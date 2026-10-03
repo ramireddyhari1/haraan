@@ -74,6 +74,11 @@ class Session(context: Context) {
         get() = prefs.getLong("last_notified_booking", 0L)
         set(value) = prefs.edit().putLong("last_notified_booking", value).apply()
 
+    /** "On duty": new bookings reach the partner with the app closed (BookingWatchService). */
+    var onDuty: Boolean
+        get() = prefs.getBoolean("on_duty", false)
+        set(value) = prefs.edit().putBoolean("on_duty", value).apply()
+
     val isSignedIn: Boolean get() = !token.isNullOrBlank()
 
     fun clear() {
@@ -81,6 +86,7 @@ class Session(context: Context) {
         isDesk = false; permissionsCsv = null
         branchId = null
         lastNotifiedBookingId = 0L
+        onDuty = false
     }
 }
 
@@ -382,6 +388,13 @@ data class BookingSummary(
     val paymentMethod: String? = null,
     val slotDate: String? = null,
     val slotLabel: String? = null,
+    /** When the booking came in (ISO-8601) — the time a payment feed shows. */
+    val createdAt: String? = null,
+    /** The customer's number: a walk-in's guest phone, else their own account's. */
+    val phone: String? = null,
+    val email: String? = null,
+    /** False on a server that doesn't send contact yet — "none" and "not sent" read differently. */
+    val contactSent: Boolean = false,
 )
 
 /**
@@ -482,12 +495,25 @@ data class DeskPayment(
     val amount: Double,
     val expiresInSeconds: Int,
     val error: String?,
+    /** Razorpay's own checkout on the desk phone (`kind = order`), already holding the customer's number. */
+    val checkout: DeskCheckout? = null,
 ) {
     val isQr: Boolean get() = kind == "upi_qr"
     val isPage: Boolean get() = present == "page" && url != null
+    val isCheckout: Boolean get() = kind == "order" && checkout != null
     /** Something the desk can actually put in front of the customer. */
-    val isUsable: Boolean get() = error == null && id != null && (qr != null || imageUrl != null || url != null)
+    val isUsable: Boolean get() = error == null && id != null && (qr != null || imageUrl != null || url != null || checkout != null)
 }
+
+/** What Razorpay's checkout opens with: the order, and the walk-in's number so it isn't asked again. */
+data class DeskCheckout(
+    val key: String,
+    val orderId: String,
+    val name: String,
+    val description: String,
+    val contact: String?,
+    val customer: String?,
+)
 
 /** Outcome of creating a walk-in: the booking, plus a Razorpay link when asked for. */
 data class WalkInResult(
@@ -751,6 +777,40 @@ data class CourtPricing(
     val peakOn: Boolean get() = peakPrice != null && peakPrice > 0
 }
 
+/**
+ * When a venue is open, day by day: Mon…Sun → (open, close) in minutes after midnight, or
+ * null when closed. open == close is open 24 hours; close earlier than open runs past midnight.
+ */
+data class VenueHours(
+    val set: Boolean,
+    val days: Map<String, Pair<Int, Int>?>,
+    val slotMinutes: Int,
+) {
+    companion object {
+        val KEYS = listOf("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+        val NAMES = listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+    }
+}
+
+/** A venue's public details, exactly as players see them on its page. */
+data class VenueDetails(
+    val address: String?,
+    val latitude: Double?,
+    val longitude: Double?,
+    val mapLink: String?,
+    val about: String?,
+    val tagline: String?,
+    val amenities: List<String>,
+    val rules: List<String>,
+    val cancellation: String?,
+    /** "Convenience fee 4%", one line per fee players pay on top. */
+    val fees: List<String>,
+    val images: List<String>,
+    val rating: Double?,
+    val ratingsCount: Int,
+    val category: String?,
+)
+
 /** An editable price/slot row for the pricing screen. */
 data class SlotEdit(
     val id: Long,
@@ -761,7 +821,12 @@ data class SlotEdit(
     val isOpen: Boolean,
     /** Sports this time runs for; empty = all of them. */
     val sports: List<String> = emptyList(),
-)
+    /** Court id → the price this slot charges on that court. Courts not listed use [price], else their own rate. */
+    val courtPrices: Map<Long, Double> = emptyMap(),
+) {
+    /** What this slot sets for one court, or null to leave it to the court's own rate. */
+    fun priceFor(courtId: Long): Double? = courtPrices[courtId]?.takeIf { it > 0 } ?: price.takeIf { it > 0 }
+}
 
 /** Unified analytics payload for either an event or a venue. */
 data class Analytics(
@@ -1152,6 +1217,10 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 paymentMethod = o.optStringOrNull("payment_method"),
                 slotDate = o.optStringOrNull("slot_date"),
                 slotLabel = o.optStringOrNull("slot_label"),
+                createdAt = o.optStringOrNull("created_at"),
+                phone = o.optStringOrNull("phone"),
+                email = o.optStringOrNull("email"),
+                contactSent = o.has("phone"),
             )
         }
     }
@@ -1374,6 +1443,10 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 capacity = o.optInt("capacity", 1),
                 isOpen = o.optBoolean("is_open", true),
                 sports = o.optJSONArray("sports").toStringList(),
+                courtPrices = o.optJSONObject("court_prices")?.let { m ->
+                    m.keys().asSequence().mapNotNull { k -> k.toLongOrNull()?.let { id -> id to m.optDouble(k, 0.0) } }
+                        .filter { it.second > 0 }.toMap()
+                }.orEmpty(),
             )
         }
     }
@@ -1398,6 +1471,74 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         if (price != null) body.put("price", price)
         val o = JSONObject(post("/api/partner/venues/$venueId/slots/generate", body.toString(), token))
         GenerateResult(created = o.optInt("created"), kept = o.optInt("kept"), removed = o.optInt("removed"))
+    }
+
+    /**
+     * The venue as players see it, from the public venue API (no token): address, map pin,
+     * about, amenities, rules, policy and fees. Only published venues answer; others 404.
+     */
+    suspend fun publicVenue(venueId: Long): VenueDetails = withContext(Dispatchers.IO) {
+        val o = JSONObject(request("GET", "/api/venues/$venueId", null, null)).getJSONObject("data")
+        fun list(k: String) = o.optJSONArray(k).toStringList()
+        val fees = o.optJSONArray("fees")?.let { a ->
+            (0 until a.length()).mapNotNull { i ->
+                val f = a.optJSONObject(i) ?: return@mapNotNull null
+                val v = f.optDouble("value", 0.0)
+                if (v <= 0) return@mapNotNull null
+                val amount = if (f.optString("type") == "percent") formatInr(v) + "%" else "₹" + formatInr(v)
+                f.optString("label").ifBlank { "Fee" }.replaceFirstChar { it.uppercase() } + " " + amount
+            }
+        }.orEmpty()
+        VenueDetails(
+            address = o.optStringOrNull("address"),
+            latitude = if (o.isNull("latitude")) null else o.optDouble("latitude"),
+            longitude = if (o.isNull("longitude")) null else o.optDouble("longitude"),
+            mapLink = o.optStringOrNull("map_link"),
+            about = o.optStringOrNull("about"),
+            tagline = o.optStringOrNull("tagline")?.trim()?.trimStart('-', '–', ' ')?.takeIf { it.isNotBlank() },
+            amenities = list("amenities"),
+            rules = list("rules"),
+            cancellation = o.optStringOrNull("cancellation"),
+            fees = fees,
+            images = list("images"),
+            rating = o.optStringOrNull("rating")?.toDoubleOrNull()?.takeIf { it > 0 },
+            // Counted off real reviews only: old rows still carry the column's seeded
+            // "4.2 from 120 ratings" with no review behind them.
+            ratingsCount = o.optInt("reviews_count", 0),
+            category = o.optStringOrNull("category"),
+        )
+    }
+
+    /** The venue's opening hours. Throws ApiException(404) on a server that predates hours editing. */
+    suspend fun venueHours(token: String, venueId: Long): VenueHours = withContext(Dispatchers.IO) {
+        parseHours(JSONObject(get("/api/partner/venues/$venueId/hours", token)))
+    }
+
+    /** Save opening hours; the server rebuilds the slot template from them. */
+    suspend fun saveVenueHours(token: String, venueId: Long, hours: VenueHours): VenueHours = withContext(Dispatchers.IO) {
+        fun hm(m: Int) = "%02d:%02d".format((m / 60) % 24, m % 60)
+        val days = JSONObject()
+        VenueHours.KEYS.forEach { k ->
+            val d = hours.days[k]
+            days.put(k, if (d == null) JSONObject.NULL else JSONObject().put("open", hm(d.first)).put("close", hm(d.second)))
+        }
+        val body = JSONObject().put("days", days).put("slot_minutes", hours.slotMinutes)
+        parseHours(JSONObject(post("/api/partner/venues/$venueId/hours", body.toString(), token)))
+    }
+
+    private fun parseHours(o: JSONObject): VenueHours {
+        val d = o.optJSONObject("days")
+        fun mins(t: String?): Int? = t?.split(":")?.let { p -> p.getOrNull(0)?.toIntOrNull()?.let { h -> h * 60 + (p.getOrNull(1)?.toIntOrNull() ?: 0) } }
+        return VenueHours(
+            set = o.optBoolean("set", false),
+            days = VenueHours.KEYS.associateWith { k ->
+                d?.optJSONObject(k)?.let { h ->
+                    val a = mins(h.optStringOrNull("open")); val b = mins(h.optStringOrNull("close"))
+                    if (a != null && b != null) a to b else null
+                }
+            },
+            slotMinutes = o.optInt("slot_minutes", 60),
+        )
     }
 
     private fun parseHolder(o: JSONObject) = PackageHolder(
@@ -1736,12 +1877,16 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         capacity: Int,
         isOpen: Boolean,
         sports: List<String> = emptyList(),
+        /** Court id → price; null leaves the slot's per-court prices as they are. */
+        courtPrices: Map<Long, Double>? = null,
     ) = withContext(Dispatchers.IO) {
         val payload = JSONObject()
             .put("time", time).put("price", price).put("capacity", capacity).put("isOpen", isOpen)
             // Always sent, because an empty list is a real answer — "this time runs
             // for every sport" — and omitting the key means "leave it unchanged".
             .put("sports", JSONArray(sports))
+        // Every court is sent (0 = no own price), so clearing a box really clears it.
+        courtPrices?.let { m -> payload.put("courtPrices", JSONObject().apply { m.forEach { (id, p) -> put(id.toString(), p) } }) }
         if (!day.isNullOrBlank()) payload.put("day", day)
         val path = if (slotId == null) "/api/partner/venues/$venueId/slots" else "/api/partner/venues/$venueId/slots/$slotId"
         post(path, payload.toString(), token)
@@ -1768,6 +1913,8 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
             .put("slotId", slotId).put("date", date)
             .put("guestName", name).put("guestPhone", phone)
             .put("paymentMethod", method.api)
+            // This build opens Razorpay's own checkout, prefilled, instead of its web page.
+            .put("nativeCheckout", true)
         if (courtId != null) payload.put("courtId", courtId)
         if (customerPackageId != null) payload.put("customerPackageId", customerPackageId)
         val o = JSONObject(post("/api/partner/venues/$venueId/bookings", payload.toString(), token))
@@ -1794,6 +1941,18 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
             amount = it.optDouble("amount", 0.0),
             expiresInSeconds = it.optInt("expires_in", 300),
             error = it.optStringOrNull("error"),
+            checkout = it.optJSONObject("checkout")?.let { c ->
+                val key = c.optStringOrNull("key")
+                val order = c.optStringOrNull("order_id")
+                if (key == null || order == null) null else DeskCheckout(
+                    key = key,
+                    orderId = order,
+                    name = c.optString("name", "Haraan"),
+                    description = c.optString("description", ""),
+                    contact = c.optStringOrNull("contact"),
+                    customer = c.optStringOrNull("customer"),
+                )
+            },
         )
     }
 
@@ -1803,7 +1962,8 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
      */
     suspend fun deskPaymentStatus(token: String, bookingId: Long, payment: DeskPayment, close: Boolean = false): PayState =
         withContext(Dispatchers.IO) {
-            val payload = JSONObject().put(if (payment.isQr) "qrId" else "linkId", payment.id).put("close", close)
+            val field = when (payment.kind) { "upi_qr" -> "qrId"; "order" -> "orderId"; else -> "linkId" }
+            val payload = JSONObject().put(field, payment.id).put("close", close)
             val o = JSONObject(post("/api/partner/bookings/$bookingId/payment-status", payload.toString(), token))
             PayState(paid = o.optBoolean("paid", false), status = o.optString("status", "unknown"))
         }
@@ -1811,7 +1971,7 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
     /** A fresh QR/link for the balance; the one it replaces is closed first. */
     suspend fun deskPaymentRequest(token: String, bookingId: Long, kind: String, replacing: DeskPayment?): PaymentRequestResult =
         withContext(Dispatchers.IO) {
-            val payload = JSONObject().put("kind", kind)
+            val payload = JSONObject().put("kind", kind).put("nativeCheckout", true)
             if (replacing?.id != null) payload.put("replaceKind", replacing.kind).put("replaceId", replacing.id)
             val o = JSONObject(post("/api/partner/bookings/$bookingId/payment-request", payload.toString(), token))
             PaymentRequestResult(paid = o.optBoolean("paid", false), payment = parseDeskPayment(o.optJSONObject("payment")))

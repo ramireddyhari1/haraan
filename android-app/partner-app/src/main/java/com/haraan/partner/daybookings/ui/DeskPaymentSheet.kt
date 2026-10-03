@@ -165,7 +165,7 @@ fun DeskPaymentSheet(
                 if (state.phase != DeskPayPhase.FAILED) {
                     val p = state.payment
                     when {
-                        p?.isPage == true -> PagePanel(state, onOpenPage)
+                        p?.isPage == true || p?.isCheckout == true -> PagePanel(state, onOpenPage)
                         p != null && !p.isQr && p.qr == null -> LinkPanel(state)
                         else -> QrPanel(state)
                     }
@@ -193,12 +193,12 @@ fun DeskPaymentSheet(
 
 @Composable
 private fun Header(state: DeskPayState, onDismiss: () -> Unit) {
-    val isLink = state.payment?.isQr == false
+    val isLink = state.payment?.isQr == false && state.payment?.isCheckout != true
     val title = when (state.phase) {
         DeskPayPhase.PAID -> "Payment received"
         DeskPayPhase.EXPIRED -> if (isLink) "Link not paid yet" else "QR expired"
         DeskPayPhase.FAILED -> if (isLink) "Link unavailable" else "UPI QR unavailable"
-        DeskPayPhase.WAITING -> when { state.payment?.isPage == true -> "Pay on Razorpay"; isLink -> "Payment link"; else -> "Scan to pay" }
+        DeskPayPhase.WAITING -> when { state.payment?.isPage == true || state.payment?.isCheckout == true -> "Pay on Razorpay"; isLink -> "Payment link"; else -> "Scan to pay" }
     }
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
@@ -266,7 +266,8 @@ private fun PagePanel(state: DeskPayState, onOpenPage: () -> Unit) {
         Text("Customer pays on Razorpay", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ink)
         Spacer(Modifier.height(4.dp))
         Text(
-            "Razorpay's page opens right here for the customer to pay. It turns green by itself when the money lands.",
+            if (payment.isCheckout) "Razorpay opens right here with ${state.customer}'s number already in. This turns green by itself when the money lands."
+            else "Razorpay's page opens right here for the customer to pay. It turns green by itself when the money lands.",
             fontSize = 12.5.sp, color = Muted, textAlign = TextAlign.Center, lineHeight = 17.sp,
         )
         if (state.phase == DeskPayPhase.WAITING) {
@@ -276,7 +277,7 @@ private fun PagePanel(state: DeskPayState, onOpenPage: () -> Unit) {
                 colors = ButtonDefaults.buttonColors(containerColor = Blue),
                 shape = RoundedCornerShape(12.dp),
                 modifier = Modifier.fillMaxWidth().height(46.dp),
-            ) { Text("Open payment page", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+            ) { Text(if (payment.isCheckout) "Open payment" else "Open payment page", fontSize = 14.sp, fontWeight = FontWeight.Bold) }
         }
     }
 
@@ -499,7 +500,7 @@ private fun Actions(
 
     if (state.phase != DeskPayPhase.WAITING) {
         Button(
-            onClick = { onRetry(if (payment == null || payment.isPage) "upi_qr" else payment.kind) },
+            onClick = { onRetry(if (payment == null || payment.isPage || payment.isCheckout) "upi_qr" else payment.kind) },
             enabled = !state.busy,
             colors = ButtonDefaults.buttonColors(containerColor = Blue),
             shape = RoundedCornerShape(12.dp),
@@ -511,7 +512,7 @@ private fun Actions(
                 Icon(Icons.Filled.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    when { payment?.isPage == true -> "Start again"; payment?.isQr == false -> "Send a new link"; else -> "Show a new QR" },
+                    when { payment?.isPage == true || payment?.isCheckout == true -> "Start again"; payment?.isQr == false -> "Send a new link"; else -> "Show a new QR" },
                     fontSize = 14.5.sp, fontWeight = FontWeight.Bold,
                 )
             }

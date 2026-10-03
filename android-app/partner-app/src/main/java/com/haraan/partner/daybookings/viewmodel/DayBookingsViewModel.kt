@@ -358,7 +358,8 @@ class DayBookingsViewModel(
                     secondsLeft = total,
                     totalSeconds = total,
                     phase = if (usable) DeskPayPhase.WAITING else DeskPayPhase.FAILED,
-                    pageOpen = usable && payment?.isPage == true,
+                    // Razorpay's page or checkout opens by itself; closing it shows the sheet.
+                    pageOpen = usable && (payment?.isPage == true || payment?.isCheckout == true),
                     message = if (usable) null else payment?.error ?: "Couldn't start an online payment. Take cash or try again.",
                 )
             )
@@ -384,7 +385,7 @@ class DayBookingsViewModel(
                 val payment = s.payment ?: return@launch
                 _uiState.update { st -> st.copy(deskPay = st.deskPay?.copy(checking = true)) }
                 // At zero a QR (or the page link nobody was texted) is closed, and checked one last time.
-                val res = repository.deskPaymentStatus(token, s.bookingId, payment, close = expired && (payment.isQr || payment.isPage))
+                val res = repository.deskPaymentStatus(token, s.bookingId, payment, close = expired && (payment.isQr || payment.isPage || payment.isCheckout))
                 val paid = res.getOrNull()?.paid == true
                 _uiState.update { st ->
                     val cur = st.deskPay ?: return@update st
@@ -402,6 +403,42 @@ class DayBookingsViewModel(
                 }
                 if (expired) return@launch
             }
+        }
+    }
+
+    /** Open Razorpay's checkout again (the customer closed it, or it hasn't opened yet). */
+    fun deskPayOpenCheckout() {
+        _uiState.update { st -> st.copy(deskPay = st.deskPay?.copy(pageOpen = true, message = null)) }
+    }
+
+    /**
+     * What Razorpay's checkout said. "Paid" is the customer's phone talking, so it is
+     * only a cue to ask the server, which asks Razorpay and settles the booking; the
+     * timer's own checks carry on either way.
+     */
+    fun deskPayCheckoutResult(outcome: com.haraan.partner.daybookings.ui.DeskCheckoutBridge.Outcome) {
+        val s = _uiState.value.deskPay ?: return
+        val payment = s.payment ?: return
+        when (outcome) {
+            is com.haraan.partner.daybookings.ui.DeskCheckoutBridge.Outcome.Paid -> viewModelScope.launch {
+                _uiState.update { st -> st.copy(deskPay = st.deskPay?.copy(pageOpen = false, checking = true, message = null)) }
+                // Capture can trail the checkout by a few seconds.
+                repeat(5) { attempt ->
+                    val paid = repository.deskPaymentStatus(token, s.bookingId, payment).getOrNull()?.paid == true
+                    if (paid) {
+                        deskPayJob?.cancel()
+                        _uiState.update { st -> st.copy(deskPay = st.deskPay?.copy(phase = DeskPayPhase.PAID, paidVia = "online", checking = false)) }
+                        loadData(forceRefresh = true)
+                        return@launch
+                    }
+                    kotlinx.coroutines.delay(1_500L * (attempt + 1))
+                }
+                _uiState.update { st -> st.copy(deskPay = st.deskPay?.copy(checking = false, message = "Paid on Razorpay. Waiting for it to confirm…")) }
+            }
+            com.haraan.partner.daybookings.ui.DeskCheckoutBridge.Outcome.Closed ->
+                _uiState.update { st -> st.copy(deskPay = st.deskPay?.copy(pageOpen = false, message = "Payment closed. Open it again, or take cash.")) }
+            is com.haraan.partner.daybookings.ui.DeskCheckoutBridge.Outcome.Failed ->
+                _uiState.update { st -> st.copy(deskPay = st.deskPay?.copy(pageOpen = false, message = outcome.message)) }
         }
     }
 
@@ -496,7 +533,7 @@ class DayBookingsViewModel(
             )
         }
         val p = s.payment
-        if (s.phase == DeskPayPhase.WAITING && p != null && (p.isQr || p.isPage) && p.id != null) {
+        if (s.phase == DeskPayPhase.WAITING && p != null && (p.isQr || p.isPage || p.isCheckout) && p.id != null) {
             viewModelScope.launch {
                 val paid = repository.deskPaymentStatus(token, s.bookingId, p, close = true).getOrNull()?.paid == true
                 if (paid) _uiState.update { it.copy(successSnackbarMessage = "₹${s.amount.toInt()} received from ${s.customer}", successIsMoney = true) }

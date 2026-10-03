@@ -144,6 +144,8 @@ internal fun LazyListScope.insightItems(
     memoryKey: String,
     onPricing: (() -> Unit)?,
     onCustomers: (period: String, type: String) -> Unit = { _, _ -> },
+    /** Off when Home's top card already shows tomorrow. */
+    showTomorrow: Boolean = true,
 ) {
     val pad = Modifier.padding(horizontal = 16.dp)
     val insights = state.value
@@ -161,7 +163,7 @@ internal fun LazyListScope.insightItems(
         item(key = "ins-growth") { Rise(11) { GrowthCard(insights.growth, pad) } }
     }
     val tomorrow = insights.tomorrow
-    if (tomorrow.venues.isNotEmpty()) {
+    if (showTomorrow && tomorrow.venues.isNotEmpty()) {
         item(key = "ins-tomorrow-head") { Rise(11) { Box(pad) { HomeSectionHeader(Icons.Filled.EventAvailable, "Tomorrow · ${tomorrow.label}") } } }
         item(key = "ins-tomorrow") { Rise(11) { TomorrowCard(tomorrow, pad) } }
     }
@@ -522,7 +524,7 @@ internal fun TomorrowCard(tomorrow: TomorrowOpen, modifier: Modifier = Modifier)
 }
 
 /** WhatsApp when it's installed (it's where turf regulars are), else the system share sheet. */
-private fun shareOpenSlots(context: android.content.Context, v: TomorrowVenue) {
+internal fun shareOpenSlots(context: android.content.Context, v: TomorrowVenue) {
     val text = v.shareText.ifBlank {
         "Courts open tomorrow at ${v.name}: " + v.windows.joinToString(", ") { it.first } + ". Book on Haraan: " + v.shareUrl
     }

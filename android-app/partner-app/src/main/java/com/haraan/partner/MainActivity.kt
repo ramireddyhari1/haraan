@@ -16,6 +16,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        routeFrom(intent)
+        // On duty survives the app being closed and reopened.
+        val session = Session(this)
+        if (session.onDuty && session.isSignedIn) com.haraan.partner.alerts.BookingWatchService.start(this)
         setContent {
             MaterialTheme(colorScheme = PartnerColors) {
                 // The app composes immediately behind the splash; the branded
@@ -26,6 +30,18 @@ class MainActivity : ComponentActivity() {
                     BrandSplash(onFinished = { showSplash = false })
                 }
             }
+        }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        routeFrom(intent)
+    }
+
+    /** A tap on a booking alert opens the app on Bookings. */
+    private fun routeFrom(intent: android.content.Intent?) {
+        if (intent?.getStringExtra(com.haraan.partner.alerts.AlertRouter.EXTRA_OPEN) == com.haraan.partner.alerts.AlertRouter.OPEN_BOOKINGS) {
+            com.haraan.partner.alerts.AlertRouter.requestBookings()
         }
     }
 }

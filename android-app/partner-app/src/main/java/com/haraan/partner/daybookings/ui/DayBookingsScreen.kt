@@ -175,19 +175,12 @@ fun DayBookingsScreen(
                     }
                 },
                 actions = {
-                    // Switch view mode (Grid vs List)
-                    IconButton(
-                        onClick = {
-                            viewModel.setViewMode(
-                                if (state.viewMode == ViewMode.GRID) ViewMode.LIST else ViewMode.GRID
-                            )
+                    // Who booked, as a list, now lives in Payments. The list here only
+                    // opens from the "owed" line, so it needs a way back to the courts.
+                    if (state.viewMode == ViewMode.LIST) {
+                        IconButton(onClick = { viewModel.setViewMode(ViewMode.GRID) }) {
+                            Icon(Icons.Filled.GridView, contentDescription = "Back to courts", tint = PrimaryBlue)
                         }
-                    ) {
-                        Icon(
-                            if (state.viewMode == ViewMode.GRID) Icons.AutoMirrored.Filled.ViewList else Icons.Filled.GridView,
-                            contentDescription = "Toggle View",
-                            tint = PrimaryBlue,
-                        )
                     }
 
                     if (state.pendingOfflineActionsCount > 0) {
@@ -410,6 +403,15 @@ fun DayBookingsScreen(
         ) {
             // Razorpay's page stands in for the sheet; closing it brings the sheet back.
             RazorpayPaymentPage(url = pageUrl, state = pay, onClose = { viewModel.deskPayShowPage(false) })
+        } else if (pay.pageOpen && pay.phase == com.haraan.partner.daybookings.viewmodel.DeskPayPhase.WAITING &&
+            pay.payment?.checkout != null
+        ) {
+            // Razorpay's checkout, number prefilled, every UPI option the website shows.
+            DeskCheckoutPage(
+                checkout = pay.payment.checkout,
+                secondsLeft = pay.secondsLeft,
+                onResult = { outcome -> viewModel.deskPayCheckoutResult(outcome) },
+            )
         } else {
             DeskPaymentSheet(
                 state = pay,
@@ -417,7 +419,9 @@ fun DayBookingsScreen(
                 onCollect = { method -> viewModel.deskPayCollect(method) },
                 onCancelBooking = { viewModel.deskPayCancelBooking() },
                 onDismiss = { viewModel.deskPayDismiss() },
-                onOpenPage = { viewModel.deskPayShowPage(true) },
+                onOpenPage = {
+                    if (pay.payment?.isCheckout == true) viewModel.deskPayOpenCheckout() else viewModel.deskPayShowPage(true)
+                },
             )
         }
     }

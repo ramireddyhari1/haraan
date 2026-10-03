@@ -590,7 +590,7 @@ internal fun ticketCodeOf(raw: String): String {
  *
  * There is no square to aim into any more. A box in the middle told the operator
  * to line the code up; a lit window that reads anywhere inside it only asks them
- * to point the phone. The comet of light circling the rim — bright cyan head,
+ * to point the phone. The comet of light circling the rim — bright Haraan-blue head,
  * blue tail, a soft bloom around it — is the "camera is live and looking"
  * signal the sweep line used to carry, without drawing across the picture.
  *
@@ -668,7 +668,8 @@ private fun ScanViewport(
         if (length <= 0f) return@Canvas
         val cometLen = length * 0.2f
         val head = phase * length
-        val cyan = Color(0xFF5FD3FF)
+        // Haraan blue, lifted a step so the head still reads as light on the camera.
+        val glow = Color(0xFF4D8BFF)
 
         fun segment(dst: Path, from: Float, to: Float) {
             dst.reset()
@@ -686,7 +687,7 @@ private fun ScanViewport(
         // Bloom: the leading part of the comet, blurred wide, drawn first.
         segment(comet, head - cometLen * 0.65f, head)
         drawIntoCanvas { canvas ->
-            glowPaint.color = cyan.copy(alpha = 0.55f).toArgb()
+            glowPaint.color = glow.copy(alpha = 0.55f).toArgb()
             glowPaint.strokeWidth = 12.dp.toPx()
             glowPaint.maskFilter = android.graphics.BlurMaskFilter(18.dp.toPx(), android.graphics.BlurMaskFilter.Blur.NORMAL)
             canvas.nativeCanvas.drawPath(comet.asAndroidPath(), glowPaint)
@@ -723,14 +724,14 @@ private fun ScanViewport(
                 if (alpha < 0.03f) continue
                 val radius = (0.55f + 1.25f * strength * fall) * density
                 drawCircle(
-                    color = lerp(accent, cyan, 0.35f + 0.65f * fall).copy(alpha = alpha),
+                    color = lerp(accent, glow, 0.35f + 0.65f * fall).copy(alpha = alpha),
                     radius = radius,
                     center = Offset(pos.x + nx * depth + tan.x * shift, pos.y + ny * depth + tan.y * shift),
                 )
             }
         }
 
-        // The line itself: faint blue tail brightening to a cyan-white head.
+        // The line itself: faint blue tail brightening to a light Haraan-blue head.
         val slices = 24
         for (k in 0 until slices) {
             val t0 = k / slices.toFloat()
@@ -739,7 +740,7 @@ private fun ScanViewport(
             val strength = t1 * t1
             drawPath(
                 slice,
-                color = lerp(accent, cyan, t1).copy(alpha = 0.15f + 0.85f * strength),
+                color = lerp(accent, glow, t1).copy(alpha = 0.15f + 0.85f * strength),
                 style = Stroke(width = (1.5f + 2f * strength) * density, cap = StrokeCap.Butt),
             )
         }
@@ -752,7 +753,7 @@ private fun ScanViewport(
                 glowPaint.maskFilter = android.graphics.BlurMaskFilter(16.dp.toPx(), android.graphics.BlurMaskFilter.Blur.NORMAL)
                 canvas.nativeCanvas.drawPath(rim.asAndroidPath(), glowPaint)
             }
-            drawPath(rim, lerp(accent, cyan, 0.5f).copy(alpha = rimFlash.value), style = Stroke(3.dp.toPx()))
+            drawPath(rim, lerp(accent, glow, 0.5f).copy(alpha = rimFlash.value), style = Stroke(3.dp.toPx()))
         }
     }
 }

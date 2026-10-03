@@ -223,6 +223,7 @@ private fun drawerIconFor(tab: Tab): ImageVector = when (tab) {
     Tab.Events -> HaraanIcons.Bookings
     Tab.Venues -> HaraanIcons.Venues
     Tab.Sales -> HaraanIcons.Sales
+    Tab.Payments -> com.haraan.partner.HaraanNavIcons.WalletOutline
     Tab.Scan -> HaraanIcons.Scan
 }
 

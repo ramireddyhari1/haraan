@@ -52,12 +52,18 @@ internal data class HaraanNavItem(
     val active: ImageVector,
 )
 
-private val BarTop = Color(0xFF111B31)
-private val BarBottom = Color(0xFF0A1226)
-private val IdleGlyph = Color(0xB3FFFFFF)
+// Haraan blue, ramped the way the launcher icon is (#4D8BFF → #2563EB → #1D4ED8), so the
+// bar and the app icon read as the same material. It was a near-black navy (#111B31),
+// which belonged to no part of the brand.
+private val BarLight = Color(0xFF4D8BFF)
+private val BarBrand = Color(0xFF2563EB)
+private val BarDeep = Color(0xFF1D4ED8)
+private val BarShadow = Color(0xFF1E40AF)
+private val IdleGlyph = Color(0xD9FFFFFF)
+private val PillInk = Color(0xFF1D4ED8)
 
 /**
- * The partner app's bottom navigation: a floating navy capsule.
+ * The partner app's bottom navigation: a floating capsule in Haraan blue.
  *
  * The selected tab is a white pill carrying its glyph and its name; every other
  * tab is a glyph alone. Selection is drawn as width: each slot's weight springs
@@ -102,11 +108,26 @@ internal fun HaraanBottomBar(
             Modifier
                 .fillMaxWidth()
                 .height(64.dp)
-                .shadow(22.dp, RoundedCornerShape(32.dp), clip = false, ambientColor = BarBottom, spotColor = BarBottom)
+                // A blue-tinted shadow: the capsule floats in its own colour's light
+                // instead of sitting on a black smudge.
+                .shadow(20.dp, RoundedCornerShape(32.dp), clip = false, ambientColor = BarShadow, spotColor = BarShadow)
                 .clip(RoundedCornerShape(32.dp))
                 .background(
+                    Brush.linearGradient(
+                        listOf(
+                            BarLight.copy(alpha = 1f - 0.22f * glass),
+                            BarBrand.copy(alpha = 1f - 0.18f * glass),
+                            BarDeep.copy(alpha = 1f - 0.14f * glass),
+                        ),
+                        start = androidx.compose.ui.geometry.Offset.Zero,
+                        end = androidx.compose.ui.geometry.Offset(900f, 260f),
+                    )
+                )
+                // Light from the top-left, like the icon: a soft sheen on the upper half.
+                .background(
                     Brush.verticalGradient(
-                        listOf(BarTop.copy(alpha = 1f - 0.2f * glass), BarBottom.copy(alpha = 1f - 0.16f * glass))
+                        listOf(Color.White.copy(alpha = 0.14f), Color.Transparent),
+                        endY = 90f,
                     )
                 )
                 // A hairline of light along the capsule's edge, so it reads as a
@@ -115,7 +136,7 @@ internal fun HaraanBottomBar(
                 .border(
                     1.dp,
                     Brush.verticalGradient(
-                        listOf(Color.White.copy(alpha = 0.2f + 0.14f * glass), Color.White.copy(alpha = 0.04f + 0.08f * glass))
+                        listOf(Color.White.copy(alpha = 0.32f + 0.1f * glass), Color.White.copy(alpha = 0.06f + 0.08f * glass))
                     ),
                     RoundedCornerShape(32.dp),
                 )
@@ -176,7 +197,7 @@ internal fun HaraanBottomBar(
                                 val s = 0.82f + 0.18f * open
                                 scaleX = s; scaleY = s
                             }
-                            .shadow(8.dp * open, RoundedCornerShape(26.dp), clip = false, spotColor = Color(0x66000000))
+                            .shadow(8.dp * open, RoundedCornerShape(26.dp), clip = false, spotColor = BarShadow)
                             .clip(RoundedCornerShape(26.dp))
                             .background(Color.White),
                     )
@@ -195,7 +216,7 @@ internal fun HaraanBottomBar(
                             Icon(
                                 item.active,
                                 contentDescription = null,
-                                tint = accent,
+                                tint = PillInk,
                                 modifier = Modifier.size(23.dp).graphicsLayer {
                                     alpha = open
                                     val s = 0.9f + 0.1f * on
@@ -212,7 +233,7 @@ internal fun HaraanBottomBar(
                                 fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 letterSpacing = (-0.1).sp,
-                                color = lerp(IdleGlyph, Color(0xFF0B1220), open),
+                                color = lerp(IdleGlyph, PillInk, open),
                                 maxLines = 1,
                                 softWrap = false,
                                 overflow = TextOverflow.Clip,

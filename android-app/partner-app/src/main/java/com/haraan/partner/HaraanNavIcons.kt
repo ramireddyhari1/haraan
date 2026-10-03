@@ -67,6 +67,26 @@ internal object HaraanNavIcons {
         stroke(RECEIPT_LINES, IDLE)
     }
 
+    // ---- Payments: a wallet with its clasp --------------------------------
+    // The flap leaning off the top gives it a silhouette that still reads at
+    // 24 dp, where a plain rounded rectangle would be just another card.
+    private const val WALLET =
+        "M4.2 8.4 H18.6 A1.8 1.8 0 0 1 20.4 10.2 V18.2 A1.8 1.8 0 0 1 18.6 20 H5.4 A1.8 1.8 0 0 1 3.6 18.2 V9 Z"
+    private const val WALLET_FLAP = "M4.2 8.4 L15 4.4 A1.4 1.4 0 0 1 16.9 5.7 V8.4"
+    private const val WALLET_CLASP = "M15.6 12.4 H20.4 V16 H15.6 A1.8 1.8 0 0 1 15.6 12.4 Z"
+
+    val WalletOutline = icon("WalletOutline") {
+        stroke(WALLET, IDLE)
+        stroke(WALLET_FLAP, IDLE)
+        stroke(WALLET_CLASP, IDLE)
+    }
+    val WalletActive = icon("WalletActive") {
+        fill(WALLET, alpha = 0.15f)
+        stroke(WALLET, ON)
+        stroke(WALLET_FLAP, ON)
+        fill(WALLET_CLASP)
+    }
+
     // ---- Venues / Outlets: a pin ------------------------------------------
     private const val PIN =
         "M12 21.1 C12 21.1 19 15.3 19 10.6 A7 7 0 1 0 5 10.6 C5 15.3 12 21.1 12 21.1 Z"

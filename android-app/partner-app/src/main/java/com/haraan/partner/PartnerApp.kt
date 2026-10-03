@@ -134,6 +134,18 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.zIndex
+import androidx.compose.runtime.collectAsState
+import androidx.compose.foundation.layout.windowInsetsTopHeight
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.material.icons.filled.AccountBalanceWallet
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
+import com.haraan.partner.ui.pricing.generateArt
+import com.haraan.partner.ui.pricing.peakArt
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
@@ -189,6 +201,11 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.sp
 import com.haraan.partner.ui.drawer.HaraanPartnerDrawer
 import com.haraan.partner.ui.Haptics
+import com.haraan.partner.ui.home.CellState
+import com.haraan.partner.ui.home.CourtHour
+import com.haraan.partner.ui.home.CourtTag
+import com.haraan.partner.ui.home.CourtsDaySection
+import com.haraan.partner.ui.home.courtKindFor
 import com.haraan.partner.ui.components.pressScale
 import com.haraan.partner.ui.components.pressShade
 import com.haraan.partner.ui.components.pressableTile
@@ -325,26 +342,14 @@ private fun BookingBanner(message: String, onClick: () -> Unit) {
     }
 }
 
-private enum class AuthMode { Home, Phone }
-
 @Composable
 private fun LoginScreen(api: PartnerApi, session: Session, onSignedIn: () -> Unit) {
-    var email by remember { mutableStateOf("") }
-    var password by remember { mutableStateOf("") }
-    var showPw by remember { mutableStateOf(false) }
-    var phone by remember { mutableStateOf("") }
-    var code by remember { mutableStateOf("") }
-    var otpToken by remember { mutableStateOf<String?>(null) }
-    var mode by remember { mutableStateOf(AuthMode.Home) }
-    var loading by remember { mutableStateOf(false) }
-    var error by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
     val view = LocalView.current
-    val context = LocalContext.current
-
+    // White status-bar icons over the navy band.
+    LightStatusBar(light = true)
     // Every sign-in path funnels here: confirm it's really a partner (overview 403s
     // otherwise), persist the session, then enter.
-    suspend fun applyLogin(result: LoginResult) {
+    com.haraan.partner.ui.auth.PartnerSignIn(api = api) { result ->
         api.overview(result.token)
         session.token = result.token
         session.name = result.name
@@ -353,273 +358,6 @@ private fun LoginScreen(api: PartnerApi, session: Session, onSignedIn: () -> Uni
         session.permissionsCsv = result.permissions.joinToString(",")
         Haptics.confirm(view)
         onSignedIn()
-    }
-    fun fail(message: String?) {
-        error = message ?: "Something went wrong"
-        Haptics.reject(view)
-    }
-
-    // The phone lane leans on the system back button/gesture, so it needs no in-card
-    // arrow: OTP step → back to the number, number step → back to the home lane.
-    BackHandler(enabled = mode == AuthMode.Phone) {
-        error = null
-        if (otpToken != null) { otpToken = null; code = "" } else { mode = AuthMode.Home; phone = "" }
-    }
-
-    val fieldColors = OutlinedTextFieldDefaults.colors(
-        focusedBorderColor = AuthAccent,
-        focusedLabelColor = AuthAccent,
-        cursorColor = AuthAccent,
-        unfocusedBorderColor = Color(0x1F0F172A),
-    )
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(AuthPageBg)
-            .verticalScroll(rememberScrollState())
-            .navigationBarsPadding()
-            .imePadding(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        AuthBrandBand()
-
-        // Sign-in card, tucked up under the band's rounded corner (BMS-style).
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .widthIn(max = 460.dp)
-                .padding(horizontal = 20.dp)
-                .offset(y = (-26).dp)
-                .shadow(22.dp, RoundedCornerShape(22.dp), clip = false)
-                .clip(RoundedCornerShape(22.dp))
-                .background(Color.White)
-                .border(1.dp, Color(0x140F172A), RoundedCornerShape(22.dp))
-                .padding(horizontal = 22.dp, vertical = 24.dp),
-        ) {
-            if (mode == AuthMode.Home) {
-                Text("Welcome back", fontSize = 21.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
-                Spacer(Modifier.height(5.dp))
-                Text(
-                    "Sign in to manage your events and venues",
-                    fontSize = 13.5.sp, color = AuthMuted, lineHeight = 18.sp,
-                )
-                Spacer(Modifier.height(18.dp))
-
-                OutlinedTextField(
-                    value = email,
-                    onValueChange = { email = it; error = null },
-                    label = { Text("Email") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = fieldColors,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it; error = null },
-                    label = { Text("Password") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    colors = fieldColors,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    visualTransformation = if (showPw) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = {
-                            showPw = !showPw
-                            view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-                        }) {
-                            Icon(
-                                if (showPw) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                contentDescription = if (showPw) "Hide password" else "Show password",
-                                tint = AuthMuted,
-                            )
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
-                if (error != null) {
-                    Spacer(Modifier.height(12.dp))
-                    Text(error!!, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
-                }
-
-                Spacer(Modifier.height(20.dp))
-                GradientCta(
-                    text = if (loading) "Signing in…" else "Sign in",
-                    enabled = !loading && email.isNotBlank() && password.isNotBlank(),
-                    loading = loading,
-                ) {
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    loading = true; error = null
-                    scope.launch {
-                        try { applyLogin(api.login(email.trim(), password)) }
-                        catch (e: ApiException) { fail(e.message) }
-                        catch (e: Exception) { fail(e.message ?: "Unable to sign in") }
-                        finally { loading = false }
-                    }
-                }
-
-                Spacer(Modifier.height(18.dp))
-                AuthDivider()
-                Spacer(Modifier.height(16.dp))
-
-                SocialButton(
-                    text = "Continue with phone",
-                    enabled = !loading,
-                    leading = { Icon(Icons.Filled.Phone, contentDescription = null, tint = AuthAccent, modifier = Modifier.size(20.dp)) },
-                ) { error = null; mode = AuthMode.Phone }
-
-                if (GoogleSignInHelper.isConfigured) {
-                    Spacer(Modifier.height(12.dp))
-                    SocialButton(
-                        text = "Continue with Google",
-                        enabled = !loading,
-                        leading = {
-                            Image(
-                                painter = painterResource(R.drawable.ic_google_logo),
-                                contentDescription = null,
-                                modifier = Modifier.size(19.dp),
-                            )
-                        },
-                    ) {
-                        loading = true; error = null
-                        scope.launch {
-                            when (val r = GoogleSignInHelper.signIn(context)) {
-                                is GoogleSignInResult.Success ->
-                                    try { applyLogin(api.google(r.idToken)) }
-                                    catch (e: ApiException) { fail(e.message) }
-                                    catch (e: Exception) { fail(e.message ?: "Unable to sign in") }
-                                is GoogleSignInResult.Cancelled -> {}
-                                is GoogleSignInResult.Error -> fail(r.message)
-                            }
-                            loading = false
-                        }
-                    }
-                }
-            } else {
-                // ---- Phone lane: enter number, then the 6-digit code -------------
-                val startOtp: () -> Unit = {
-                    view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                    loading = true; error = null
-                    scope.launch {
-                        try {
-                            val s = api.startPhoneOtp(phone.trim())
-                            if (s.channel == "whatsapp" && !s.token.isNullOrBlank()) {
-                                otpToken = s.token; code = ""
-                                view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
-                            } else {
-                                fail("Couldn't send a WhatsApp code to that number. Try email or Google.")
-                            }
-                        } catch (e: ApiException) { fail(e.message) }
-                        catch (e: Exception) { fail(e.message ?: "Couldn't send the code") }
-                        finally { loading = false }
-                    }
-                }
-
-                // No in-card back arrow — the system back button/gesture drives this
-                // lane (see BackHandler above). A hero badge anchors it instead.
-                AuthIconBadge(if (otpToken == null) Icons.Filled.Phone else Icons.Filled.Sms)
-                Spacer(Modifier.height(14.dp))
-
-                if (otpToken == null) {
-                    Text("Sign in with phone", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "Enter your number and we'll send a one-time code to your WhatsApp.",
-                        fontSize = 13.5.sp, color = AuthMuted, lineHeight = 19.sp,
-                    )
-                    Spacer(Modifier.height(18.dp))
-                    PhoneNumberField(
-                        value = phone,
-                        onValueChange = { phone = it.filter { c -> c.isDigit() }.take(10); error = null },
-                    )
-                    Spacer(Modifier.height(12.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        LayoutBox(Modifier.size(7.dp).clip(RoundedCornerShape(99.dp)).background(Color(0xFF25D366)))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Delivered free on WhatsApp", fontSize = 12.sp, color = AuthMuted)
-                    }
-                    if (error != null) {
-                        Spacer(Modifier.height(12.dp))
-                        Text(error!!, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
-                    }
-                    Spacer(Modifier.height(20.dp))
-                    GradientCta(
-                        text = if (loading) "Sending…" else "Send code",
-                        enabled = !loading && phone.trim().length == 10,
-                        loading = loading,
-                        onClick = startOtp,
-                    )
-                } else {
-                    Text("Enter the code", fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        "We sent a 6-digit code on WhatsApp to +91 ${phone.trim()}.",
-                        fontSize = 13.5.sp, color = AuthMuted, lineHeight = 19.sp,
-                    )
-                    Spacer(Modifier.height(18.dp))
-                    OutlinedTextField(
-                        value = code,
-                        onValueChange = { code = it.filter { c -> c.isDigit() }.take(6); error = null },
-                        label = { Text("6-digit code") },
-                        singleLine = true,
-                        shape = RoundedCornerShape(12.dp),
-                        colors = fieldColors,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        textStyle = TextStyle(fontSize = 22.sp, letterSpacing = 10.sp, fontWeight = FontWeight.Bold, color = AuthInk),
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    if (error != null) {
-                        Spacer(Modifier.height(12.dp))
-                        Text(error!!, color = MaterialTheme.colorScheme.error, fontSize = 13.sp)
-                    }
-                    Spacer(Modifier.height(20.dp))
-                    GradientCta(
-                        text = if (loading) "Verifying…" else "Verify & sign in",
-                        enabled = !loading && code.length == 6,
-                        loading = loading,
-                    ) {
-                        view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                        loading = true; error = null
-                        scope.launch {
-                            try { applyLogin(api.verifyPhoneOtp(otpToken!!, code.trim())) }
-                            catch (e: ApiException) { fail(e.message) }
-                            catch (e: Exception) { fail(e.message ?: "Couldn't verify the code") }
-                            finally { loading = false }
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                    TextButton(
-                        onClick = startOtp,
-                        enabled = !loading,
-                        modifier = Modifier.align(Alignment.CenterHorizontally),
-                    ) { Text("Resend code", color = AuthAccent, fontWeight = FontWeight.SemiBold) }
-                }
-            }
-        }
-
-        Spacer(Modifier.height(14.dp))
-        Text(
-            "Trusted by turf owners, clubs & event organisers",
-            fontSize = 12.sp,
-            color = AuthMuted,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 32.dp),
-        )
-        Spacer(Modifier.height(8.dp))
-        // A faint "watermark" Haraan wordmark under the footer credit — a quiet
-        // shadow-type brand mark, kept tight to the footer.
-        Image(
-            painter = painterResource(R.drawable.haraan_logo_white),
-            contentDescription = null,
-            contentScale = ContentScale.Fit,
-            colorFilter = ColorFilter.tint(AuthInk),
-            modifier = Modifier.width(120.dp).alpha(0.08f),
-        )
-        Spacer(Modifier.height(12.dp))
     }
 }
 
@@ -653,208 +391,6 @@ private fun SocialButton(
         leading()
         Spacer(Modifier.width(10.dp))
         Text(text, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = AuthInk)
-    }
-}
-
-/** A thin rule with a centred "or continue with" label. */
-@Composable
-private fun AuthDivider() {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-        LayoutBox(Modifier.weight(1f).height(1.dp).background(Color(0x1A0F172A)))
-        Text(
-            "or continue with",
-            fontSize = 12.sp,
-            color = AuthMuted,
-            modifier = Modifier.padding(horizontal = 12.dp),
-        )
-        LayoutBox(Modifier.weight(1f).height(1.dp).background(Color(0x1A0F172A)))
-    }
-}
-
-/** Soft gradient badge that anchors a sub-screen (phone / OTP) with a single mark. */
-@Composable
-private fun AuthIconBadge(icon: ImageVector) {
-    LayoutBox(
-        modifier = Modifier
-            .size(52.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Brush.linearGradient(listOf(Color(0xFFEAF1FF), Color(0xFFDCE8FF))))
-            .border(1.dp, Color(0x142F6BFF), RoundedCornerShape(16.dp)),
-        contentAlignment = Alignment.Center,
-    ) { Icon(icon, contentDescription = null, tint = AuthAccent, modifier = Modifier.size(26.dp)) }
-}
-
-/**
- * A single-line phone field with a fixed "+91" country segment, a divider, and an
- * animated focus ring — reads far more like a real product than a plain prefix.
- */
-@Composable
-private fun PhoneNumberField(value: String, onValueChange: (String) -> Unit) {
-    val interaction = remember { MutableInteractionSource() }
-    val focused by interaction.collectIsFocusedAsState()
-    val borderColor by animateColorAsState(
-        if (focused) AuthAccent else Color(0x1F0F172A), label = "phone-border",
-    )
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(56.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFFF8FAFC))
-            .border(if (focused) 1.6.dp else 1.dp, borderColor, RoundedCornerShape(14.dp)),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 14.dp, end = 11.dp),
-        ) {
-            Text("🇮🇳", fontSize = 17.sp)
-            Spacer(Modifier.width(7.dp))
-            Text("+91", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = AuthInk)
-        }
-        LayoutBox(Modifier.width(1.dp).height(26.dp).background(Color(0x1F0F172A)))
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            singleLine = true,
-            textStyle = TextStyle(fontSize = 16.sp, color = AuthInk, letterSpacing = 1.sp, fontWeight = FontWeight.Medium),
-            cursorBrush = SolidColor(AuthAccent),
-            interactionSource = interaction,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
-            modifier = Modifier.weight(1f).padding(horizontal = 13.dp),
-            decorationBox = { inner ->
-                LayoutBox(contentAlignment = Alignment.CenterStart) {
-                    if (value.isEmpty()) {
-                        Text("00000 00000", color = Color(0xFF94A3B8), fontSize = 16.sp, letterSpacing = 1.sp)
-                    }
-                    inner()
-                }
-            },
-        )
-    }
-}
-
-/** The dark aurora brand band — the mobile "hero" of the web partner sign-in. */
-@Composable
-private fun AuthBrandBand() {
-    val bandShape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp)
-    // Gentle, endless drift on the two glows so the band feels alive, not static.
-    val t = rememberInfiniteTransition(label = "aurora")
-    val drift by t.animateFloat(
-        initialValue = 0f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(9000), RepeatMode.Reverse),
-        label = "drift",
-    )
-
-    LayoutBox(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(bandShape)
-            .background(Brush.linearGradient(listOf(AuthInkTop, AuthInkMid, AuthInkBot))),
-    ) {
-        // Aurora glows (soft radial gradients; no blur dependency so it looks the
-        // same on every API level).
-        LayoutBox(
-            Modifier
-                .matchParentSize()
-                .graphicsLayer { translationX = -40f + 30f * drift; translationY = -30f + 22f * drift }
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(Color(0x8C3B82F6), Color(0x00000000)),
-                        center = Offset(180f, 60f), radius = 520f,
-                    )
-                )
-        )
-        LayoutBox(
-            Modifier
-                .matchParentSize()
-                .graphicsLayer { translationX = 30f - 26f * drift; translationY = 24f - 18f * drift }
-                .background(
-                    Brush.radialGradient(
-                        colors = listOf(Color(0x80818CF8), Color(0x00000000)),
-                        center = Offset(760f, 360f), radius = 520f,
-                    )
-                )
-        )
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(start = 22.dp, end = 22.dp, top = 22.dp, bottom = 30.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Image(
-                    painter = painterResource(R.drawable.haraan_logo_white),
-                    contentDescription = "Haraan",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.height(22.dp),
-                )
-                Spacer(Modifier.width(10.dp))
-                Text(
-                    "PARTNER",
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 2.4.sp,
-                    color = Color(0xFFCFE0FF),
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(999.dp))
-                        .background(Color(0x1AFFFFFF))
-                        .border(1.dp, Color(0x2EFFFFFF), RoundedCornerShape(999.dp))
-                        .padding(horizontal = 9.dp, vertical = 4.dp),
-                )
-            }
-            Spacer(Modifier.height(18.dp))
-            Text(
-                "Run your venue.\nFill every show.",
-                fontSize = 27.sp,
-                lineHeight = 30.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = (-0.5).sp,
-                color = Color.White,
-            )
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "One console for hosts & venue owners — publish events, take bookings, scan tickets at the gate and watch earnings in real time.",
-                fontSize = 13.5.sp,
-                lineHeight = 19.sp,
-                color = Color(0xCCE0E8FF),
-            )
-            Spacer(Modifier.height(16.dp))
-            // Equal thirds so all three always sit on one line — never wrapping,
-            // never clipped, on any screen width.
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                AuthChip("₹", "Earnings", Modifier.weight(1f))
-                AuthChip("⚡", "Check-in", Modifier.weight(1f))
-                AuthChip("◎", "Dashboard", Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-@Composable
-private fun AuthChip(glyph: String, label: String, modifier: Modifier = Modifier) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.Center,
-        modifier = modifier
-            .clip(RoundedCornerShape(999.dp))
-            .background(Color(0x14FFFFFF))
-            .border(1.dp, Color(0x24FFFFFF), RoundedCornerShape(999.dp))
-            .padding(horizontal = 8.dp, vertical = 8.dp),
-    ) {
-        LayoutBox(
-            modifier = Modifier
-                .size(17.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(Color(0x593884FF)),
-            contentAlignment = Alignment.Center,
-        ) { Text(glyph, fontSize = 9.sp, fontWeight = FontWeight.Bold, color = Color.White) }
-        Spacer(Modifier.width(6.dp))
-        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFE6EDFF), maxLines = 1)
     }
 }
 
@@ -911,7 +447,7 @@ private fun GradientCta(
 
 // ---- Home scaffold + tabs ----------------------------------------------
 
-internal enum class Tab(val label: String) { Home("Home"), Events("Events"), Venues("Venues"), Matches("Matches"), Sales("Sales"), Scan("Scan") }
+internal enum class Tab(val label: String) { Home("Home"), Events("Events"), Venues("Venues"), Matches("Matches"), Sales("Sales"), Payments("Payments"), Scan("Scan") }
 
 /**
  * Which console the signed-in partner belongs to. Drives the whole shell.
@@ -998,20 +534,24 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
             add(Tab.Home)
             if (lane != Lane.VENUE) add(Tab.Events)
             if (lane != Lane.EVENT) add(Tab.Venues)
-            // Games on the turf. A venue's bar has the room for a fifth; the
-            // combined lane's does not, so it reaches Matches from the drawer
-            // instead. A café has no pitch and an event host has no venue, so
-            // neither lane is offered it at all.
-            if (lane == Lane.VENUE) add(Tab.Matches)
+            // Matches is off the bar (the user asked, 2026-10-01): it lives in the
+            // drawer for the venue lanes instead. A café has no pitch and an event
+            // host has no venue, so neither lane is offered it at all.
             add(Tab.Sales)
+            // Every booking's money in one history (the user asked, 2026-10-01). The
+            // combined lane's bar is full, so it reaches Payments from the drawer.
+            if ((lane == Lane.VENUE || lane == Lane.CAFE) && session.can("reports")) add(Tab.Payments)
             add(Tab.Scan)
         }
     }
     // What the drawer lists. The drawer is the index, so a destination the bar
     // couldn't fit still has to appear here.
     val navTabs = remember(tabs, lane) {
-        if (lane != Lane.BOTH) tabs
-        else tabs.toMutableList().apply { add(indexOf(Tab.Venues) + 1, Tab.Matches) }
+        if (lane != Lane.VENUE && lane != Lane.BOTH) tabs
+        else tabs.toMutableList().apply {
+            add(indexOf(Tab.Venues) + 1, Tab.Matches)
+            if (lane == Lane.BOTH && session.can("reports")) add(indexOf(Tab.Sales) + 1, Tab.Payments)
+        }
     }
     var tab by remember { mutableStateOf(Tab.Home) }
     // Back from any other tab returns Home first; only Back on Home leaves the app.
@@ -1028,10 +568,54 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     val view = LocalView.current
     var unseenBookings by remember { mutableStateOf(0) }
     var bookingBanner by remember { mutableStateOf<String?>(null) }
+    // The same card the on-duty service draws over other apps, shown inside Haraan.
+    var inAppAlert by remember { mutableStateOf<com.haraan.partner.alerts.BookingAlert?>(null) }
+    // On duty: bookings reach the partner with the app closed.
+    val appContext = LocalContext.current
+    var onDuty by remember { mutableStateOf(session.onDuty) }
+    var dutySetup by remember { mutableStateOf(false) }
+    fun goOnDuty() {
+        session.onDuty = true; onDuty = true
+        com.haraan.partner.alerts.BookingWatchService.start(appContext)
+    }
+    val notifPermission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { _ -> if (com.haraan.partner.alerts.AlertOverlay.allowed(appContext)) goOnDuty() else dutySetup = true }
+    val toggleDuty: () -> Unit = {
+        if (onDuty) {
+            session.onDuty = false; onDuty = false
+            com.haraan.partner.alerts.BookingWatchService.stop(appContext)
+        } else if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            androidx.core.content.ContextCompat.checkSelfPermission(appContext, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        } else if (!com.haraan.partner.alerts.AlertOverlay.allowed(appContext)) {
+            dutySetup = true
+        } else goOnDuty()
+    }
+    if (dutySetup) {
+        DutySetupDialog(
+            onAllow = {
+                dutySetup = false
+                goOnDuty()
+                runCatching {
+                    appContext.startActivity(
+                        android.content.Intent(
+                            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            android.net.Uri.parse("package:" + appContext.packageName),
+                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
+                }
+            },
+            onNotificationsOnly = { dutySetup = false; goOnDuty() },
+            onDismiss = { dutySetup = false },
+        )
+    }
     // Bumped whenever a new booking lands, so an open Home refetches quietly and
     // its money figures count up to the new total instead of waiting for a pull.
     var moneyLanded by remember { mutableStateOf(0) }
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+    var seenHere by remember { mutableStateOf(0L) }
     LaunchedEffect(token) {
         // Only while the app is on screen: in the background this pulled 100
         // bookings every 20 seconds for nobody, and drained the desk phone's battery.
@@ -1041,27 +625,36 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                 val list = api.bookings(token)
                 val maxId = list.maxOfOrNull { it.id } ?: 0L
                 val last = session.lastNotifiedBookingId
-                when {
+                if (session.onDuty) {
+                    // The service announces bookings (over any app, with its chime);
+                    // here we only refresh Home when one has landed.
+                    if (maxId > seenHere && seenHere != 0L) { moneyLanded++; unseenBookings += 1 }
+                    seenHere = maxId
+                } else when {
                     last == 0L -> session.lastNotifiedBookingId = maxId // baseline; don't alert on first load
                     maxId > last -> {
-                        val fresh = list.filter { it.id > last }
-                        unseenBookings += fresh.size
-                        // Deliberately NOT branch-filtered: an owner wants to know
-                        // a booking landed anywhere, not only at the outlet they
-                        // happen to be looking at — so the alert names the branch.
-                        bookingBanner = fresh.firstOrNull()?.let {
-                            val where = it.branch ?: it.label
-                            listOfNotNull(where, "₹" + formatInr(it.amount)).joinToString(" · ")
+                        // Holds still waiting for their money are left out until paid.
+                        val (fresh, mark) = com.haraan.partner.alerts.BookingAlert.pickFresh(list, last)
+                        session.lastNotifiedBookingId = mark
+                        if (fresh.isNotEmpty()) {
+                            unseenBookings += fresh.size
+                            // Deliberately NOT branch-filtered: an owner wants to know
+                            // a booking landed anywhere, not only at the outlet they
+                            // happen to be looking at — so the alert names the branch.
+                            inAppAlert = com.haraan.partner.alerts.BookingAlert.from(fresh.first(), more = fresh.size - 1)
+                            moneyLanded++
+                            com.haraan.partner.alerts.AlertChime.play(appContext)
                         }
-                        session.lastNotifiedBookingId = maxId
-                        moneyLanded++
-                        Haptics.money(view)
                     }
                 }
             }
             kotlinx.coroutines.delay(20_000)
         }
         }
+    }
+    val openFromAlert by com.haraan.partner.alerts.AlertRouter.openBookings.collectAsState()
+    LaunchedEffect(openFromAlert) {
+        if (openFromAlert) { tab = Tab.Sales; unseenBookings = 0; com.haraan.partner.alerts.AlertRouter.consumed() }
     }
     LaunchedEffect(bookingBanner) {
         if (bookingBanner != null) { kotlinx.coroutines.delay(6_000); bookingBanner = null }
@@ -1274,7 +867,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                 onShiftRegister = if (lane == Lane.VENUE || lane == Lane.CAFE) ({ showShiftRegister = true; closeDrawer() }) else null,
                 onStandingSlots = if (lane == Lane.VENUE || lane == Lane.BOTH) ({ showStandingSlots = true; closeDrawer() }) else null,
                 onPricingMatrix = if ((lane == Lane.VENUE || lane == Lane.BOTH) && session.can("pricing")) ({ showPricingMatrix = true; closeDrawer() }) else null,
-                onWhatsAppDesk = if (lane == Lane.VENUE || lane == Lane.BOTH) ({ showWhatsAppDesk = true; closeDrawer() }) else null,
+                onWhatsAppDesk = if (!WHATSAPP_DESK_LOCKED && (lane == Lane.VENUE || lane == Lane.BOTH)) ({ showWhatsAppDesk = true; closeDrawer() }) else null,
                 onOperationsCenter = if (lane == Lane.VENUE || lane == Lane.BOTH) ({ showOperationsCenter = true; closeDrawer() }) else null,
                 onNotifications = { showNotifications = true; closeDrawer() },
                 onSupport = { showSupport = true; closeDrawer() },
@@ -1370,12 +963,26 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                     BookingBanner(msg) { bookingBanner = null; tab = Tab.Sales; unseenBookings = 0 }
                 }
             }
+            inAppAlert?.let { a ->
+                LayoutBox(Modifier.fillMaxWidth().zIndex(10f).statusBarsPadding().padding(top = 8.dp)) {
+                    androidx.compose.runtime.key(a.id) {
+                        com.haraan.partner.alerts.BookingAlertCard(
+                            alert = a,
+                            onOpen = { inAppAlert = null; tab = Tab.Sales; unseenBookings = 0 },
+                            onDismiss = { inAppAlert = null },
+                            formatInr = ::formatInr,
+                        )
+                    }
+                }
+            }
             when (tab) {
                 // Customers, Packages, Academy and Payouts are reached from the
                 // drawer, which already lists every one of them — Home no longer
                 // repeats that list as four cards.
                 Tab.Home -> HomeTab(
                     api, token, session.name ?: "Partner", lane, branchId,
+                    onDuty = onDuty,
+                    onToggleDuty = toggleDuty,
                     venues = venues,
                     reloadSignal = moneyLanded,
                     unseen = unseenBookings,
@@ -1386,13 +993,13 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                     onScan = { tab = Tab.Scan },
                     onSupport = { showSupport = true },
                     onReports = if (session.can("reports")) ({ showReports = true }) else null,
-                    onWhatsApp = if (lane == Lane.VENUE || lane == Lane.BOTH) ({ showWhatsAppDesk = true }) else null,
+                    onWhatsApp = if (!WHATSAPP_DESK_LOCKED && (lane == Lane.VENUE || lane == Lane.BOTH)) ({ showWhatsAppDesk = true }) else null,
                     onSettlement = if (session.can("reports")) ({ showPayouts = true }) else null,
                     onMenu = { drawerScope.launch { drawerState.open() } },
                     onBell = { tab = Tab.Sales; unseenBookings = 0 },
                     branchSwitcher = ctx?.takeIf { it.isMultiBranch }?.let { known ->
                         {
-                            BranchSwitcher(known, branchId, onDark = true) { picked ->
+                            BranchSwitcher(known, branchId, onDark = false) { picked ->
                                 branchId = picked
                                 session.branchId = picked
                             }
@@ -1407,10 +1014,18 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                 Tab.Events -> EventsTab(api, token) { id, name ->
                     detail = AnalyticsTarget(AnalyticsKind.Event, id, name)
                 }
-                Tab.Venues -> VenuesTab(api, token) { id, name ->
-                    manageVenue = id to name
-                }
+                Tab.Venues -> com.haraan.partner.ui.venues.VenuesScreen(
+                    api = api,
+                    token = token,
+                    canPricing = session.can("pricing"),
+                    canReports = session.can("reports"),
+                    onDesk = { id, name -> manageStartsInSlots = false; manageVenue = id to name },
+                    onPricing = { id, name -> manageStartsInSlots = true; manageVenue = id to name },
+                    onAnalytics = { id, name -> detail = AnalyticsTarget(AnalyticsKind.Venue, id, name) },
+                    onSupport = { showSupport = true },
+                )
                 Tab.Matches -> MatchesScreen(api, token, branchId)
+                Tab.Payments -> com.haraan.partner.payments.PaymentsScreen(api, token, branchId, canManage = session.can("bookings"))
                 Tab.Sales -> {
                     if (lane == Lane.VENUE || lane == Lane.CAFE) {
                         val targetVenue = ctx?.branches?.firstOrNull { it.id == branchId }
@@ -1771,6 +1386,7 @@ internal fun iconFor(tab: Tab) = when (tab) {
     Tab.Events -> Icons.Filled.CalendarMonth
     Tab.Venues -> Icons.Filled.Place
     Tab.Sales -> Icons.Filled.Payments
+    Tab.Payments -> Icons.Filled.AccountBalanceWallet
     Tab.Scan -> Icons.Filled.QrCodeScanner
 }
 
@@ -1785,6 +1401,7 @@ private fun navItemFor(tab: Tab, lane: Lane): HaraanNavItem {
         Tab.Venues -> HaraanNavIcons.PinOutline to HaraanNavIcons.PinActive
         Tab.Matches -> HaraanNavIcons.FlagOutline to HaraanNavIcons.FlagActive
         Tab.Sales -> HaraanNavIcons.ReceiptOutline to HaraanNavIcons.ReceiptActive
+        Tab.Payments -> HaraanNavIcons.WalletOutline to HaraanNavIcons.WalletActive
         Tab.Scan -> HaraanNavIcons.ScanOutline to HaraanNavIcons.ScanActive
     }
     return HaraanNavItem(tab.name, labelFor(tab, lane), outline, active)
@@ -1852,6 +1469,8 @@ private fun HomeTab(
     name: String,
     lane: Lane,
     venueId: Long? = null,
+    onDuty: Boolean = false,
+    onToggleDuty: () -> Unit = {},
     /** The partner's venues, loaded once by the scaffold. Null while that load is in flight. */
     venues: List<VenueSummary>? = null,
     reloadSignal: Int = 0,
@@ -1910,11 +1529,21 @@ private fun HomeTab(
                         }.getOrNull()
                     } else null
                 }
+                // The latest bookings with their money, for the payments feed.
+                val recent = async {
+                    if (courtsLane) runCatching { api.bookings(token, branch) }.getOrNull() else null
+                }
+                // Tomorrow's courts, for the top card once today's hours are over.
+                val tomorrowGrid = async {
+                    if (focus != null && courtsLane) {
+                        runCatching { api.venueDay(token, focus.id, apiDate(todayMillis() + DAY_MS)) }.getOrNull()
+                    } else null
+                }
                 // The charts are extra: a failure loses them, never Home.
                 val insights = async {
                     if (courtsLane) runCatching { api.insights(token, branch) }.getOrNull() else null
                 }
-                HomeData(overview.await(), sheet.await(), grid.await(), payouts.await(), whatsapp.await(), insights.await())
+                HomeData(overview.await(), sheet.await(), grid.await(), payouts.await(), whatsapp.await(), insights.await(), tomorrowGrid.await(), recent.await())
             }
         },
     ) { data ->
@@ -1943,7 +1572,10 @@ private fun HomeTab(
                     listState.firstVisibleItemScrollOffset > with(density) { 190.dp.toPx() }
             }
         }
-        LightStatusBar(light = !collapsed)
+        LightStatusBar(light = false)
+        // The booking the desk tapped on the board: who, their number, and one tap to call.
+        var counter by remember { mutableStateOf<CounterPick?>(null) }
+        counter?.let { pick -> CounterSheet(pick, onDismiss = { counter = null }, onBookings = { counter = null; onBookings() }) }
 
         LayoutBox(Modifier.fillMaxSize().background(AuthPageBg)) {
             LazyColumn(
@@ -1954,9 +1586,15 @@ private fun HomeTab(
             ) {
                 item(key = "hero") {
                     Rise(0) {
-                        HomeHero(
-                            name = name,
-                            place = placeLine(venues, focus, branch),
+                        val todayHours = data.grid?.let { courtHours(it) }?.takeIf { it.isNotEmpty() }
+                        val tomorrowHoursList = data.tomorrowGrid?.let { courtHours(it) }?.takeIf { it.isNotEmpty() }
+                        val slotLen = slotLengthOf(todayHours ?: tomorrowHoursList)
+                        HomeTop(
+                            status = if (settingUp) null else venueOpenStatus(todayHours, tomorrowHoursList, slotLen),
+                            onDuty = onDuty,
+                            onToggleDuty = onToggleDuty,
+                            name = focus?.name ?: name,
+                            place = if (focus != null) focus.location?.takeIf { it.isNotBlank() } else placeLine(venues, focus, branch),
                             photo = focus?.image,
                             initial = (focus?.name ?: name).trim().take(1).uppercase(),
                             unseen = unseen,
@@ -1965,9 +1603,28 @@ private fun HomeTab(
                             branchSwitcher = branchSwitcher,
                         ) {
                             if (settingUp) {
-                                HeroSetup(venues, focus, o.bookingsTotal > 0, onSetUpSlots, onSupport)
+                                // Setup still reads best white-on-navy: a card, not the whole top.
+                                LayoutBox(
+                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp))
+                                        .background(Brush.linearGradient(listOf(AuthInkTop, AuthInkMid))).padding(18.dp),
+                                ) { HeroSetup(venues, focus, o.bookingsTotal > 0, onSetUpSlots, onSupport) }
                             } else {
-                                HeroMoney(day, memoryKey = "home.today.$branch", onDue = onBookings)
+                                val tomorrowOpen = data.insights?.tomorrow
+                                TodayStatus(
+                                    day = day,
+                                    memoryKey = "home.today.$branch",
+                                    clockHours = data.grid?.let { courtHoursByClock(it) },
+                                    tomorrow = tomorrowOpen?.venues?.let { vs -> vs.firstOrNull { it.id == focus?.id } ?: vs.singleOrNull() },
+                                    tomorrowLabel = tomorrowOpen?.label,
+                                    shareUrl = focus?.let { "${ApiConfig.BASE_URL}/gamehub/${it.id}" },
+                                    tomorrowHours = tomorrowHoursList,
+                                    todayHours = todayHours,
+                                    slotMinutes = slotLen,
+                                    onBooked = { b, time, court -> counter = CounterPick(b, time, court) },
+                                    onOpenDesk = { focus?.let { f -> onOpenDesk(f.id, f.name) } },
+                                    onDue = onBookings,
+                                    onBookings = onBookings,
+                                )
                             }
                         }
                     }
@@ -1989,8 +1646,22 @@ private fun HomeTab(
                                 onScan = onScan,
                                 onSupport = onSupport,
                             ),
-                            modifier = Modifier.padding(horizontal = 16.dp).overlapUp(34.dp),
+                            modifier = Modifier.padding(horizontal = 16.dp),
                         )
+                    }
+                }
+                data.recent?.let { list ->
+                    item(key = "payments") {
+                        Rise(2) {
+                            com.haraan.partner.ui.home.PaymentsCard(
+                                entries = paymentEntries(list),
+                                toBank = data.payouts?.let { it.inFlight + it.available }?.takeIf { it > 0 },
+                                formatInr = ::formatInr,
+                                onViewAll = onBookings,
+                                onSettlement = onSettlement,
+                                modifier = Modifier.padding(horizontal = 16.dp),
+                            )
+                        }
                     }
                 }
                 if (day.chaseCount > 0) {
@@ -2000,24 +1671,28 @@ private fun HomeTab(
                     item(key = "closed") { Rise(2) { LayoutBox(Modifier.padding(horizontal = 16.dp)) { ClosedNotice(shut) } } }
                 }
                 val pips = data.grid?.let { slotPips(it) }.orEmpty()
-                if (!settingUp && pips.isNotEmpty() && focus != null) {
-                    item(key = "courts-head") {
+                val todayOver = data.grid?.let { courtHoursByClock(it).first == 0 } == true
+                // The board at the top now carries today's courts; the strip only stays for a
+                // day the board can't draw (no rows came back for it).
+                if (!settingUp && pips.isNotEmpty() && focus != null && data.grid?.let { courtHours(it) }.isNullOrEmpty()) {
+                    item(key = "courts") {
                         Rise(3) {
-                            LayoutBox(Modifier.padding(horizontal = 16.dp)) {
-                                HomeSectionHeader(
-                                    icon = Icons.Filled.Schedule,
-                                    title = "Today's courts",
-                                    action = "Open desk",
-                                    onAction = { onOpenDesk(focus.id, focus.name) },
-                                )
-                            }
+                            val grid = data.grid!!
+                            CourtsDaySection(
+                                hours = courtHours(grid),
+                                kind = courtKindFor(grid.courts.flatMap { it.sports } + grid.slots.flatMap { it.sports }),
+                                formatPrice = ::formatInr,
+                                onOpenDesk = { onOpenDesk(focus.id, focus.name) },
+                            )
                         }
                     }
-                    item(key = "courts") { Rise(4) { CourtsStrip(pips) { onOpenDesk(focus.id, focus.name) } } }
                 }
                 if (!settingUp) {
-                    if (day.next.isEmpty()) {
-                        item(key = "quiet") {
+                    if (day.next.size <= 1) {
+                        // After hours the top already says so; the line would repeat it.
+                        // The board at the top already shows the day; this line only speaks
+                        // when there's no board to read it from.
+                        if (day.next.isEmpty() && !todayOver && data.grid?.let { courtHours(it) }.isNullOrEmpty()) item(key = "quiet") {
                             Rise(5) {
                                 QuietLine(
                                     text = if (day.slotsBooked > 0) "All of today's bookings are done" else "No bookings left today",
@@ -2031,14 +1706,15 @@ private fun HomeTab(
                         item(key = "next-head") {
                             Rise(5) {
                                 LayoutBox(Modifier.padding(horizontal = 16.dp)) {
-                                    HomeSectionHeader(icon = Icons.Filled.Today, title = "Next up", action = "All bookings", onAction = onBookings)
+                                    HomeSectionHeader(icon = Icons.Filled.Today, title = "Later today", action = "All bookings", onAction = onBookings)
                                 }
                             }
                         }
-                        itemsIndexed(day.next, key = { i, _ -> "next-$i" }) { i, booking ->
+                        val later = day.next.drop(1)
+                        itemsIndexed(later, key = { i, _ -> "next-$i" }) { i, booking ->
                             Rise(6 + i.coerceAtMost(4)) {
                                 LayoutBox(Modifier.padding(horizontal = 16.dp)) {
-                                    TimelineRow(booking, first = i == 0, last = i == day.next.lastIndex)
+                                    TimelineRow(booking, first = i == 0, last = i == later.lastIndex)
                                 }
                             }
                         }
@@ -2047,6 +1723,7 @@ private fun HomeTab(
                 insights?.let { (state, go) ->
                     insightItems(
                         state = state,
+                        showTomorrow = settingUp,
                         onWeek = go,
                         memoryKey = "home.week.$branch",
                         onPricing = onPricing?.let { open -> focus?.let { f -> { open(f.id, f.name) } } },
@@ -2064,6 +1741,13 @@ private fun HomeTab(
                 }
             }
 
+            // The top is white now, so the status bar needs a white band of its own:
+            // without it, the first lines slid up under the clock and battery icons.
+            LayoutBox(
+                Modifier.fillMaxWidth()
+                    .windowInsetsTopHeight(androidx.compose.foundation.layout.WindowInsets.statusBars)
+                    .background(Color.White),
+            )
             CompactHomeBar(
                 visible = collapsed,
                 title = focus?.name ?: name,
@@ -2086,6 +1770,8 @@ private data class HomeData(
     val whatsapp: com.haraan.partner.whatsapp.model.WhatsAppMetrics? = null,
     /** The week's bars, channel split, tomorrow and busy hours; null when not a venue or off. */
     val insights: HomeInsights? = null,
+    val tomorrowGrid: DayGrid? = null,
+    val recent: List<BookingSummary>? = null,
 )
 
 /**
@@ -2113,13 +1799,17 @@ private fun LightStatusBar(light: Boolean) {
 }
 
 /**
- * The venue's hero: full-bleed navy under the status bar, the venue's own photo
- * worked into the right side, and the chrome (menu, bell, avatar) living inside
- * it rather than on a white strip above. [content] is the day's money, or the
- * setup path when nothing is bookable yet.
+ * The top of Home, plainly: the venue, one or two sentences that are true right now, and
+ * a single card for what comes next — the next booking, the hours still open, or
+ * tomorrow once today is over. No scenery and no gauges: everything here is something
+ * only this venue's own data can say.
  */
 @Composable
-private fun HomeHero(
+private fun HomeTop(
+    /** "Open now · till 12 PM" and whether it's open; null while setting up. */
+    status: Pair<String, Boolean>?,
+    onDuty: Boolean,
+    onToggleDuty: () -> Unit,
     name: String,
     place: String?,
     photo: String?,
@@ -2130,191 +1820,569 @@ private fun HomeHero(
     branchSwitcher: (@Composable () -> Unit)?,
     content: @Composable () -> Unit,
 ) {
-    val shape = RoundedCornerShape(bottomStart = 34.dp, bottomEnd = 34.dp)
-    LayoutBox(
+    val view = LocalView.current
+    Column(
         Modifier
             .fillMaxWidth()
-            .shadow(20.dp, shape, clip = false, spotColor = AuthInkTop)
-            .clip(shape)
-            .background(Brush.linearGradient(listOf(AuthInkTop, AuthInkMid, AuthInkBot))),
+            .background(Color.White)
+            .statusBarsPadding()
+            .padding(bottom = 18.dp),
     ) {
-        if (photo != null) {
-            LayoutBox(Modifier.matchParentSize()) {
-                AsyncImage(
-                    model = photo,
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    alpha = 0.85f,
-                    modifier = Modifier.fillMaxHeight().fillMaxWidth(0.7f).align(Alignment.CenterEnd),
-                )
-                // Navy across the text, dissolving into the photo on the right, so
-                // the picture is atmosphere and never fights the figures.
-                LayoutBox(
-                    Modifier.matchParentSize().background(
-                        Brush.horizontalGradient(
-                            0f to AuthInkTop,
-                            0.38f to AuthInkTop,
-                            0.7f to AuthInkTop.copy(alpha = 0.7f),
-                            1f to AuthInkTop.copy(alpha = 0.3f),
-                        )
-                    )
-                )
-                // The figures and glass sit in the lower half, so the photo is gone
-                // by then: a partner's upload may be a poster full of small print,
-                // and it must never show through behind a number.
-                LayoutBox(
-                    Modifier.matchParentSize().background(
-                        Brush.verticalGradient(
-                            0f to AuthInkTop.copy(alpha = 0.5f),
-                            0.28f to Color.Transparent,
-                            0.5f to AuthInkMid.copy(alpha = 0.75f),
-                            0.66f to AuthInkBot,
-                            1f to AuthInkBot,
-                        )
-                    )
-                )
-            }
-        }
-        // A cool bloom top-left, where the eye lands first.
-        LayoutBox(
-            Modifier.matchParentSize().background(
-                Brush.radialGradient(listOf(Color(0x4D3B82F6), Color.Transparent), center = Offset(80f, 120f), radius = 700f)
-            )
-        )
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(start = 8.dp, end = 12.dp, top = 2.dp, bottom = 54.dp),
+        Row(
+            Modifier.fillMaxWidth().padding(start = 4.dp, end = 12.dp, top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                IconButton(onClick = onMenu) {
-                    Icon(Icons.Filled.Menu, contentDescription = "Menu", tint = Color.White, modifier = Modifier.size(23.dp))
-                }
-                Spacer(Modifier.weight(1f))
-                branchSwitcher?.let { it(); Spacer(Modifier.width(4.dp)) }
-                HeroBell(unseen, onBell)
-                Spacer(Modifier.width(6.dp))
-                VenueAvatar(photo = photo, initial = initial, onClick = onMenu)
+            IconButton(onClick = onMenu) {
+                Icon(Icons.Filled.Menu, contentDescription = "Menu", tint = AuthInk, modifier = Modifier.size(23.dp))
             }
-            Column(Modifier.padding(start = 12.dp, end = 8.dp)) {
-                Spacer(Modifier.height(10.dp))
-                Text(greeting().uppercase(), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xB3CFE0FF), letterSpacing = 1.6.sp)
-                Spacer(Modifier.height(4.dp))
+            Column(Modifier.weight(1f)) {
                 Text(
-                    name, fontSize = 28.sp, lineHeight = 32.sp, fontWeight = FontWeight.ExtraBold,
-                    color = Color.White, letterSpacing = (-0.7).sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    name, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, letterSpacing = (-0.3).sp,
                 )
-                place?.let {
-                    Spacer(Modifier.height(3.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.Place, null, tint = Color(0x99CFE0FF), modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(it, fontSize = 13.sp, color = Color(0xCCE0E8FF), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (status != null) {
+                        LayoutBox(
+                            Modifier.size(7.dp).clip(RoundedCornerShape(99.dp))
+                                .background(if (status.second) Color(0xFF16A34A) else Color(0xFF94A3B8)),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            status.first, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold,
+                            color = if (status.second) Color(0xFF15803D) else AuthMuted, maxLines = 1,
+                        )
+                    }
+                    place?.let {
+                        Text(
+                            (if (status != null) "  ·  " else "") + it,
+                            fontSize = 12.5.sp, color = AuthMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
                     }
                 }
-                Spacer(Modifier.height(24.dp))
-                content()
             }
+            branchSwitcher?.let { it(); Spacer(Modifier.width(2.dp)) }
+            DutySwitch(onDuty, onToggleDuty)
+            LayoutBox {
+                IconButton(onClick = { Haptics.tick(view); onBell() }) {
+                    Icon(Icons.Filled.Notifications, contentDescription = "New bookings", tint = AuthInk, modifier = Modifier.size(22.dp))
+                }
+                if (unseen > 0) {
+                    LayoutBox(
+                        Modifier.align(Alignment.TopEnd).padding(top = 7.dp, end = 5.dp)
+                            .size(17.dp).clip(RoundedCornerShape(99.dp)).background(RED)
+                            .border(1.5.dp, Color.White, RoundedCornerShape(99.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) { Text(if (unseen > 9) "9+" else "$unseen", fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+                }
+            }
+            Spacer(Modifier.width(4.dp))
+            VenueAvatar(photo = photo, initial = initial, onClick = onMenu)
         }
+        Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp)) { content() }
     }
 }
 
-/** The bell on navy: white glyph, red count. */
+private fun minutesNow(): Int = java.util.Calendar.getInstance().let { it.get(java.util.Calendar.HOUR_OF_DAY) * 60 + it.get(java.util.Calendar.MINUTE) }
+
+/** Minutes in one slot, read off the gaps between start times (30 or 60). */
+private fun slotLengthOf(hours: List<CourtHour>?): Int =
+    hours.orEmpty().map { it.start }.filter { it != Int.MAX_VALUE }.distinct().sorted()
+        .zipWithNext { a, b -> b - a }.filter { it > 0 }.minOrNull()?.coerceIn(30, 60) ?: 60
+
+/** "Open now · till 12 PM", "Opens at 6 AM", "Closed · opens 6 AM tomorrow" — off the real slots. */
+private fun venueOpenStatus(today: List<CourtHour>?, tomorrow: List<CourtHour>?, len: Int): Pair<String, Boolean> {
+    val now = minutesNow()
+    val starts = today.orEmpty().map { it.start }.filter { it != Int.MAX_VALUE }
+    if (starts.isNotEmpty()) {
+        val first = starts.min()
+        val end = starts.max() + len
+        if (now < first) return "Opens at ${com.haraan.partner.ui.pricing.clock(first)}" to false
+        if (now < end) return "Open now · till ${com.haraan.partner.ui.pricing.clock(end)}" to true
+    }
+    val next = tomorrow.orEmpty().map { it.start }.filter { it != Int.MAX_VALUE }.minOrNull()
+    return (if (next != null) "Closed · opens ${com.haraan.partner.ui.pricing.clock(next)} tomorrow" else "Closed today") to false
+}
+
+private data class CounterPick(val b: com.haraan.partner.ui.home.CellBooking, val time: String, val court: String?)
+
+/**
+ * A booking, at the counter: the full name and the full number (Playo's own owners ask
+ * for this — a masked number is no use when someone hasn't turned up), what's owed, and
+ * Call / WhatsApp one tap away.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun HeroBell(count: Int, onClick: () -> Unit) {
+private fun CounterSheet(p: CounterPick, onDismiss: () -> Unit, onBookings: () -> Unit) {
+    val context = LocalContext.current
     val view = LocalView.current
-    LayoutBox {
-        IconButton(onClick = { Haptics.tick(view); onClick() }) {
-            Icon(Icons.Filled.Notifications, contentDescription = "New bookings", tint = Color.White, modifier = Modifier.size(22.dp))
-        }
-        if (count > 0) {
-            LayoutBox(
-                Modifier.align(Alignment.TopEnd).padding(top = 7.dp, end = 5.dp)
-                    .size(17.dp).clip(RoundedCornerShape(99.dp)).background(RED)
-                    .border(1.5.dp, AuthInkTop, RoundedCornerShape(99.dp)),
-                contentAlignment = Alignment.Center,
-            ) { Text(if (count > 9) "9+" else "$count", fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = Color.White) }
+    val b = p.b
+    val digits = b.phone.orEmpty().filter { it.isDigit() }
+    val local = if (digits.length > 10) digits.takeLast(10) else digits
+    val pretty = if (local.length == 10) "+91 " + local.take(5) + " " + local.drop(5) else b.phone.orEmpty()
+    val owed = (b.amount - b.paid).coerceAtLeast(0.0)
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color.White) {
+        Column(Modifier.fillMaxWidth().padding(start = 22.dp, end = 22.dp, bottom = 28.dp)) {
+            Text(b.customer, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = AuthInk, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(2.dp))
+            Text(
+                listOfNotNull(p.court, p.time, if (b.walkIn) "Walk-in" else "Online").joinToString(" · "),
+                fontSize = 14.sp, color = AuthMuted,
+            )
+            Spacer(Modifier.height(16.dp))
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(AuthPageBg).border(1.dp, Hairline, RoundedCornerShape(14.dp)).padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("₹" + formatInr(b.amount), fontSize = 20.sp, fontWeight = FontWeight.Bold, color = AuthInk)
+                    Text(
+                        when {
+                            owed <= 0.0 -> "Paid in full"
+                            b.paid > 0.0 -> "₹" + formatInr(b.paid) + " paid · ₹" + formatInr(owed) + " to collect"
+                            else -> "Not paid yet"
+                        },
+                        fontSize = 13.sp, color = if (owed > 0.0) RED else Color(0xFF15803D), fontWeight = FontWeight.SemiBold,
+                    )
+                }
+                if (pretty.isNotBlank()) {
+                    Text(pretty, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = AuthInk, style = TextStyle(fontFeatureSettings = "tnum"))
+                }
+            }
+            if (local.length == 10) {
+                Spacer(Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Button(
+                        onClick = {
+                            Haptics.tick(view)
+                            runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_DIAL, android.net.Uri.parse("tel:+91$local"))) }
+                        },
+                        modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(12.dp),
+                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = AuthAccent),
+                    ) {
+                        Icon(Icons.Filled.Phone, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Call", fontWeight = FontWeight.Bold)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            Haptics.tick(view)
+                            runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://wa.me/91$local"))) }
+                        },
+                        modifier = Modifier.weight(1f).height(48.dp), shape = RoundedCornerShape(12.dp),
+                    ) {
+                        Icon(Icons.Filled.Forum, contentDescription = null, modifier = Modifier.size(18.dp), tint = AuthAccentDeep)
+                        Spacer(Modifier.width(8.dp))
+                        Text("WhatsApp", fontWeight = FontWeight.Bold, color = AuthAccentDeep)
+                    }
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            TextButton(onClick = onBookings) { Text("Open in Bookings", color = AuthAccentDeep, fontWeight = FontWeight.SemiBold) }
         }
     }
 }
 
 /**
- * The day's money inside the hero: what today is worth, how full the courts are,
- * and three figures on frosted glass. Money that lands while the partner watches
- * counts up and glows; the buzz came from the booking poll that found it.
+ * A gate pulled shut with a padlock — single-weight line work in the app's ink, drawn
+ * only after hours. It's the one picture on Home, and it says the one true thing.
  */
 @Composable
-private fun HeroMoney(day: ShiftBoard, memoryKey: String, onDue: () -> Unit) {
-    val money = rememberMoneyMotion(day.expected, memoryKey)
-    Column(
-        Modifier.graphicsLayer {
-            val lift = 1f + 0.02f * money.pulse
-            scaleX = lift; scaleY = lift
-        },
-    ) {
-        Text(
-            "TODAY · " + day.dayLabel.uppercase(),
-            color = Color(0xB3CFE0FF), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp,
-        )
-        Spacer(Modifier.height(6.dp))
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-                "₹" + formatInr(kotlin.math.round(money.shown)),
-                color = lerp(Color.White, Color(0xFFBFD6FF), money.pulse),
-                fontSize = 44.sp, lineHeight = 46.sp,
-                fontWeight = FontWeight.ExtraBold, letterSpacing = (-1.6).sp,
-                style = TextStyle(fontFeatureSettings = "tnum, zero"),
-            )
-            Spacer(Modifier.width(9.dp))
-            Text("expected", color = Color(0xCCE0E8FF), fontSize = 14.sp, modifier = Modifier.padding(bottom = 9.dp))
+private fun ClosedGate(modifier: Modifier) {
+    Canvas(modifier) {
+        val ink = Color(0xFF94A3B8)
+        val sw = 1.8.dp.toPx()
+        val w = size.width
+        val h = size.height
+        val ground = h * 0.92f
+        // Posts with caps.
+        listOf(w * 0.12f, w * 0.88f).forEach { x ->
+            drawLine(ink, Offset(x, h * 0.12f), Offset(x, ground), sw * 1.4f, StrokeCap.Round)
+            drawCircle(ink, sw * 1.3f, Offset(x, h * 0.1f))
         }
-        Spacer(Modifier.height(14.dp))
-        Text(
-            "${day.slotsBooked} of ${day.slotsTotal} slots booked" + if (day.slotsDone > 0) " · ${day.slotsDone} done" else "",
-            color = Color(0xE6E0E8FF), fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.height(9.dp))
-        OccupancyBar(day.occupancy)
-        Spacer(Modifier.height(18.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-            GlassStat(Modifier.weight(1f), "Booked", "${day.slotsBooked}/${day.slotsTotal}")
-            GlassStat(Modifier.weight(1f), "Collected", "₹" + formatInr(day.collected))
-            GlassStat(
-                Modifier.weight(1f), "Due", "₹" + formatInr(day.due),
-                alert = day.due > 0,
-                onClick = if (day.due > 0) onDue else null,
+        // Two leaves meeting in the middle: top rail, bottom rail, bars.
+        val top = h * 0.3f
+        val bottom = ground - h * 0.06f
+        drawLine(ink, Offset(w * 0.12f, top), Offset(w * 0.88f, top), sw, StrokeCap.Round)
+        drawLine(ink, Offset(w * 0.12f, bottom), Offset(w * 0.88f, bottom), sw, StrokeCap.Round)
+        var x = w * 0.2f
+        while (x < w * 0.84f) {
+            if (kotlin.math.abs(x - w * 0.5f) > w * 0.05f) drawLine(ink, Offset(x, top), Offset(x, bottom), sw * 0.8f, StrokeCap.Round)
+            x += w * 0.075f
+        }
+        // Padlock where the leaves meet, in the accent — the only colour in it.
+        val lock = Offset(w * 0.5f, (top + bottom) / 2 + h * 0.06f)
+        val lw = w * 0.13f
+        val lh = h * 0.2f
+        drawArc(AuthAccent, 180f, 180f, false, Offset(lock.x - lw * 0.32f, lock.y - lh * 0.95f), androidx.compose.ui.geometry.Size(lw * 0.64f, lh * 0.9f),
+            style = androidx.compose.ui.graphics.drawscope.Stroke(sw * 0.9f, cap = StrokeCap.Round))
+        drawRoundRect(AuthAccent, Offset(lock.x - lw / 2, lock.y - lh * 0.5f), androidx.compose.ui.geometry.Size(lw, lh), androidx.compose.ui.geometry.CornerRadius(2.dp.toPx()))
+        drawLine(ink, Offset(0f, ground), Offset(w, ground), sw, StrokeCap.Round)
+    }
+}
+
+/**
+ * Bookings as a payments feed, newest first: venue bookings only (event tickets have
+ * their own screen), skipping cancelled ones and anything with nothing to collect.
+ */
+private fun paymentEntries(list: List<BookingSummary>): List<com.haraan.partner.ui.home.PaymentEntry> {
+    val fmtIn = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US)
+    val today = java.util.Calendar.getInstance()
+    fun sameDay(a: java.util.Calendar, b: java.util.Calendar) = a.get(java.util.Calendar.YEAR) == b.get(java.util.Calendar.YEAR) && a.get(java.util.Calendar.DAY_OF_YEAR) == b.get(java.util.Calendar.DAY_OF_YEAR)
+    return list.asSequence()
+        .filter { it.amount > 0 && !(it.status ?: "").lowercase().let { s -> s.startsWith("cancel") || s == "expired" || s == "refunded" } }
+        .mapNotNull { b ->
+            val at = b.createdAt?.let { runCatching { fmtIn.parse(it) }.getOrNull() } ?: return@mapNotNull null
+            val cal = java.util.Calendar.getInstance().apply { time = at }
+            val yesterday = (today.clone() as java.util.Calendar).apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }
+            val label = when {
+                sameDay(cal, today) -> java.text.SimpleDateFormat("h:mm a", java.util.Locale.ENGLISH).format(at)
+                sameDay(cal, yesterday) -> "Yesterday"
+                else -> java.text.SimpleDateFormat("d MMM", java.util.Locale.ENGLISH).format(at)
+            }
+            val way = when ((b.paymentMethod ?: "").lowercase()) {
+                "cash" -> com.haraan.partner.ui.home.PayWay.Cash
+                "upi", "upi_qr" -> com.haraan.partner.ui.home.PayWay.Upi
+                "card" -> com.haraan.partner.ui.home.PayWay.Card
+                "" -> if (b.amountPaid > 0) com.haraan.partner.ui.home.PayWay.Online else null
+                else -> com.haraan.partner.ui.home.PayWay.Online
+            }
+            com.haraan.partner.ui.home.PaymentEntry(
+                name = b.customer, amount = b.amount, paid = b.amountPaid, way = way,
+                walkIn = b.channel.equals("offline", true), whenLabel = label, today = sameDay(cal, today),
+            ) to at.time
+        }
+        .sortedByDescending { it.second }
+        .map { it.first }
+        .toList()
+}
+
+/**
+ * On duty / off duty, like a driver going online: a pill with a thumb that slides
+ * across, green when Haraan is listening for bookings with the app closed.
+ */
+@Composable
+private fun DutySwitch(on: Boolean, onToggle: () -> Unit) {
+    val view = LocalView.current
+    val slide by animateFloatAsState(if (on) 1f else 0f, spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium), label = "duty")
+    val interaction = remember { MutableInteractionSource() }
+    Row(
+        Modifier
+            .pressScale(interaction, pressedScale = 0.93f)
+            .clip(RoundedCornerShape(99.dp))
+            .background(lerp(Color(0xFFF1F5F9), Color(0xFFDCFCE7), slide))
+            .border(1.dp, lerp(Color(0x1F0F172A), Color(0x6616A34A), slide), RoundedCornerShape(99.dp))
+            .clickable(interactionSource = interaction, indication = null) {
+                if (on) Haptics.tick(view) else Haptics.confirm(view)
+                onToggle()
+            }
+            .semantics { contentDescription = if (on) "On duty. Tap to go off duty." else "Off duty. Tap to go on duty." }
+            .padding(start = 4.dp, end = 10.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // The track and its thumb.
+        LayoutBox(
+            Modifier.size(width = 30.dp, height = 18.dp).clip(RoundedCornerShape(99.dp))
+                .background(lerp(Color(0xFFCBD5E1), Color(0xFF16A34A), slide)),
+        ) {
+            LayoutBox(
+                Modifier.padding(2.dp).size(14.dp)
+                    .graphicsLayer { translationX = 12.dp.toPx() * slide }
+                    .shadow(2.dp, RoundedCornerShape(99.dp))
+                    .clip(RoundedCornerShape(99.dp)).background(Color.White),
             )
+        }
+        Spacer(Modifier.width(7.dp))
+        Text(
+            if (on) "On duty" else "Off duty",
+            fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+            color = lerp(AuthMuted, Color(0xFF15803D), slide), maxLines = 1,
+        )
+    }
+}
+
+/**
+ * Asking for "Display over other apps" the way a person would: what it does (with the
+ * card drawn small), why, and a way to say no that still works.
+ */
+@Composable
+private fun DutySetupDialog(onAllow: () -> Unit, onNotificationsOnly: () -> Unit, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Color.White,
+        title = { Text("Never miss a booking", fontWeight = FontWeight.Bold, color = AuthInk) },
+        text = {
+            Column {
+                // A phone with the booking card dropping in at the top.
+                Canvas(Modifier.fillMaxWidth().height(120.dp)) {
+                    val w = size.height * 0.56f
+                    val left = (size.width - w) / 2
+                    drawRoundRect(Color(0xFFE2E8F0), Offset(left, 0f), androidx.compose.ui.geometry.Size(w, size.height), androidx.compose.ui.geometry.CornerRadius(14.dp.toPx()))
+                    drawRoundRect(Color.White, Offset(left + 4.dp.toPx(), 4.dp.toPx()), androidx.compose.ui.geometry.Size(w - 8.dp.toPx(), size.height - 8.dp.toPx()), androidx.compose.ui.geometry.CornerRadius(11.dp.toPx()))
+                    // Some other app underneath: grey lines.
+                    for (i in 0 until 5) {
+                        val y = size.height * (0.45f + i * 0.1f)
+                        drawLine(Color(0xFFE2E8F0), Offset(left + 12.dp.toPx(), y), Offset(left + w - 12.dp.toPx() - (i % 2) * 18.dp.toPx(), y), 5.dp.toPx(), StrokeCap.Round)
+                    }
+                    // The Haraan card over it.
+                    drawRoundRect(
+                        Brush.linearGradient(listOf(Color(0xFF4D8BFF), Color(0xFF1E40AF))),
+                        Offset(left - 10.dp.toPx(), 14.dp.toPx()),
+                        androidx.compose.ui.geometry.Size(w + 20.dp.toPx(), size.height * 0.3f),
+                        androidx.compose.ui.geometry.CornerRadius(9.dp.toPx()),
+                    )
+                    drawLine(Color.White, Offset(left + 2.dp.toPx(), 26.dp.toPx()), Offset(left + w * 0.45f, 26.dp.toPx()), 4.dp.toPx(), StrokeCap.Round)
+                    drawLine(Color(0xB3FFFFFF), Offset(left + 2.dp.toPx(), 36.dp.toPx()), Offset(left + w * 0.7f, 36.dp.toPx()), 3.dp.toPx(), StrokeCap.Round)
+                    drawRoundRect(Color.White, Offset(left + w - 22.dp.toPx(), 22.dp.toPx()), androidx.compose.ui.geometry.Size(26.dp.toPx(), 12.dp.toPx()), androidx.compose.ui.geometry.CornerRadius(4.dp.toPx()))
+                }
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    "While you're on duty, a new booking pops up over whatever app is open — with the amount, the customer and the court — and plays Haraan's chime.",
+                    fontSize = 14.sp, color = AuthInk, lineHeight = 20.sp,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Android calls this \"Display over other apps\". Turn it on for Haraan Partner on the next screen.",
+                    fontSize = 13.sp, color = AuthMuted, lineHeight = 18.sp,
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onAllow, colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = AuthAccent), shape = RoundedCornerShape(12.dp)) {
+                Text("Turn it on", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onNotificationsOnly) { Text("Notifications only", color = AuthMuted) }
+        },
+    )
+}
+
+/** Today in words, then the one card for what's next. */
+@Composable
+private fun TodayStatus(
+    day: ShiftBoard,
+    memoryKey: String,
+    clockHours: Pair<Int, Int>?,
+    tomorrow: TomorrowVenue?,
+    tomorrowLabel: String?,
+    shareUrl: String?,
+    tomorrowHours: List<CourtHour>?,
+    todayHours: List<CourtHour>?,
+    slotMinutes: Int,
+    onBooked: (com.haraan.partner.ui.home.CellBooking, String, String?) -> Unit,
+    onOpenDesk: () -> Unit,
+    onDue: () -> Unit,
+    onBookings: () -> Unit,
+) {
+    // The board's "now" line moves with the clock while Home sits open.
+    var nowMin by remember { mutableStateOf(minutesNow()) }
+    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(30_000); nowMin = minutesNow() } }
+    val context = LocalContext.current
+    val view = LocalView.current
+    val money = rememberMoneyMotion(day.expected, memoryKey)
+    val left = clockHours?.first ?: (day.slotsTotal - day.slotsDone).coerceAtLeast(0)
+    val over = day.slotsTotal > 0 && left == 0
+    val next = day.next.firstOrNull()
+    val running = next?.running == true
+
+    val headline = when {
+        running -> "On court now: ${next!!.court.ifBlank { next.venue }}"
+        over -> "Today's hours are over."
+        day.slotsBooked > 0 -> "${day.slotsBooked} of ${day.slotsTotal} court-hours booked"
+        day.slotsTotal == 0 -> "No courts running today."
+        else -> "Nothing booked yet today."
+    }
+    val subline = when {
+        day.expected > 0 && over -> "₹" + formatInr(kotlin.math.round(money.shown)) + " earned · ₹" + formatInr(day.collected) + " collected"
+        day.expected > 0 -> "₹" + formatInr(kotlin.math.round(money.shown)) + " expected · ₹" + formatInr(day.collected) + " in so far"
+        over -> "No bookings came in."
+        left == 1 -> "1 court-hour still open."
+        left > 0 -> "$left court-hours still open."
+        else -> null
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(headline, fontSize = 20.sp, lineHeight = 25.sp, fontWeight = FontWeight.Bold, color = AuthInk, letterSpacing = (-0.3).sp)
+            subline?.let {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    it, fontSize = 14.sp, color = lerp(AuthMuted, AuthAccentDeep, money.pulse),
+                    style = TextStyle(fontFeatureSettings = "tnum"),
+                )
+            }
+        }
+        // The one drawing on Home: the gate shut for the night, only when it is.
+        if (over) {
+            Spacer(Modifier.width(12.dp))
+            ClosedGate(Modifier.size(width = 64.dp, height = 46.dp))
+        }
+    }
+    if (day.due > 0) {
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier.clip(RoundedCornerShape(10.dp)).clickable { Haptics.tick(view); onDue() }.padding(vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LayoutBox(Modifier.size(7.dp).clip(RoundedCornerShape(99.dp)).background(RED))
+            Spacer(Modifier.width(7.dp))
+            Text("₹" + formatInr(day.due) + " still to collect today", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = RED)
+            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = RED, modifier = Modifier.size(18.dp))
+        }
+    }
+
+    // The one card for what comes next.
+    val card: (@Composable () -> Unit)? = when {
+        // During hours: the next customer, then the whole of today, live.
+        !over && todayHours != null -> {
+            {
+                Column {
+                    if (next != null) {
+                        NextBookingCard(next, onBookings)
+                        Spacer(Modifier.height(12.dp))
+                    }
+                    com.haraan.partner.ui.home.DayGridCard(
+                        label = "Today · " + day.dayLabel,
+                        hours = todayHours,
+                        nowMinutes = nowMin,
+                        slotMinutes = slotMinutes,
+                        onBooked = onBooked,
+                        onOpen = { _, _ -> onOpenDesk() },
+                        // No button on the board (removed at the user's ask, 2026-10-01).
+                        action = null,
+                        onAction = {},
+                    )
+                }
+            }
+        }
+        next != null -> { { NextBookingCard(next, onBookings) } }
+        !over && left > 0 && shareUrl != null -> {
+            {
+                NextCard(
+                    label = "Still open today",
+                    title = if (left == 1) "1 court-hour to sell" else "$left court-hours to sell",
+                    detail = "Send your booking link to regulars.",
+                    action = "Share booking link",
+                    onAction = { Haptics.tick(view); shareText(context, "Book a court with us on Haraan: $shareUrl") },
+                )
+            }
+        }
+        over && tomorrowHours != null -> {
+            {
+                com.haraan.partner.ui.home.DayGridCard(
+                    label = "Tomorrow" + (tomorrowLabel?.let { " · $it" } ?: ""),
+                    hours = tomorrowHours,
+                    nowMinutes = null,
+                    slotMinutes = slotMinutes,
+                    onBooked = onBooked,
+                    onOpen = { _, _ -> onOpenDesk() },
+                    action = null,
+                    onAction = {},
+                )
+            }
+        }
+        tomorrow != null -> {
+            {
+                NextCard(
+                    label = "Tomorrow" + (tomorrowLabel?.let { " · $it" } ?: ""),
+                    title = when {
+                        tomorrow.closed -> "Closed tomorrow"
+                        tomorrow.openHours <= 0.0 -> "Fully booked"
+                        else -> formatHours(tomorrow.openHours) + " open"
+                    },
+                    detail = tomorrow.windows.takeIf { !tomorrow.closed && it.isNotEmpty() }?.joinToString(" · ") { it.first },
+                    action = if (!tomorrow.closed && tomorrow.openHours > 0.0) "Share on WhatsApp" else null,
+                    onAction = { Haptics.tick(view); shareOpenSlots(context, tomorrow) },
+                )
+            }
+        }
+        else -> null
+    }
+    card?.let {
+        Spacer(Modifier.height(16.dp))
+        it()
+    }
+}
+
+private fun formatHours(h: Double): String {
+    val whole = h == kotlin.math.floor(h)
+    val n = if (whole) h.toLong().toString() else "%.1f".format(h)
+    return "$n court-hour" + if (h == 1.0) "" else "s"
+}
+
+private fun shareText(context: Context, text: String) {
+    val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+        type = "text/plain"
+        putExtra(android.content.Intent.EXTRA_TEXT, text)
+    }
+    runCatching { context.startActivity(android.content.Intent.createChooser(send, "Share booking link")) }
+}
+
+/** The next booking, as the desk would say it: when, who, which court, and whether it's paid. */
+@Composable
+private fun NextBookingCard(b: ShiftBooking, onOpen: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val view = LocalView.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .pressScale(interaction, pressedScale = 0.97f)
+            .clip(RoundedCornerShape(18.dp))
+            .background(if (b.running) Color(0xFFEFF5FF) else AuthPageBg)
+            .border(1.dp, if (b.running) Color(0x332F6BFF) else Hairline, RoundedCornerShape(18.dp))
+            .pressShade(interaction, amount = 0.04f)
+            .clickable(interactionSource = interaction, indication = null) { Haptics.tick(view); onOpen() }
+            .padding(16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.width(72.dp)) {
+            Text(if (b.running) "Now" else "Next", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (b.running) AuthAccentDeep else AuthMuted)
+            Text(b.time.replace(":00", ""), fontSize = 19.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk, maxLines = 1)
+        }
+        Column(Modifier.weight(1f)) {
+            Text(b.customer, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                listOf(b.court.ifBlank { b.venue }, if (b.walkIn) "Walk-in" else "Online").joinToString(" · "),
+                fontSize = 12.5.sp, color = AuthMuted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text("₹" + formatInr(b.amount), fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+            Text(if (b.paid) "Paid" else "Unpaid", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (b.paid) Color(0xFF15803D) else RED)
         }
     }
 }
 
-/** One figure on frosted glass. Presses only when there's somewhere to go. */
+/** What comes next when it isn't a booking: a plain card with one real action. */
 @Composable
-private fun GlassStat(modifier: Modifier, label: String, value: String, alert: Boolean = false, onClick: (() -> Unit)? = null) {
-    val view = LocalView.current
-    val interaction = remember { MutableInteractionSource() }
+private fun NextCard(label: String, title: String, detail: String?, action: String?, onAction: () -> Unit) {
     Column(
-        modifier
-            .pressScale(interaction, pressedScale = 0.95f)
-            .clip(RoundedCornerShape(16.dp))
-            .background(if (alert) Color(0x33F87171) else Color(0x14FFFFFF))
-            .border(1.dp, if (alert) Color(0x55FCA5A5) else Color(0x1FFFFFFF), RoundedCornerShape(16.dp))
-            .pressShade(interaction, amount = 0.1f)
-            .then(
-                if (onClick != null) Modifier.clickable(interactionSource = interaction, indication = null) {
-                    Haptics.tick(view); onClick()
-                } else Modifier
-            )
-            .padding(horizontal = 12.dp, vertical = 11.dp),
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(18.dp))
+            .background(AuthPageBg)
+            .border(1.dp, Hairline, RoundedCornerShape(18.dp))
+            .padding(16.dp),
     ) {
-        Text(label, fontSize = 10.5.sp, fontWeight = FontWeight.Bold, color = if (alert) Color(0xFFFCA5A5) else Color(0x99E0E8FF), letterSpacing = 0.4.sp)
-        Spacer(Modifier.height(3.dp))
-        Text(
-            value, fontSize = 17.sp, fontWeight = FontWeight.ExtraBold,
-            color = if (alert) Color(0xFFFECACA) else Color.White,
-            maxLines = 1, style = TextStyle(fontFeatureSettings = "tnum"),
-        )
+        Text(label, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = AuthMuted)
+        Spacer(Modifier.height(2.dp))
+        Text(title, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+        detail?.let {
+            Spacer(Modifier.height(2.dp))
+            Text(it, fontSize = 13.sp, color = AuthMuted, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        if (action != null) {
+            Spacer(Modifier.height(12.dp))
+            val interaction = remember { MutableInteractionSource() }
+            Text(
+                action, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White,
+                modifier = Modifier
+                    .pressScale(interaction, pressedScale = 0.95f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(AuthAccent)
+                    .clickable(interactionSource = interaction, indication = null) { onAction() }
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+            )
+        }
     }
 }
 
@@ -2378,43 +2446,124 @@ private fun DeskActions(
     modifier: Modifier,
 ) {
     if (doors.isEmpty()) return
-    Row(
+    // What a locked door says when it's tapped; clears itself.
+    var notice by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(notice) { if (notice != null) { kotlinx.coroutines.delay(2600); notice = null } }
+    Column(
         modifier
             .fillMaxWidth()
-            .shadow(18.dp, RoundedCornerShape(24.dp), clip = false, spotColor = Color(0x330F172A))
+            .shadow(14.dp, RoundedCornerShape(24.dp), clip = false, spotColor = Color(0x262563EB))
             .clip(RoundedCornerShape(24.dp))
             .background(Color.White)
+            .border(1.dp, Color(0x0F0F172A), RoundedCornerShape(24.dp))
             .padding(horizontal = 8.dp, vertical = 16.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
     ) {
-        doors.forEach { door -> DoorTile(door, Modifier.weight(1f)) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            doors.forEach { door -> DoorTile(door, Modifier.weight(1f), onLocked = { notice = it }) }
+        }
+        androidx.compose.animation.AnimatedVisibility(
+            visible = notice != null,
+            enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.expandVertically(),
+            exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.shrinkVertically(),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 14.dp)
+                    .clip(RoundedCornerShape(12.dp)).background(Color(0xFFF1F5FB)).padding(horizontal = 12.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Lock, contentDescription = null, tint = AuthMuted, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(notice.orEmpty(), fontSize = 12.5.sp, color = AuthInk)
+            }
+        }
     }
 }
 
+/**
+ * One door: a lit tile that presses in under the thumb (it sinks, its shadow goes),
+ * the glyph, the word. A locked door looks reachable but asleep — greyed mark,
+ * padlock, a "Coming soon" tag — and answers a tap with a short shake and a line
+ * saying when, instead of opening.
+ */
 @Composable
-private fun DoorTile(door: DeskDoor, modifier: Modifier) {
+private fun DoorTile(door: DeskDoor, modifier: Modifier, onLocked: (String) -> Unit) {
     val view = LocalView.current
+    val scope = rememberCoroutineScope()
     val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    val sink by animateFloatAsState(if (pressed) 1f else 0f, spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium), label = "door-sink")
+    val shake = remember { Animatable(0f) }
     Column(
         modifier
-            .pressScale(interaction, pressedScale = 0.9f)
-            .clip(RoundedCornerShape(16.dp))
-            .clickable(interactionSource = interaction, indication = null) { Haptics.tick(view); door.onClick() }
+            .graphicsLayer { translationX = shake.value }
+            .clickable(interactionSource = interaction, indication = null) {
+                if (door.locked) {
+                    Haptics.warn(view)
+                    onLocked(door.lockedNote ?: "${door.label} is coming soon.")
+                    scope.launch {
+                        for (x in listOf(7f, -6f, 4f, -2f, 0f)) shake.animateTo(x, tween(55))
+                    }
+                } else {
+                    Haptics.tick(view); door.onClick()
+                }
+            }
             // The live fact ("₹15 ready", "2 chats waiting") is what a screen
             // reader says for the tile, so it isn't lost off the visible label.
-            .semantics(mergeDescendants = true) { contentDescription = "${door.label}. ${door.fact}" }
+            .semantics(mergeDescendants = true) {
+                contentDescription = if (door.locked) "${door.label}. Coming soon." else "${door.label}. ${door.fact}"
+            }
             .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         LayoutBox {
             LayoutBox(
-                Modifier.size(54.dp).clip(RoundedCornerShape(18.dp))
-                    .background(Brush.linearGradient(listOf(Color(0xFFEEF4FF), Color(0xFFDCE7FF))))
-                    .border(1.dp, Color(0x142F6BFF), RoundedCornerShape(18.dp))
-                    .pressShade(interaction, amount = 0.08f),
+                Modifier
+                    .graphicsLayer {
+                        val sc = 1f - 0.07f * sink
+                        scaleX = sc; scaleY = sc
+                        translationY = 1.5.dp.toPx() * sink
+                    }
+                    .shadow((5f * (1f - sink)).dp, RoundedCornerShape(18.dp), clip = false, spotColor = Color(0x402563EB))
+                    .size(56.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        if (door.locked) Brush.verticalGradient(listOf(Color(0xFFF8FAFC), Color(0xFFEFF2F6)))
+                        else Brush.verticalGradient(listOf(Color.White, Color(0xFFEAF1FF)))
+                    )
+                    // Lit top edge, darker foot: a key, not a sticker.
+                    .border(
+                        1.dp,
+                        Brush.verticalGradient(listOf(Color(0x332563EB), Color(0x142563EB))),
+                        RoundedCornerShape(18.dp),
+                    )
+                    .pressShade(interaction, amount = 0.05f),
                 contentAlignment = Alignment.Center,
-            ) { Icon(door.icon, contentDescription = null, tint = AuthAccentDeep, modifier = Modifier.size(24.dp)) }
-            if (door.badge > 0) {
+            ) {
+                when {
+                    door.whatsapp -> com.haraan.partner.ui.home.WhatsAppMark(locked = door.locked, modifier = Modifier.size(30.dp))
+                    else -> Icon(door.icon, contentDescription = null, tint = Color(0xFF1D4ED8), modifier = Modifier.size(26.dp))
+                }
+            }
+            if (door.locked) {
+                // Padlock, sitting on the tile's corner.
+                LayoutBox(
+                    Modifier.align(Alignment.BottomEnd).offset(x = 4.dp, y = 4.dp)
+                        .size(20.dp).clip(RoundedCornerShape(99.dp)).background(Color.White)
+                        .border(1.dp, Color(0x1F0F172A), RoundedCornerShape(99.dp)),
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Icons.Filled.Lock, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(11.dp)) }
+                // The tag rides the tile's top edge.
+                Text(
+                    "Coming soon",
+                    fontSize = 7.5.sp, lineHeight = 9.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, softWrap = false,
+                    letterSpacing = 0.2.sp,
+                    // Sits on the tile's top edge, half above it, clear of the mark.
+                    modifier = Modifier.align(Alignment.TopCenter).offset(y = (-7).dp)
+                        .clip(RoundedCornerShape(99.dp)).background(AuthInk)
+                        .border(1.5.dp, Color.White, RoundedCornerShape(99.dp))
+                        .padding(horizontal = 5.dp, vertical = 1.5.dp),
+                )
+            } else if (door.badge > 0) {
                 LayoutBox(
                     Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-5).dp)
                         .size(19.dp).clip(RoundedCornerShape(99.dp)).background(RED)
@@ -2423,10 +2572,19 @@ private fun DoorTile(door: DeskDoor, modifier: Modifier) {
                 ) { Text(if (door.badge > 9) "9+" else "${door.badge}", fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = Color.White) }
             }
         }
-        Spacer(Modifier.height(8.dp))
-        Text(door.label, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, color = AuthInk, maxLines = 1)
+        Spacer(Modifier.height(9.dp))
+        Text(
+            door.label, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
+            color = if (door.locked) AuthMuted else AuthInk,
+        )
     }
 }
+
+/**
+ * WhatsApp Desk is held back in this version: its door shows locked with a "Coming
+ * soon" tag and the drawer entry is hidden. Flip to false to open it again.
+ */
+private const val WHATSAPP_DESK_LOCKED = true
 
 /** One door: what it is, and one live fact about it. */
 private class DeskDoor(
@@ -2436,6 +2594,11 @@ private class DeskDoor(
     /** The fact is good news worth colour (money ready) or needs attention (chats waiting). */
     val factTone: DoorTone = DoorTone.Quiet,
     val badge: Int = 0,
+    /** Drawn with WhatsApp's own mark instead of a glyph. */
+    val whatsapp: Boolean = false,
+    /** Shown but not open in this version. */
+    val locked: Boolean = false,
+    val lockedNote: String? = null,
     val onClick: () -> Unit,
 )
 
@@ -2464,7 +2627,7 @@ private fun deskDoors(
         val now = java.util.Calendar.getInstance().let { it.get(java.util.Calendar.HOUR_OF_DAY) * 60 + it.get(java.util.Calendar.MINUTE) }
         val open = pips.count { (it.start == Int.MAX_VALUE || it.start + 60 > now) && it.booked < it.total }
         doors += DeskDoor(
-            Icons.Filled.PersonAdd, "Walk-in",
+            com.haraan.partner.ui.home.DoorGlyphs.WalkIn, "Walk-in",
             when {
                 pips.isEmpty() -> "Book a court at the desk"
                 open == 0 -> "No slots left today"
@@ -2476,7 +2639,7 @@ private fun deskDoors(
     }
     if (onReports != null) {
         doors += DeskDoor(
-            Icons.Filled.BarChart, "Reports",
+            com.haraan.partner.ui.home.DoorGlyphs.Reports, "Reports",
             when (bookingsTotal) {
                 0 -> "Export any date range"
                 1 -> "1 booking · CSV"
@@ -2484,25 +2647,19 @@ private fun deskDoors(
             },
         ) { onReports() }
     }
-    if (focus != null && courtsLane && onWhatsApp != null) {
-        // Chats waiting on a reply — not unread messages, which one chatty customer inflates.
-        val waiting = whatsapp?.needsActionCount ?: 0
+    if (focus != null && courtsLane) {
+        // Locked in this version: shown so partners know it's coming, never opened.
         doors += DeskDoor(
-            Icons.Filled.Forum, "WhatsApp",
-            when {
-                waiting == 1 -> "1 chat waiting"
-                waiting > 1 -> "$waiting chats waiting"
-                (whatsapp?.activeHoldsCount ?: 0) == 1 -> "1 slot on hold"
-                (whatsapp?.activeHoldsCount ?: 0) > 1 -> "${whatsapp!!.activeHoldsCount} slots on hold"
-                else -> "Chats & pay links"
-            },
-            factTone = if (waiting > 0) DoorTone.Attention else DoorTone.Quiet,
-            badge = waiting,
-        ) { onWhatsApp() }
+            Icons.Filled.Forum, "WhatsApp", "Coming soon",
+            whatsapp = true,
+            locked = WHATSAPP_DESK_LOCKED,
+            lockedNote = "WhatsApp bookings are coming in the next update.",
+            badge = if (WHATSAPP_DESK_LOCKED) 0 else (whatsapp?.needsActionCount ?: 0),
+        ) { onWhatsApp?.invoke() }
     }
     if (onSettlement != null) {
         doors += DeskDoor(
-            Icons.Filled.AccountBalance, "Settlement",
+            com.haraan.partner.ui.home.DoorGlyphs.Settlement, "Settlement",
             when {
                 payouts == null -> "Payouts to your bank"
                 payouts.available > 0 -> "₹" + formatInr(payouts.available) + " ready"
@@ -2523,6 +2680,53 @@ private fun deskDoors(
 /** One hour of the day at the venue, summed across its courts. */
 private data class SlotPip(val time: String, val start: Int, val booked: Int, val total: Int, val price: Double)
 
+/**
+ * (court-hours still ahead, court-hours already gone by) for today, off the device clock —
+ * the same rows and the same "past" test as the courts strip, so the two never disagree.
+ */
+private fun courtHoursByClock(grid: DayGrid): Pair<Int, Int> {
+    val hours = courtHours(grid)
+    val starts = hours.map { it.start }.filter { it != Int.MAX_VALUE }.distinct().sorted()
+    val length = starts.zipWithNext { a, b -> b - a }.filter { it > 0 }.minOrNull()?.coerceIn(30, 60) ?: 60
+    val now = java.util.Calendar.getInstance().let { it.get(java.util.Calendar.HOUR_OF_DAY) * 60 + it.get(java.util.Calendar.MINUTE) }
+    val past = hours.filter { it.start != Int.MAX_VALUE && now >= it.start + length }
+    val played = past.sumOf { it.total }
+    return (hours.sumOf { it.total } - played) to played
+}
+
+/** Today's hours court by court, for the drawn strip on Home. */
+private fun courtHours(grid: DayGrid): List<CourtHour> = grid.slots.map { s ->
+    val cells = s.courts.filter { it.allowed }
+    val states = if (cells.isNotEmpty()) {
+        cells.map { c -> when { c.isBooked -> CellState.Booked; c.isHeld -> CellState.Held; else -> CellState.Open } }
+    } else {
+        // A venue without courts still sells the slot [capacity] times.
+        val cap = s.capacity.coerceAtLeast(1)
+        List(cap) { i -> if (i < s.booked.coerceAtMost(cap)) CellState.Booked else CellState.Open }
+    }
+    val byId = grid.courts.associateBy { it.id }
+    CourtHour(
+        time = (s.time ?: s.label).trim(),
+        start = slotStartMinutes(s.time ?: s.label),
+        cells = states,
+        price = cells.minOfOrNull { it.price } ?: s.price,
+        // Each drawn court is that court: its name, and its own sport's markings.
+        courts = cells.map { c ->
+            val col = byId[c.courtId]
+            CourtTag(col?.name ?: "Court", courtKindFor(col?.sports.orEmpty()))
+        },
+        cellPrices = cells.map { it.price },
+        bookings = cells.map { c ->
+            c.bookings.firstOrNull()?.let { b ->
+                com.haraan.partner.ui.home.CellBooking(
+                    id = b.id, customer = b.customer, phone = b.phone, amount = b.amount, paid = b.amountPaid,
+                    paymentStatus = b.paymentStatus, walkIn = b.channel.equals("offline", true) || b.channel.equals("walk-in", true) || b.channel.equals("desk", true),
+                )
+            }
+        },
+    )
+}
+
 private fun slotPips(grid: DayGrid): List<SlotPip> = grid.slots.map { s ->
     val cells = s.courts.filter { it.allowed }
     val total = if (cells.isNotEmpty()) cells.size else s.capacity
@@ -2535,73 +2739,6 @@ private fun slotPips(grid: DayGrid): List<SlotPip> = grid.slots.map { s ->
         price = cells.minOfOrNull { it.price } ?: s.price,
     )
 }
-
-/**
- * Today's hours as a strip of chips: done, on now, full, part-booked or open.
- * It scrolls itself to the current hour, so the first thing in view is what
- * matters next. Any chip opens the desk.
- */
-@Composable
-private fun CourtsStrip(pips: List<SlotPip>, onOpen: () -> Unit) {
-    val now = java.util.Calendar.getInstance().let { it.get(java.util.Calendar.HOUR_OF_DAY) * 60 + it.get(java.util.Calendar.MINUTE) }
-    val rowState = rememberLazyListState()
-    val first = pips.indexOfFirst { it.start == Int.MAX_VALUE || it.start + 60 > now }.coerceAtLeast(0)
-    LaunchedEffect(first) { rowState.animateScrollToItem((first - 1).coerceAtLeast(0)) }
-    LazyRow(
-        state = rowState,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp),
-    ) {
-        itemsIndexed(pips) { _, p ->
-            val live = p.start != Int.MAX_VALUE && now >= p.start && now < p.start + 60
-            val past = p.start != Int.MAX_VALUE && now >= p.start + 60
-            SlotChip(p, live = live, past = past, onClick = onOpen)
-        }
-    }
-}
-
-@Composable
-private fun SlotChip(p: SlotPip, live: Boolean, past: Boolean, onClick: () -> Unit) {
-    val full = p.total > 0 && p.booked >= p.total
-    val bg: Brush
-    val fg: Color
-    val sub: String
-    val subColor: Color
-    when {
-        live -> { bg = Brush.linearGradient(listOf(AuthInkTop, AuthInkMid)); fg = Color.White; sub = "Now"; subColor = Color(0xFF7DA9FF) }
-        past -> { bg = SolidColor(Color(0xFFF1F4F8)); fg = AuthMuted; sub = "Done"; subColor = AuthMuted }
-        full -> { bg = SolidColor(Color(0xFFEAF1FF)); fg = AuthAccentDeep; sub = "Full"; subColor = AuthAccentDeep }
-        p.booked > 0 -> { bg = SolidColor(Color.White); fg = AuthInk; sub = "${p.booked}/${p.total} booked"; subColor = AuthAccentDeep }
-        else -> { bg = SolidColor(Color(0xFFF2FBF5)); fg = AuthInk; sub = "Open"; subColor = Color(0xFF15803D) }
-    }
-    LayoutBox(
-        Modifier
-            .pressableTile(cornerRadius = 18.dp, pressedScale = 0.93f, onClick = onClick)
-            .width(92.dp)
-            .shadow(if (past) 0.dp else 6.dp, RoundedCornerShape(18.dp), clip = false, spotColor = Color(0x1A0F172A))
-            .clip(RoundedCornerShape(18.dp))
-            .background(bg)
-            .border(1.dp, if (live) Color(0x337DA9FF) else CardBorder, RoundedCornerShape(18.dp))
-            .padding(12.dp),
-    ) {
-        Column {
-            Text(compactTime(p.time), fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = fg, maxLines = 1, letterSpacing = (-0.2).sp)
-            Spacer(Modifier.height(8.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (live) RailDot(live = true) else LayoutBox(Modifier.size(6.dp).clip(RoundedCornerShape(99.dp)).background(subColor))
-                Spacer(Modifier.width(6.dp))
-                Text(sub, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = subColor, maxLines = 1)
-            }
-            if (!past && !full && p.price > 0) {
-                Spacer(Modifier.height(4.dp))
-                Text("₹" + formatInr(p.price), fontSize = 11.5.sp, color = if (live) Color(0xCCE0E8FF) else AuthMuted, maxLines = 1)
-            }
-        }
-    }
-}
-
-/** "6:00 AM" → "6 AM"; anything else passes through. */
-private fun compactTime(raw: String): String = raw.replace(":00", "").trim()
 
 /** One quiet line where an empty card used to stand. */
 @Composable
@@ -4227,123 +4364,238 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
     // The sports a slot may be narrowed to are whatever this venue's courts host —
     // asking the courts keeps the picker honest instead of offering a sport nothing
     // can be booked for. A failure here just means no picker, never a broken screen.
-    val venueSports by produceState(emptyList<String>(), venueId) {
-        value = runCatching { api.venueCourts(token, venueId).flatMap { it.sports }.distinct() }
-            .getOrDefault(emptyList())
+    val courts by produceState<List<CourtPricing>?>(null, venueId) {
+        value = runCatching { api.venueCourts(token, venueId) }.getOrDefault(emptyList())
     }
+    val venueSports = courts.orEmpty().flatMap { it.sports }.distinct()
+    // With courts, each court is sold once per slot — a slot "capacity" means nothing there.
+    val hasCourts = courts.orEmpty().isNotEmpty()
+    val courtRate = courts.orEmpty().minOfOrNull { it.price }?.takeIf { it > 0 }
+    val todayName = remember { java.text.SimpleDateFormat("EEEE", java.util.Locale.ENGLISH).format(java.util.Date()) }
+    // Courts cost different amounts, so the list shows one court's real prices at a time.
+    var courtTab by remember { mutableStateOf<Long?>(null) }
+    val activeCourts = courts.orEmpty()
 
     if (showCourts) {
         CourtPricingScreen(api, token, venueId, venueName, onBack = { showCourts = false })
         return
     }
 
+    // The dialog stays open until the server says yes, and says why when it says no —
+    // a refused save used to close the dialog and show nothing, as if it had worked.
+    suspend fun trySave(id: Long?, day: String, time: String, price: Double, capacity: Int, isOpen: Boolean, sports: List<String>, courtPrices: Map<Long, Double>?): String? =
+        runCatching { api.saveSlot(token, venueId, id, day, time, price, capacity, isOpen, sports, courtPrices) }
+            .fold(
+                onSuccess = { Haptics.confirm(view); reload++; null },
+                onFailure = { e -> Haptics.reject(view); (e as? ApiException)?.message ?: "Couldn't save. Check your connection and try again." },
+            )
+    val weekdays = remember { listOf("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday") }
+    var day by remember { mutableStateOf(if (todayName in weekdays) todayName else "Monday") }
+    // Switched on/off in the list before the server answers, so the switch never lags the thumb.
+    val openOverride = remember { mutableStateMapOf<Long, Boolean>() }
+    var noteIsError by remember { mutableStateOf(false) }
+
+    /** The rows the desk sells on [d]: that day's own slots, plus every-day slots at other times. */
+    fun rowsFor(d: String, all: List<SlotEdit>): List<Pair<SlotEdit, Boolean>> {
+        val own = all.filter { it.day == d }
+        val taken = own.mapNotNull { com.haraan.partner.ui.pricing.startMinutes(it.time) }.toSet()
+        val every = all.filter { (it.day ?: "Every day") !in weekdays && com.haraan.partner.ui.pricing.startMinutes(it.time) !in taken }
+        return (own.map { it to true } + every.map { it to false })
+            .sortedBy { com.haraan.partner.ui.pricing.startMinutes(it.first.time) ?: Int.MAX_VALUE }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White, scrolledContainerColor = Color.White),
-                title = { Text("Pricing & slots", maxLines = 1, fontWeight = FontWeight.Bold, color = AuthInk, fontSize = 18.sp) },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = AuthPageBg, scrolledContainerColor = Color.White),
+                title = {
+                    Column {
+                        Text("Pricing & slots", maxLines = 1, fontWeight = FontWeight.ExtraBold, color = AuthInk, fontSize = 18.sp)
+                        Text(venueName, maxLines = 1, fontSize = 12.sp, color = AuthMuted)
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = AuthInk) }
                 },
                 actions = {
-                    HeaderIcon(Icons.Filled.Add, "Add slot") { adding = true }
+                    HeaderIcon(Icons.Filled.Add, "Add slot") { Haptics.tick(view); adding = true }
                     Spacer(Modifier.width(4.dp))
                 },
             )
         },
     ) { padding ->
-        Column(Modifier.fillMaxSize().background(AuthPageBg).padding(padding)) {
-            Text(
-                venueName,
-                Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                fontSize = 13.sp,
-                color = AuthMuted,
-            )
-            // Peak pricing lives on the court, not the slot — its own screen.
-            LayoutBox(Modifier.padding(horizontal = 16.dp)) {
-                PressableSurface(onClick = { showCourts = true }) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        LayoutBox(
-                            Modifier.size(42.dp).clip(RoundedCornerShape(13.dp))
-                                .background(Brush.linearGradient(listOf(Color(0xFFFFF1DC), Color(0xFFFFE3BC)))),
-                            contentAlignment = Alignment.Center,
-                        ) { Icon(Icons.AutoMirrored.Filled.TrendingUp, contentDescription = null, tint = Color(0xFFB45309), modifier = Modifier.size(21.dp)) }
-                        Spacer(Modifier.width(13.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Courts & peak pricing", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk)
-                            Spacer(Modifier.height(1.dp))
-                            Text("Charge more at busy hours", fontSize = 12.sp, color = AuthMuted)
-                        }
-                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFB6C0D0), modifier = Modifier.size(20.dp))
+        LayoutBox(Modifier.fillMaxSize().background(AuthPageBg).padding(padding)) {
+            val s = state
+            if (s is UiState.Loading) {
+                com.haraan.partner.ui.pricing.StudioSkeleton()
+            } else Loaded(state) { slots ->
+                val slotMinutes = remember(slots) {
+                    slots.mapNotNull { com.haraan.partner.ui.pricing.startMinutes(it.time) }.distinct().sorted()
+                        .zipWithNext { a, b -> b - a }.filter { it > 0 }.minOrNull()?.coerceIn(30, 60) ?: 60
+                }
+                val columns = weekdays.map { d ->
+                    com.haraan.partner.ui.pricing.DayColumn(
+                        d,
+                        rowsFor(d, slots).mapNotNull { (slot, own) ->
+                            com.haraan.partner.ui.pricing.startMinutes(slot.time)?.let {
+                                com.haraan.partner.ui.pricing.DayMark(it, own, openOverride[slot.id] ?: slot.isOpen)
+                            }
+                        },
+                    )
+                }
+                val rows = rowsFor(day, slots)
+                val court = activeCourts.firstOrNull { it.id == courtTab } ?: activeCourts.singleOrNull()
+
+                /** What a slot charges, as the list shows it for the chosen court (or all of them). */
+                fun priceOf(slot: SlotEdit): Triple<String, String?, Boolean> {
+                    if (court != null) {
+                        val own = slot.priceFor(court.id)
+                        return if (own != null) Triple("₹" + formatInr(own), if (slot.courtPrices[court.id] != null) "this court" else "all courts", true)
+                        else Triple(if (court.price > 0) "₹" + court.price else "—", "court rate", false)
+                    }
+                    val each = activeCourts.map { c -> slot.priceFor(c.id) ?: c.price.toDouble() }.filter { it > 0 }
+                    val lo = each.minOrNull()
+                    val hi = each.maxOrNull()
+                    val set = slot.price > 0 || slot.courtPrices.isNotEmpty()
+                    return when {
+                        lo == null -> Triple(if (slot.price > 0) "₹" + formatInr(slot.price) else "Court rate", null, slot.price > 0)
+                        lo == hi -> Triple("₹" + formatInr(lo), if (set) "all courts" else "court rate", set)
+                        else -> Triple("₹" + formatInr(lo) + "–" + formatInr(hi!!), "by court", set)
                     }
                 }
-            }
-            Spacer(Modifier.height(10.dp))
-            // One tap for a whole day of slots, instead of "+" forty times.
-            LayoutBox(Modifier.padding(horizontal = 16.dp)) {
-                PressableSurface(onClick = { Haptics.tick(view); generating = true }) {
-                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                        LayoutBox(
-                            Modifier.size(42.dp).clip(RoundedCornerShape(13.dp))
-                                .background(Brush.linearGradient(listOf(Color(0xFFE0E9FF), Color(0xFFC9D8FF)))),
-                            contentAlignment = Alignment.Center,
-                        ) { Icon(Icons.Filled.AutoAwesome, contentDescription = null, tint = Color(0xFF1D4ED8), modifier = Modifier.size(21.dp)) }
-                        Spacer(Modifier.width(13.dp))
-                        Column(Modifier.weight(1f)) {
-                            Text("Generate slots", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = AuthInk)
-                            Spacer(Modifier.height(1.dp))
-                            Text("30-min or 1-hour slots, open to close, in one tap", fontSize = 12.sp, color = AuthMuted)
-                        }
-                        Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFB6C0D0), modifier = Modifier.size(20.dp))
+
+                LazyColumn(
+                    Modifier.fillMaxSize(),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 32.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    item(key = "week") {
+                        com.haraan.partner.ui.pricing.WeekRibbon(
+                            days = columns, selected = day, today = todayName, slotMinutes = slotMinutes,
+                            onPick = { day = it },
+                        )
                     }
-                }
-            }
-            note?.let {
-                Text(it, Modifier.padding(horizontal = 20.dp, vertical = 8.dp), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF16A34A))
-            }
-            Spacer(Modifier.height(14.dp))
-            Loaded(state) { slots ->
-                if (slots.isEmpty()) {
-                    EmptyState("No slots yet. Tap Generate slots to build your day, or + to add one.")
-                } else {
-                    LazyColumn(
-                        Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                        contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp),
-                    ) {
-                        items(slots) { slot ->
-                            Card(
-                                Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(16.dp),
-                                colors = CardDefaults.cardColors(containerColor = Color.White),
-                                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    item(key = "tools") {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            com.haraan.partner.ui.pricing.ToolTile(
+                                "Peak pricing", "Charge more at busy hours, per court",
+                                art = { peakArt() },
+                                onClick = { showCourts = true }, modifier = Modifier.weight(1f),
+                            )
+                            com.haraan.partner.ui.pricing.ToolTile(
+                                "Generate slots", "Open to close in one tap, 30 or 60 min",
+                                art = { generateArt() },
+                                onClick = { generating = true }, modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                    if (activeCourts.size > 1) {
+                        item(key = "courts") {
+                            Row(
+                                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                Row(Modifier.padding(16.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    Column(Modifier.weight(1f)) {
-                                        Text(slot.time, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                                        Text(
-                                            listOfNotNull(
-                                                slot.day,
-                                                "cap ${slot.capacity}",
-                                                if (slot.isOpen) "open" else "closed",
-                                            ).joinToString(" · "),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    // No price of its own = the court's rate is charged, not ₹0.
-                                    Text(
-                                        if (slot.price > 0) "₹" + formatInr(slot.price) else "Court rate",
-                                        style = if (slot.price > 0) MaterialTheme.typography.titleMedium else MaterialTheme.typography.bodySmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (slot.price > 0) MaterialTheme.colorScheme.primary else AuthMuted,
+                                com.haraan.partner.ui.pricing.CourtPill("All courts", null, courtTab == null) { courtTab = null }
+                                activeCourts.forEach { c ->
+                                    Spacer(Modifier.width(8.dp))
+                                    com.haraan.partner.ui.pricing.CourtPill(c.name, if (c.price > 0) "₹${c.price}" else null, courtTab == c.id) { courtTab = c.id }
+                                }
+                            }
+                        }
+                    }
+                    item(key = "summary-$day") {
+                        val starts = rows.mapNotNull { com.haraan.partner.ui.pricing.startMinutes(it.first.time) }
+                        val openCount = rows.count { openOverride[it.first.id] ?: it.first.isOpen }
+                        val cheapest = rows.filter { openOverride[it.first.id] ?: it.first.isOpen }.mapNotNull { (slot, _) ->
+                            if (court != null) slot.priceFor(court.id) ?: court.price.toDouble()
+                            else activeCourts.map { c -> slot.priceFor(c.id) ?: c.price.toDouble() }.minOrNull() ?: slot.price
+                        }.filter { it > 0 }.minOrNull()
+                        com.haraan.partner.ui.pricing.DaySummary(
+                            day = day, isToday = day == todayName, slots = rows.size, open = openCount,
+                            span = if (starts.isEmpty()) null else com.haraan.partner.ui.pricing.clock(starts.min()) + " – " + com.haraan.partner.ui.pricing.clock(starts.max() + slotMinutes),
+                            from = cheapest?.let { "₹" + formatInr(it) },
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                    note?.let { n ->
+                        item(key = "note") {
+                            Text(
+                                n, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                                color = if (noteIsError) RED else Color(0xFF15803D),
+                                modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                                    .background(if (noteIsError) Color(0xFFFEF2F2) else Color(0xFFF0FDF4))
+                                    .padding(horizontal = 12.dp, vertical = 9.dp),
+                            )
+                        }
+                    }
+                    if (rows.isEmpty()) {
+                        item(key = "empty-$day") {
+                            Column(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                com.haraan.partner.ui.pricing.EmptyDayArt(Modifier.size(width = 180.dp, height = 130.dp))
+                                Spacer(Modifier.height(10.dp))
+                                Text("No slots on ${day}s", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+                                Text("Nothing can be booked this day until you add times.", fontSize = 12.5.sp, color = AuthMuted)
+                                Spacer(Modifier.height(12.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    OutlinedButton(onClick = { Haptics.tick(view); adding = true }, shape = RoundedCornerShape(14.dp)) { Text("Add one") }
+                                    Button(
+                                        onClick = { Haptics.tick(view); generating = true }, shape = RoundedCornerShape(14.dp),
+                                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = AuthAccent),
+                                    ) { Text("Generate slots", fontWeight = FontWeight.Bold) }
+                                }
+                            }
+                        }
+                    } else {
+                        var index = 0
+                        rows.groupBy { com.haraan.partner.ui.pricing.dayPartOf(com.haraan.partner.ui.pricing.startMinutes(it.first.time) ?: 0) }
+                            .forEach { (part, partRows) ->
+                                item(key = "part-$day-${part.name}") {
+                                    com.haraan.partner.ui.pricing.DayPartHeader(
+                                        part, partRows.size, partRows.count { openOverride[it.first.id] ?: it.first.isOpen },
                                     )
-                                    IconButton(onClick = { editing = slot }) { Icon(Icons.Filled.Edit, contentDescription = "Edit") }
-                                    IconButton(onClick = { Haptics.tick(view); confirmDelete = slot }) {
-                                        Icon(Icons.Filled.Delete, contentDescription = "Delete", tint = RED)
+                                }
+                                partRows.forEach { (slot, own) ->
+                                    val i = index++
+                                    // Keyed by day, so switching day plays the entrance again.
+                                    item(key = "slot-$day-${slot.id}") {
+                                        val isOpen = openOverride[slot.id] ?: slot.isOpen
+                                        val (price, pnote, priceIsOwn) = priceOf(slot)
+                                        com.haraan.partner.ui.pricing.SlotLine(
+                                            time = slot.time,
+                                            source = if (own) null else "Every day",
+                                            detail = listOfNotNull(
+                                                slot.sports.takeIf { it.isNotEmpty() }?.joinToString(", ")?.let { "$it only" },
+                                                if (!hasCourts) "${slot.capacity} at a time" else null,
+                                                if (isOpen) null else "Off sale",
+                                            ).joinToString(" · ").ifBlank { null },
+                                            price = price, priceNote = pnote, priceIsOwn = priceIsOwn,
+                                            open = isOpen, index = i,
+                                            onToggle = { on ->
+                                                openOverride[slot.id] = on
+                                                if (on) Haptics.confirm(view) else Haptics.tick(view)
+                                                scope.launch {
+                                                    val err = trySave(slot.id, slot.day ?: "Every day", slot.time, slot.price, slot.capacity, on, slot.sports, null)
+                                                    if (err != null) {
+                                                        openOverride.remove(slot.id)
+                                                        noteIsError = true; note = err
+                                                    } else {
+                                                        noteIsError = false
+                                                        note = if (own) "${slot.time} ${if (on) "back on sale" else "off sale"} on ${day}s"
+                                                        else "${slot.time} ${if (on) "back on sale" else "off sale"} on every day"
+                                                    }
+                                                }
+                                            },
+                                            onEdit = { editing = slot },
+                                        )
                                     }
                                 }
                             }
+                        item(key = "rule") {
+                            Text(
+                                "Every-day slots run on all days. A day's own slot at the same time replaces it — that's what the desk sells.",
+                                fontSize = 11.5.sp, color = AuthMuted, lineHeight = 16.sp,
+                                modifier = Modifier.padding(top = 6.dp, start = 4.dp, end = 4.dp),
+                            )
                         }
                     }
                 }
@@ -4360,6 +4612,7 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
             onDismiss = { generating = false },
             onGenerated = { r ->
                 generating = false
+                noteIsError = false
                 note = buildString {
                     append("${r.created} slot${if (r.created == 1) "" else "s"} created")
                     if (r.removed > 0) append(" · ${r.removed} replaced")
@@ -4394,11 +4647,13 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
     if (adding) {
         SlotEditDialog(
             existing = null,
+            initialDay = day,
             venueSports = venueSports,
+            courts = activeCourts,
+            courtRate = courtRate,
             onDismiss = { adding = false },
-            onSave = { day, time, price, capacity, isOpen, sports ->
-                adding = false
-                scope.launch { runCatching { api.saveSlot(token, venueId, null, day, time, price, capacity, isOpen, sports) }; reload++ }
+            onSave = { day, time, price, capacity, isOpen, sports, courtPrices ->
+                trySave(null, day, time, price, capacity, isOpen, sports, courtPrices).also { if (it == null) { adding = false; noteIsError = false; note = "$time added to $day" } }
             },
         )
     }
@@ -4406,10 +4661,12 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
         SlotEditDialog(
             existing = slot,
             venueSports = venueSports,
+            courts = activeCourts,
+            courtRate = courtRate,
             onDismiss = { editing = null },
-            onSave = { day, time, price, capacity, isOpen, sports ->
-                editing = null
-                scope.launch { runCatching { api.saveSlot(token, venueId, slot.id, day, time, price, capacity, isOpen, sports) }; reload++ }
+            onDelete = { editing = null; confirmDelete = slot },
+            onSave = { day, time, price, capacity, isOpen, sports, courtPrices ->
+                trySave(slot.id, day, time, price, capacity, isOpen, sports, courtPrices).also { if (it == null) { editing = null; noteIsError = false; note = "$day $time saved" } }
             },
         )
     }
@@ -4418,31 +4675,111 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
 @Composable
 private fun SlotEditDialog(
     existing: SlotEdit?,
+    /** The day a new slot starts on — the one the partner is looking at. */
+    initialDay: String? = null,
     /** Every sport this venue's courts host — the only sensible options to offer. */
     venueSports: List<String>,
+    /** The venue's courts — each can carry its own price at this time. */
+    courts: List<CourtPricing>,
+    /** The lowest court rate, to say what "no price" will charge. */
+    courtRate: Int?,
     onDismiss: () -> Unit,
-    onSave: (day: String?, time: String, price: Double, capacity: Int, isOpen: Boolean, sports: List<String>) -> Unit,
+    /** Shown only when editing: deleting lives here, not as a red bin on every row. */
+    onDelete: (() -> Unit)? = null,
+    /** Returns null when saved, else the reason it wasn't. */
+    onSave: suspend (day: String, time: String, price: Double, capacity: Int, isOpen: Boolean, sports: List<String>, courtPrices: Map<Long, Double>?) -> String?,
 ) {
-    var day by remember { mutableStateOf(existing?.day ?: "") }
-    var time by remember { mutableStateOf(existing?.time ?: "") }
-    var price by remember { mutableStateOf(existing?.price?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() } ?: "") }
+    val hasCourts = courts.isNotEmpty()
+    // One box per court; empty = that court's own rate (or the all-courts price).
+    val courtPriceText = remember {
+        mutableStateMapOf<Long, String>().apply {
+            courts.forEach { c -> put(c.id, existing?.courtPrices?.get(c.id)?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() } ?: "") }
+        }
+    }
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val days = listOf("Every day", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
+    // Picked, never typed: "Mon-Fri" used to be saved as every day, weekends included.
+    var day by remember { mutableStateOf(existing?.day?.takeIf { it in days } ?: initialDay?.takeIf { it in days } ?: "Every day") }
+    // A start time off a clock, never free text: "06:00 AM - 07:00 AM" couldn't be sold online.
+    var minutes by remember { mutableStateOf(existing?.time?.let { slotStartMinutes(it) }?.takeIf { it != Int.MAX_VALUE }) }
+    var price by remember { mutableStateOf(existing?.price?.takeIf { it > 0 }?.let { if (it == it.toLong().toDouble()) it.toLong().toString() else it.toString() } ?: "") }
     var capacity by remember { mutableStateOf((existing?.capacity ?: 1).toString()) }
     var isOpen by remember { mutableStateOf(existing?.isOpen ?: true) }
     // Nothing selected means "every sport", which is what a slot has always meant.
     val picked = remember { mutableStateListOf<String>().apply { addAll(existing?.sports.orEmpty()) } }
+    var saving by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    fun label(m: Int) = "%d:%02d %s".format(if (m / 60 % 12 == 0) 12 else m / 60 % 12, m % 60, if (m < 720) "AM" else "PM")
 
     AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (existing == null) "Add slot" else "Edit slot") },
+        onDismissRequest = { if (!saving) onDismiss() },
+        title = { Text(if (existing == null) "Add slot" else "Edit slot", fontWeight = FontWeight.Bold) },
         text = {
-            Column {
-                OutlinedTextField(day, { day = it }, label = { Text("Day (e.g. Mon-Fri, Sat-Sun)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(time, { time = it }, label = { Text("Time (e.g. 06:00 AM - 07:00 AM)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(price, { price = it.filter { c -> c.isDigit() } }, label = { Text("Price (₹)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(capacity, { capacity = it.filter { c -> c.isDigit() } }, label = { Text("Capacity (courts)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("Day", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AuthMuted)
+                Spacer(Modifier.height(6.dp))
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+                    days.forEachIndexed { i, d ->
+                        if (i > 0) Spacer(Modifier.width(6.dp))
+                        SportChip(if (d == "Every day") d else d.take(3), day == d) { day = d; error = null }
+                    }
+                }
+                Text(
+                    if (day == "Every day") "Runs on every date. A weekday slot at the same time replaces it on that day."
+                    else "Only on ${day}s.",
+                    fontSize = 11.5.sp, color = AuthMuted, modifier = Modifier.padding(top = 6.dp),
+                )
+                Spacer(Modifier.height(14.dp))
+                Text("Starts at", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AuthMuted)
+                Spacer(Modifier.height(6.dp))
+                OutlinedButton(
+                    onClick = {
+                        val m = minutes ?: (6 * 60)
+                        android.app.TimePickerDialog(context, { _, h, min -> minutes = h * 60 + min; error = null }, m / 60, m % 60, false).show()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                ) {
+                    Icon(Icons.Filled.Schedule, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text(minutes?.let { label(it) } ?: "Pick a time", fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    price, { price = it.filter { c -> c.isDigit() }; error = null },
+                    label = { Text(if (courts.size > 1) "Price for all courts (₹)" else "Price (₹)") },
+                    placeholder = { Text("Court rate") },
+                    supportingText = {
+                        Text(
+                            if (hasCourts) "Empty = each court's own rate" + (courtRate?.let { " (from ₹$it)" } ?: "") + ". A price here is charged on every court at this time."
+                            else "Empty = the venue's rate.",
+                        )
+                    },
+                    singleLine = true, modifier = Modifier.fillMaxWidth(),
+                )
+                if (courts.size > 1) {
+                    Spacer(Modifier.height(4.dp))
+                    Text("Price per court", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AuthMuted)
+                    Text("A court's own price here beats the all-courts price.", fontSize = 11.5.sp, color = AuthMuted)
+                    courts.forEach { c ->
+                        Spacer(Modifier.height(6.dp))
+                        OutlinedTextField(
+                            courtPriceText[c.id].orEmpty(), { v -> courtPriceText[c.id] = v.filter { ch -> ch.isDigit() }; error = null },
+                            label = { Text(c.name + " (₹)") },
+                            placeholder = { Text(if (c.price > 0) "₹${c.price} court rate" else "Court rate") },
+                            singleLine = true, modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+                }
+                if (!hasCourts) {
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedTextField(
+                        capacity, { capacity = it.filter { c -> c.isDigit() } },
+                        label = { Text("Bookings at a time") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 // Only worth asking on a venue that actually mixes sports.
                 if (venueSports.size > 1) {
                     Spacer(Modifier.height(12.dp))
@@ -4461,21 +4798,36 @@ private fun SlotEditDialog(
                     Text("Open for booking", Modifier.weight(1f))
                     Switch(checked = isOpen, onCheckedChange = { isOpen = it })
                 }
+                error?.let {
+                    Spacer(Modifier.height(6.dp))
+                    Text(it, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = RED)
+                }
             }
         },
         confirmButton = {
             TextButton(
                 onClick = {
-                    onSave(
-                        day.trim().ifBlank { null }, time.trim(),
-                        price.toDoubleOrNull() ?: 0.0, capacity.toIntOrNull() ?: 1, isOpen,
-                        picked.toList(),
-                    )
+                    val m = minutes ?: return@TextButton
+                    saving = true
+                    scope.launch {
+                        error = onSave(
+                            day, label(m), price.toDoubleOrNull() ?: 0.0, capacity.toIntOrNull()?.coerceAtLeast(1) ?: 1, isOpen, picked.toList(),
+                            if (courts.size > 1) courts.associate { c -> c.id to (courtPriceText[c.id]?.toDoubleOrNull() ?: 0.0) } else null,
+                        )
+                        saving = false
+                    }
                 },
-                enabled = time.isNotBlank(),
-            ) { Text("Save") }
+                enabled = minutes != null && !saving,
+            ) { Text(if (saving) "Saving…" else "Save") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = {
+            Row {
+                if (onDelete != null) {
+                    TextButton(onClick = onDelete, enabled = !saving) { Text("Delete", color = RED, fontWeight = FontWeight.Bold) }
+                }
+                TextButton(onClick = onDismiss, enabled = !saving) { Text("Cancel") }
+            }
+        },
     )
 }
 

@@ -6,6 +6,12 @@
     <!-- Outcome haptics (ui/Haptics.kt). A normal permission, granted at install;
          without it Vibrator.vibrate() silently does nothing. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- On duty (alerts/BookingWatchService): new bookings reach the partner with the
+         app closed — a card over other apps, or a high-priority notification. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
@@ -27,8 +33,18 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
+        <service
+            android:name=".alerts.BookingWatchService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Live booking alerts for a venue's front desk while the owner is on duty" />
+        </service>
+
         <activity
             android:name=".MainActivity"
+            android:launchMode="singleTop"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
