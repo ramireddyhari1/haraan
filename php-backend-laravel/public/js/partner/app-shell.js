@@ -1552,12 +1552,27 @@
         });
     }
 
+    /** The white header a drawer tool carries in the app: back, title, optional actions. */
+    function toolHeader(title, actions) {
+        return '<header class="ha-toolbar"><button type="button" class="ha-ibtn" data-back aria-label="Back"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg></button>'
+            + '<b>' + esc(title) + '</b><span class="ha-grow"></span>' + (actions || '') + '</header>';
+    }
+
+    document.addEventListener('click', function (e) {
+        if (!e.target.closest('.ha-toolbar [data-back]')) return;
+        e.preventDefault();
+        var ref = document.referrer;
+        if (ref && ref.indexOf(location.origin + '/partner') === 0 && history.length > 1) history.back();
+        else go(u.home);
+    });
+
     window.HaApp = {
         cfg: cfg, u: u, api: api, apiSend: apiSend, soft: soft, esc: esc, inr: inr, rupees: rupees, hrs: hrs,
         plural: plural, initials: initials, slotStart: slotStart, clock: clock, shortTime: shortTime,
         minutesNow: minutesNow, ymd: ymd, store: store, h: h, glyph: glyph, mat: mat, MAT: MAT, DRAWER: DRAWER,
         can: can, isDesk: isDesk, lane: lane, courtsLane: courtsLane, urlOf: urlOf, go: go, share: share,
-        sheet: sheet, toast: toast, loadScript: loadScript, months: MONTHS,
+        sheet: sheet, toast: toast, loadScript: loadScript, months: MONTHS, toolHeader: toolHeader,
+        token: function () { return token; }, refresh: refreshToken,
         register: function (key, screen) { screens[key] = screen; },
     };
 
@@ -1565,7 +1580,7 @@
         if (!active) return;
         try { if (active.screen.leave) active.screen.leave(); } catch (e) { /* screen gone */ }
         active = null;
-        root.classList.remove('ha-screen-on', 'ha-full');
+        root.classList.remove('ha-screen-on', 'ha-full', 'ha-tool');
     }
 
     function screenHost() {
@@ -1598,6 +1613,7 @@
         var screen = screens[key];
         root.classList.add('ha-screen-on');
         root.classList.toggle('ha-full', !!screen.full);
+        root.classList.toggle('ha-tool', !!screen.tool);
         var host = screenHost();
         if (!host) return false;
         if (!active) {

@@ -159,7 +159,9 @@ class PartnerPanelProvider extends PanelProvider
                     . '<script>window.HaraanPartnerApp=' . json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES) . ';</script>'
                     . '<link rel="stylesheet" href="' . e(asset('css/partner/app-screens.css')) . '?v=' . $v('css/partner/app-screens.css') . '">'
                     . '<script src="' . e(asset('js/partner/app-shell.js')) . '?v=' . $v('js/partner/app-shell.js') . '" defer></script>'
-                    . '<script src="' . e(asset('js/partner/app-screens.js')) . '?v=' . $v('js/partner/app-screens.js') . '" defer></script>';
+                    . '<link rel="stylesheet" href="' . e(asset('css/partner/app-tools.css')) . '?v=' . $v('css/partner/app-tools.css') . '">'
+                    . '<script src="' . e(asset('js/partner/app-screens.js')) . '?v=' . $v('js/partner/app-screens.js') . '" defer></script>'
+                    . '<script src="' . e(asset('js/partner/app-tools.js')) . '?v=' . $v('js/partner/app-tools.js') . '" defer></script>';
             },
         );
 
