@@ -486,31 +486,41 @@
     /* =============================================================== header === */
 
     function bellHtml() {
-        return '<a class="ha-ibtn ha-bell" href="' + esc(urlOf('sales') || u.notifications || '#') + '" aria-label="New bookings">' + mat('bell') + '</a>';
-    }
-
-    function avatarHtml(initial) {
-        return '<button type="button" class="ha-avatar" data-drawer aria-label="Menu">' + esc(initial) + '</button>';
+        return '<a class="ha-hbtn ha-bell" href="' + esc(urlOf('sales') || u.notifications || '#') + '" aria-label="New bookings">' + mat('bell') + '</a>';
     }
 
     /** The white bar on every tab but Home (Home carries its own top, like the app). */
+    /**
+     * The header every tab carries: the desktop console's floating glass bar, sized for a
+     * thumb. Menu, then who is signed in (the desktop's account chip: initials with a
+     * live dot, the venue, the role and branch), then the bell.
+     */
+    function headerHtml() {
+        var v = focusVenue();
+        var name = (v && v.name) || cfg.name || 'Haraan Partner';
+        var where = v && (v.branch || v.location);
+        var role = altitudeLabel() === 'Owner' ? (courtsLane() ? 'Venue owner' : 'Owner') : altitudeLabel();
+        return '<button type="button" class="ha-hbtn" data-drawer aria-label="Menu">' + mat('menu') + '</button>'
+            + '<button type="button" class="ha-acct" data-drawer aria-label="Menu">'
+            + '<span class="ha-acct-av">' + esc(initials(name)) + '<i></i></span>'
+            + '<span class="ha-acct-tx"><b>' + esc(name) + '</b><small>' + esc(role + (where ? ' · ' + where : '')) + '</small></span></button>'
+            + bellHtml();
+    }
+
+    /** The white bar on every tab but Home (Home carries its own, like the app). */
     function renderAppBar() {
         var bar = document.getElementById('ha-appbar');
         if (!bar) {
-            bar = h('<header id="ha-appbar" class="ha-appbar"></header>');
+            bar = h('<header id="ha-appbar" class="ha-appbar ha-glassbar"></header>');
             document.body.insertBefore(bar, document.body.firstChild);
         }
-        var initial = (focusVenueName() || cfg.name || 'H').trim().charAt(0).toUpperCase();
-        bar.innerHTML = '<button type="button" class="ha-ibtn" data-drawer aria-label="Menu">' + mat('menu') + '</button>'
-            + '<button type="button" class="ha-wordmark" data-drawer aria-label="Menu"><img src="' + esc(cfg.logo) + '" alt="Haraan"></button>'
-            + '<span class="ha-grow"></span>' + bellHtml() + avatarHtml(initial);
+        bar.innerHTML = headerHtml();
     }
 
     var venuesCache = null;
-    function focusVenueName() {
+    function focusVenue() {
         if (!venuesCache || !venuesCache.length) return null;
-        var v = venuesCache.filter(function (x) { return x.id === cfg.branch; })[0] || venuesCache[0];
-        return v.name;
+        return venuesCache.filter(function (x) { return x.id === cfg.branch; })[0] || venuesCache[0];
     }
 
     /* =============================================================== drawer === */
@@ -1877,10 +1887,10 @@
     function renderCompact() {
         var bar = document.getElementById('ha-compact');
         if (!bar) {
-            bar = h('<div id="ha-compact" class="ha-compact"></div>');
+            bar = h('<div id="ha-compact" class="ha-compact ha-glassbar"></div>');
             document.body.appendChild(bar);
         }
-        bar.innerHTML = '<button type="button" class="ha-ibtn" data-drawer aria-label="Menu">' + mat('menu') + '</button><b>' + esc(focusVenueName() || cfg.name) + '</b>' + bellHtml();
+        bar.innerHTML = headerHtml();
     }
 
     window.addEventListener('scroll', function () {

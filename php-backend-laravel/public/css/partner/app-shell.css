@@ -34,7 +34,7 @@ html.ha-app .fi-topbar-ctn,
 html.ha-app .fi-topbar,
 html.ha-app .fi-sidebar,
 html.ha-app .fi-sidebar-close-overlay { display: none !important; }
-html.ha-app .fi-main-ctn { padding-top: 56px; }
+html.ha-app .fi-main-ctn { padding-top: calc(78px + env(safe-area-inset-top, 0px)); }
 html.ha-app.ha-home-on .fi-main-ctn { padding-top: 0; }
 html.ha-app.ha-home-on .fi-main > :not(#ha-home) { display: none !important; }
 html.ha-app.ha-drawer-open { overflow: hidden; }
@@ -60,34 +60,49 @@ html.ha-app.ha-home-on #ha-compact { display: flex; }
     -webkit-tap-highlight-color: transparent; position: relative;
 }
 .ha-ibtn svg { width: 23px; height: 23px; }
-.ha-bell svg { width: 22px; height: 22px; }
 .ha-ibtn:active { background: rgba(15, 23, 42, .06); }
 
-.ha-avatar {
-    width: 36px; height: 36px; flex: none; border-radius: 999px; border: 1.5px solid #fff;
-    background: linear-gradient(135deg, #0A1738, #0B1C46); color: #fff;
-    font: 800 14px/1 Inter, system-ui, sans-serif; display: grid; place-items: center; cursor: pointer;
-    box-shadow: 0 0 0 1px rgba(15, 23, 42, .06); transition: transform .12s;
+/* The header: the desktop console's floating glass bar (hrn-glass-topbar), sized
+   for a thumb — inset from the edges, rounded, frosted, with the account chip. */
+.ha-glassbar {
+    position: fixed; z-index: 40; left: 10px; right: 10px; top: calc(env(safe-area-inset-top, 0px) + 8px); height: 60px;
+    align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; border-radius: 20px;
+    background: rgba(255, 255, 255, .82); -webkit-backdrop-filter: saturate(1.6) blur(16px); backdrop-filter: saturate(1.6) blur(16px);
+    border: 1px solid rgba(230, 233, 240, .9);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 10px 26px -16px rgba(15, 23, 42, .28);
+    transition: box-shadow .25s, background .25s;
 }
-.ha-avatar:active { transform: scale(.9); }
-
-.ha-appbar {
-    position: fixed; z-index: 40; top: 0; left: 0; right: 0; height: 56px;
-    align-items: center; gap: 2px; padding: 0 10px 0 4px; background: #fff;
-    box-shadow: 0 1px 0 var(--ha-hair);
+/* Page content scrolls away under a soft fade instead of showing in the gap above the bar. */
+.ha-glassbar::before {
+    content: ""; position: absolute; z-index: -1; left: -10px; right: -10px; bottom: 100%; height: calc(env(safe-area-inset-top, 0px) + 9px);
+    background: var(--ha-page);
 }
-.ha-wordmark { border: 0; background: none; padding: 0 4px; cursor: pointer; }
-.ha-wordmark img { height: 22px; width: auto; display: block; }
+html.ha-collapsed .ha-compact { background: rgba(255, 255, 255, .9); box-shadow: 0 1px 2px rgba(15, 23, 42, .05), 0 14px 30px -14px rgba(15, 23, 42, .32); }
+.ha-hbtn {
+    width: 42px; height: 42px; flex: none; display: grid; place-items: center; position: relative;
+    border: 0; border-radius: 14px; background: #F3F5F9; color: var(--ha-ink); cursor: pointer;
+    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .04); -webkit-tap-highlight-color: transparent; transition: transform .12s, background .15s;
+}
+.ha-hbtn svg { width: 22px; height: 22px; }
+.ha-hbtn.ha-bell { border-radius: 999px; }
+.ha-hbtn.ha-bell svg { width: 21px; height: 21px; }
+.ha-hbtn:active { transform: scale(.92); background: #E9EDF4; }
+.ha-acct {
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 10px 0 4px;
+    border: 0; border-radius: 14px; background: none; text-align: left; font-family: inherit; color: var(--ha-ink); cursor: pointer;
+    -webkit-tap-highlight-color: transparent; transition: background .15s, transform .12s;
+}
+.ha-acct:active { background: rgba(15, 23, 42, .05); transform: scale(.98); }
+.ha-acct-av {
+    position: relative; width: 36px; height: 36px; flex: none; border-radius: 999px; display: grid; place-items: center;
+    background: linear-gradient(135deg, #0A1738, #0B1C46); color: #fff; font: 800 13px/1 Inter, system-ui, sans-serif; letter-spacing: .2px;
+    box-shadow: 0 4px 10px -4px rgba(11, 28, 70, .6);
+}
+.ha-acct-av i { position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 99px; background: #22C55E; border: 2px solid #fff; box-sizing: border-box; }
+.ha-acct-tx { min-width: 0; display: flex; flex-direction: column; }
+.ha-acct-tx b { font-size: 15px; line-height: 19px; font-weight: 800; letter-spacing: -.2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ha-acct-tx small { font-size: 11.5px; line-height: 15px; font-weight: 500; color: var(--ha-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ha-grow { flex: 1; min-width: 0; }
-
-.ha-compact {
-    position: fixed; z-index: 40; top: 0; left: 0; right: 0; height: 56px; box-sizing: content-box;
-    align-items: center; gap: 2px; padding: env(safe-area-inset-top, 0px) 6px 0 4px; background: #fff;
-    box-shadow: 0 1px 0 var(--ha-hair); transition: box-shadow .22s;
-}
-.ha-compact b { flex: 1; min-width: 0; font-size: 17px; font-weight: 800; color: var(--ha-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* Home's only header: always there; it lifts off the page with a soft shadow once scrolled. */
-html.ha-collapsed .ha-compact { box-shadow: 0 6px 16px -8px rgba(15, 23, 42, .18); }
 
 /* ── the floating bottom bar (HaraanBottomBar) ───────────────────────────── */
 
@@ -216,7 +231,7 @@ html.ha-collapsed .ha-compact { box-shadow: 0 6px 16px -8px rgba(15, 23, 42, .18
 .ha-home a { text-decoration: none; color: inherit; }
 .ha-home p, .ha-home h2, .ha-home h3 { margin: 0; }
 
-.ha-top { background: #fff; padding: calc(56px + env(safe-area-inset-top, 0px)) 0 18px; }
+.ha-top { padding: calc(80px + env(safe-area-inset-top, 0px)) 0 4px; }
 .ha-topbody { padding: 10px 20px 0; }
 
 .ha-today { display: flex; align-items: center; gap: 12px; }
