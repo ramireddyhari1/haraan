@@ -342,6 +342,34 @@ Route::post('/partner/branch', function (Request $request) {
     return back();
 })->middleware(['web', 'auth'])->name('partner.branch.switch');
 
+// Booking alerts for the partner console installed as a web app (iPhone Home Screen,
+// desktop browser). public/js/partner/pwa.js posts the browser's FCM token here once
+// the partner allows notifications; BookingNotifier then reaches it like any Android
+// device. The token is remembered in the session so signing out unhooks this browser
+// (see the Logout listener in AppServiceProvider).
+Route::post('/partner/push/subscribe', function (Request $request) {
+    $user = $request->user();
+
+    if (! $user->canAccessPanel(\Filament\Facades\Filament::getPanel('partner'))) {
+        abort(403);
+    }
+
+    if (! \App\Support\PlatformRules::bool('partner_web_app.push_enabled')) {
+        return response()->json(['ok' => false, 'reason' => 'disabled'], 409);
+    }
+
+    $data = $request->validate(['token' => ['required', 'string', 'max:512']]);
+
+    \App\Models\DeviceToken::query()->updateOrCreate(
+        ['token' => $data['token']],
+        ['user_id' => $user->id, 'platform' => \App\Models\DeviceToken::PLATFORM_WEB, 'last_seen_at' => now()],
+    );
+
+    $request->session()->put('partner_web_push_token', $data['token']);
+
+    return response()->json(['ok' => true]);
+})->middleware(['web', 'auth', 'throttle:30,1'])->name('partner.push.subscribe');
+
 Route::controller(PartnerAuthController::class)
     ->middleware('throttle:auth')
     ->group(function (): void {

@@ -500,7 +500,7 @@ final class BookingNotifier
         $body = trim(implode(' · ', array_filter([$when, $where]))) . ' · Ticket ' . $code;
 
         try {
-            DeviceToken::query()
+            DeviceToken::pushable()
                 ->where('user_id', $userId)
                 ->chunkById(200, function ($tokens) use ($title, $body, $data): void {
                     foreach ($tokens as $device) {
@@ -628,7 +628,7 @@ final class BookingNotifier
         ];
 
         try {
-            DeviceToken::query()
+            DeviceToken::pushable()
                 ->where('user_id', $partnerId)
                 ->chunkById(100, function ($tokens) use ($title, $body, $data): void {
                     foreach ($tokens as $device) {
@@ -660,7 +660,7 @@ final class BookingNotifier
         ];
 
         try {
-            DeviceToken::query()
+            DeviceToken::pushable()
                 ->where('user_id', $partnerId)
                 ->chunkById(100, function ($tokens) use ($title, $body, $data): void {
                     foreach ($tokens as $device) {

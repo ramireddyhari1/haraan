@@ -1,0 +1,17 @@
+{
+    "id": "/partner",
+    "name": "Haraan Partner",
+    "short_name": "Haraan Partner",
+    "description": "Bookings, courts, walk-ins and payouts for Haraan venue partners.",
+    "start_url": "/partner?source=homescreen",
+    "scope": "/partner",
+    "display": "standalone",
+    "orientation": "portrait",
+    "background_color": "#ffffff",
+    "theme_color": "#ffffff",
+    "icons": [
+        { "src": "/partner-app/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+        { "src": "/partner-app/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+        { "src": "/partner-app/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+    ]
+}

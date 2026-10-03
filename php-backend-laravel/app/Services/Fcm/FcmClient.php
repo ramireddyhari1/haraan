@@ -63,6 +63,11 @@ final class FcmClient
                         array_merge(['title' => $title, 'body' => $body], $data),
                     ),
                     'android' => ['priority' => 'HIGH'],
+                    // Browser tokens (the partner web app on an iPhone): deliver now rather
+                    // than when the phone next wakes, and drop the alert after a day — a
+                    // booking alert that old is noise. The service worker builds the
+                    // notification from `data`, exactly as the Android app does.
+                    'webpush' => ['headers' => ['Urgency' => 'high', 'TTL' => '86400']],
                 ],
             ];
 

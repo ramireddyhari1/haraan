@@ -57,7 +57,7 @@ final class SendNotificationPush implements ShouldQueue
         }
 
         if ($userIds->isNotEmpty()) {
-            DeviceToken::query()
+            DeviceToken::pushable()
                 ->whereIn('user_id', $userIds)
                 ->chunkById(500, function ($tokens) use ($fcm, $notification, $data): void {
                     foreach ($tokens as $device) {

@@ -38,6 +38,24 @@ class AppServiceProvider extends ServiceProvider
     {
         Gate::policy(Event::class, EventPolicy::class);
 
+        // Signing out of the partner web app unhooks that browser from booking alerts,
+        // so a shared desk iPhone stops buzzing for the partner who just left. Logout
+        // fires before the session is invalidated, so the token is still readable.
+        \Illuminate\Support\Facades\Event::listen(\Illuminate\Auth\Events\Logout::class, function (\Illuminate\Auth\Events\Logout $event): void {
+            if (! app()->bound('session') || $event->user === null) {
+                return;
+            }
+
+            $token = session()->pull('partner_web_push_token');
+
+            if (is_string($token) && $token !== '') {
+                \App\Models\DeviceToken::query()
+                    ->where('token', $token)
+                    ->where('user_id', $event->user->getAuthIdentifier())
+                    ->delete();
+            }
+        });
+
         // Hide the "Create & create another" button on every create form in both
         // panels. Records here are created one at a time, so the rapid multi-add
         // affordance only added clutter. Set on the base page — no subclass

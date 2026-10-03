@@ -41,7 +41,7 @@ class PlatformRulesPage extends Page implements HasForms
 
     protected string $view = 'filament.pages.membership-settings';
 
-    private const SECTIONS = ['fees', 'bookings', 'waitlist', 'creation', 'xp', 'rewards', 'otp', 'whatsapp_bot', 'partner_insights', 'messaging', 'ai'];
+    private const SECTIONS = ['fees', 'bookings', 'waitlist', 'creation', 'xp', 'rewards', 'otp', 'whatsapp_bot', 'partner_insights', 'partner_web_app', 'messaging', 'ai'];
 
     public static function canAccess(): bool
     {

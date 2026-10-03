@@ -181,6 +181,11 @@ return [
         // appId identifies the web app to Firebase; the phone-auth reCAPTCHA/app-credential
         // check needs it (without it: auth/invalid-app-credential).
         'app_id'      => env('FIREBASE_APP_ID', '1:618469027917:web:0050ee1392e5e0f3fd6c04'),
+        // Web push (the partner console installed on an iPhone home screen). The sender id
+        // is the project number — the middle of app_id. The VAPID key is the PUBLIC half of
+        // Firebase → Cloud Messaging → Web Push certificates; blank = the SDK's built-in key.
+        'messaging_sender_id' => env('FIREBASE_MESSAGING_SENDER_ID', '618469027917'),
+        'web_push_vapid_key'  => env('FIREBASE_WEB_PUSH_VAPID_KEY'),
     ],
 
     // Firebase Cloud Messaging — background push to the app's registered devices

@@ -61,10 +61,10 @@ class HrmsNotifier
 
         // 2. Push Notification via FCM
         try {
-            $tokens = DeviceToken::where('user_id', $user->id)->pluck('token')->all();
+            $tokens = DeviceToken::pushable()->where('user_id', $user->id)->pluck('token')->all();
             foreach ($tokens as $token) {
                 if (! empty($token)) {
-                    $this->fcm->sendToToken($token, $title, $message, [
+                    $this->fcm->send($token, $title, $message, [
                         'type' => 'hrms',
                         'channel_type' => $channelType,
                         'url' => $url ?? '',

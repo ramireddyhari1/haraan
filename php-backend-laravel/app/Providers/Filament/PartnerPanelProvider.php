@@ -89,6 +89,57 @@ class PartnerPanelProvider extends PanelProvider
             },
         );
 
+        // The console as an installable web app — the iPhone partner app. Manifest +
+        // Apple meta make "Add to Home Screen" open it full screen with the Partner
+        // icon; pwa.js registers the service worker, shows the install guide in an
+        // iPhone browser and the booking-alerts prompt once installed. On every partner
+        // page including the login (so installing from the sign-in screen works); the
+        // prompts themselves only run for a signed-in partner. Admin switches live in
+        // /control → Platform rules → Partner web app.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::HEAD_END,
+            function (): string {
+                if (\Filament\Facades\Filament::getCurrentPanel()?->getId() !== 'partner') {
+                    return '';
+                }
+                $v = fn (string $path): int => @filemtime(public_path($path)) ?: 1;
+                $user = auth()->user();
+
+                $config = [
+                    'signedIn' => $user !== null && $user->canAccessPanel(\Filament\Facades\Filament::getPanel('partner')),
+                    'userId' => $user?->id,
+                    'csrf' => csrf_token(),
+                    'swUrl' => asset('partner-sw.js'),
+                    'subscribeUrl' => route('partner.push.subscribe'),
+                    'icon' => asset('partner-app/icon-180.png'),
+                    'installPrompt' => \App\Support\PlatformRules::bool('partner_web_app.install_prompt'),
+                    'reshowDays' => \App\Support\PlatformRules::int('partner_web_app.install_reshow_days'),
+                    'pushEnabled' => \App\Support\PlatformRules::bool('partner_web_app.push_enabled'),
+                    'pushPrompt' => \App\Support\PlatformRules::string('partner_web_app.push_prompt'),
+                    'vapidKey' => config('services.firebase.web_push_vapid_key') ?: null,
+                    'firebase' => [
+                        'apiKey' => config('services.firebase.api_key'),
+                        'authDomain' => config('services.firebase.auth_domain'),
+                        'projectId' => config('services.firebase.project_id'),
+                        'messagingSenderId' => config('services.firebase.messaging_sender_id'),
+                        'appId' => config('services.firebase.app_id'),
+                    ],
+                ];
+
+                return '<link rel="manifest" href="' . e(asset('partner.webmanifest')) . '?v=' . $v('partner.webmanifest') . '">'
+                    . '<meta name="theme-color" content="#ffffff">'
+                    . '<meta name="mobile-web-app-capable" content="yes">'
+                    . '<meta name="apple-mobile-web-app-capable" content="yes">'
+                    . '<meta name="apple-mobile-web-app-status-bar-style" content="default">'
+                    . '<meta name="apple-mobile-web-app-title" content="Haraan Partner">'
+                    . '<meta name="format-detection" content="telephone=no">'
+                    . '<link rel="apple-touch-icon" href="' . e(asset('partner-app/icon-180.png')) . '">'
+                    . '<link rel="stylesheet" href="' . e(asset('css/partner/pwa.css')) . '?v=' . $v('css/partner/pwa.css') . '">'
+                    . '<script>window.HaraanPartnerPwa=' . json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES) . ';</script>'
+                    . '<script src="' . e(asset('js/partner/pwa.js')) . '?v=' . $v('js/partner/pwa.js') . '" defer></script>';
+            },
+        );
+
         // Premium visual theme for the Event create/edit wizard — same overrides the
         // control panel uses, scoped to those two pages so the partner's event-creation
         // experience is just as polished without restyling the rest of the console.

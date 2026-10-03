@@ -1,0 +1,201 @@
+/*
+ * Partner web app prompts (public/js/partner/pwa.js): the iPhone install guide, the
+ * "turn on booking alerts" card and the one-line result toast. All three sit on the
+ * bottom edge above the iPhone home indicator and stay out of the console's way.
+ */
+
+.hrn-pwa-sheet,
+.hrn-pwa-card,
+.hrn-pwa-toast {
+    position: fixed;
+    z-index: 60;
+    left: 12px;
+    right: 12px;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    margin: 0 auto;
+    max-width: 420px;
+    box-sizing: border-box;
+    background: #fff;
+    color: #0f172a;
+    border: 1px solid rgba(15, 23, 42, .08);
+    border-radius: 20px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 18px 40px -12px rgba(15, 23, 42, .28);
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    opacity: 0;
+    transform: translateY(16px);
+    transition: opacity .2s ease, transform .22s cubic-bezier(.2, .8, .2, 1);
+}
+
+.hrn-pwa-sheet.is-in,
+.hrn-pwa-card.is-in,
+.hrn-pwa-toast.is-in {
+    opacity: 1;
+    transform: none;
+}
+
+.hrn-pwa-title {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 650;
+    line-height: 1.3;
+    letter-spacing: -.01em;
+}
+
+.hrn-pwa-sub {
+    margin: 3px 0 0;
+    font-size: 13px;
+    line-height: 1.45;
+    color: #64748b;
+}
+
+/* ── install guide ─────────────────────────────────────────────────────── */
+
+.hrn-pwa-sheet { padding: 18px 18px 10px; }
+
+.hrn-pwa-x {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: #94a3b8;
+    cursor: pointer;
+}
+.hrn-pwa-x svg { width: 18px; height: 18px; }
+
+.hrn-pwa-head {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding-right: 28px;
+}
+
+.hrn-pwa-icon {
+    flex: none;
+    width: 52px;
+    height: 52px;
+    border-radius: 12px;
+    box-shadow: 0 0 0 1px rgba(15, 23, 42, .08);
+}
+
+.hrn-pwa-steps {
+    list-style: none;
+    margin: 16px 0 4px;
+    padding: 14px 0 0;
+    border-top: 1px solid #eef2f7;
+    display: grid;
+    gap: 12px;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.hrn-pwa-steps li {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.hrn-pwa-n {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    margin-top: 1px;
+    border-radius: 999px;
+    display: grid;
+    place-items: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #2563eb;
+    background: #eff6ff;
+}
+
+.hrn-pwa-steps b { font-weight: 600; }
+
+.hrn-pwa-key {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 7px 1px 5px;
+    border-radius: 7px;
+    background: #f1f5f9;
+    white-space: nowrap;
+}
+.hrn-pwa-key svg { width: 15px; height: 15px; color: #2563eb; }
+
+.hrn-pwa-later {
+    display: block;
+    width: 100%;
+    margin-top: 8px;
+    padding: 12px;
+    border: 0;
+    background: transparent;
+    color: #64748b;
+    font-family: inherit; font-size: 14px; font-weight: 500; line-height: 1;
+    cursor: pointer;
+}
+
+/* ── alerts card ───────────────────────────────────────────────────────── */
+
+.hrn-pwa-card {
+    display: flex;
+    gap: 12px;
+    padding: 14px 14px 12px;
+}
+
+.hrn-pwa-bell {
+    flex: none;
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+    display: grid;
+    place-items: center;
+    color: #2563eb;
+    background: #eff6ff;
+}
+.hrn-pwa-bell svg { width: 20px; height: 20px; }
+
+.hrn-pwa-card-body { flex: 1; min-width: 0; }
+
+.hrn-pwa-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.hrn-pwa-card .hrn-pwa-later {
+    width: auto;
+    margin: 0;
+    padding: 9px 12px;
+}
+
+.hrn-pwa-on {
+    border: 0;
+    border-radius: 10px;
+    padding: 9px 16px;
+    background: #2563eb;
+    color: #fff;
+    font-family: inherit; font-size: 14px; font-weight: 600; line-height: 1;
+    cursor: pointer;
+}
+.hrn-pwa-on:disabled { opacity: .7; cursor: default; }
+
+/* ── toast ─────────────────────────────────────────────────────────────── */
+
+.hrn-pwa-toast {
+    padding: 13px 16px;
+    font-size: 14px;
+    line-height: 1.4;
+    background: #0f172a;
+    color: #fff;
+    border-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .hrn-pwa-sheet, .hrn-pwa-card, .hrn-pwa-toast { transition: none; }
+}
