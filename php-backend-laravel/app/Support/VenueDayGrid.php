@@ -100,7 +100,7 @@ final class VenueDayGrid
                     return $bl;
                 }
                 $bs = BookingService::timeToMinutes($bl->start_time);
-                $be = BookingService::endMinutes($bl->end_time);
+                $be = self::endOf($bl->end_time);
                 if ($bs === null || $be === null || ($start < $be && $start + $length > $bs)) {
                     return $bl;
                 }
@@ -177,6 +177,17 @@ final class VenueDayGrid
             ])->values(),
             'slots'      => $rows,
         ];
+    }
+
+    /** A block's end as minutes of the day; "24:00" / "00:00" mean midnight at the end. */
+    private static function endOf(?string $time): ?int
+    {
+        if ($time !== null && str_starts_with(trim($time), '24:')) {
+            return 24 * 60;
+        }
+        $m = BookingService::timeToMinutes($time);
+
+        return $m === 0 ? 24 * 60 : $m;
     }
 
     /**
