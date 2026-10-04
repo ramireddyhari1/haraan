@@ -626,23 +626,85 @@
         return (hh % 12 === 0 ? 12 : hh % 12) + ':' + (mm < 10 ? '0' : '') + mm + (hh < 12 ? ' AM' : ' PM');
     }
 
-    var pay = { host: null, all: null, filter: 'all', query: '' };
+    var pay = { host: null, all: null, filter: 'all', query: '', bins: null, selBar: null };
 
-    function monthCard(all) {
-        var now = new Date();
-        var mine = all.filter(function (p) { return p.at.getFullYear() === now.getFullYear() && p.at.getMonth() === now.getMonth(); });
-        var received = mine.reduce(function (t, p) { return t + p.paid; }, 0);
-        var count = mine.filter(function (p) { return p.paid > 0; }).length;
-        var due = all.reduce(function (t, p) { return t + p.owed; }, 0);
-        var byWay = {};
-        mine.forEach(function (p) { if (p.way && p.paid > 0) byWay[p.way] = (byWay[p.way] || 0) + p.paid; });
-        var ways = Object.keys(WAYS).filter(function (w) { return byWay[w] > 0; });
-        return '<section class="ha-month"><small>Received in ' + MONTH_LONG[now.getMonth()] + '</small>'
-            + '<div class="ha-month-big"><b data-count="' + received + '">' + rupees(received) + '</b><span>' + (count === 0 ? 'no payments yet' : count === 1 ? '1 payment' : count + ' payments') + '</span></div>'
-            + (ways.length ? '<div class="ha-month-bar">' + ways.map(function (w) { return '<i style="flex:' + byWay[w] + ';background:' + (w === 'cash' ? '#FCD34D' : w === 'online' ? 'rgba(255,255,255,.65)' : '#fff') + '"></i>'; }).join('') + '</div>'
-                + '<div class="ha-month-ways">' + ways.map(function (w) { return '<span><small>' + WAYS[w][0] + '</small><b>' + rupees(byWay[w]) + '</b></span>'; }).join('') + '</div>' : '')
-            + (due > 0 ? '<span class="ha-month-due"><i></i>' + rupees(due) + ' still to collect</span>' : '')
+    var PAY_WAYS = [['upi', 'UPI', '#2563EB'], ['online', 'Haraan', '#60A5FA'], ['cash', 'Cash', '#F59E0B'], ['card', 'Card', '#1E3A8A']];
+
+    function startOf(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+
+    /**
+     * The hero: this month so far against all of last month, then the last 30 days as one
+     * bar per day — the shape of the business, drawn from the payments themselves. Tap a
+     * day to read it and jump the list there. If only the latest page of payments is
+     * loaded, days older than the oldest one are shown as "no data", not as zero.
+     */
+    function payHero(all) {
+        var now = new Date(), today = startOf(now);
+        var mStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        var lStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        var paidRows = all.filter(function (p) { return p.paid > 0; });
+        var thisMonth = paidRows.filter(function (p) { return p.at >= mStart; }).reduce(function (t, p) { return t + p.paid; }, 0);
+        var lastMonth = paidRows.filter(function (p) { return p.at >= lStart && p.at < mStart; }).reduce(function (t, p) { return t + p.paid; }, 0);
+        var oldest = all.length ? startOf(all[all.length - 1].at) : today;
+        var truncated = all.length >= 100;
+        var lastPartial = truncated && oldest > lStart;
+
+        var bins = [];
+        for (var i = 29; i >= 0; i--) {
+            var d = new Date(today.getFullYear(), today.getMonth(), today.getDate() - i);
+            bins.push({ d: d, k: dayKey(d), amt: 0, n: 0, nodata: truncated && d < oldest });
+        }
+        var byKey = {};
+        bins.forEach(function (x) { byKey[x.k] = x; });
+        paidRows.forEach(function (p) { var x = byKey[dayKey(p.at)]; if (x) { x.amt += p.paid; x.n++; } });
+        var top = bins.reduce(function (m, x) { return Math.max(m, x.amt); }, 0) || 1;
+        var total30 = bins.reduce(function (t, x) { return t + x.amt; }, 0), n30 = bins.reduce(function (t, x) { return t + x.n; }, 0);
+        pay.bins = bins;
+        pay.selBar = null;
+
+        var ways = {};
+        paidRows.forEach(function (p) { if (p.at >= bins[0].d && p.way) ways[p.way] = (ways[p.way] || 0) + p.paid; });
+        var due = all.reduce(function (t, p) { return t + p.owed; }, 0), dueN = all.filter(function (p) { return p.owed > 0; }).length;
+
+        var bars = bins.map(function (x, idx) {
+            var h = x.amt > 0 ? Math.max(6, x.amt / top * 100) : 0;
+            return '<button type="button" class="ha-pmbar' + (x.nodata ? ' is-nodata' : '') + (x.k === dayKey(today) ? ' is-today' : '') + (x.d.getDate() === 1 ? ' is-first' : '') + '" data-pbar="' + idx + '" style="--h:' + h + '%;--i:' + idx + '" aria-label="' + esc(dayWord(x.d) + ': ' + rupees(x.amt)) + '"><i></i></button>';
+        }).join('');
+        var firstIdx = -1;
+        bins.forEach(function (x, idx) { if (x.d.getDate() === 1) firstIdx = idx; });
+        var axis = '<span style="left:0">' + bins[0].d.getDate() + ' ' + A.months[bins[0].d.getMonth()] + '</span>'
+            + (firstIdx > 3 && firstIdx < 26 ? '<span class="is-mid" style="left:' + ((firstIdx + 0.5) / 30 * 100).toFixed(2) + '%">1 ' + A.months[bins[firstIdx].d.getMonth()] + '</span>' : '')
+            + '<span style="right:0">Today</span>';
+        var cap = 'Last 30 days · ' + rupees(total30) + (n30 ? ' from ' + n30 + (n30 === 1 ? ' payment' : ' payments') : '');
+
+        return '<section class="ha-pmh">'
+            + '<div class="ha-pmh-top"><span class="ha-grow"><small>' + MONTH_LONG[now.getMonth()] + ' so far</small><b data-count="' + thisMonth + '">' + rupees(thisMonth) + '</b></span>'
+            + '<span class="ha-pmh-vs"><small>' + MONTH_LONG[lStart.getMonth()] + '</small><b>' + (lastPartial ? 'at least ' : '') + rupees(lastMonth) + '</b></span></div>'
+            + '<div class="ha-pmh-chart">' + bars + '</div><div class="ha-pmh-axis">' + axis + '</div>'
+            + '<p class="ha-pmh-cap" data-default="' + esc(cap) + '">' + esc(cap) + '</p>'
+            + (Object.keys(ways).length ? '<div class="ha-pmh-ways">' + PAY_WAYS.filter(function (w) { return ways[w[0]] > 0; }).map(function (w) {
+                return '<span><i style="background:' + w[2] + '"></i>' + w[1] + '<b>' + rupees(ways[w[0]]) + '</b></span>';
+            }).join('') + '</div>' : '')
+            + (due > 0 ? '<button type="button" class="ha-pmh-due" data-filter="due"><i></i><span class="ha-grow"><b>' + rupees(due) + ' still to collect</b><small>' + dueN + ' ' + (dueN === 1 ? 'booking' : 'bookings') + ' not fully paid</small></span>' + mat('chevron') + '</button>' : '')
             + '</section>';
+    }
+
+    /** A day's bar was tapped: read it out, and bring that day into view in the list. */
+    function pickBar(idx) {
+        var host = pay.host, x = pay.bins && pay.bins[idx];
+        if (!host || !x) return;
+        var same = pay.selBar === idx;
+        pay.selBar = same ? null : idx;
+        host.querySelectorAll('.ha-pmbar').forEach(function (b, i) { b.classList.toggle('is-sel', i === pay.selBar); });
+        var cap = host.querySelector('.ha-pmh-cap');
+        cap.textContent = same ? cap.dataset.default : x.nodata ? dayWord(x.d) + ' · older than the payments loaded here'
+            : dayWord(x.d) + ' · ' + (x.amt > 0 ? rupees(x.amt) + ' from ' + x.n + (x.n === 1 ? ' payment' : ' payments') : 'nothing received');
+        cap.classList.toggle('is-sel', !same);
+        vibrate(5);
+        if (same || !(x.amt > 0)) return;
+        if (pay.filter !== 'all' && pay.filter !== 'received') { pay.filter = 'all'; renderPayments(); }
+        var head = host.querySelector('[data-pday="' + x.k + '"]');
+        if (head) window.scrollTo({ top: head.getBoundingClientRect().top + window.scrollY - 92, behavior: 'smooth' });
     }
 
     function payRow(p, i) {
@@ -650,8 +712,10 @@
         return '<button type="button" class="ha-payrow" data-pay="' + p.id + '" style="--i:' + Math.min(i, 10) + '">'
             + '<span class="ha-token is-' + (p.way || 'due') + '">' + A.payToken(p.way) + '</span>'
             + '<span class="ha-pay-who"><b>' + esc(p.name) + '</b><small>' + esc(bits.join(' · ')) + '</small></span>'
-            + '<span class="ha-pay-amt">' + (p.paid > 0 ? '<b>+' + rupees(p.paid) + '</b>' : '')
-            + (p.owed > 0 ? '<small class="is-due">' + rupees(p.owed) + ' due</small>' : p.paid > 0 ? '<small class="is-in">Received</small>' : '') + '</span></button>';
+            + '<span class="ha-pay-amt">' + (p.paid > 0 ? '<b>+' + rupees(p.paid) + '</b>' : '<b class="is-muted">' + rupees(p.amount) + '</b>')
+            // Fully paid rows say nothing more; only money still owed is flagged.
+            + (p.owed > 0 && p.paid > 0 ? '<span class="ha-part"><i style="width:' + Math.round(p.paid / p.amount * 100) + '%"></i></span>' : '')
+            + (p.owed > 0 ? '<small class="is-due">' + rupees(p.owed) + ' due</small>' : '') + '</span></button>';
     }
 
     function emptyTill(text) {
@@ -678,7 +742,7 @@
         var idx = 0;
         var listHtml = groups.map(function (g) {
             var rec = g.rows.reduce(function (t, p) { return t + p.paid; }, 0), owed = g.rows.reduce(function (t, p) { return t + p.owed; }, 0);
-            return '<div class="ha-payday"><b>' + esc(dayWord(g.at)) + '</b>' + (rec > 0 ? '<em class="is-in">+' + rupees(rec) + '</em>' : '') + (owed > 0 ? '<em class="is-due">' + rupees(owed) + ' due</em>' : '') + '</div>'
+            return '<div class="ha-payday" data-pday="' + g.k + '"><b>' + esc(dayWord(g.at)) + '</b>' + (rec > 0 ? '<em class="is-in">+' + rupees(rec) + '</em>' : '') + (owed > 0 ? '<em class="is-due">' + rupees(owed) + ' due</em>' : '') + '</div>'
                 + '<div class="ha-paylist">' + g.rows.map(function (p, i) { return (i ? '<hr class="ha-hr ha-hr-50">' : '') + payRow(p, idx++); }).join('') + '</div>';
         }).join('');
         var listEl = host.querySelector('.ha-paybody');
@@ -686,12 +750,17 @@
             + listHtml + '<p class="ha-payfoot">' + (all.length >= 100 ? 'Showing your latest ' + all.length + ' payments.' : 'That’s every payment so far.') + '</p>';
         if (listEl) {
             listEl.innerHTML = body;
+            listEl.classList.remove('is-swap'); void listEl.offsetWidth; listEl.classList.add('is-swap');
             host.querySelectorAll('.ha-chip').forEach(function (c) { c.classList.toggle('is-on', c.dataset.filter === pay.filter); });
             return;
         }
-        host.innerHTML = '<div class="ha-tab ha-payments"><h1 class="ha-tabtitle">Payments</h1>' + monthCard(all)
+        var counts = { all: all.length, received: 0, due: 0, walkin: 0, online: 0 };
+        all.forEach(function (p) { if (p.paid > 0) counts.received++; if (p.owed > 0) counts.due++; if (p.walkIn) counts.walkin++; else counts.online++; });
+        host.innerHTML = '<div class="ha-tab ha-payments"><h1 class="ha-tabtitle">Payments</h1>' + payHero(all)
             + '<label class="ha-search">' + mat('search') + '<input type="search" placeholder="Search by name" autocomplete="off" value="' + esc(pay.query) + '"></label>'
-            + '<div class="ha-chiprow">' + FILTERS.map(function (f) { return '<button type="button" class="ha-chip' + (pay.filter === f[0] ? ' is-on' : '') + '" data-filter="' + f[0] + '">' + f[1] + '</button>'; }).join('') + '</div>'
+            + '<div class="ha-chiprow">' + FILTERS.map(function (f) {
+                return '<button type="button" class="ha-chip' + (pay.filter === f[0] ? ' is-on' : '') + (f[0] === 'due' && counts.due ? ' is-alert' : '') + '" data-filter="' + f[0] + '">' + f[1] + '<em>' + counts[f[0]] + '</em></button>';
+            }).join('') + '</div>'
             + '<div class="ha-paybody">' + body + '</div></div>';
         countUp(host);
     }
@@ -741,6 +810,9 @@
     }
 
     function slotPassed(ymd, label) {
+        var md = /^(\d{4})-(\d{2})-(\d{2})/.exec(ymd || '');
+        // A booking on an earlier day has been played, whether or not its slot has a time.
+        if (md && new Date(+md[1], +md[2] - 1, +md[3]) < startOf(new Date())) return true;
         var t = slotTime(label);
         if (!ymd || !t) return false;
         var start = t.split(/[–-]/)[0].trim();
@@ -873,7 +945,12 @@
             pay.host = host;
             host.onclick = function (e) {
                 var t = e.target, b;
-                if ((b = t.closest('[data-filter]'))) { pay.filter = b.dataset.filter; vibrate(5); renderPayments(); }
+                if ((b = t.closest('[data-pbar]'))) { pickBar(+b.dataset.pbar); }
+                else if ((b = t.closest('[data-filter]'))) {
+                    if (pay.filter === b.dataset.filter) return;
+                    pay.filter = b.dataset.filter; vibrate(5); renderPayments();
+                    if (b.classList.contains('ha-pmh-due')) { var row = host.querySelector('.ha-chiprow'); if (row) window.scrollTo({ top: row.getBoundingClientRect().top + window.scrollY - 92, behavior: 'smooth' }); }
+                }
                 else if ((b = t.closest('[data-pay]'))) {
                     var p = (pay.all || []).filter(function (x) { return x.id === +b.dataset.pay; })[0];
                     if (p) openPass(p.src);

@@ -201,28 +201,58 @@ html.ha-app.ha-full .ha-nav-cap { opacity: .9; box-shadow: 0 10px 20px -6px rgba
 /* ── Payments ───────────────────────────────────────────────────────────── */
 
 .ha-payments { gap: 10px; }
-.ha-month { position: relative; overflow: hidden; padding: 18px; border-radius: 22px; color: #fff; background: radial-gradient(circle at 0 0, rgba(255, 255, 255, .2), rgba(255, 255, 255, 0) 60%), linear-gradient(135deg, #4D8BFF, #2563EB 50%, #1E40AF); box-shadow: 0 14px 28px -12px rgba(30, 64, 175, .6), inset 0 1px 0 rgba(255, 255, 255, .35); }
-.ha-month > small { font-size: 13px; font-weight: 600; color: rgba(255, 255, 255, .85); }
-.ha-month-big { display: flex; align-items: flex-end; gap: 8px; }
-.ha-month-big b { font-size: 34px; line-height: 38px; font-weight: 700; letter-spacing: -1px; font-variant-numeric: tabular-nums; }
-.ha-month-big span { font-size: 13px; color: rgba(255, 255, 255, .8); padding-bottom: 6px; }
-.ha-month-bar { display: flex; gap: 2px; height: 8px; margin-top: 12px; border-radius: 99px; overflow: hidden; background: rgba(255, 255, 255, .2); transform-origin: left; animation: ha-grow .7s ease-out both; }
-.ha-month-ways { display: flex; gap: 14px; margin-top: 8px; }
-.ha-month-ways small { display: block; font-size: 11px; color: rgba(255, 255, 255, .7); }
-.ha-month-ways b { display: block; font-size: 13px; font-weight: 700; }
-.ha-month-due { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; padding: 5px 10px; border-radius: 99px; background: rgba(245, 158, 11, .2); border: 1px solid rgba(252, 211, 77, .5); font-size: 12.5px; font-weight: 700; color: #FEF3C7; }
-.ha-month-due i { width: 6px; height: 6px; border-radius: 99px; background: #FDE68A; }
+/* Payments hero: this month against last, then 30 days drawn one bar per day */
+.ha-pmh { padding: 18px 18px 14px; border-radius: 24px; background: #fff; border: 1px solid rgba(15, 23, 42, .06); box-shadow: 0 12px 26px -18px rgba(15, 23, 42, .3); }
+.ha-pmh-top { display: flex; align-items: flex-end; gap: 12px; }
+.ha-pmh-top small { display: block; font-size: 12.5px; font-weight: 600; color: var(--ha-muted); }
+.ha-pmh-top .ha-grow b { display: block; margin-top: 2px; font-size: 32px; line-height: 36px; font-weight: 800; letter-spacing: -.9px; font-variant-numeric: tabular-nums; color: var(--ha-ink); }
+.ha-pmh-vs { text-align: right; padding-bottom: 3px; }
+.ha-pmh-vs b { display: block; margin-top: 2px; font-size: 15px; font-weight: 700; color: #475569; font-variant-numeric: tabular-nums; }
+.ha-pmh-chart { display: flex; align-items: flex-end; gap: 3px; height: 92px; margin-top: 16px; padding-bottom: 1px; border-bottom: 1px solid #E8EDF4; }
+.ha-pmbar { position: relative; flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; background: none; cursor: pointer; display: flex; align-items: flex-end; -webkit-tap-highlight-color: transparent; }
+.ha-pmbar i { display: block; width: 100%; height: var(--h); min-height: 2px; border-radius: 3px 3px 1px 1px; background: #C9D8F6; transform-origin: bottom; animation: ha-bar-up .55s cubic-bezier(.22, .9, .24, 1) both; animation-delay: calc(var(--i) * 14ms); transition: background .18s; }
+.ha-pmbar[style*="--h:0%"] i { background: #EEF2F7; }
+.ha-pmbar.is-today i { background: #2563EB; }
+.ha-pmbar.is-nodata i { height: 2px; background: repeating-linear-gradient(90deg, #E2E8F0 0 2px, transparent 2px 4px); }
+.ha-pmbar.is-first::before { content: ""; position: absolute; left: -2px; top: 0; bottom: 0; width: 1px; background: repeating-linear-gradient(#D5DCE7 0 3px, transparent 3px 6px); }
+.ha-pmbar.is-sel i { background: #0B1C46; }
+.ha-pmbar:active i { filter: brightness(.9); }
+@keyframes ha-bar-up { from { transform: scaleY(0); } }
+.ha-pmh-axis { position: relative; height: 16px; margin-top: 5px; font-size: 10.5px; font-weight: 600; color: #94A3B8; }
+.ha-pmh-axis span { position: absolute; top: 0; white-space: nowrap; }
+.ha-pmh-axis span.is-mid { transform: translateX(-50%); }
+.ha-pmh-cap { margin-top: 6px !important; font-size: 12.5px; font-weight: 600; color: var(--ha-muted); transition: color .18s; }
+.ha-pmh-cap.is-sel { color: var(--ha-ink); }
+.ha-pmh-ways { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #E2E8F0; font-size: 12px; font-weight: 600; color: var(--ha-muted); }
+.ha-pmh-ways span { display: inline-flex; align-items: center; gap: 6px; }
+.ha-pmh-ways i { width: 8px; height: 8px; border-radius: 3px; }
+.ha-pmh-ways b { color: var(--ha-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+.ha-pmh-due { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 12px; padding: 11px 12px; border: 0; border-radius: 14px; background: #FEF2F2; text-align: left; font-family: inherit; cursor: pointer; transition: transform .12s; }
+.ha-pmh-due:active { transform: scale(.98); }
+.ha-pmh-due > i { width: 8px; height: 8px; flex: none; border-radius: 99px; background: #DC2626; box-shadow: 0 0 0 4px rgba(220, 38, 38, .14); }
+.ha-pmh-due b { display: block; font-size: 13.5px; font-weight: 800; color: #B91C1C; font-variant-numeric: tabular-nums; }
+.ha-pmh-due small { display: block; font-size: 11.5px; color: #DC2626; opacity: .85; }
+.ha-pmh-due > svg { width: 18px; height: 18px; flex: none; fill: #DC2626; }
 .ha-search { display: flex; align-items: center; gap: 10px; height: 46px; margin-top: 4px; padding: 0 14px; border-radius: 14px; border: 1px solid rgba(15, 23, 42, .08); background: #fff; }
 .ha-search svg { width: 19px; height: 19px; color: var(--ha-muted); flex: none; }
 .ha-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font: 400 16px/1.2 Inter, system-ui, sans-serif; color: var(--ha-ink); padding: 0; }
 .ha-search input::placeholder { color: var(--ha-muted); }
-.ha-chiprow { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px; }
+.ha-chiprow { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 0 16px; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
 .ha-chiprow::-webkit-scrollbar { display: none; }
-.ha-chip { flex: none; padding: 8px 14px; border-radius: 99px; border: 1px solid rgba(15, 23, 42, .12); background: #fff; font: 500 13px/1.2 Inter, system-ui, sans-serif; color: var(--ha-ink); cursor: pointer; transition: transform .12s; }
+.ha-chip { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px 0 14px; border-radius: 99px; border: 1px solid rgba(15, 23, 42, .1); background: #fff; font: 600 13px/1 Inter, system-ui, sans-serif; color: var(--ha-ink); cursor: pointer; transition: transform .12s, background .18s, color .18s; -webkit-tap-highlight-color: transparent; }
+.ha-chip em { min-width: 18px; padding: 2px 6px; border-radius: 99px; background: #F1F4F9; font-style: normal; font-size: 11px; font-weight: 700; color: var(--ha-muted); text-align: center; font-variant-numeric: tabular-nums; box-sizing: border-box; }
+.ha-chip.is-alert em { background: #FEE2E2; color: #DC2626; }
+.ha-chip.is-on em { background: rgba(255, 255, 255, .22); color: #fff; }
 .ha-chip:active { transform: scale(.93); }
 .ha-chip.is-on { background: #1D4ED8; border-color: transparent; color: #fff; font-weight: 700; }
 .ha-paybody { display: flex; flex-direction: column; gap: 10px; }
-.ha-payday { display: flex; align-items: center; gap: 12px; padding: 8px 4px 0; }
+.ha-payday { position: sticky; z-index: 5; top: calc(76px + env(safe-area-inset-top, 0px)); display: flex; align-items: center; gap: 10px; margin: 0 -16px; padding: 10px 20px 6px; background: linear-gradient(var(--ha-page) 70%, rgba(247, 248, 251, 0)); }
+.ha-payday em.is-in, .ha-payday em.is-due { padding: 3px 8px; border-radius: 99px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.ha-payday em.is-in { background: rgba(22, 163, 74, .1); }
+.ha-payday em.is-due { background: rgba(220, 38, 38, .08); }
+.ha-paybody.is-swap { animation: ha-swap .26s ease-out both; }
+@keyframes ha-swap { from { opacity: .2; transform: translateY(6px); } }
+.ha-pay-amt b.is-muted { color: var(--ha-muted); font-weight: 600; }
 .ha-payday b { flex: 1; font-size: 13.5px; font-weight: 700; }
 .ha-payday em { font-style: normal; font-size: 12.5px; font-weight: 600; }
 .ha-paylist { padding: 4px 14px; border-radius: 18px; background: #fff; border: 1px solid rgba(15, 23, 42, .08); box-shadow: 0 6px 14px -8px rgba(37, 99, 235, .12); }
@@ -281,8 +311,8 @@ html.ha-app.ha-full .ha-nav-cap { opacity: .9; box-shadow: 0 10px 20px -6px rgba
 .ha-node small { margin-top: 2px; font-size: 11.5px; color: var(--ha-muted); white-space: nowrap; }
 .ha-node.is-done small { color: var(--ha-ink); font-weight: 600; }
 .ha-node.is-done.is-alert small { color: #D97706; }
-.ha-node:first-child small { align-self: flex-start; margin-left: -4px; }
-.ha-node:last-of-type small { align-self: flex-end; margin-right: -4px; }
+.ha-node:first-of-type { transform: translateX(-13px); align-items: flex-start; }
+.ha-node:last-of-type { transform: translateX(calc(-100% + 13px)); align-items: flex-end; }
 .ha-sb { margin-top: 18px !important; margin-bottom: 8px !important; font-size: 13px; font-weight: 600; }
 .ha-softbtn { flex: 1; height: 48px; border-radius: 14px; border: 1px solid rgba(37, 99, 235, .15); background: #fff; color: #1D4ED8; font: 700 14.5px/1 Inter, system-ui, sans-serif; cursor: pointer; transition: transform .12s; }
 .ha-softbtn:active { transform: scale(.95); }
