@@ -131,4 +131,19 @@ html.ha-app .vdb-av { background: linear-gradient(135deg, #1E3A8A, var(--navy)) 
 html.ha-app .vdb-facts { padding: 6px 18px; }
 html.ha-app .vdb-actions { padding: 12px 18px calc(16px + env(safe-area-inset-bottom, 0px)); }
 
+
+/* ── Walk-in | Block, the duration picker, a blocked cell ──────────────────── */
+html.ha-app .vdb-modes { padding: 4px; border-radius: 16px; }
+html.ha-app .vdb-modes button { min-height: 46px; border-radius: 12px; font-size: 14px; }
+html.ha-app .vdb-modes button:active { transform: scale(.97); }
+html.ha-app .vdb-dur { grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); gap: 8px; }
+html.ha-app .vdb-dur button { min-height: 60px; border-radius: 14px; }
+html.ha-app .vdb-dur button:active:not(:disabled) { transform: scale(.95); }
+html.ha-app .vdb-dur button.is-on { background: var(--blue); border-color: var(--blue); box-shadow: 0 8px 16px -10px rgba(37, 99, 235, .9); }
+html.ha-app .vdb-dur button.is-on b, html.ha-app .vdb-dur button.is-on small { color: #fff; }
+html.ha-app .vdb-reasons button.is-on { background: #0F172A; border-color: #0F172A; box-shadow: none; }
+html.ha-app .vdb-primary.is-ink { background: #0F172A; box-shadow: 0 10px 20px -12px rgba(15, 23, 42, .8); }
+html.ha-app .vdb-cell.is-blocked { padding: 6px; border-radius: 14px; border: 0; background: repeating-linear-gradient(135deg, #EEF2F7 0 6px, #E4E9F1 6px 12px); box-shadow: inset 0 0 0 1px #D5DCE7; }
+html.ha-app .vdb-cell.is-blocked b { font-size: 9px; }
+html.ha-app .vdb-cell.is-blocked span { font-size: 9.5px; }
 }

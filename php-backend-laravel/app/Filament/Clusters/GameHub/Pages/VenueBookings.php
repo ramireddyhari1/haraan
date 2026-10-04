@@ -7,6 +7,7 @@ namespace App\Filament\Clusters\GameHub\Pages;
 use App\Filament\Clusters\GameHub\GameHubCluster;
 use App\Models\Booking;
 use App\Models\Venue;
+use App\Models\VenueBlock;
 use App\Models\VenueBlockedDate;
 use App\Services\BookingLedger;
 use App\Services\BookingService;
@@ -80,6 +81,25 @@ class VenueBookings extends Page
 
     /** cash | upi | later */
     public $payNow = 'cash';
+
+    /** What the open-slot sheet does: seat a walk-in, or block the court. */
+    public $sheetMode = 'walkin';
+
+    /** Why the court is blocked (a VenueBlock kind). */
+    public $blockKind = 'maintenance';
+
+    public $blockNote = '';
+
+    /** Block sheet (a blocked cell was tapped). */
+    public $openBlockId = null;
+
+    /** The reasons offered at the desk, in the words a venue uses. */
+    public const BLOCK_REASONS = [
+        'maintenance' => 'Maintenance',
+        'private'     => 'Private hire',
+        'academy'     => 'Coaching',
+        'tournament'  => 'Event',
+    ];
 
     /** Booking sheet. */
     public $openBookingId = null;
@@ -413,6 +433,81 @@ class VenueBookings extends Page
         $this->seatCourtId = $courtId;
         $this->hours = '1';
         $this->payNow = 'cash';
+        $this->sheetMode = 'walkin';
+        $this->blockKind = 'maintenance';
+        $this->blockNote = '';
+    }
+
+    public function showBlock(int $id): void
+    {
+        $this->closeSheets();
+        $this->openBlockId = $id;
+    }
+
+    /**
+     * How long the open sheet can run, in the venue's own slot length: 30-minute venues
+     * offer 30 min · 1 hr · 1½ hr · 2 hr, hourly ones 1 · 2 · 3 hr. `units` is what
+     * reserveVenue() counts (slots, not hours). An option that would run into a booked,
+     * held, blocked or unsold slot on this court is offered but disabled.
+     *
+     * @return list<array{units: int, minutes: int, label: string, until: string, free: bool}>
+     */
+    public function durationOptions(): array
+    {
+        $grid = $this->grid();
+        $slots = collect($grid['slots'] ?? [])->values();
+        $at = $slots->search(fn ($sl) => (int) $sl['slot_id'] === (int) $this->seatSlotId);
+        if ($at === false) {
+            return [];
+        }
+        $len = $this->slotLength();
+        $start = BookingService::timeToMinutes($slots[$at]['time']);
+        $max = $len <= 30 ? 4 : 3;
+        $out = [];
+        $free = true;
+        for ($n = 1; $n <= $max; $n++) {
+            $row = $slots[$at + $n - 1] ?? null;
+            $rowStart = $row ? BookingService::timeToMinutes($row['time']) : null;
+            if ($row === null || $start === null || $rowStart !== $start + ($n - 1) * $len) {
+                $free = false;
+            } elseif ($this->seatCourtId) {
+                $cell = collect($row['courts'])->firstWhere('court_id', (int) $this->seatCourtId);
+                if (! $cell || $cell['is_booked'] || $cell['is_held'] || ! $cell['allowed']) {
+                    $free = false;
+                }
+            } elseif (($row['available'] ?? 0) < 1) {
+                $free = false;
+            }
+            $mins = $n * $len;
+            $end = $start === null ? null : $start + $mins;
+            $out[] = [
+                'units' => $n,
+                'minutes' => $mins,
+                'label' => $mins < 60 ? $mins.' min' : ($mins === 60 ? '1 hr' : intdiv($mins, 60).($mins % 60 ? '½' : '').' hrs'),
+                'until' => $end === null ? '' : Carbon::today()->addMinutes($end)->format('g:i A'),
+                'free' => $free,
+            ];
+        }
+
+        return $out;
+    }
+
+    /** @return array<string, mixed>|null */
+    public function openBlock(): ?array
+    {
+        if ($this->openBlockId === null || $this->venue() === null) {
+            return null;
+        }
+        $b = VenueBlock::query()->where('venue_id', $this->venue()->id)->find((int) $this->openBlockId);
+        if ($b === null) {
+            return null;
+        }
+
+        return VenueDayGrid::block($b) + [
+            'court' => $b->court?->name ?? 'Every court',
+            'by' => $b->created_by ? \App\Models\User::query()->whereKey($b->created_by)->value('name') : null,
+            'time' => $b->isAllDay() ? 'All day' : self::clock($b->start_time).' – '.self::clock($b->end_time),
+        ];
     }
 
     public function showBooking(int $id): void
@@ -426,6 +521,8 @@ class VenueBookings extends Page
         $this->seatSlotId = null;
         $this->seatCourtId = null;
         $this->openBookingId = null;
+        $this->openBlockId = null;
+        $this->blockNote = '';
         $this->guestName = '';
         $this->guestPhone = '';
         $this->resetValidation();
@@ -477,6 +574,87 @@ class VenueBookings extends Page
             ->send();
 
         $this->justBookedId = $booking->id;
+        $this->closeSheets();
+        unset($this->grid, $this->stats);
+    }
+
+    /**
+     * Take the court out of sale for this time — maintenance, a private hire, coaching.
+     * Written as a one-off VenueBlock, which reserveVenue() already refuses, so the app,
+     * the web and WhatsApp can't sell it either.
+     */
+    public function blockSlot(): void
+    {
+        $venue = $this->venue();
+        if ($venue === null || $this->seatSlotId === null) {
+            return;
+        }
+
+        $this->validate([
+            'blockKind' => ['required', 'in:'.implode(',', array_keys(self::BLOCK_REASONS))],
+            'blockNote' => ['nullable', 'string', 'max:120'],
+            'hours'     => ['required', 'integer', 'min:1', 'max:6'],
+        ], [], ['blockNote' => 'note']);
+
+        $opt = collect($this->durationOptions())->firstWhere('units', (int) $this->hours);
+        if ($opt === null || ! $opt['free']) {
+            Notification::make()->title('Couldn\'t block that')->body('Part of that time is already booked or blocked. Pick a shorter time.')->danger()->send();
+
+            return;
+        }
+
+        $slot = collect($this->grid()['slots'] ?? [])->firstWhere('slot_id', (int) $this->seatSlotId);
+        $start = BookingService::timeToMinutes($slot['time'] ?? null);
+        if ($start === null) {
+            return;
+        }
+        $end = min(24 * 60, $start + (int) $opt['minutes']);
+        $hm = fn (int $m): string => $m >= 24 * 60 ? '24:00' : sprintf('%02d:%02d', intdiv($m, 60), $m % 60);
+
+        // A court that isn't this venue's can't be blocked from here.
+        $courtId = $this->seatCourtId ? (int) $this->seatCourtId : null;
+        if ($courtId !== null && ! $venue->courts()->whereKey($courtId)->exists()) {
+            return;
+        }
+
+        VenueBlock::query()->create([
+            'venue_id' => $venue->id,
+            'venue_court_id' => $courtId,
+            'kind' => $this->blockKind,
+            'title' => trim((string) $this->blockNote) ?: null,
+            'starts_on' => $this->date,
+            'ends_on' => $this->date,
+            'weekday' => null,
+            'start_time' => $hm($start),
+            'end_time' => $hm($end),
+            'created_by' => auth()->id(),
+        ]);
+
+        Notification::make()
+            ->title('Court blocked')
+            ->body((self::BLOCK_REASONS[$this->blockKind] ?? 'Blocked').' · '.self::clock($hm($start)).' – '.self::clock($hm($end)))
+            ->success()
+            ->send();
+
+        $this->closeSheets();
+        unset($this->grid, $this->stats);
+    }
+
+    /** Lift a one-off block set at the desk. Recurring and whole-venue blocks stay put. */
+    public function unblock(int $id): void
+    {
+        $venue = $this->venue();
+        $b = $venue ? VenueBlock::query()->where('venue_id', $venue->id)->find($id) : null;
+        if ($b === null) {
+            return;
+        }
+        if (! VenueDayGrid::block($b)['removable']) {
+            Notification::make()->title('This block repeats or covers the whole venue')->body('Ask Haraan to change it.')->warning()->send();
+
+            return;
+        }
+        $b->delete();
+        Notification::make()->title('Court open again')->success()->send();
         $this->closeSheets();
         unset($this->grid, $this->stats);
     }

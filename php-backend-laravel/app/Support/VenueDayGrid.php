@@ -6,6 +6,7 @@ namespace App\Support;
 
 use App\Models\Booking;
 use App\Models\Venue;
+use App\Models\VenueBlock;
 use App\Models\VenueBlockedDate;
 use App\Models\VenueCourt;
 use App\Models\VenueSlot;
@@ -86,12 +87,40 @@ final class VenueDayGrid
 
         $day = Carbon::parse($date);
 
-        $rows = $slots->map(function (VenueSlot $s) use ($bySlot, $byCell, $holdsBySlot, $holdsByCell, $courts, $day, $venue): array {
+        // Maintenance, private hire, coaching… (VenueBlock) take a court-hour without being
+        // a booking. reserveVenue() already refuses them; the grid says so too, so no one
+        // is offered a cell the engine would turn down.
+        $blocks = VenueBlock::query()->applyingOn($venue->id, $day)->get();
+        $blockFor = static function (int $courtId, ?int $start) use ($blocks, $length): ?VenueBlock {
+            foreach ($blocks as $bl) {
+                if (! $bl->coversCourt($courtId)) {
+                    continue;
+                }
+                if ($bl->isAllDay() || $start === null) {
+                    return $bl;
+                }
+                $bs = BookingService::timeToMinutes($bl->start_time);
+                $be = BookingService::endMinutes($bl->end_time);
+                if ($bs === null || $be === null || ($start < $be && $start + $length > $bs)) {
+                    return $bl;
+                }
+            }
+
+            return null;
+        };
+
+        $rows = $slots->map(function (VenueSlot $s) use ($bySlot, $byCell, $holdsBySlot, $holdsByCell, $courts, $day, $venue, $blockFor): array {
             $b = $bySlot->get($s->id) ?? collect();
             $sHeld = $holdsBySlot->get($s->id) ?? collect();
-            $cells = $courts->map(function (VenueCourt $c) use ($s, $byCell, $holdsByCell, $day, $venue): array {
+            $start = BookingService::timeToMinutes($s->time);
+            $blockedFree = 0;
+            $cells = $courts->map(function (VenueCourt $c) use ($s, $byCell, $holdsByCell, $day, $venue, $blockFor, $start, &$blockedFree): array {
                 $cb = $byCell->get($c->id.'-'.$s->id) ?? collect();
                 $ch = $holdsByCell->get($c->id.'-'.$s->id) ?? collect();
+                $bl = $cb->isEmpty() ? $blockFor((int) $c->id, $start) : null;
+                if ($bl !== null && $s->allowsCourt($c)) {
+                    $blockedFree++;
+                }
                 // The rate this cell would actually CHARGE — peak included. Showing the
                 // base rate here while reserveVenue() bills the peak one would have the
                 // desk quoting a price the customer is never charged.
@@ -111,7 +140,9 @@ final class VenueDayGrid
                     // Whether this court may be sold at all at this time — decided here
                     // so it matches what reserveVenue() will accept. False cells are
                     // unsellable, not merely busy.
-                    'allowed'   => $s->allowsCourt($c),
+                    // A blocked court-hour is not for sale either; `block` says why.
+                    'allowed'   => $s->allowsCourt($c) && $bl === null,
+                    'block'     => $bl === null ? null : self::block($bl),
                     'bookings'  => $cb->map(fn (Booking $x): array => self::booking($x))->values(),
                 ];
             })->values();
@@ -128,7 +159,7 @@ final class VenueDayGrid
                 // Held court-hours are out of stock without being sold, so they come
                 // off `available` while staying out of `booked`.
                 'held'      => $sHeld->count(),
-                'available' => max((int) $s->capacity - $b->count() - $sHeld->count(), 0),
+                'available' => max((int) $s->capacity - $b->count() - $sHeld->count() - $blockedFree, 0),
                 'is_open'   => (bool) $s->is_available,
                 'bookings'  => $b->map(fn (Booking $x): array => self::booking($x))->values(),
                 'courts'    => $cells,
@@ -145,6 +176,28 @@ final class VenueDayGrid
                 'sports' => $c->sportsList(),
             ])->values(),
             'slots'      => $rows,
+        ];
+    }
+
+    /**
+     * A block as the desk shows it. `removable` = a one-off the desk itself can lift;
+     * recurring or whole-venue blocks are managed where they were set up.
+     *
+     * @return array<string, mixed>
+     */
+    public static function block(VenueBlock $b): array
+    {
+        return [
+            'id'        => $b->id,
+            'kind'      => $b->kind,
+            'label'     => $b->label(),
+            'reason'    => VenueBlock::KINDS[$b->kind] ?? ucfirst((string) $b->kind),
+            'note'      => $b->title,
+            'start'     => $b->start_time,
+            'end'       => $b->end_time,
+            'all_day'   => $b->isAllDay(),
+            'whole'     => $b->venue_court_id === null,
+            'removable' => $b->weekday === null && $b->starts_on?->isSameDay($b->ends_on) && $b->venue_court_id !== null,
         ];
     }
 

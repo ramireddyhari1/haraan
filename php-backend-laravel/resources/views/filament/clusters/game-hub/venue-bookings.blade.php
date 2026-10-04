@@ -30,6 +30,11 @@
     $seatCourt = $this->seatCourtId ? collect($courts)->firstWhere('id', (int) $this->seatCourtId) : null;
     $seatCell = $seatSlot && $seatCourt ? collect($seatSlot['courts'])->firstWhere('court_id', (int) $this->seatCourtId) : null;
     $seatPrice = (float) ($seatCell['price'] ?? $seatSlot['price'] ?? 0);
+    $durations = $seatSlot ? $this->durationOptions() : [];
+    $picked = collect($durations)->firstWhere('units', (int) $this->hours);
+    $perLabel = $len < 60 ? 'per ' . $len . ' min' : 'an hour';
+    $seatFrom = $seatSlot ? $this::clock($seatSlot['time']) : '';
+    $block = $this->openBlock();
 @endphp
 
 <x-filament-panels::page>
@@ -251,6 +256,14 @@
                                 <b>In checkout</b>
                                 <span>held while they pay</span>
                             </div>
+                        @elseif (! empty($cell['block']))
+                            @php $bk = $cell['block']; @endphp
+                            <button type="button" wire:key="{{ $cellKey }}" wire:click="showBlock({{ $bk['id'] }})" data-press @if ($isPast && ! $isPastDay) data-past @endif
+                                    @class(['vdb-cell', 'is-blocked', 'is-past' => $isPast]) aria-label="Blocked: {{ $bk['reason'] }}">
+                                <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.6"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7"/></svg>
+                                <b>{{ $bk['reason'] }}</b>
+                                <span>{{ $bk['note'] ?: ($bk['all_day'] ? 'all day' : 'till ' . $this::clock($bk['end'])) }}</span>
+                            </button>
                         @elseif (! $cell['allowed'])
                             <div wire:key="{{ $cellKey }}" @if ($isPast && ! $isPastDay) data-past @endif class="vdb-cell is-off" title="This court isn't sold at this time">
                                 <span>Not sold</span>
@@ -290,14 +303,33 @@
                    role="dialog" aria-label="Seat a walk-in">
                 <header class="vdb-sheet-head">
                     <div>
-                        <div class="vdb-lab">Walk-in</div>
-                        <h3>{{ $seatCourt['name'] ?? $grid['venue']['name'] }} · {{ $this::clock($seatSlot['time']) }}</h3>
-                        <p>{{ $dayLabel }} · {{ $inr($seatPrice) }} an hour @if ($seatCell['is_peak'] ?? false)(peak)@endif</p>
+                        <div class="vdb-lab">{{ $this->sheetMode === 'block' ? 'Block court' : 'Walk-in' }}</div>
+                        <h3>{{ $seatCourt['name'] ?? $grid['venue']['name'] }} · {{ $seatFrom }}</h3>
+                        <p>{{ $dayLabel }} · {{ $inr($seatPrice) }} {{ $perLabel }} @if ($seatCell['is_peak'] ?? false)(peak)@endif</p>
                     </div>
                     <button type="button" class="vdb-x" x-on:click="close()" aria-label="Close"><svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
                 </header>
 
-                <form wire:submit="seat" class="vdb-form">
+                <form wire:submit="{{ $this->sheetMode === 'block' ? 'blockSlot' : 'seat' }}" class="vdb-form">
+                    <div class="vdb-modes" role="tablist">
+                        <button type="button" role="tab" wire:click="$set('sheetMode', 'walkin')" data-press @class(['is-on' => $this->sheetMode !== 'block'])>
+                            <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="4.6" r="2.4"/><path d="M3.5 14c.4-2.9 2.2-4.6 4.5-4.6s4.1 1.7 4.5 4.6"/></svg>Walk-in
+                        </button>
+                        <button type="button" role="tab" wire:click="$set('sheetMode', 'block')" data-press @class(['is-on' => $this->sheetMode === 'block'])>
+                            <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.6"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7"/></svg>Block slot
+                        </button>
+                    </div>
+
+                    @if ($this->sheetMode === 'block')
+                    <div class="vdb-field">
+                        <span>Why</span>
+                        <div class="vdb-seg vdb-reasons">
+                            @foreach ($this::BLOCK_REASONS as $k => $label)
+                                <button type="button" wire:click="$set('blockKind', '{{ $k }}')" data-press @class(['is-on' => $this->blockKind === $k])>{{ $label }}</button>
+                            @endforeach
+                        </div>
+                    </div>
+                    @else
                     <label class="vdb-field">
                         <span>Name</span>
                         <input x-ref="name" type="text" wire:model="guestName" placeholder="Who's playing?" autocomplete="off" maxlength="120">
@@ -315,17 +347,39 @@
                         @error('guestPhone')<em>{{ $message }}</em>@enderror
                     </label>
 
+                    @endif
+
                     <div class="vdb-field">
-                        <span>How long</span>
-                        <div class="vdb-seg">
-                            @foreach ([1, 2, 3] as $h)
-                                <button type="button" wire:click="$set('hours', '{{ $h }}')" data-press @class(['is-on' => (int) $this->hours === $h])>
-                                    {{ $h }} {{ \Illuminate\Support\Str::plural('hr', $h) }}
+                        <span>How long <small>from {{ $seatFrom }}</small></span>
+                        <div class="vdb-dur">
+                            @foreach ($durations as $o)
+                                <button type="button" wire:click="$set('hours', '{{ $o['units'] }}')" data-press @disabled(! $o['free'])
+                                        @class(['is-on' => (int) $this->hours === $o['units'], 'is-off' => ! $o['free']])>
+                                    <b>{{ $o['label'] }}</b>
+                                    <small>{{ $o['free'] ? 'till ' . $o['until'] : 'taken' }}</small>
                                 </button>
                             @endforeach
                         </div>
                     </div>
 
+                    @if ($this->sheetMode === 'block')
+                    <label class="vdb-field">
+                        <span>Note <small>optional — only your team sees it</small></span>
+                        <input type="text" wire:model="blockNote" placeholder="e.g. Net repair, Coach Ravi's batch" autocomplete="off" maxlength="120">
+                        @error('blockNote')<em>{{ $message }}</em>@enderror
+                    </label>
+
+                    <div class="vdb-sheet-foot">
+                        <div class="vdb-total">
+                            <span>Not bookable by anyone</span>
+                            <b>{{ $seatFrom }}{{ $picked ? ' – ' . $picked['until'] : '' }}</b>
+                        </div>
+                        <button type="submit" class="vdb-primary is-ink" data-haptic wire:loading.attr="disabled" wire:target="blockSlot">
+                            <span wire:loading.remove wire:target="blockSlot">Block court</span>
+                            <span wire:loading wire:target="blockSlot">Blocking…</span>
+                        </button>
+                    </div>
+                    @else
                     <div class="vdb-field">
                         <span>Payment</span>
                         <div class="vdb-seg">
@@ -337,7 +391,7 @@
 
                     <div class="vdb-sheet-foot">
                         <div class="vdb-total">
-                            <span>{{ (int) $this->hours }} × {{ $inr($seatPrice) }}</span>
+                            <span>{{ $seatFrom }}{{ $picked ? ' – ' . $picked['until'] : '' }} · {{ (int) $this->hours }} × {{ $inr($seatPrice) }}</span>
                             <b>{{ $inr($seatPrice * (int) $this->hours) }}</b>
                         </div>
                         <button type="submit" class="vdb-primary" data-haptic wire:loading.attr="disabled" wire:target="seat">
@@ -345,8 +399,50 @@
                             <span wire:loading wire:target="seat">Booking…</span>
                         </button>
                     </div>
-                    <p class="vdb-fine">Price is what the court charges at this hour, peak included. Longer bookings run into the next hours if they're free.</p>
+                    <p class="vdb-fine">Price is what the court charges at this time, peak included. Longer bookings run into the next slots if they're free.</p>
+                    @endif
                 </form>
+            </aside>
+        </div>
+        </template></div>
+    @endif
+
+    {{-- ── Block sheet ─────────────────────────────────────────────────── --}}
+    @if ($block)
+        <div wire:key="blk-{{ $block['id'] }}"><template x-teleport="body">
+        <div class="vdb-sheet-wrap"
+             x-data="{ show: false, close() { this.show = false; setTimeout(() => window.dispatchEvent(new CustomEvent('vdb-close')), 180) } }"
+             x-init="$nextTick(() => show = true)"
+             x-on:keydown.escape.window="close()">
+            <div class="vdb-scrim" x-show="show" x-transition.opacity.duration.180ms x-on:click="close()"></div>
+            <aside class="vdb-sheet" x-show="show"
+                   x-transition:enter="vdb-sheet-in" x-transition:enter-start="vdb-sheet-from" x-transition:enter-end="vdb-sheet-to"
+                   x-transition:leave="vdb-sheet-out" x-transition:leave-start="vdb-sheet-to" x-transition:leave-end="vdb-sheet-from"
+                   role="dialog" aria-label="Blocked court">
+                <header class="vdb-sheet-head">
+                    <div class="vdb-who">
+                        <span class="vdb-av vdb-lockav"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.6"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7"/></svg></span>
+                        <div>
+                            <h3>{{ $block['reason'] }}</h3>
+                            <p>Not bookable by anyone</p>
+                        </div>
+                    </div>
+                    <button type="button" class="vdb-x" x-on:click="close()" aria-label="Close"><svg viewBox="0 0 16 16"><path d="m4 4 8 8M12 4l-8 8"/></svg></button>
+                </header>
+                <dl class="vdb-facts">
+                    <div><dt>When</dt><dd>{{ $block['time'] }}</dd></div>
+                    <div><dt>Court</dt><dd>{{ $block['court'] }}</dd></div>
+                    @if ($block['note'])<div><dt>Note</dt><dd>{{ $block['note'] }}</dd></div>@endif
+                    @if ($block['by'])<div><dt>Blocked by</dt><dd>{{ $block['by'] }}</dd></div>@endif
+                </dl>
+                <div class="vdb-actions">
+                    @if ($block['removable'])
+                        <button type="button" class="vdb-primary" data-haptic wire:click="unblock({{ $block['id'] }})"
+                                wire:confirm="Open this court again? Players can book it straight away.">Unblock court</button>
+                    @else
+                        <p class="vdb-fine">This block repeats or covers the whole venue, so it's changed by Haraan, not from the desk.</p>
+                    @endif
+                </div>
             </aside>
         </div>
         </template></div>
@@ -547,6 +643,25 @@
     .vdb-cell.is-held svg{width:15px;height:15px;}
     .vdb-cell.is-held b{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;}
     .vdb-cell.is-held span{font-size:10.5px;color:var(--ink3);}
+    .vdb-cell.is-blocked{background:repeating-linear-gradient(135deg,#f1f5f9 0 6px,#e9eef5 6px 12px);border:1px solid #d5dce7;align-items:center;justify-content:center;gap:1px;color:#475569;text-align:center;}
+    .vdb-cell.is-blocked svg{width:15px;height:15px;}
+    .vdb-cell.is-blocked b{font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;}
+    .vdb-cell.is-blocked span{font-size:10.5px;color:var(--ink3);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+    .vdb-modes{display:flex;gap:4px;padding:4px;border-radius:14px;background:#f1f4f9;}
+    .vdb-modes button{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:42px;border:0;border-radius:11px;background:none;font-size:13.5px;font-weight:700;color:var(--ink3);transition:background-color .18s,color .18s,box-shadow .18s;}
+    .vdb-modes button svg{width:16px;height:16px;}
+    .vdb-modes button.is-on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(15,23,42,.12);}
+    .vdb-dur{display:grid;grid-template-columns:repeat(auto-fit,minmax(70px,1fr));gap:6px;}
+    .vdb-dur button{display:flex;flex-direction:column;align-items:center;gap:2px;min-height:54px;padding:6px 4px;border-radius:12px;border:1px solid var(--line);background:#fff;color:var(--ink);transition:background-color .15s,border-color .15s,color .15s,transform .12s var(--ease);}
+    .vdb-dur button b{font-size:14px;font-weight:750;}
+    .vdb-dur button small{font-size:10.5px;color:var(--ink3);font-variant-numeric:tabular-nums;}
+    .vdb-dur button.is-on{background:#eef3ff;border-color:var(--blue);}
+    .vdb-dur button.is-on b{color:var(--blue2);}
+    .vdb-dur button.is-off{opacity:.45;cursor:not-allowed;text-decoration:line-through;}
+    .vdb-reasons{display:grid;grid-template-columns:1fr 1fr;}
+    .vdb-primary.is-ink{background:#0f172a;}
+    .vdb-lockav{background:#334155 !important;}
+    .vdb-lockav svg{width:20px;height:20px;stroke:#fff;}
     .vdb-cell.is-off{background:repeating-linear-gradient(135deg,#f8fafc 0 7px,#f1f5f9 7px 14px);border-style:dashed;align-items:center;justify-content:center;}
     .vdb-cell.is-off span{font-size:10.5px;font-weight:700;color:var(--ink4);}
     .vdb-cell.is-gone{background:#fafbfc;border-color:var(--line2);align-items:center;justify-content:center;color:#cbd5e1;}
