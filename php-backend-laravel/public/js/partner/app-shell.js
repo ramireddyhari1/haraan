@@ -798,6 +798,8 @@
         wireHome(host);
         countUps(host);
         placeSegs(host);
+        // Home has real numbers on screen: the launch splash can go (PartnerSplash.php).
+        document.dispatchEvent(new Event('ha:ready'));
         // A payment that arrived since the last draw lands with the app's money buzz.
         if (home.payFresh && document.visibilityState === 'visible' && navigator.vibrate) {
             try { navigator.vibrate([12, 60, 22]); } catch (err) { /* none */ }
@@ -2046,6 +2048,9 @@
             renderCompact();
             if (home.data && document.getElementById('ha-home')) renderHome();
             loadHome(!!home.data);
+        } else {
+            // Any other page is drawn as soon as it mounts; Home waits for its data.
+            document.dispatchEvent(new Event('ha:ready'));
         }
     }
 

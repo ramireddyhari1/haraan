@@ -89,6 +89,19 @@ class PartnerPanelProvider extends PanelProvider
             },
         );
 
+        // The launch screen on a phone / the iPhone home-screen app (App\Support\PartnerSplash):
+        // iOS launch images plus a page splash where the wordmark fills blue until the app
+        // has drawn. Every partner page including sign-in, since that is where a cold
+        // open of the installed app lands when signed out.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::HEAD_END,
+            fn (): string => \Filament\Facades\Filament::getCurrentPanel()?->getId() === 'partner' ? \App\Support\PartnerSplash::head() : '',
+        );
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::BODY_START,
+            fn (): string => \Filament\Facades\Filament::getCurrentPanel()?->getId() === 'partner' ? \App\Support\PartnerSplash::body() : '',
+        );
+
         // The console as an installable web app — the iPhone partner app. Manifest +
         // Apple meta make "Add to Home Screen" open it full screen with the Partner
         // icon; pwa.js registers the service worker, shows the install guide in an
