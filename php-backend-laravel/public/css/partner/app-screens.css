@@ -63,16 +63,46 @@ html.ha-app.ha-full .ha-nav-cap { opacity: .9; box-shadow: 0 10px 20px -6px rgba
 .ha-vtoday { margin-top: 18px; align-items: flex-end; }
 .ha-vtoday b { font-size: 13px; font-weight: 700; }
 .ha-vtoday small { font-size: 12.5px; color: var(--ha-muted); }
-.ha-strip { display: flex; gap: 3px; height: 34px; margin-top: 8px; }
-.ha-strip.is-dense { gap: 1.5px; }
-.ha-strip-b { position: relative; flex: 1 1 0; border-radius: 5px; background: #E6EDFA; overflow: hidden; }
-.ha-strip-b.is-past { background: #EDF0F4; }
-.ha-strip-b > i { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 5px; background: linear-gradient(#4D8BFF, #2563EB); transform-origin: bottom; animation: ha-barup .7s cubic-bezier(.2, .8, .2, 1) both; animation-delay: calc(180ms + var(--i) * 25ms); }
-.ha-strip-b.is-past > i { background: linear-gradient(#B9C3D3, #A7B2C4); }
-.ha-strip-b > em { position: absolute; top: -2px; bottom: -2px; width: 2px; margin-left: -1px; background: #1E40AF; }
+/* Today as one timeline (dayStrip): booked share, played hours, a Now marker */
+.ha-tline { position: relative; margin-top: 10px; padding-top: 2px; }
+.ha-tline-cells { display: flex; gap: 2px; height: 22px; }
+.ha-tline-cells.is-dense { gap: 1px; }
+.ha-tl-c { position: relative; flex: 1 1 0; border-radius: 4px; background: #EEF3FC; box-shadow: inset 0 0 0 1px rgba(37, 99, 235, .08); overflow: hidden; }
+.ha-tl-c:first-child { border-radius: 8px 4px 4px 8px; }
+.ha-tl-c:last-child { border-radius: 4px 8px 8px 4px; }
+.ha-tl-c > i { position: absolute; left: 0; right: 0; bottom: 0; background: linear-gradient(#4D8BFF, #1D4ED8); transform-origin: bottom; animation: ha-barup .6s cubic-bezier(.22, .9, .24, 1) both; animation-delay: calc(150ms + var(--i) * 18ms); }
+.ha-tl-c.is-past { background: repeating-linear-gradient(135deg, #F4F6F9 0 4px, #ECEFF4 4px 8px); box-shadow: none; }
+.ha-tl-c.is-past > i { background: #B6C1D2; }
+.ha-tline-now { position: absolute; top: -4px; bottom: 18px; width: 2px; margin-left: -1px; border-radius: 2px; background: #0B1C46; pointer-events: none; }
+.ha-tline-now em { position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); margin-bottom: 2px; padding: 1px 6px; border-radius: 99px; background: #0B1C46; color: #fff; font-style: normal; font-size: 9.5px; font-weight: 800; letter-spacing: .3px; }
+.ha-tline-axis { position: relative; height: 16px; margin-top: 5px; }
+.ha-tline-axis small { position: absolute; top: 0; transform: translateX(-50%); font-size: 10.5px; font-weight: 600; color: #94A3B8; white-space: nowrap; }
+.ha-tline-axis small.is-start { transform: none; }
+.ha-tline-axis small.is-end { transform: translateX(-100%); }
+.ha-vtoday + .ha-tline { margin-top: 22px; }
+
+/* No photo: the venue's own courts, drawn from above (courtsBanner) */
+.ha-cbanner { position: relative; padding: 46px 14px 14px; border-radius: 22px 22px 0 0; overflow: hidden;
+    background: radial-gradient(120% 90% at 50% 0%, #EAF2FF 0%, #F5F8FD 60%, #fff 100%); border-bottom: 1px solid #EEF2F7; }
+.ha-cbanner .ha-vpill { position: absolute; top: 12px; left: 14px; margin: 0; box-shadow: 0 1px 2px rgba(15, 23, 42, .08); }
+.ha-cb-row { display: flex; justify-content: center; align-items: flex-end; gap: 12px; }
+.ha-cb-court { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; min-width: 0; animation: ha-rise .4s cubic-bezier(.22, .9, .24, 1) both; animation-delay: calc(80ms + var(--i) * 60ms); }
+.ha-cb-court .ha-minicourt { width: 58px; height: 74px; filter: drop-shadow(0 6px 10px rgba(30, 64, 175, .14)); }
+.ha-cb-court b { max-width: 72px; font-size: 11.5px; font-weight: 700; color: var(--ha-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ha-cb-court em { position: absolute; top: -9px; left: 50%; transform: translateX(-50%); padding: 2px 7px; border-radius: 99px; background: #16A34A; color: #fff; font-style: normal; font-size: 9px; font-weight: 800; letter-spacing: .3px; white-space: nowrap; box-shadow: 0 4px 8px -4px rgba(22, 163, 74, .8); }
+.ha-cb-court.is-live .ha-minicourt { filter: drop-shadow(0 0 0 #16A34A) drop-shadow(0 6px 12px rgba(22, 163, 74, .35)); }
+.ha-cb-more { align-self: center; padding: 6px 10px; border-radius: 99px; background: #fff; font-size: 12px; font-weight: 700; color: var(--ha-muted); box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .08); }
+
+/* Courts list: each court's own rail of today's slots */
+.ha-crail { display: flex; gap: 2px; margin-top: 8px; height: 6px; max-width: 220px; }
+.ha-crail i { flex: 1 1 0; border-radius: 2px; background: #E3EBF8; }
+.ha-crail i.is-b { background: #2563EB; }
+.ha-crail i.is-p { background: #EEF1F5; }
+.ha-court-count { flex: none; display: flex; flex-direction: column; align-items: flex-end; align-self: flex-start; padding-top: 2px; }
+.ha-court-count b { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ha-court-count small { font-size: 10.5px; color: var(--ha-muted); white-space: nowrap; }
+.ha-court:active { background: rgba(37, 99, 235, .04); }
 .ha-strip-empty { height: 34px; margin-top: 8px; border-radius: 9px; background: #F1F4F8; display: grid; place-items: center; font-size: 12px; color: var(--ha-faint); }
-.ha-strip-ends { justify-content: space-between; margin-top: 5px; }
-.ha-strip-ends small { font-size: 11px; color: var(--ha-faint); }
 .ha-vfacts { display: flex; align-items: center; margin-top: 16px; padding: 12px 0; border-radius: 14px; background: #F7F9FC; }
 .ha-vfacts > span { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 0 10px; text-align: center; }
 .ha-vfacts > span.is-wide { flex: 1.2; }
@@ -132,10 +162,6 @@ html.ha-app.ha-full .ha-nav-cap { opacity: .9; box-shadow: 0 10px 20px -6px rgba
 .ha-court small { display: block; font-size: 12.5px; color: var(--ha-muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ha-court em { display: block; font-style: normal; font-size: 12.5px; font-weight: 600; color: #1E40AF; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ha-court em.is-amber { color: #B45309; }
-.ha-court-fill { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; }
-.ha-court-fill b { font-size: 15px; }
-.ha-court-fill > i { display: block; width: 54px; height: 5px; border-radius: 99px; background: #E6EDFA; overflow: hidden; }
-.ha-court-fill > i > i { display: block; height: 100%; background: var(--ha-blue); border-radius: 99px; }
 .ha-mrow { display: flex; align-items: center; gap: 14px; width: 100%; padding: 12px 18px; border: 0; background: none; text-align: left; cursor: pointer; color: var(--ha-ink); }
 .ha-mrow:active { background: #F7F9FC; }
 .ha-mic { width: 36px; height: 36px; flex: none; border-radius: 11px; background: #EFF4FF; color: var(--ha-blue); display: grid; place-items: center; }
@@ -459,7 +485,7 @@ html.ha-app.ha-full .ha-nav-cap { opacity: .9; box-shadow: 0 10px 20px -6px rgba
 .ha-manual-go:disabled { background: rgba(255, 255, 255, .12); color: rgba(255, 255, 255, .4); }
 
 @media (prefers-reduced-motion: reduce) {
-    .ha-tab > *, .ha-payrow, .ha-strip-b > i, .ha-pass, .ha-stamp, .ha-rim-line, .ha-rim-glow { animation: none !important; }
+    .ha-tab > *, .ha-payrow, .ha-tl-c > i, .ha-cb-court, .ha-pass, .ha-stamp, .ha-rim-line, .ha-rim-glow { animation: none !important; }
 }
 
 } /* end phone */

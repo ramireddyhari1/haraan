@@ -326,8 +326,8 @@
     /** A court in miniature, marked for its sport (MiniCourt in CourtsDay.kt). */
     function miniCourt(kind) {
         var grass = kind === 'football' || kind === 'cricket';
-        var c = grass ? '#9FD1AE' : '#A9BFE6';
-        var bg = grass ? '#E3F4E8' : '#E8F0FB';
+        var c = grass ? '#8FC8A0' : '#86A8E4';
+        var bg = grass ? '#E3F4E8' : '#E4EDFC';
         var W = 44, H = 56, x = 4, y = 4, w = 36, hh = 48, cx = 22, cy = 28;
         var m = '';
         if (kind === 'racket') {
@@ -337,7 +337,7 @@
         } else if (kind === 'cricket') {
             m = '<rect x="15.9" y="8.8" width="12.2" height="38.4"/><line x1="13.9" y1="13.6" x2="30.1" y2="13.6"/><line x1="13.9" y1="42.4" x2="30.1" y2="42.4"/>';
         } else {
-            m = '<rect x="4" y="4" width="36" height="48"/><line x1="4" y1="28" x2="40" y2="28"/>';
+            m = '<rect x="4" y="4" width="36" height="48"/><line x1="4" y1="28" x2="40" y2="28"/><circle cx="22" cy="28" r="6"/><line x1="14" y1="4" x2="14" y2="10"/><line x1="30" y1="4" x2="30" y2="10"/><line x1="14" y1="46" x2="14" y2="52"/><line x1="30" y1="46" x2="30" y2="52"/>';
         }
         var bands = grass ? '<rect x="0" y="9.3" width="44" height="9.3" fill="#D6EEDD"/><rect x="0" y="28" width="44" height="9.3" fill="#D6EEDD"/><rect x="0" y="46.7" width="44" height="9.3" fill="#D6EEDD"/>' : '';
         return '<svg class="ha-minicourt" viewBox="0 0 44 56" aria-hidden="true"><defs><clipPath id="ha-mc"><rect width="44" height="56" rx="8"/></clipPath></defs>'
@@ -345,19 +345,60 @@
             + '<g fill="none" stroke="' + c + '" stroke-width="1">' + m + '</g></svg>';
     }
 
+    /** "₹6.7L" for the big all-time figures, so a stat never wraps; exact below a lakh. */
+    function shortInr(n) {
+        n = Math.round(Number(n) || 0);
+        if (n >= 10000000) return '₹' + (n / 10000000).toFixed(1).replace(/\.0$/, '') + 'Cr';
+        if (n >= 100000) return '₹' + (n / 100000).toFixed(1).replace(/\.0$/, '') + 'L';
+        return rupees(n);
+    }
+
+    /**
+     * Today as one timeline: a cell per slot — booked share filled blue, open ones light,
+     * played ones faded — with a "Now" marker and the hours under it.
+     */
     function dayStrip(hours, now, len) {
         if (!hours.length) return '<div class="ha-strip-empty">Nothing on sale today</div>';
-        var n = hours.length;
-        var bars = hours.map(function (x, i) {
+        var n = hours.length, first = hours[0].start, end = hours[n - 1].start + len, span = end - first;
+        var cells = hours.map(function (x, i) {
             var past = x.start + len <= now;
             var fill = x.total > 0 && x.booked > 0 ? x.booked / x.total : 0;
-            var nowAt = now >= x.start && now < x.start + len ? (now - x.start) / len : null;
-            return '<span class="ha-strip-b' + (past ? ' is-past' : '') + '" style="--i:' + i + '">'
-                + (fill ? '<i style="height:' + (fill * 100) + '%"></i>' : '')
-                + (nowAt != null ? '<em style="left:' + (nowAt * 100) + '%"></em>' : '') + '</span>';
+            return '<span class="ha-tl-c' + (past ? ' is-past' : '') + (fill >= 1 ? ' is-full' : '') + '" style="--i:' + i + '">'
+                + (fill ? '<i style="height:' + Math.round(fill * 100) + '%"></i>' : '') + '</span>';
         }).join('');
-        return '<div class="ha-strip' + (n > 30 ? ' is-dense' : '') + '">' + bars + '</div>'
-            + '<div class="ha-row ha-strip-ends"><small>' + A.clock(hours[0].start) + '</small><small>' + A.clock(hours[n - 1].start + len) + '</small></div>';
+        var marks = [[first, A.clock(first)], [end, A.clock(end)]];
+        [720, 1080].forEach(function (m) { if (m - first > span * 0.18 && end - m > span * 0.18) marks.push([m, A.clock(m)]); });
+        var nowAt = now > first && now < end ? (now - first) / span * 100 : null;
+        return '<div class="ha-tline">' + '<div class="ha-tline-cells' + (n > 30 ? ' is-dense' : '') + '">' + cells + '</div>'
+            + (nowAt != null ? '<span class="ha-tline-now" style="left:' + nowAt.toFixed(2) + '%"><em>Now</em></span>' : '')
+            + '<div class="ha-tline-axis">' + marks.map(function (m) {
+                var at = (m[0] - first) / span * 100;
+                return '<small style="left:' + at.toFixed(2) + '%" class="' + (at <= 0 ? 'is-start' : at >= 100 ? 'is-end' : '') + '">' + esc(m[1]) + '</small>';
+            }).join('') + '</div></div>';
+    }
+
+    /**
+     * When there is no venue photo, the venue's own courts drawn from above, side by side,
+     * each marked for its sport and named; a court in play right now glows. Drawn from
+     * the court list and today's grid — no stock scenery.
+     */
+    function courtsBanner(room, pill) {
+        var courts = room.courts && room.courts.length ? room.courts : (room.today && room.today.courts) || [];
+        if (!courts.length) return '';
+        var now = A.minutesNow(), hours = hoursOf(room.today), len = slotLength(hours);
+        var live = {};
+        ((room.today && room.today.slots) || []).forEach(function (sl) {
+            var st = A.slotStart(sl.time || sl.label);
+            if (!isFinite(st) || now < st || now >= st + len) return;
+            (sl.courts || []).forEach(function (c) { if (c.is_booked || c.is_held) live[c.court_id] = true; });
+        });
+        var shown = courts.slice(0, 4);
+        return '<div class="ha-cbanner">' + pill
+            + '<div class="ha-cb-row">' + shown.map(function (c, i) {
+                var on = !!live[c.id];
+                return '<span class="ha-cb-court' + (on ? ' is-live' : '') + '" style="--i:' + i + '">' + miniCourt(courtKind(c.sports))
+                    + '<b>' + esc(cap(c.name)) + '</b>' + (on ? '<em>In play</em>' : '') + '</span>';
+            }).join('') + (courts.length > 4 ? '<span class="ha-cb-more">+' + (courts.length - 4) + '</span>' : '') + '</div></div>';
     }
 
     function venueHero(room) {
@@ -376,18 +417,19 @@
         var dir = directionsUrl(room.details);
         var courtsN = (room.courts && room.courts.length) || (room.today && room.today.courts && room.today.courts.length) || 0;
         var canP = A.can('pricing');
+        var banner = v.image ? '' : courtsBanner(room, pill(true));
         return '<section class="ha-vcard ha-vhero">'
-            + (v.image ? '<div class="ha-vphoto"><img src="' + esc(v.image) + '" alt="' + esc(v.name) + '" loading="lazy">' + pill(true) + '</div>' : '')
-            + '<div class="ha-vbody">' + (v.image ? '' : pill(false))
+            + (v.image ? '<div class="ha-vphoto"><img src="' + esc(v.image) + '" alt="' + esc(v.name) + '" loading="lazy">' + pill(true) + '</div>' : (banner || ''))
+            + '<div class="ha-vbody">' + (v.image || banner ? '' : pill(false))
             + '<h2>' + esc(v.name) + '</h2>'
             + (addr ? (dir ? '<a class="ha-vaddr" href="' + esc(dir) + '" target="_blank" rel="noopener">' : '<span class="ha-vaddr">') + mat('pin') + '<span>' + esc(addr) + '</span>' + (dir ? '</a>' : '</span>') : '')
             + '<button type="button" class="ha-hoursrow" data-hours="' + v.id + '">' + mat('schedule') + '<span>' + esc(hoursSummary(room.hours) || 'Set your opening hours') + '</span>'
             + (canP ? '<b>Edit</b>' : '') + mat('chevron') + '</button>'
             + '<div class="ha-row ha-vtoday"><b class="ha-grow">Today</b><small>' + (room.today == null ? 'Couldn’t load today' : room.today.is_blocked ? 'Marked closed' : total === 0 ? 'No slots today' : booked + ' of ' + total + ' booked') + '</small></div>'
             + dayStrip(hours, now, len)
-            + '<div class="ha-vfacts"><span><b>' + (total === 0 ? '—' : rupees(leftValue)) + '</b><small>left to sell today</small></span><i></i>'
-            + '<span><b>' + (courtsN || 1) + '</b><small>' + ((room.courts || []).length === 1 ? 'court' : 'courts') + '</small></span><i></i>'
-            + '<span class="is-wide"><b>' + rupees(v.revenue || 0) + '</b><small>earned · ' + (v.bookings || 0) + ' ' + (v.bookings === 1 ? 'booking' : 'bookings') + '</small></span></div>'
+            + '<div class="ha-vfacts"><span><b>' + (total === 0 ? '—' : shortInr(leftValue)) + '</b><small>to sell today</small></span><i></i>'
+            + '<span><b>' + (courtsN || 1) + '</b><small>' + (courtsN === 1 ? 'court' : 'courts') + '</small></span><i></i>'
+            + '<span><b>' + shortInr(v.revenue || 0) + '</b><small>' + (v.bookings || 0) + ' ' + (v.bookings === 1 ? 'booking' : 'bookings') + '</small></span></div>'
             + '<div class="ha-row ha-vacts">'
             + (A.urlOf('sales') ? '<a class="ha-vbtn is-main" href="' + esc(A.urlOf('sales')) + '">Open desk</a>' : '')
             + (canP && A.u.pricing ? '<a class="ha-vbtn" href="' + esc(A.u.pricing) + '">Slots &amp; pricing</a>' : '')
@@ -450,10 +492,12 @@
         var courts = room.courts || [];
         if (!courts.length) return '';
         var slots = (room.today && room.today.slots) || [];
+        var now = A.minutesNow(), len = slotLength(hoursOf(room.today));
         return '<section class="ha-vcard"><div class="ha-row ha-vhead"><b class="ha-grow">Courts</b><small class="ha-faint">Today</small></div>'
             + courts.map(function (c, i) {
                 var cells = [];
-                slots.forEach(function (s) { (s.courts || []).forEach(function (x) { if (x.court_id === c.id && x.allowed) cells.push(x); }); });
+                slots.forEach(function (s) { (s.courts || []).forEach(function (x) { if (x.court_id === c.id && x.allowed) cells.push({ c: x, start: A.slotStart(s.time || s.label) }); }); });
+                cells.forEach(function (x) { x.past = isFinite(x.start) && x.start + len <= now; Object.keys(x.c).forEach(function (k) { x[k] = x.c[k]; }); });
                 var booked = cells.filter(function (x) { return x.is_booked || x.is_held; }).length;
                 var prices = cells.map(function (x) { return x.price; }).filter(function (p) { return p > 0; });
                 var lo = prices.length ? Math.min.apply(null, prices) : 0, hi = prices.length ? Math.max.apply(null, prices) : 0;
@@ -464,8 +508,11 @@
                 var href = A.can('pricing') && A.u.pricing ? A.u.pricing : null;
                 return (i ? '<hr class="ha-hr ha-hr-78">' : '') + '<' + (href ? 'a href="' + esc(href) + '"' : 'div') + ' class="ha-court">' + miniCourt(courtKind(c.sports))
                     + '<span class="ha-grow"><b>' + esc(cap(c.name)) + '</b><small>' + esc((c.sports || []).join(' · ') || 'Any sport') + '</small>'
-                    + '<em class="' + (rate === 'No rate set' ? 'is-amber' : '') + '">' + esc([rate, peak].filter(Boolean).join(' · ')) + '</em></span>'
-                    + '<span class="ha-court-fill"><b>' + (cells.length ? booked + '/' + cells.length : '—') + '</b><i><i style="width:' + (cells.length ? booked / cells.length * 100 : 0) + '%"></i></i></span>'
+                    + '<em class="' + (rate === 'No rate set' ? 'is-amber' : '') + '">' + esc([rate, peak].filter(Boolean).join(' · ')) + '</em>'
+                    + (cells.length ? '<span class="ha-crail">' + cells.map(function (x) {
+                        return '<i class="' + (x.is_booked || x.is_held ? 'is-b' : x.past ? 'is-p' : '') + '"></i>';
+                    }).join('') + '</span>' : '') + '</span>'
+                    + '<span class="ha-court-count"><b>' + (cells.length ? booked : '—') + '</b><small>' + (cells.length ? 'of ' + cells.length + ' booked' : 'no slots') + '</small></span>'
                     + '</' + (href ? 'a' : 'div') + '>';
             }).join('') + '<div class="ha-pad6"></div></section>';
     }
