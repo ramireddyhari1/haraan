@@ -503,7 +503,7 @@
                 var lo = prices.length ? Math.min.apply(null, prices) : 0, hi = prices.length ? Math.max.apply(null, prices) : 0;
                 var rate = prices.length && lo !== hi ? '₹' + inr(lo) + '–' + inr(hi) + ' a slot today'
                     : prices.length ? '₹' + inr(lo) + ' a slot' : c.price > 0 ? '₹' + c.price + ' a slot' : 'No rate set';
-                var peak = c.peak_price != null && (!prices.length || lo === hi)
+                var peak = c.peak_price > 0 && (!prices.length || lo === hi)
                     ? 'peak ₹' + c.peak_price + (c.peak_start && c.peak_end ? ' ' + A.clock(A.slotStart(c.peak_start)).replace(/ [AP]M$/, '') + '–' + A.clock(A.slotStart(c.peak_end)) : '') : null;
                 var href = A.can('pricing') && A.u.pricing ? A.u.pricing : null;
                 return (i ? '<hr class="ha-hr ha-hr-78">' : '') + '<' + (href ? 'a href="' + esc(href) + '"' : 'div') + ' class="ha-court">' + miniCourt(courtKind(c.sports))

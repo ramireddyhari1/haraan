@@ -177,7 +177,8 @@ final class VenueCourt extends Model
      */
     public function isPeak(Carbon $date, ?string $time): bool
     {
-        if ($this->peak_price === null) {
+        // A peak rate of zero or less is a typo, not a price: never charge it, never show it.
+        if ($this->peak_price === null || (int) $this->peak_price <= 0) {
             return false;
         }
 
@@ -240,7 +241,14 @@ final class VenueCourt extends Model
             return (int) $this->peak_price;
         }
 
-        return (int) $baseRate;
+        // Never a negative charge, whatever was typed into a price field.
+        return max(0, (int) $baseRate);
+    }
+
+    /** The peak rate when there is a real one (> 0), else null — for anything that displays it. */
+    public function peakRate(): ?int
+    {
+        return $this->peak_price !== null && (int) $this->peak_price > 0 ? (int) $this->peak_price : null;
     }
 
     /** Parse a time label ("7:00 PM", "19:00") to minutes-from-midnight, or null. */

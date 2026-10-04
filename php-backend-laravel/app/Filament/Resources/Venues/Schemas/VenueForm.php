@@ -291,6 +291,7 @@ class VenueForm
                             ->label('Base price per hour')
                             ->required()
                             ->numeric()
+                            ->minValue(0)
                             ->default(0)
                             ->prefix('₹')
                             ->helperText('The "from" price on the card. Individual courts can set their own rate in the Courts tab.'),

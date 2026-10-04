@@ -77,12 +77,14 @@ class CourtsRelationManager extends RelationManager
                 TextInput::make('price')
                     ->label('Base price per hour')
                     ->numeric()
+                    ->minValue(0)
                     ->prefix('₹')
                     ->placeholder('Leave blank to use the venue price')
                     ->helperText('Off-peak / normal hourly rate (e.g. a cricket pitch may cost more than a badminton court).'),
                 TextInput::make('peak_price')
                     ->label('Peak price per hour')
                     ->numeric()
+                    ->minValue(1)
                     ->prefix('₹')
                     ->placeholder('Leave blank for no peak pricing')
                     ->helperText('Higher rate for busy times. Only applies when you set the days and/or window below.'),

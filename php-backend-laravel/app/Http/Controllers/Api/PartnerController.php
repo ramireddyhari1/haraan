@@ -2392,7 +2392,7 @@ class PartnerController extends Controller
             'is_active'   => (bool) $c->is_active,
             'price'       => (int) ($c->price ?? $venuePrice),
             'has_own_price' => $c->price !== null,
-            'peak_price'  => $c->peak_price !== null ? (int) $c->peak_price : null,
+            'peak_price'  => $c->peak_price !== null && (int) $c->peak_price > 0 ? (int) $c->peak_price : null,
             'peak_days'   => $c->peakDaysList(),
             'peak_start'  => $c->peak_start,
             'peak_end'    => $c->peak_end,

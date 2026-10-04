@@ -80,7 +80,8 @@ final class VenuesController extends Controller
                 'price' => $c->price ?? $venue->price,
                 // Optional peak pricing (null price = none). Days are 3-letter names; the window
                 // is "HH:MM". Clients apply the peak rate when the picked day/time matches.
-                'peak_price' => $c->peak_price,
+                // Only a real peak rate (> 0); a mistyped 0 or negative one is no peak at all.
+                'peak_price' => $c->peak_price !== null && (int) $c->peak_price > 0 ? (int) $c->peak_price : null,
                 'peak_days' => $c->peakDaysList(),
                 'peak_start' => $c->peak_start,
                 'peak_end' => $c->peak_end,
