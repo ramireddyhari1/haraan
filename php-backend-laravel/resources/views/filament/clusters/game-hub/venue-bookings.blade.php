@@ -60,6 +60,7 @@
             @if ($this->venue())
                 <button type="button" class="vdb-quiet" wire:click="toggleClosed"
                         wire:confirm="{{ $blocked ? 'Reopen this day for bookings?' : 'Close this day? Nothing can be booked while it is closed.' }}">
+                    <svg class="vdb-ph-only" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3.5" width="11" height="10" rx="2"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3"/>@unless ($blocked)<path d="m6.5 9 3 3m0-3-3 3"/>@endunless</svg>
                     {{ $blocked ? 'Reopen day' : 'Close day' }}
                 </button>
             @endif
@@ -195,7 +196,7 @@
                 <b x-text="early ? 'Hide' : 'Show'"></b>
             </button>
         @endif
-        <section @class(['vdb-grid-card', 'is-due' => $this->filter === 'due']) x-bind:class="{ 'hide-past': ! early }">
+        <section @class(['vdb-grid-card', 'is-due' => $this->filter === 'due', 'is-wide' => $cols > 3]) x-bind:class="{ 'hide-past': ! early }">
             <div class="vdb-grid" style="--cols: {{ $cols }}">
                 <div class="vdb-corner">Time</div>
                 @forelse ($courts as $court)
@@ -430,6 +431,7 @@
     .vdb{display:flex;flex-direction:column;gap:14px;}
     .vdb button,.vdb-sheet-wrap button{font:inherit;cursor:pointer;}
     .vdb svg,.vdb-sheet-wrap svg{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
+    .vdb-ph-only{display:none;}
     .vdb-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px !important;color:var(--ink3);letter-spacing:.02em;word-break:break-all;max-width:60%;}
 
     /* venue + day line */

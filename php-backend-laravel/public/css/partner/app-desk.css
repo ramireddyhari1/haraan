@@ -1,0 +1,134 @@
+/*
+ * The Bookings tab (Day bookings, venue-bookings.blade.php) on a phone / the iPhone app.
+ *
+ * Phone only and app-shell only: everything sits under html.ha-app inside a ≤767px
+ * query, so the desktop desk is untouched. The page's own markup and Livewire actions
+ * (seat a walk-in, check in, collect, cancel, close the day) are unchanged — this is
+ * presentation: open slots go quiet, bookings go solid, courts fit the screen.
+ */
+
+@media (max-width: 767px) {
+
+/* The app header already names the venue; the console title would say it twice. */
+html.ha-app .fi-page:has(.vdb) .fi-header { display: none; }
+html.ha-app .vdb { gap: 12px; padding: 0 0 8px; }
+html.ha-app .vdb, html.ha-app .vdb-sheet-wrap { --blue: #2563EB; --navy: #0B1C46; }
+
+/* ── the date is the title; Close day is a real control ─────────────────────── */
+html.ha-app .vdb-top { flex-wrap: nowrap; align-items: center; gap: 10px; padding: 2px 2px 0; }
+html.ha-app .vdb-where:not(:has(select)) { display: none; }
+html.ha-app .vdb-where { flex: 1; min-width: 0; }
+html.ha-app .vdb-where select { width: 100%; height: 40px; font-size: 16px; border-radius: 12px; }
+html.ha-app .vdb-top-end { flex: 1; min-width: 0; justify-content: space-between; gap: 10px; }
+html.ha-app .vdb-where:has(select) + .vdb-top-end { flex: none; }
+html.ha-app .vdb-where:has(select) + .vdb-top-end .vdb-dayname { display: none; }
+html.ha-app .vdb-dayname { display: block; min-width: 0; font-size: 21px; font-weight: 800; letter-spacing: -.4px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+html.ha-app .vdb-quiet {
+    flex: none; display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border-radius: 99px;
+    border: 1px solid var(--line); background: #fff; color: var(--ink2); font-size: 12.5px; font-weight: 700;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .05); transition: transform .12s var(--ease);
+}
+html.ha-app .vdb-quiet .vdb-ph-only { display: block; width: 15px; height: 15px; color: var(--ink3); }
+html.ha-app .vdb-quiet:active { transform: scale(.95); background: #fef2f2; color: var(--red); }
+
+/* ── date strip: full bleed, snaps, today marked ────────────────────────────── */
+html.ha-app .vdb-strip-wrap { margin: 0 -16px; }
+html.ha-app .vdb-strip { gap: 6px; padding: 2px 16px 4px; scroll-padding: 0 16px; }
+html.ha-app .vdb-day { width: 54px; padding: 8px 2px 7px; border-radius: 16px; border-color: transparent; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .05), inset 0 0 0 1px rgba(15, 23, 42, .06); }
+html.ha-app .vdb-day-dow { font-size: 9.5px; letter-spacing: .1em; }
+html.ha-app .vdb-day-num { font-size: 19px; }
+html.ha-app .vdb-day-count { font-size: 9.5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+html.ha-app .vdb-day.is-today:not(.is-on) { box-shadow: 0 1px 2px rgba(15, 23, 42, .05), inset 0 0 0 1.5px rgba(37, 99, 235, .45); }
+html.ha-app .vdb-day.is-on { background: linear-gradient(160deg, #3B82F6, #1D4ED8); box-shadow: 0 10px 18px -10px rgba(29, 78, 216, .9); }
+html.ha-app .vdb-day:active { transform: scale(.94); }
+
+/* ── the day card ──────────────────────────────────────────────────────────── */
+html.ha-app .vdb-card { padding: 16px 16px 12px; border-radius: 22px; border-color: rgba(15, 23, 42, .06); box-shadow: 0 10px 24px -16px rgba(15, 23, 42, .22); }
+html.ha-app .vdb-card-main { gap: 16px; }
+html.ha-app .vdb-ring { width: 76px; height: 76px; }
+html.ha-app .vdb-ring-txt b { font-size: 20px; }
+html.ha-app .vdb-big { font-size: 28px; }
+html.ha-app .vdb-counts { margin-top: 12px; padding-top: 10px; }
+html.ha-app .vdb-counts b { font-size: 18px; }
+html.ha-app .vdb-due { border-radius: 16px; padding: 12px 14px; }
+
+/* ── "already played" ──────────────────────────────────────────────────────── */
+html.ha-app .vdb-earlier { align-self: stretch; justify-content: center; height: 38px; border-color: transparent; background: rgba(15, 23, 42, .04); font-size: 12.5px; }
+html.ha-app .vdb-earlier:active { transform: scale(.98); }
+
+/* ── courts × times: up to three courts fit the screen, headers stick ───────── */
+html.ha-app .vdb-grid-card { width: auto; max-height: none; overflow: visible; border-radius: 22px; border-color: rgba(15, 23, 42, .06); box-shadow: 0 10px 24px -16px rgba(15, 23, 42, .22); }
+html.ha-app .vdb-grid-card.is-wide { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+html.ha-app .vdb-grid { grid-template-columns: 50px repeat(var(--cols), minmax(0, 1fr)); gap: 6px; padding: 0 8px 10px 0; min-width: 0; }
+html.ha-app .vdb-grid-card.is-wide .vdb-grid { grid-template-columns: 50px repeat(var(--cols), 92px); min-width: min-content; }
+html.ha-app .vdb-corner, html.ha-app .vdb-court {
+    top: calc(78px + env(safe-area-inset-top, 0px)); background: rgba(255, 255, 255, .94);
+    -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); padding: 11px 4px 9px; border-bottom-color: rgba(15, 23, 42, .06);
+}
+html.ha-app .vdb-corner:first-child { border-top-left-radius: 22px; }
+html.ha-app .vdb-grid-card.is-wide .vdb-corner, html.ha-app .vdb-grid-card.is-wide .vdb-court { top: 0; }
+html.ha-app .vdb-corner { font-size: 9px; }
+html.ha-app .vdb-court b { font-size: 12px; }
+html.ha-app .vdb-court span { font-size: 9.5px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+html.ha-app .vdb-time { font-size: 11px; border-right: 0; padding-left: 2px; }
+html.ha-app .vdb-time em { font-size: 8.5px; padding: 1px 5px; }
+html.ha-app .vdb-time.is-now { box-shadow: none; }
+html.ha-app .vdb-time.is-now::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: var(--blue); }
+
+html.ha-app .vdb-cell { height: 62px; border-radius: 14px; padding: 7px 8px; }
+html.ha-app button.vdb-cell:hover { transform: none; box-shadow: none; }
+html.ha-app button.vdb-cell:active { transform: scale(.95); }
+
+/* An open court is an invitation, not a billboard: a quiet outline, the price, a +. */
+html.ha-app .vdb-cell.is-open { background: #fff; border: 1.5px dashed #D3DCEA; justify-content: flex-end; }
+html.ha-app .vdb-cell.is-open:active { background: #F3F7FF; border-color: #93B4F6; }
+html.ha-app .vdb-open { display: none; }
+html.ha-app .vdb-open.is-peak { display: inline-flex; position: absolute; top: 7px; left: 8px; font-size: 0; }
+html.ha-app .vdb-open.is-peak i { width: 7px; height: 7px; }
+html.ha-app .vdb-open.is-peak::after { content: "Peak"; margin-left: 4px; font-size: 9.5px; font-weight: 800; letter-spacing: .04em; color: var(--amber); }
+html.ha-app .vdb-price { font-size: 12.5px; font-weight: 700; color: var(--ink3); letter-spacing: 0; }
+html.ha-app .vdb-plus { top: 7px; right: 7px; bottom: auto; width: 22px; height: 22px; background: #EAF1FF; color: var(--blue); box-shadow: none; opacity: 1 !important; transform: none !important; }
+html.ha-app .vdb-plus svg { width: 12px; height: 12px; stroke-width: 2.6; }
+
+/* A booking is the thing to see: a solid tile with who and whether they've paid. */
+html.ha-app .vdb-cell.is-booked { background: linear-gradient(160deg, #3B82F6, #1D4ED8); border-color: transparent; color: #fff; box-shadow: 0 8px 16px -10px rgba(29, 78, 216, .8); }
+html.ha-app .vdb-cell.is-walkin { background: linear-gradient(160deg, #1E3A8A, var(--navy)); box-shadow: 0 8px 16px -10px rgba(11, 28, 70, .8); }
+html.ha-app .vdb-kicker { font-size: 8.5px; letter-spacing: .08em; color: rgba(255, 255, 255, .72) !important; }
+html.ha-app .vdb-in { background: rgba(255, 255, 255, .18); color: #fff; padding: 1px 4px 1px 2px; }
+html.ha-app .vdb-name { font-size: 12.5px; line-height: 15px; color: #fff; }
+html.ha-app .vdb-amt { font-size: 10.5px; color: rgba(255, 255, 255, .78); }
+html.ha-app .vdb-amt em { font-size: 9.5px; padding: 1px 5px; border-radius: 99px; }
+html.ha-app .vdb-amt em.is-paid { background: rgba(34, 197, 94, .22); color: #BBF7D0; }
+html.ha-app .vdb-amt em.is-due { background: rgba(248, 113, 113, .25); color: #FECACA; }
+html.ha-app .vdb-cell.is-past.is-booked { opacity: .5; }
+
+html.ha-app .vdb-cell.is-held { padding: 6px; }
+html.ha-app .vdb-cell.is-held b { font-size: 9px; }
+html.ha-app .vdb-cell.is-held span { font-size: 9px; text-align: center; line-height: 11px; }
+html.ha-app .vdb-cell.is-off { background: repeating-linear-gradient(135deg, #F8FAFC 0 6px, #F1F5F9 6px 12px); border: 0; }
+html.ha-app .vdb-cell.is-off span { font-size: 9.5px; }
+html.ha-app .vdb-cell.is-gone { background: transparent; border: 1px solid #F1F4F8; }
+html.ha-app .vdb-grid-card.is-due .vdb-cell.is-owing { box-shadow: 0 0 0 2px #FCA5A5; }
+
+/* ── sheets: thumb-sized, inputs that don't make iOS zoom, CTA above the home bar ── */
+html.ha-app .vdb-sheet { max-height: 90vh; border-radius: 26px 26px 0 0; padding-bottom: env(safe-area-inset-bottom, 0px); box-shadow: 0 -20px 50px -20px rgba(15, 23, 42, .45); }
+html.ha-app .vdb-sheet::before { content: ""; flex: none; align-self: center; width: 38px; height: 5px; margin-top: 8px; border-radius: 99px; background: #D5DCE7; }
+html.ha-app .vdb-sheet-head { padding: 12px 18px 14px; }
+html.ha-app .vdb-sheet-head h3 { font-size: 19px; }
+html.ha-app .vdb-form { padding: 14px 18px 16px; }
+html.ha-app .vdb-field input { height: 50px; font-size: 16px; border-radius: 14px; }
+html.ha-app .vdb-phone { border-radius: 14px; }
+html.ha-app .vdb-phone b { font-size: 16px; }
+html.ha-app .vdb-seg { gap: 8px; }
+html.ha-app .vdb-seg button { min-height: 46px; border-radius: 14px; font-size: 14px; }
+html.ha-app .vdb-seg button:active { transform: scale(.96); }
+html.ha-app .vdb-seg button.is-on { background: var(--blue); border-color: var(--blue); color: #fff; box-shadow: 0 8px 16px -10px rgba(37, 99, 235, .9); }
+html.ha-app .vdb-sheet-foot { position: sticky; bottom: 0; margin: auto -18px -16px; padding: 12px 18px calc(12px + env(safe-area-inset-bottom, 0px)); background: rgba(255, 255, 255, .96); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+html.ha-app .vdb-primary { min-height: 52px; border-radius: 16px; font-size: 15px; }
+html.ha-app .vdb-primary:active { transform: scale(.97); }
+html.ha-app .vdb-fine { display: none; }
+html.ha-app .vdb-av { background: linear-gradient(135deg, #1E3A8A, var(--navy)) !important; }
+html.ha-app .vdb-facts { padding: 6px 18px; }
+html.ha-app .vdb-actions { padding: 12px 18px calc(16px + env(safe-area-inset-bottom, 0px)); }
+
+}

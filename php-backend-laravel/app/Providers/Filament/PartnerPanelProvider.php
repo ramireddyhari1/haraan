@@ -174,6 +174,7 @@ class PartnerPanelProvider extends PanelProvider
                     . '<script src="' . e(asset('js/partner/app-shell.js')) . '?v=' . $v('js/partner/app-shell.js') . '" defer></script>'
                     . '<link rel="stylesheet" href="' . e(asset('css/partner/app-tools.css')) . '?v=' . $v('css/partner/app-tools.css') . '">'
                     . '<link rel="stylesheet" href="' . e(asset('css/partner/app-venue-tools.css')) . '?v=' . $v('css/partner/app-venue-tools.css') . '">'
+                    . '<link rel="stylesheet" href="' . e(asset('css/partner/app-desk.css')) . '?v=' . $v('css/partner/app-desk.css') . '">'
                     . '<script src="' . e(asset('js/partner/app-screens.js')) . '?v=' . $v('js/partner/app-screens.js') . '" defer></script>'
                     . '<script src="' . e(asset('js/partner/app-tools.js')) . '?v=' . $v('js/partner/app-tools.js') . '" defer></script>'
                     . '<script src="' . e(asset('js/partner/app-venue-tools.js')) . '?v=' . $v('js/partner/app-venue-tools.js') . '" defer></script>';
