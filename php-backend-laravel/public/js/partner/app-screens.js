@@ -1153,6 +1153,7 @@
             v.srcObject = stream;
             v.play().catch(function () {});
             if (gate) gate.hidden = true;
+            host.querySelector('.ha-scan').classList.remove('is-nocam');
             var track = stream.getVideoTracks()[0];
             var caps = track && track.getCapabilities ? track.getCapabilities() : {};
             host.querySelector('[data-torch]').hidden = !caps.torch;
@@ -1169,13 +1170,45 @@
         });
     }
 
+    var IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+    /**
+     * How to turn the camera back on, for the phone in hand. iOS never asks twice: once
+     * refused, the only way back is a setting, so say exactly where it is.
+     */
+    function cameraSteps() {
+        if (IOS && navigator.standalone) return ['Open the Settings app, then Safari', 'Tap Camera and choose Allow', 'Come back here and tap Try again'];
+        if (IOS) return ['Tap \u201caA\u201d in Safari\u2019s address bar', 'Website Settings \u203a Camera \u203a Allow', 'Tap Try again'];
+        return ['Tap the icon left of the address bar', 'Permissions \u203a Camera \u203a Allow', 'Tap Try again'];
+    }
+
     function showGate(refused, text) {
         var g = scan.host && scan.host.querySelector('.ha-camgate');
         if (!g) return;
         g.hidden = false;
-        g.querySelector('b').textContent = refused ? 'Camera access is off' : 'Starting the camera…';
+        scan.host.querySelector('.ha-scan').classList.add('is-nocam');
+        g.querySelector('b').textContent = refused ? 'Camera access is off' : 'Starting the camera\u2026';
         g.querySelector('p').textContent = text;
-        g.querySelector('[data-allow]').hidden = !refused;
+        var allow = g.querySelector('[data-allow]');
+        allow.hidden = !refused;
+        allow.textContent = refused ? 'Try again' : 'Allow camera';
+        var steps = g.querySelector('.ha-gate-steps');
+        steps.hidden = !refused;
+        steps.innerHTML = refused ? cameraSteps().map(function (t, i) { return '<li><i>' + (i + 1) + '</i><span>' + esc(t) + '</span></li>'; }).join('') : '';
+    }
+
+    function gateArt() {
+        var q = '';
+        [[0, 0], [1, 0], [2, 0], [0, 1], [2, 1], [0, 2], [1, 2], [2, 2], [4, 0], [4, 2], [3, 3], [4, 4], [2, 4], [0, 4], [3, 1], [1, 3]].forEach(function (c) {
+            q += '<rect x="' + (56 + c[0] * 6) + '" y="' + (44 + c[1] * 6) + '" width="5" height="5" rx="1"/>';
+        });
+        return '<svg class="ha-gate-art" viewBox="0 0 140 120" aria-hidden="true">'
+            + '<rect x="38" y="6" width="64" height="108" rx="12" fill="rgba(255,255,255,.04)" stroke="rgba(255,255,255,.35)" stroke-width="2"/>'
+            + '<circle cx="70" cy="16" r="3.2" fill="none" stroke="rgba(255,255,255,.45)" stroke-width="1.5"/>'
+            + '<path d="M64 21 76 11" stroke="#F87171" stroke-width="2" stroke-linecap="round"/>'
+            + '<g fill="rgba(255,255,255,.75)">' + q + '</g>'
+            + '<g fill="none" stroke="#4D8BFF" stroke-width="2.4" stroke-linecap="round"><path d="M50 46v-8h8M90 46v-8h-8M50 76v8h8M90 76v8h-8"/></g>'
+            + '<path d="M18 92h22M100 92h22" stroke="rgba(255,255,255,.18)" stroke-width="2" stroke-dasharray="3 4" stroke-linecap="round"/></svg>';
     }
 
     /** The capture: a QR seeded from the ticket bursts apart over the verdict (QrBurst). */
@@ -1268,6 +1301,10 @@
                 if (!scan.host) return;
                 host.querySelector('.ha-checking').hidden = true;
                 host.classList.remove('is-locked');
+                var sc = host.querySelector('.ha-scan');
+                sc.classList.remove('is-res-ok', 'is-res-warn', 'is-res-fail'); void sc.offsetWidth;
+                sc.classList.add('is-res-' + o.tone);
+                setTimeout(function () { sc.classList.remove('is-res-' + o.tone); }, 1200);
                 vibrate(o.tone === 'ok' ? [12, 60, 24] : [40, 60, 40]);
                 scan.held = o;
                 scan.recent.unshift(o);
@@ -1313,7 +1350,9 @@
             scan.busy = false; scan.held = null; scan.typing = false;
             host.innerHTML = '<div class="ha-scan">'
                 + '<div class="ha-scan-win"><video playsinline muted autoplay></video>'
-                + '<div class="ha-camgate" hidden><svg viewBox="0 0 24 24"><path fill="currentColor" d="M12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4zM9 2 7.17 4H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-3.17L15 2H9zm3 15a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg><b>Starting the camera…</b><p>One moment.</p><button type="button" class="ha-cta" data-allow hidden>Allow camera</button></div>'
+                + '<div class="ha-finder" aria-hidden="true"><i class="tl"></i><i class="tr"></i><i class="bl"></i><i class="br"></i><span class="ha-finder-sweep"></span></div>'
+                + '<p class="ha-finder-hint">Hold the ticket QR inside the frame</p>'
+                + '<div class="ha-camgate" hidden>' + gateArt() + '<b>Starting the camera…</b><p>One moment.</p><ol class="ha-gate-steps" hidden></ol><button type="button" class="ha-cta" data-allow hidden>Allow camera</button></div>'
                 + '<svg class="ha-scan-rim" preserveAspectRatio="none" aria-hidden="true"><rect class="ha-rim-base" x="1" y="1" rx="30" ry="30"/><rect class="ha-rim-glow" x="1" y="1" rx="30" ry="30" pathLength="100"/><rect class="ha-rim-line" x="1" y="1" rx="30" ry="30" pathLength="100"/><rect class="ha-rim-flash" x="1" y="1" rx="30" ry="30"/></svg>'
                 + '</div>'
                 + '<div class="ha-scan-title"><h1>Scan a ticket</h1><p>Point the camera at the ticket QR — no need to tap</p></div>'
