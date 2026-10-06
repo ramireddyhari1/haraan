@@ -2415,12 +2415,8 @@ private fun CameraMode(
             LivePathOverlay(
                 path = livePath,
                 uprightAspect = uprightAspect,
-                onFinished = {
-                    if (showAr) {
-                        showAr = false
-                        if (lastMetrics?.flight3d != null) showReplay = true
-                    }
-                },
+                onHandOff = { if (lastMetrics?.flight3d != null) showReplay = true },
+                onDone = { showAr = false },
             )
         }
         val clipToPlay = replayClip

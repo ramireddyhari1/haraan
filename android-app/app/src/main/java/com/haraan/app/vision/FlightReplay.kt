@@ -27,6 +27,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -165,8 +166,9 @@ fun FlightReplayOverlay(
 
     val startMs = flight.releaseMs
     val endMs = flight.stumpsMs?.takeIf { it > startMs } ?: flight.lastSeenMs
-    // Slow motion: a real delivery is over in about half a second.
-    val playMs = ((endMs - startMs) * 4.5).coerceIn(2_000.0, 3_800.0).toInt()
+    // Slow motion, about three times: a real delivery is over in half a second, and much
+    // slower than this the answer takes longer to arrive than the ball did to be bowled.
+    val playMs = ((endMs - startMs) * 3.0).coerceIn(1_500.0, 2_600.0).toInt()
     val hits = flight.hitsStumps
 
     val context = LocalContext.current
@@ -199,7 +201,7 @@ fun FlightReplayOverlay(
             return@LaunchedEffect
         }
         play.animateTo(1f, tween(playMs, easing = LinearEasing))
-        if (hits == true) bails.animateTo(1f, tween(700, easing = FastOutSlowInEasing))
+        if (hits == true) bails.animateTo(1f, tween(550, easing = FastOutSlowInEasing))
     }
     LaunchedEffect(view) {
         if (previous != view) {
@@ -209,15 +211,27 @@ fun FlightReplayOverlay(
         }
     }
 
-    val nowMs = startMs + (endMs - startMs) * play.value
+    /*
+     * SMOOTH MEANS ONLY THE PICTURE MOVES. The replay clock is read inside the Canvas, so
+     * each frame is a redraw and nothing more; the panel underneath only hears about the two
+     * moments it changes — the bounce and the arrival — not sixty times a second.
+     */
+    val pitched by remember(flight) { derivedStateOf { startMs + (endMs - startMs) * play.value >= flight.bounceMs } }
+    val arrived by remember(flight) { derivedStateOf { play.value >= 1f } }
+    // Fades up over whatever was on screen — the path on the camera picture, usually — so
+    // the hand-off is one movement rather than a cut to black.
+    val appear = remember { Animatable(0f) }
+    LaunchedEffect(Unit) { appear.animateTo(1f, tween(280, easing = FastOutSlowInEasing)) }
     Box(
         modifier
             .fillMaxSize()
+            .graphicsLayer { alpha = appear.value }
             .background(Night)
             .clickable(enabled = false) {},
     ) {
         Canvas(Modifier.fillMaxSize()) {
             val progress = play.value.toDouble()
+            val nowMs = startMs + (endMs - startMs) * progress
             val camera = previous.cameraAt(progress).lerp(view.cameraAt(progress), glide.value.toDouble())
             drawScene(camera, flight, startMs, nowMs, grain, crowd, turf, bails.value)
         }
@@ -301,9 +315,9 @@ fun FlightReplayOverlay(
         ) {
             Readout(
                 flight = flight,
-                progress = play.value,
-                pitched = nowMs >= flight.bounceMs,
-                arrived = play.value >= 1f,
+                progress = { play.value },
+                pitched = pitched,
+                arrived = arrived,
             )
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -371,7 +385,7 @@ private fun ReplayGlyph() {
  * three equal tiles.
  */
 @Composable
-private fun Readout(flight: Flight3d, progress: Float, pitched: Boolean, arrived: Boolean) {
+private fun Readout(flight: Flight3d, progress: () -> Float, pitched: Boolean, arrived: Boolean) {
     val shape = RoundedCornerShape(20.dp)
     val pitchIn = remember { Animatable(0f) }
     val speedIn = remember { Animatable(0f) }
@@ -393,8 +407,10 @@ private fun Readout(flight: Flight3d, progress: Float, pitched: Boolean, arrived
             .border(1.dp, Color.White.copy(alpha = 0.09f), shape),
     ) {
         // Where the replay is, as a hairline along the top edge.
-        Box(Modifier.fillMaxWidth().height(2.dp).background(Color.White.copy(alpha = 0.06f))) {
-            Box(Modifier.fillMaxWidth(progress.coerceIn(0f, 1f)).height(2.dp).background(RampLight))
+        // Drawn, not laid out, so the moving hairline is a redraw and never a recomposition.
+        Canvas(Modifier.fillMaxWidth().height(2.dp)) {
+            drawRect(Color.White.copy(alpha = 0.06f))
+            drawRect(RampLight, size = Size(size.width * progress().coerceIn(0f, 1f), size.height))
         }
         Row(
             Modifier.padding(start = 18.dp, end = 16.dp, top = 12.dp, bottom = 14.dp),
@@ -743,7 +759,7 @@ private fun DrawScope.ball(
     // filling half the screen reads as a rendering fault, not as drama.
     val maxBallPx = 15.dp.toPx().toDouble()
 
-    val steps = 110
+    val steps = 72
     val points = (0..steps).map { i -> startMs + (nowMs - startMs) * i / steps }.map { it to flight.at(it) }
 
     // The path's shadow on the pitch first: what turns a line into a ball in the air.

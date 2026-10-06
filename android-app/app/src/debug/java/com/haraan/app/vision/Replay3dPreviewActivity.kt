@@ -83,7 +83,7 @@ class Replay3dPreviewActivity : ComponentActivity() {
             }
             if (path != null) {
                 key(round) {
-                    LivePathOverlay(path = path, uprightAspect = (w / h).toFloat(), onFinished = { round++ })
+                    LivePathOverlay(path = path, uprightAspect = (w / h).toFloat(), onHandOff = {}, onDone = { round++ })
                 }
             }
         }

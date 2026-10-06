@@ -196,16 +196,35 @@ internal fun DrawScope.drawArPath(path: ArPath, frame: Rect, uptoMs: Double, stu
  * STEP ONE AFTER A BALL: the path drawn over the live viewfinder.
  *
  * It draws itself in at a little under real pace, lights the stumps, holds long enough to
- * read, and gets out of the way — [onFinished] is where the 3D replay takes over. A tap
- * skips it. The knocks match the 3D replay's: the bounce, then the verdict.
+ * read, and gets out of the way in two beats: [onHandOff] is the moment the 3D replay should
+ * start fading up over it, and [onDone] — a beat later, once that is opaque, or straight
+ * away when there is no 3D replay — is when it has faded itself out and can be removed.
+ * A tap skips to the hand-off. The knocks match the 3D replay's: the bounce, the verdict.
  */
 @Composable
-internal fun LivePathOverlay(path: ArPath, uprightAspect: Float, onFinished: () -> Unit) {
+internal fun LivePathOverlay(
+    path: ArPath,
+    uprightAspect: Float,
+    onHandOff: () -> Unit,
+    onDone: () -> Unit,
+) {
     val context = LocalContext.current
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val reveal = remember { Animatable(0f) }
     val glow = remember { Animatable(0f) }
     val fade = remember { Animatable(1f) }
-    val drawMs = ((path.endMs - path.startMs) * 2.2).coerceIn(900.0, 1_700.0).toInt()
+    var leaving by remember { mutableStateOf(false) }
+    fun leave() {
+        if (leaving) return
+        leaving = true
+        onHandOff()
+        scope.launch {
+            delay(300)
+            fade.animateTo(0f, tween(240))
+            onDone()
+        }
+    }
+    val drawMs = ((path.endMs - path.startMs) * 1.8).coerceIn(750.0, 1_200.0).toInt()
 
     LaunchedEffect(path) {
         val bounceMs = path.bounceMs
@@ -223,17 +242,18 @@ internal fun LivePathOverlay(path: ArPath, uprightAspect: Float, onFinished: () 
                 null -> Unit
             }
         }
-        glow.animateTo(1f, tween(260))
-        delay(2_200)
-        fade.animateTo(0f, tween(320))
-        onFinished()
+        glow.animateTo(1f, tween(220))
+        // Long enough to read the answer, no longer. The 3D replay then fades up OVER this
+        // (it is drawn on top), and this fades out underneath it — never a gap between them.
+        delay(1_000)
+        leave()
     }
 
     Box(
         Modifier
             .fillMaxSize()
             .graphicsLayer { alpha = fade.value }
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onFinished() },
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { leave() },
     ) {
         Canvas(Modifier.fillMaxSize()) {
             val frame = frameRect(size.width, size.height, uprightAspect)
