@@ -906,6 +906,23 @@ private fun CameraMode(
         mutableStateOf(com.haraan.app.vision.CameraEnd.BOWLER)
     }
     var stumpCalTapping by remember { mutableStateOf(false) }
+
+    /*
+     * AUTO: FILMING WITH NOBODY SCORING.
+     *
+     * In the nets there is no scorer to tap BALL. With Auto on, the phone films in rolling
+     * segments of up to [REVIEW_CLIP_MS] and watches every one for a delivery. A segment
+     * with no ball in it is thrown away unseen; one with a ball is cut a beat after the
+     * ball is done, kept, and runs the whole after-the-ball sequence — then the next
+     * segment starts by itself once the replays are over.
+     *
+     * [autoSegment] says whether the clip now recording is one of those segments; it is
+     * set by the auto loop at the moment it arms, never by the scorer's cue or the button.
+     */
+    var autoMode by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    var autoSegment by remember { mutableStateOf(false) }
+    var armingAuto by remember { mutableStateOf(false) }
+    var deliveryFlash by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var stumpCalTaps by remember { mutableStateOf<List<com.haraan.app.vision.Point2>>(emptyList()) }
     var stumpQuad by remember { mutableStateOf<com.haraan.app.vision.PitchQuad?>(null) }
     var calibrationNote by remember { mutableStateOf<String?>(null) }
@@ -1172,6 +1189,26 @@ private fun CameraMode(
                         // The camera's own monotonic clock, never the UI clock: ball
                         // motion timing has to come from when the sensor saw it.
                         val frameMs = image.imageInfo.timestamp / 1_000_000
+
+                        /*
+                         * An Auto segment runs for most of a session, not for one ball, so
+                         * the wicket would never be looked at again. Every eighth frame
+                         * with no ball about, the detector gets a turn.
+                         */
+                        idleAnalysisFrame++
+                        val ballQuiet = latestBall?.let { frameMs - it.timestampMs > 1_500 } ?: true
+                        if (autoSegment && ballQuiet && idleAnalysisFrame % 8 == 0 && stumpDetector.available) {
+                            val wicket = stumpDetector.detectWicket(
+                                luma = bytes,
+                                width = image.width,
+                                height = image.height,
+                                rowStride = plane.rowStride,
+                                rotationDegrees = image.imageInfo.rotationDegrees,
+                                creases = pitchDetector.creases(),
+                                lookForStones = wicketLock?.kind != com.haraan.app.vision.WicketKind.STUMPS,
+                            )
+                            wicketLock = wicketTracker.onFrame(wicket, cameraMove, uprightAspect, frameMs)
+                        }
                         val sighting = vision.onFrame(
                             luma = bytes,
                             width = image.width,
@@ -1999,6 +2036,20 @@ private fun CameraMode(
                 }
                 }
                 Spacer(Modifier.width(10.dp))
+                AutoChip(
+                    on = autoMode,
+                    onToggle = {
+                        autoMode = !autoMode
+                        view.performHapticFeedback(Feel.SELECT)
+                        // Off while an Auto segment is running: stop it, and let the finish
+                        // drop it as it would any segment without a ball.
+                        if (!autoMode && autoSegment && calledFlight == null) {
+                            activeRecording?.stop()
+                            activeRecording = null
+                        }
+                    },
+                )
+                Spacer(Modifier.width(8.dp))
                 ChromeIconButton(
                     active = showAdminPanel,
                     description = "Wicket diagnostics",
@@ -2174,6 +2225,13 @@ private fun CameraMode(
          */
         if (granted) {
             RecordingEdgeGlow(recording = recording, uprightAspect = uprightAspect)
+            DeliveryDetectedFlash(
+                trigger = deliveryFlash,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 64.dp),
+            )
         }
 
         if (stumpCalTapping && granted) {
@@ -2309,7 +2367,49 @@ private fun CameraMode(
         // The analyser called the ball done mid-clip: the numbers land now, not when the
         // scorer gets round to the result.
         LaunchedEffect(calledFlight) {
-            calledFlight?.let(showFlight)
+            val flight = calledFlight ?: return@LaunchedEffect
+            if (autoSegment) {
+                /*
+                 * WAS THAT A DELIVERY? With a calibrated pitch, only something that fits a
+                 * ball bowled down it counts — a throw from the covers or a fielder walking
+                 * past does not. A false alarm is let go and the segment keeps watching.
+                 */
+                val calibrated = found
+                if (calibrated != null) {
+                    val trial = com.haraan.app.vision.FlightMetrics.of(flight, uprightAspect, calibrated, wicketLock)
+                    if (trial.flight3d == null) {
+                        vision.reset()
+                        ballTrail = emptyList()
+                        latestBall = null
+                        trackedPoints = 0
+                        calledFlight = null
+                        return@LaunchedEffect
+                    }
+                }
+                deliveryFlash++
+                view.performHapticFeedback(Feel.TICK)
+            }
+            showFlight(flight)
+            if (autoSegment && recording) {
+                // A beat after the ball for the clip, then the segment closes and is kept.
+                delay(AUTO_TAIL_MS)
+                activeRecording?.stop()
+                activeRecording = null
+            }
+        }
+
+        /*
+         * THE AUTO LOOP. Starts the next segment whenever nothing else needs the screen: not
+         * recording, no replay up, nobody tapping out a calibration.
+         */
+        LaunchedEffect(autoMode, recording, showAr, showReplay, showVideo, stumpCalTapping, wicketTapping, videoCapture) {
+            if (!autoMode || recording || showAr || showReplay || showVideo || stumpCalTapping || wicketTapping) {
+                return@LaunchedEffect
+            }
+            if (videoCapture == null || !granted) return@LaunchedEffect
+            delay(AUTO_REARM_MS)
+            armingAuto = true
+            armRef.value?.invoke(null)
         }
 
         // `ballSeq`: the scorer's BALL that armed this clip, or null from the phone's own
@@ -2317,6 +2417,11 @@ private fun CameraMode(
         val armDelivery: (Int?) -> Unit = fun(ballSeq: Int?) {
             val capture = videoCapture ?: return
             if (recording) return
+            // An Auto segment only when the auto loop armed it; the scorer and the button
+            // always make a clip that is kept.
+            val wasAuto = armingAuto
+            armingAuto = false
+            autoSegment = wasAuto
             if (ballSeq != null) lastFilmedSeq = ballSeq
             clipBallSeq = ballSeq
             discardClip = false
@@ -2359,6 +2464,12 @@ private fun CameraMode(
                     recording = false
                     trackingLive = false
                     clipBallSeq = null
+                    autoSegment = false
+                    // An Auto segment nothing was bowled in: gone, without a buzz.
+                    if (wasAuto && calledFlight == null) {
+                        runCatching { file.delete() }
+                        return@startClip
+                    }
                     // The scorer called this ball dead: nothing was bowled worth keeping.
                     if (discardClip) {
                         discardClip = false
@@ -2502,6 +2613,7 @@ private fun CameraMode(
         val status = when {
             // The point count is the only honest signal of whether vision is doing
             // anything, and it belongs where the person filming can see it.
+            recording && autoSegment && calledFlight == null -> "Auto · watching for a delivery"
             recording && calledFlight != null -> "Ball done · clip still recording for the scorer"
             recording && trackedPoints > 0 -> "Ball seen in $trackedPoints frames$trackWord"
             recording -> "Filming this ball"
@@ -2581,6 +2693,9 @@ private fun CameraMode(
             com.haraan.app.vision.FlightReplayOverlay(
                 flight = replayFlight,
                 onClose = { showReplay = false },
+                // In Auto nobody may be holding the phone: it closes itself and the next
+                // segment starts.
+                autoCloseAfterMs = if (autoMode) AUTO_REPLAY_HOLD_MS else null,
             )
         }
         if (showGallery) {
@@ -3663,6 +3778,65 @@ private fun CalibrateGlyph(modifier: Modifier = Modifier, tint: Color = Color.Wh
         drawCircle(tint, radius = 1.6.dp.toPx(), center = c)
     }
 }
+
+/**
+ * Auto, on and off. Red-dotted while on, because on means the phone is filming.
+ */
+@Composable
+private fun AutoChip(on: Boolean, onToggle: () -> Unit) {
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (on) Color(0xFF2563EB) else Color.White.copy(alpha = 0.12f))
+            .clickableCapture(enabled = true, onClick = onToggle)
+            .padding(horizontal = 11.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (on) {
+            Box(Modifier.size(6.dp).clip(CircleShape).background(Color(0xFFFF5A5F)))
+            Spacer(Modifier.width(6.dp))
+        }
+        Text("Auto", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+/** "Delivery detected", the moment Auto hears a ball — the same words FullTrack users know. */
+@Composable
+private fun DeliveryDetectedFlash(trigger: Int, modifier: Modifier = Modifier) {
+    val show = remember { Animatable(0f) }
+    LaunchedEffect(trigger) {
+        if (trigger == 0) return@LaunchedEffect
+        show.snapTo(0f)
+        show.animateTo(1f, tween(160))
+        delay(1_100)
+        show.animateTo(0f, tween(260))
+    }
+    if (show.value <= 0.01f) return
+    Text(
+        "Delivery detected",
+        color = Color.White,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = modifier
+            .graphicsLayer {
+                alpha = show.value
+                scaleX = 0.92f + 0.08f * show.value
+                scaleY = 0.92f + 0.08f * show.value
+            }
+            .clip(RoundedCornerShape(999.dp))
+            .background(Rec)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+    )
+}
+
+/** How long Auto films after the ball is done: the batter's shot and the follow-through. */
+private const val AUTO_TAIL_MS = 1_200L
+
+/** The pause before the next Auto segment starts. */
+private const val AUTO_REARM_MS = 400L
+
+/** How long a 3D replay stays up in Auto once it has played. */
+private const val AUTO_REPLAY_HOLD_MS = 2_500L
 
 @Composable
 private fun ToolButton(

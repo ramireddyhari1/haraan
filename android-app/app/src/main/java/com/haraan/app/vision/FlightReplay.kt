@@ -152,6 +152,8 @@ fun FlightReplayOverlay(
     holdAt: Float? = null,
     /** Debug only: open on this view. */
     startView: ReplayView? = null,
+    /** Closes itself this long after it has played, for a phone nobody is holding. */
+    autoCloseAfterMs: Long? = null,
 ) {
     var view by remember { mutableStateOf(startView ?: ReplayView.AUTO) }
     var previous by remember { mutableStateOf(startView ?: ReplayView.AUTO) }
@@ -202,6 +204,10 @@ fun FlightReplayOverlay(
         }
         play.animateTo(1f, tween(playMs, easing = LinearEasing))
         if (hits == true) bails.animateTo(1f, tween(550, easing = FastOutSlowInEasing))
+        if (autoCloseAfterMs != null) {
+            delay(autoCloseAfterMs)
+            onClose()
+        }
     }
     LaunchedEffect(view) {
         if (previous != view) {
