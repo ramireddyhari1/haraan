@@ -36,6 +36,22 @@ object PitchGeometry {
      */
     const val STUMP_SET_WIDTH_M = 0.2286
 
+    /**
+     * One stump's diameter. The Laws allow 1.38 to 1.5 inches; club stumps sit at the thin
+     * end, and [StumpCalibration] has always used this figure.
+     */
+    const val STUMP_DIAMETER_M = 0.035
+
+    /**
+     * Outer stump CENTRE to outer stump centre — the span every detector actually measures.
+     *
+     * A detector finds a bar by its middle, not by its outside edge, so the two outer bars'
+     * centres are a stump's width closer together than [STUMP_SET_WIDTH_M]. Dividing the
+     * outside-to-outside width by a centre-to-centre span overstated every distance taken
+     * from a detected wicket by 18%, and every speed with it.
+     */
+    const val STUMP_CENTRES_SPAN_M = STUMP_SET_WIDTH_M - STUMP_DIAMETER_M // 0.1936
+
     /** Stump height above the ground: 28 inches. Used only to sanity-check a shape. */
     const val STUMP_HEIGHT_M = 0.711
 

@@ -178,4 +178,34 @@ class CameraMotionTest {
         assertTrue(many.confidence > contested.confidence)
         assertEquals(0f, FrameMotion.STILL.confidence, 1e-6f)
     }
+
+    /**
+     * WHAT A THREE-SECOND COAST STANDS ON.
+     *
+     * The tracker now carries an unseen wicket for seconds on chained camera motion alone —
+     * the striker in front of the stumps — where it used to give up after eight frames. That
+     * is only honest if chaining ninety noisy estimates does not walk the anchor off the
+     * wicket. Optical flow at 320 wide is good to roughly a third of a pixel, about 0.001 of
+     * the frame; the far wicket from behind the arm is 0.006 across.
+     */
+    @Test
+    fun `ninety chained noisy estimates of a slow pan stay on a far wicket`() {
+        val rnd = kotlin.random.Random(11)
+        val noise = 0.001
+        val panPerFrame = 0.0012
+        var truth = Point2(0.5, 0.6)
+        var carried = truth
+        var points = grid(6)
+        repeat(90) {
+            val moved = transform(points, dx = panPerFrame, dy = panPerFrame * 0.2)
+            val observed = moved.map { Point2(it.x + (rnd.nextDouble() * 2 - 1) * noise, it.y + (rnd.nextDouble() * 2 - 1) * noise) }
+            val motion = CameraMotion.estimate(points, observed, aspect)
+            assertTrue("every frame of a steady pan should resolve", motion.isUsable)
+            carried = motion.apply(carried, aspect)
+            truth = Point2(truth.x + panPerFrame, truth.y + panPerFrame * 0.2)
+            points = moved
+        }
+        val driftFw = kotlin.math.hypot(carried.x - truth.x, (carried.y - truth.y) / aspect)
+        assertTrue("drift after 3 s was %.4f fw".format(driftFw), driftFw < 0.003)
+    }
 }

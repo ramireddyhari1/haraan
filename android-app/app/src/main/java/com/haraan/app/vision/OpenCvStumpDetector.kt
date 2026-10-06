@@ -8,6 +8,8 @@ import org.opencv.core.MatOfPoint
 import org.opencv.core.Rect
 import org.opencv.core.Size
 import org.opencv.imgproc.Imgproc
+import kotlin.math.abs
+import kotlin.math.max
 
 /** Where the stump search got to, so a null can be explained rather than shrugged at. */
 data class StumpDetectorReport(
@@ -46,32 +48,56 @@ data class StumpDetectorReport(
      * knowing which one fired tells you what the camera is actually looking at.
      */
     val stoneWasDark: Boolean = false,
+    /** What the last frame did: "focus" (full-res patch only), "search" (whole frame). */
+    val mode: String = "search",
+    /** Last frame's own cost, ms. The average hides the difference between the modes. */
+    val lastProcessingMs: Long = 0L,
+    /** Candidates handed to the comb fit last frame, and how many it confirmed. */
+    val probes: Int = 0,
+    val combFits: Int = 0,
+    /** Last comb fit's correlation and signal-to-noise, or null when none fitted. */
+    val lastNcc: Float? = null,
+    val lastSnr: Float? = null,
+    /** The threshold offset the frame's own noise chose. See [OpenCvStumpDetector.noiseOffset]. */
+    val adaptiveC: Float = 0f,
+    /** Whether the last stumps were dark against a bright ground. */
+    val stumpsWereDark: Boolean = false,
+    /** Focus frames that found the wicket, of focus frames run. The lock's hit rate. */
+    val focusHits: Int = 0,
+    val focusRuns: Int = 0,
+    /** The comb's last word: "fit", or the rule that refused — "fence: flank 0.8". */
+    val combVerdict: String = "",
 )
 
 /**
  * Finds the wicket.
  *
  * WHY, when a crease detector already exists. Because the crease detector keeps failing on
- * the half of its job that depends on faint paint. On real club footage it now finds seven
- * crease-angle segments and then dies on "the pitch edges are too close together" — the
- * RAILS, the long lines running away from the camera, are the weak half. Those are the
- * edges of a strip of grass against more grass. A wicket is three bright vertical bars
- * against a dark background, always present, never worn off, and exactly 0.2286 m across.
- * It is the most reliable landmark on the field and nothing in this package was looking
- * for it.
+ * the half of its job that depends on faint paint. A wicket is never absent, never worn off,
+ * and exactly 0.2286 m across. It is the most reliable landmark on the field.
  *
  * WHAT IT DELIBERATELY DOES NOT DO. It does not produce a [PitchQuad] and it does not feed
- * calibration. [StumpGeometry] explains why at length: three stump bases are collinear, and
- * collinear points cannot define a plane map however badly one is wanted. This detector
- * exists to put a measured landmark on screen so that its reliability can be SEEN on real
- * footage before anything is built on top of it — which is the order everything else in
- * this package has been wrong about at least once.
+ * calibration: three stump bases are collinear, and collinear points cannot define a plane
+ * map. See [StumpGeometry].
  *
- * ANALYSIS WIDTH IS HIGHER THAN THE OTHER TWO, and on purpose. The ball tracker and the
- * pitch detector work at 480 because a ball is a blob and a crease is metres long. A stump
- * is 0.0229 m across: at 480 wide, from twenty metres, all three together are a couple of
- * pixels. Finding three separate bars in that is not a tuning problem, it is an arithmetic
- * impossibility, so this stage gets its own larger frame.
+ * TWO MODES, AND WHY THE SECOND EXISTS.
+ *
+ *   SEARCH, over the whole frame scaled to 960 wide. Contours of bright vertical bars, as
+ *   before — but now as a source of CANDIDATES rather than answers. A triple of separate
+ *   bars is a candidate; so is a single blob the shape of a whole wicket, which is what a
+ *   far wicket looks like once three 1.5-pixel stumps have been scaled and blurred into
+ *   each other. Every candidate is then checked by [StumpProfile] on the FULL-resolution
+ *   sensor pixels around it, where the three stumps are still three.
+ *
+ *   FOCUS, on a small full-resolution patch where the tracker says the wicket is (or was).
+ *   No scaling, no blur, no contour sweep: a comb fit on a few thousand pixels. It is what
+ *   keeps a far lock alive, and it costs a fraction of a search, which is what lets a lock
+ *   be held for a three-hour match without the phone cooking.
+ *
+ * The bar pass runs in both polarities — stumps pale on grass, and stumps dark against a
+ * low sun or a sightscreen — and its threshold offset is set from the frame's own noise, so
+ * a grainy dusk frame does not turn every blade of grass into a bar and a flat overcast one
+ * does not lose a faint stump.
  */
 class OpenCvStumpDetector(
     private val analysisWidth: Int = 960,
@@ -88,8 +114,28 @@ class OpenCvStumpDetector(
     private var stoneMarksFound = 0
     private var stoneWasDark = false
     private var totalProcessingMs = 0L
+    private var lastProcessingMs = 0L
     private var lastRejection: String? = "nothing analysed yet"
     private var released = false
+    private var mode = "search"
+    private var probes = 0
+    private var combFits = 0
+    private var lastNcc: Float? = null
+    private var lastSnr: Float? = null
+    private var adaptiveC = STUMP_ADAPTIVE_C.toFloat()
+    private var stumpsWereDark = false
+    private var focusHits = 0
+    private var focusRuns = 0
+    /** Search frames since the last stumps, to alternate in the dark-bar pass. */
+    private var searchesWithoutStumps = 0
+
+    /**
+     * Comb fits allowed this search. A COLD start — nothing held, nothing remembered — gets
+     * more: it is the moment the operator is watching the screen, and a second spent on a
+     * few more fits is worth more than the CPU. Once anything is held, the budget drops.
+     */
+    private var probeBudget = MAX_PROBES
+    private var blobBudget = MAX_BLOB_PROBES
 
     private var scratchPacked: ByteArray? = null
     private var scratchFull: Mat? = null
@@ -106,6 +152,17 @@ class OpenCvStumpDetector(
         stonesPlausible = stonesPlausible,
         stoneMarksFound = stoneMarksFound,
         stoneWasDark = stoneWasDark,
+        mode = mode,
+        lastProcessingMs = lastProcessingMs,
+        probes = probes,
+        combFits = combFits,
+        lastNcc = lastNcc,
+        lastSnr = lastSnr,
+        adaptiveC = adaptiveC,
+        stumpsWereDark = stumpsWereDark,
+        focusHits = focusHits,
+        focusRuns = focusRuns,
+        combVerdict = StumpProfile.lastVerdict,
     )
 
     /**
@@ -120,27 +177,11 @@ class OpenCvStumpDetector(
         height: Int,
         rowStride: Int,
         rotationDegrees: Int,
-        /**
-         * Crease-angled segments from the pitch detector's view of the SAME frame.
-         *
-         * Optional, and an empty list changes nothing: with no segments the ranking is by
-         * shape alone, exactly as before. Passing stale ones from an earlier frame would
-         * be worse than passing none.
-         */
         creases: List<CreaseSegment> = emptyList(),
     ): StumpSet? = (detectWicket(luma, width, height, rowStride, rotationDegrees, creases)
         as? WicketSighting.Stumps)?.set
 
-    /**
-     * The wicket in one frame, of either kind, or null.
-     *
-     * THE ORDER IS THE POINT. Three bars are looked for first and win whenever they are
-     * there, because a set of stumps is both harder to fake and the only one of the two
-     * that carries a scale. The stone pass runs only when that fails — which on the
-     * grounds this app is used on is most of the time, since the wicket is a stone, a
-     * brick or a stack of two, and no amount of tuning will make three bars out of one
-     * lump.
-     */
+    /** The best wicket in one frame, of either kind, or null. See [detectCandidates]. */
     fun detectWicket(
         luma: ByteArray,
         width: Int,
@@ -148,30 +189,96 @@ class OpenCvStumpDetector(
         rowStride: Int,
         rotationDegrees: Int,
         creases: List<CreaseSegment> = emptyList(),
-        /**
-         * False to look for three bars only.
-         *
-         * The camera screen passes false while it holds a stumps lock. The stone passes are
-         * most of this stage's cost (about 30 ms a frame to 114 on the first field test), and
-         * while the wicket is known to be stumps a lump found on a frame where the bars
-         * flickered out is not the wicket — it is a reason to throw away a good stumps lock
-         * for a worse claim, which is what the tracker does with a change of kind.
-         */
         lookForStones: Boolean = true,
-    ): WicketSighting? {
-        if (!available || released || width <= 0 || height <= 0) return null
+        focus: WicketFocus? = null,
+    ): WicketSighting? = detectCandidates(
+        luma, width, height, rowStride, rotationDegrees, creases, lookForStones, focus,
+    ).firstOrNull()
+
+    /**
+     * Every wicket in one frame, best first — empty when there is none.
+     *
+     * THE ORDER IS THE POINT. Three bars are looked for first and win whenever they are
+     * there, because a set of stumps is both harder to fake and the only one of the two
+     * kinds that carries a scale. The stone pass runs only when that fails.
+     *
+     * @param lookForStones false to look for three bars only. The camera screen passes
+     *   false while it holds a stumps lock: the stone passes are most of a search's cost,
+     *   and a lump found on a frame where the bars flickered out is not the wicket.
+     * @param focus where the tracker holds, remembers or suspects the wicket. Looked at
+     *   first, at full resolution; when the wicket is there, nothing else is done.
+     * @param allowSearch false to look only at [focus]. The camera screen holds a steady
+     *   lock this way, and runs a whole-frame search only when the focus comes up empty.
+     */
+    fun detectCandidates(
+        luma: ByteArray,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        rotationDegrees: Int,
+        creases: List<CreaseSegment> = emptyList(),
+        lookForStones: Boolean = true,
+        focus: WicketFocus? = null,
+        allowSearch: Boolean = true,
+    ): List<WicketSighting> {
+        if (!available || released || width <= 0 || height <= 0) return emptyList()
 
         framesSeen++
         val startedAt = System.nanoTime()
         return try {
+            probes = 0
+            combFits = 0
+            if (focus != null && focus.kind == WicketKind.STUMPS) {
+                mode = "focus"
+                focusRuns++
+                val near = lookAround(luma, width, height, rowStride, rotationDegrees, focus, creases)
+                if (near != null) {
+                    focusHits++
+                    setsFound++
+                    lastRejection = null
+                    return listOf(WicketSighting.Stumps(near))
+                }
+                if (!allowSearch) {
+                    lastRejection = "not at the held place this frame"
+                    return emptyList()
+                }
+            }
+            mode = "search"
+            val cold = focus == null
+            probeBudget = if (cold) COLD_MAX_PROBES else MAX_PROBES
+            blobBudget = if (cold) COLD_MAX_BLOB_PROBES else MAX_BLOB_PROBES
             findWicket(luma, width, height, rowStride, rotationDegrees, creases, lookForStones)
         } catch (t: Throwable) {
             Log.w(TAG, "stump detection failed", t)
             lastRejection = "OpenCV threw: ${t.javaClass.simpleName}"
-            null
+            emptyList()
         } finally {
-            totalProcessingMs += (System.nanoTime() - startedAt) / 1_000_000
+            lastProcessingMs = (System.nanoTime() - startedAt) / 1_000_000
+            totalProcessingMs += lastProcessingMs
         }
+    }
+
+    /** The comb fit around a held place. Pure Kotlin on a full-resolution patch. */
+    private fun lookAround(
+        luma: ByteArray,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        rotationDegrees: Int,
+        focus: WicketFocus,
+        creases: List<CreaseSegment>,
+    ): StumpSet? {
+        probes++
+        val (set, fit) = StumpProfile.locateAt(luma, width, height, rowStride, rotationDegrees, focus) ?: return null
+        noteFit(fit)
+        return StumpGeometry.withCreases(set.copy(method = StumpMethod.FOCUS_COMB), creases, focus.aspect)
+    }
+
+    private fun noteFit(fit: CombFit) {
+        combFits++
+        lastNcc = fit.ncc.toFloat()
+        lastSnr = fit.snr.toFloat()
+        stumpsWereDark = !fit.bright
     }
 
     private fun findWicket(
@@ -182,7 +289,7 @@ class OpenCvStumpDetector(
         rotationDegrees: Int,
         creases: List<CreaseSegment>,
         lookForStones: Boolean,
-    ): WicketSighting? {
+    ): List<WicketSighting> {
         barsFound = 0
         barsAboveHorizon = 0
         stonesFound = 0
@@ -197,12 +304,10 @@ class OpenCvStumpDetector(
             for (row in 0 until height) {
                 val from = row * rowStride
                 if (from + width > luma.size) {
-                    // Same refusal the pitch detector makes, for the same reason: into a
-                    // reused buffer the missing rows are last frame's, and the seam between
-                    // them is a long straight bright edge — which is exactly what this is
-                    // looking for.
+                    // Into a reused buffer the missing rows are last frame's, and the seam
+                    // between them is a long straight bright edge — exactly what this hunts.
                     lastRejection = "short luma buffer"
-                    return null
+                    return emptyList()
                 }
                 System.arraycopy(luma, from, out, row * width, width)
             }
@@ -233,6 +338,7 @@ class OpenCvStumpDetector(
 
         val frameW = upright.cols()
         val frameH = upright.rows()
+        val frameAspect = frameW.toFloat() / frameH.coerceAtLeast(1)
 
         // The horizon comes off the GREYSCALE frame, before any threshold. A binarised
         // picture has lost exactly the texture and brightness the estimate reads.
@@ -240,126 +346,88 @@ class OpenCvStumpDetector(
 
         val blurred = Mat()
         Imgproc.GaussianBlur(upright, blurred, Size(3.0, 3.0), 0.0)
+
+        /*
+         * THE THRESHOLD OFFSET COMES FROM THE FRAME.
+         *
+         * A fixed -3.5 grey levels was right for one light. At dusk the sensor's gain goes
+         * up and the noise with it, and -3.5 turns grass into a field of bars; under a flat
+         * overcast sky the stumps themselves are a few levels above the ground and -3.5
+         * loses them. The mean absolute difference between the frame and its own blur is
+         * the noise plus the fine texture — exactly the clutter the threshold must clear.
+         */
+        adaptiveC = noiseOffset(upright, blurred).toFloat()
         upright.release()
 
         /*
-         * ADAPTIVE, NEVER OTSU.
-         *
-         * A global threshold is the mistake the pitch detector spent a session being wrong
-         * about: put a treeline in frame and Otsu splits sky from ground rather than paint
-         * from grass, and everything of interest saturates into one shape. Stumps are
-         * BRIGHTER THAN WHAT IS DIRECTLY BEHIND THEM, which is a local claim, so it is
-         * tested locally.
+         * ADAPTIVE, NEVER OTSU — and stumps are BRIGHTER THAN WHAT IS DIRECTLY BEHIND THEM,
+         * which is a local claim, so it is tested locally.
          */
         val bright = Mat()
         Imgproc.adaptiveThreshold(
-            blurred,
-            bright,
-            255.0,
-            Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C,
-            Imgproc.THRESH_BINARY,
-            PitchThreshold.ADAPTIVE_BLOCK,
-            STUMP_ADAPTIVE_C,
+            blurred, bright, 255.0,
+            Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, Imgproc.THRESH_BINARY,
+            PitchThreshold.ADAPTIVE_BLOCK, adaptiveC.toDouble(),
         )
 
+        loadIntegral(blurred)
+        var pass = barPass(bright, +1, frameW, frameH, frameAspect, creases, luma, width, height, rowStride, rotationDegrees)
+        var dark = false
+
         /*
-         * VERTICAL CLOSE, INTO A SEPARATE MAT.
-         *
-         * The stone pass needs the mask BEFORE the vertical close, because a stump-height
-         * close distorts every lump's aspect ratio and the stone test leans on that ratio.
-         * Previously this was solved by cloning bright (~500 KB) before every close. Now
-         * the close writes into its own Mat, and bright stays intact for collectStones()
-         * if the bar search fails. On the happy path (stumps found), no clone ever happens.
+         * THE OTHER POLARITY. Stumps against a low sun, a white sightscreen or a pale
+         * concrete strip are darker than what is behind them, and a brightness test cannot
+         * see them at all. Run only when the bright pass found no stumps, and only on
+         * alternate such frames: it is a second threshold and a second contour sweep.
          */
-        val closed = Mat()
-        val kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(1.0, 7.0))
-        Imgproc.morphologyEx(bright, closed, Imgproc.MORPH_CLOSE, kernel)
-        kernel.release()
-
-        val contours = mutableListOf<MatOfPoint>()
-        val hierarchy = Mat()
-        Imgproc.findContours(closed, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
-        hierarchy.release()
-        closed.release()
-
-        val candidates = ArrayList<StumpCandidate>()
-        for (contour in contours) {
-            val box = Imgproc.boundingRect(contour)
-            contour.release()
-
-            if (box.width <= 0 || box.height <= 0) continue
-            if (box.height.toFloat() / box.width < MIN_ASPECT) continue
-
-            val heightFraction = box.height.toFloat() / frameH
-            if (heightFraction < MIN_HEIGHT_FRACTION || heightFraction > MAX_HEIGHT_FRACTION) continue
-            if (box.width.toFloat() / frameW > MAX_WIDTH_FRACTION) continue
-
-            val baseY = (box.y + box.height).toFloat() / frameH
-            // A wicket stands on the pitch. A trunk at the treeline does not, and this is
-            // the only test that can tell them apart — geometrically they are identical.
-            if (!GroundHorizon.isOnGround(baseY, horizonY)) {
-                barsAboveHorizon++
-                continue
-            }
-
-            candidates.add(
-                StumpCandidate(
-                    centreX = (box.x + box.width / 2f) / frameW,
-                    baseY = baseY,
-                    topY = box.y.toFloat() / frameH,
-                ),
+        if (pass.sightings.isEmpty() && (searchesWithoutStumps < COLD_BOTH_POLARITIES || searchesWithoutStumps % 2 == 1)) {
+            val inverse = Mat()
+            /*
+             * THE SIGN FLIPS WITH THE POLARITY. THRESH_BINARY_INV marks a pixel when it is NOT
+             * above (local mean - C). A negative C, right for "brighter than the mean by
+             * |C|", here marks everything not brighter than mean + |C| — nearly the whole
+             * frame — and the dark pass found one giant blob and nothing else. Dark means
+             * below the mean by |C|: C positive.
+             */
+            Imgproc.adaptiveThreshold(
+                blurred, inverse, 255.0,
+                Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, Imgproc.THRESH_BINARY_INV,
+                PitchThreshold.ADAPTIVE_BLOCK, -adaptiveC.toDouble(),
             )
+            val darkPass = barPass(inverse, -1, frameW, frameH, frameAspect, creases, luma, width, height, rowStride, rotationDegrees)
+            inverse.release()
+            if (darkPass.sightings.isNotEmpty()) {
+                pass = darkPass
+                dark = true
+            }
         }
 
-        barsFound = candidates.size
-        val frameAspect = frameW.toFloat() / frameH.coerceAtLeast(1)
-
-        val search = StumpGeometry.search(candidates, creases, frameAspect)
-        val set = search.set
-        if (set != null) {
+        if (pass.sightings.isNotEmpty()) {
             bright.release()
             blurred.release()
+            searchesWithoutStumps = 0
             setsFound++
             lastRejection = null
-            return WicketSighting.Stumps(set)
+            if (dark) stumpsWereDark = true
+            return pass.sightings
         }
+        searchesWithoutStumps++
 
-        // Why the bar search stopped, kept aside: if the stone pass also finds nothing,
-        // this is the more informative of the two reasons and the screen should show it.
-        /*
-         * NAME THE RULE, NOT JUST THE OUTCOME.
-         *
-         * "$barsFound bars, none of them three in a wicket's shape" was what this said on a
-         * ground with three stumps a metre in front of the phone and exactly three bars
-         * found — which is one triple, rejected by exactly one rule, and the screen could
-         * not say which. [StumpGeometry.search] now carries the nearest miss's reason with
-         * its measured value and its limit, so the next thing a tester does is change a
-         * number rather than guess at a photograph.
-         */
-        val barRejection = when {
-            candidates.isEmpty() && barsAboveHorizon > 0 ->
-                "no bars on the ground ($barsAboveHorizon above the horizon)"
-            candidates.size < StumpGeometry.MIN_CANDIDATES ->
-                "only ${candidates.size} tall thin bars in frame"
-            search.reason != null -> "$barsFound bars; nearest miss: ${search.reason}"
-            else -> "$barsFound bars, none of them three in a wicket's shape"
-        }
+        val barRejection = pass.rejection
 
         if (!lookForStones) {
             bright.release()
             blurred.release()
             lastRejection = "$barRejection; stone search off while stumps are locked"
-            return null
+            return emptyList()
         }
 
         /*
          * THE GULLY WICKET.
          *
-         * Pale first, against the mask already computed, then dark on a second threshold -
-         * and the dark pass runs only when the pale one found nothing, because it costs
-         * another threshold and another contour sweep over a 960-wide frame, and most of
-         * the time the first pass has already answered. A white stone on red earth and a
-         * granite one on a concrete strip are opposite tests; a ground gives you either.
+         * Pale first, against the mask already computed, then dark on a second threshold —
+         * and the dark pass runs only when the pale one found nothing. A white stone on red
+         * earth and a granite one on a concrete strip are opposite tests.
          */
         val paleStones = collectStones(bright, frameW, frameH)
         bright.release()
@@ -368,18 +436,17 @@ class OpenCvStumpDetector(
         var plausible = StoneGeometry.plausibleCount(paleStones)
 
         if (mark == null) {
-            val dark = Mat()
+            val darkMask = Mat()
+            // Dark = below the local mean by |C|, so C is POSITIVE here — the same sign flip as
+            // the dark bar pass. With the pitch detector's negative C this mask was nearly
+            // all foreground and the dark-stone pass could never have found a stone.
             Imgproc.adaptiveThreshold(
-                blurred,
-                dark,
-                255.0,
-                Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C,
-                Imgproc.THRESH_BINARY_INV,
-                PitchThreshold.ADAPTIVE_BLOCK,
-                PitchThreshold.ADAPTIVE_C,
+                blurred, darkMask, 255.0,
+                Imgproc.ADAPTIVE_THRESH_GAUSSIAN_C, Imgproc.THRESH_BINARY_INV,
+                PitchThreshold.ADAPTIVE_BLOCK, -PitchThreshold.ADAPTIVE_C,
             )
-            val darkStones = collectStones(dark, frameW, frameH)
-            dark.release()
+            val darkStones = collectStones(darkMask, frameW, frameH)
+            darkMask.release()
             stones += darkStones.size
             plausible += StoneGeometry.plausibleCount(darkStones)
             val darkMark = StoneGeometry.findMark(darkStones, creases, frameAspect)
@@ -399,12 +466,281 @@ class OpenCvStumpDetector(
                 plausible == 0 -> "$barRejection; $stones lumps, none wicket-shaped"
                 else -> "$barRejection; $plausible of $stones lumps scored, none a wicket"
             }
-            return null
+            return emptyList()
         }
 
         stoneMarksFound++
         lastRejection = null
-        return WicketSighting.Stone(mark)
+        return listOf(WicketSighting.Stone(mark))
+    }
+
+    private class BarPass(val sightings: List<WicketSighting>, val rejection: String)
+
+    /** A place the comb is asked to look at, normalised, with how sure the guess is. */
+    private class Probe(
+        val centreX: Double,
+        val baseY: Double,
+        val topY: Double,
+        val halfSpan: Double,
+        val tolerance: Double,
+        val reach: Double,
+        /** The contour triple it came from; null for a blob. */
+        val triple: StumpSet?,
+        val rank: Double = 0.0,
+    )
+
+    /**
+     * Bars out of one binary mask, turned into wickets.
+     *
+     * Contours give two kinds of candidate. Triples of separate bars, as before, through
+     * [StumpGeometry.search] — now every distinct one rather than the single best. And
+     * MERGED blobs: one box the proportions of a whole wicket, which is what three stumps
+     * become at match distance once scaled and blurred. Both go to the comb fit at full
+     * resolution, which is the judge. A triple the comb cannot confirm survives at a
+     * reduced score — a near wicket in strong texture can defeat the comb and still be a
+     * wicket — and a blob it cannot confirm is dropped, because a blob proves nothing.
+     */
+    private fun barPass(
+        mask: Mat,
+        /** +1 for pale bars, -1 for dark: the sign of "stands out" in [boxContrast]. */
+        polarity: Int,
+        frameW: Int,
+        frameH: Int,
+        frameAspect: Float,
+        creases: List<CreaseSegment>,
+        luma: ByteArray,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        rotationDegrees: Int,
+    ): BarPass {
+        /*
+         * OPEN VERTICALLY, THEN CLOSE VERTICALLY — into their own Mats, since the stone pass
+         * needs the mask untouched.
+         *
+         * The opening is the fix for every ground with paint on it. The bowling crease is a
+         * white line through the stumps' feet, and in the mask it JOINS them: three stumps
+         * and two metres of crease become one wide contour that is neither a bar nor a
+         * wicket-shaped blob, and the wicket was never even offered to the comb — on the
+         * synthetic field, not at 40 m and not at 5. An opening with a 1×5 column keeps only
+         * what is at least five pixels tall, so the crease (a pixel or three thick) and the
+         * speckle go, and every stump from 5 to 40 m (twelve pixels tall or more at this
+         * scale) stays. The close then rejoins a stump broken by a shadow.
+         */
+        val opened = Mat()
+        val openKernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(1.0, OPEN_HEIGHT_PX))
+        Imgproc.morphologyEx(mask, opened, Imgproc.MORPH_OPEN, openKernel)
+        openKernel.release()
+        val closed = Mat()
+        val kernel = Imgproc.getStructuringElement(Imgproc.MORPH_RECT, Size(1.0, 7.0))
+        Imgproc.morphologyEx(opened, closed, Imgproc.MORPH_CLOSE, kernel)
+        kernel.release()
+        opened.release()
+
+        val contours = mutableListOf<MatOfPoint>()
+        val hierarchy = Mat()
+        Imgproc.findContours(closed, contours, hierarchy, Imgproc.RETR_EXTERNAL, Imgproc.CHAIN_APPROX_SIMPLE)
+        hierarchy.release()
+        closed.release()
+
+        val candidates = ArrayList<StumpCandidate>()
+        val blobs = ArrayList<Probe>()
+        for (contour in contours) {
+            val box = Imgproc.boundingRect(contour)
+            contour.release()
+            if (box.width <= 0 || box.height <= 0) continue
+
+            val heightFraction = box.height.toFloat() / frameH
+            if (heightFraction < MIN_HEIGHT_FRACTION || heightFraction > MAX_HEIGHT_FRACTION) continue
+
+            val baseY = (box.y + box.height).toFloat() / frameH
+            // A wicket stands on the pitch. A trunk at the treeline does not.
+            if (!GroundHorizon.isOnGround(baseY, horizonY)) {
+                barsAboveHorizon++
+                continue
+            }
+            val aspect = box.height.toFloat() / box.width
+            val contrast = polarity * boxContrast(box, frameW, frameH)
+
+            // Merged: the proportions of a whole wicket, not of one stump.
+            if (aspect in MERGED_MIN_ASPECT..MERGED_MAX_ASPECT && box.width >= MERGED_MIN_WIDTH_PX) {
+                /*
+                 * TWO PRIORS ON THE SPACING, NOT ONE. The blob's width is outside to outside
+                 * plus however much blur, so it overstates; its height is the stumps' height
+                 * and fixes the spacing by the Laws' proportion (0.1936 / 0.711), less
+                 * whatever a raised camera foreshortens. The comb searches the range both
+                 * allow. Trusting the width alone let a narrow blob steer the comb to half
+                 * the real spacing — a scale out by two.
+                 */
+                val fromWidth = box.width * 0.42
+                val fromHeight = box.height * (PitchGeometry.STUMP_CENTRES_SPAN_M / PitchGeometry.STUMP_HEIGHT_M) / 2.0
+                val lo = minOf(fromWidth, fromHeight) * 0.75
+                val hi = maxOf(fromWidth, fromHeight) * 1.35
+                val mid = (lo + hi) / 2.0
+                val wicketish = aspect / WHOLE_WICKET_ASPECT
+                blobs.add(
+                    Probe(
+                        centreX = (box.x + box.width / 2.0) / frameW,
+                        baseY = baseY.toDouble(),
+                        topY = box.y.toDouble() / frameH,
+                        halfSpan = mid / frameW,
+                        tolerance = (hi - lo) / (hi + lo),
+                        // A blob of two merged stumps and a third apart is centred half a
+                        // spacing off the middle stump; the search must reach past that.
+                        reach = 1.6,
+                        triple = null,
+                        // Most wicket-like first: standing out from the ground, in a whole
+                        // wicket's proportions. Height ranked grass streaks first.
+                        rank = contrast * (if (wicketish in 0.5..2.0) 1.0 else 0.35),
+                    ),
+                )
+            }
+
+            if (aspect < MIN_ASPECT) continue
+            if (box.width.toFloat() / frameW > MAX_WIDTH_FRACTION) continue
+            candidates.add(
+                StumpCandidate(
+                    centreX = (box.x + box.width / 2f) / frameW,
+                    baseY = baseY,
+                    topY = box.y.toFloat() / frameH,
+                    contrast = contrast.toFloat().coerceAtLeast(0.01f),
+                ),
+            )
+        }
+        barsFound = candidates.size
+
+        val search = StumpGeometry.search(candidates, creases, frameAspect)
+        val probeList = ArrayList<Probe>()
+        for (set in search.ranked) {
+            probeList.add(
+                Probe(
+                    centreX = set.middle.centreX.toDouble(),
+                    baseY = set.middle.baseY.toDouble(),
+                    topY = set.middle.topY.toDouble(),
+                    halfSpan = abs(set.spanX) / 2.0,
+                    tolerance = 0.3,
+                    reach = 1.0,
+                    triple = set,
+                ),
+            )
+        }
+        probeList.addAll(blobs.sortedByDescending { it.rank }.take(blobBudget))
+
+        val found = ArrayList<StumpSet>()
+        for (p in probeList.take(probeBudget)) {
+            probes++
+            val fitted = StumpProfile.locate(
+                luma, width, height, rowStride, rotationDegrees,
+                centreX = p.centreX,
+                baseY = p.baseY,
+                topY = p.topY,
+                halfSpanFw = p.halfSpan,
+                tolerance = p.tolerance,
+                searchHalfSpans = p.reach,
+            )
+            if (fitted != null) {
+                noteFit(fitted.second)
+                val how = if (p.triple != null) StumpMethod.TRIPLE_COMB else StumpMethod.MERGED_COMB
+                found.add(StumpGeometry.withCreases(fitted.first.copy(method = how), creases, frameAspect))
+            }
+            /*
+             * A triple the comb could NOT confirm is dropped, not passed on at a discount. It
+             * used to survive at 0.7 of its score, and a fence — three palings of which the
+             * contour test is satisfied and the comb is not — then reached READY on persistence
+             * alone, five frames in. The comb works from five metres to forty on the same
+             * wickets the contours find; a set it rejects is not a set.
+             */
+        }
+
+        val sightings = distinctSets(found).map { WicketSighting.Stumps(it) }
+        val rejection = when {
+            sightings.isNotEmpty() -> ""
+            candidates.isEmpty() && blobs.isEmpty() && barsAboveHorizon > 0 ->
+                "no bars on the ground ($barsAboveHorizon above the horizon)"
+            blobs.isNotEmpty() && candidates.size < StumpGeometry.MIN_CANDIDATES ->
+                "${blobs.size} wicket-shaped blobs, none three stumps at full resolution"
+            candidates.size < StumpGeometry.MIN_CANDIDATES ->
+                "only ${candidates.size} tall thin bars in frame"
+            search.reason != null -> "$barsFound bars; nearest miss: ${search.reason}"
+            else -> "$barsFound bars, none of them three in a wicket's shape"
+        }
+        return BarPass(sightings, rejection)
+    }
+
+    private var integral: DoubleArray? = null
+    private var integralW = 0
+
+    /** The grey frame's integral image, read out once, for O(1) box means. */
+    private fun loadIntegral(gray: Mat) {
+        val sum = Mat()
+        try {
+            Imgproc.integral(gray, sum, CvType.CV_64F)
+            val n = sum.rows() * sum.cols()
+            val out = integral?.takeIf { it.size == n } ?: DoubleArray(n).also { integral = it }
+            sum.get(0, 0, out)
+            integralW = sum.cols()
+        } finally {
+            sum.release()
+        }
+    }
+
+    private fun boxSum(x0: Int, y0: Int, x1: Int, y1: Int): Double {
+        val s = integral ?: return 0.0
+        val w = integralW
+        return s[y1 * w + x1] - s[y0 * w + x1] - s[y1 * w + x0] + s[y0 * w + x0]
+    }
+
+    /**
+     * Mean inside the box minus the mean of the ground either side of it, same rows, a box
+     * width out each way. A stump is tens of grey levels; a grass streak is a few.
+     */
+    private fun boxContrast(box: Rect, frameW: Int, frameH: Int): Double {
+        if (integral == null) return 0.0
+        val pad = maxOf(2, box.width)
+        val x0 = box.x
+        val x1 = (box.x + box.width).coerceAtMost(frameW)
+        val y0 = box.y
+        val y1 = (box.y + box.height).coerceAtMost(frameH)
+        val ox0 = (x0 - pad).coerceAtLeast(0)
+        val ox1 = (x1 + pad).coerceAtMost(frameW)
+        val inner = boxSum(x0, y0, x1, y1)
+        val outer = boxSum(ox0, y0, ox1, y1)
+        val innerArea = ((x1 - x0) * (y1 - y0)).toDouble()
+        val ringArea = ((ox1 - ox0) * (y1 - y0)).toDouble() - innerArea
+        if (innerArea <= 0 || ringArea <= 0) return 0.0
+        return inner / innerArea - (outer - inner) / ringArea
+    }
+
+    /** Best first, one per place: a blob and a triple of the same wicket are one sighting. */
+    private fun distinctSets(sets: List<StumpSet>): List<StumpSet> {
+        val out = ArrayList<StumpSet>()
+        for (s in sets.sortedByDescending { it.score }) {
+            val mid = s.middle.centreX
+            val clash = out.any { k ->
+                abs(mid - k.middle.centreX) < 0.5f * max(abs(s.spanX), abs(k.spanX)) &&
+                    abs(s.middle.baseY - k.middle.baseY) < max(s.meanHeight, k.meanHeight)
+            }
+            if (!clash) out.add(s)
+            if (out.size >= StumpGeometry.MAX_RANKED) break
+        }
+        return out
+    }
+
+    /**
+     * The threshold offset this frame's noise calls for, in grey levels (negative: brighter
+     * than the local mean by this much).
+     */
+    private fun noiseOffset(gray: Mat, blurred: Mat): Double {
+        val diff = Mat()
+        return try {
+            Core.absdiff(gray, blurred, diff)
+            val meanAbs = Core.mean(diff).`val`[0]
+            -(meanAbs * NOISE_TO_OFFSET).coerceIn(MIN_ADAPTIVE_OFFSET, MAX_ADAPTIVE_OFFSET)
+        } catch (t: Throwable) {
+            STUMP_ADAPTIVE_C
+        } finally {
+            diff.release()
+        }
     }
 
     /**
@@ -540,7 +876,7 @@ class OpenCvStumpDetector(
     companion object {
         private const val TAG = "OpenCvStumpDetector"
 
-        /** Taller than it is wide, by this much, before it is worth considering. */
+        /** Taller than it is wide, by this much, before it is worth considering as one stump. */
         const val MIN_ASPECT = 2.0f
 
         /**
@@ -556,7 +892,40 @@ class OpenCvStumpDetector(
         /** A bar wider than this is a post, a bat, or a leg. */
         const val MAX_WIDTH_FRACTION = 0.045f
 
-        /** Threshold offset: -3.5 ensures clean segmentation of stumps in room/turf lighting. */
+        /**
+         * A blob with a whole wicket's proportions: 0.711 m tall over 0.2286 m wide is 3.1,
+         * squashed towards 1.3 by a camera looking down and stretched by blur to ~7 when
+         * the stumps are a pixel each.
+         */
+        const val MERGED_MIN_ASPECT = 1.3f
+        const val MERGED_MAX_ASPECT = 7.0f
+
+        /** Narrower than this and there is no wicket inside it to resolve. */
+        const val MERGED_MIN_WIDTH_PX = 3
+
+        /** Comb fits per search frame, and how many of them may go to blobs. */
+        const val MAX_PROBES = 6
+        const val MAX_BLOB_PROBES = 4
+
+        /** The same, on a cold start with nothing held or remembered. */
+        const val COLD_MAX_PROBES = 12
+        const val COLD_MAX_BLOB_PROBES = 9
+
+        /** Failed searches on which both polarities run every time, before alternating. */
+        const val COLD_BOTH_POLARITIES = 3
+
+        /** Shortest vertical run the bar mask keeps; see the opening in [barPass]. */
+        const val OPEN_HEIGHT_PX = 5.0
+
+        /** Height over outside width of a whole wicket: 0.711 / 0.2286. */
+        const val WHOLE_WICKET_ASPECT = 3.1
+
+        /** The old fixed offset; the fallback when the noise cannot be measured. */
         const val STUMP_ADAPTIVE_C = -3.5
+
+        /** Threshold offset per grey level of measured noise, and its bounds. */
+        const val NOISE_TO_OFFSET = 1.6
+        const val MIN_ADAPTIVE_OFFSET = 2.5
+        const val MAX_ADAPTIVE_OFFSET = 6.0
     }
 }

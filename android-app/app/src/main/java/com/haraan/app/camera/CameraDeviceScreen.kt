@@ -109,6 +109,7 @@ import com.haraan.app.ui.Feel
 import com.haraan.app.data.CameraDeviceRepository
 import com.haraan.app.vision.OpenCvBallTracker
 import com.haraan.app.vision.drawWicketLock
+import com.haraan.app.vision.drawWicketRegion
 import com.haraan.app.vision.TrackQuality
 import com.haraan.app.data.CameraSession
 import com.haraan.app.data.PairingPreview
@@ -886,6 +887,30 @@ private fun CameraMode(
     val wicketTracker = remember { com.haraan.app.vision.WicketTracker() }
     var wicketLock by remember { mutableStateOf<com.haraan.app.vision.WicketLock?>(null) }
     var wicketDiagnostics by remember { mutableStateOf(wicketTracker.diagnostics()) }
+    var stumpReport by remember { mutableStateOf<com.haraan.app.vision.StumpDetectorReport?>(null) }
+    /*
+     * STARTUP AND RANGE, FOR THE DEVELOPER READOUT.
+     *
+     * When the screen asked for the camera (wall clock) and when the first frame reached the
+     * analyser, so "camera → first frame" can be printed beside the tracker's own "→ first
+     * detection" and "→ READY". The lens, read once from Camera2, turns a span into an
+     * ESTIMATED distance. The upright frame's width turns a span into pixels.
+     */
+    val screenOpenedAt = remember { android.os.SystemClock.elapsedRealtime() }
+    var cameraToFirstFrameMs by remember { mutableStateOf<Long?>(null) }
+    val lensContext = LocalContext.current
+    val lens = remember { readBackLens(lensContext) }
+    var cameraIntrinsics by remember { mutableStateOf<com.haraan.app.vision.CameraIntrinsics?>(null) }
+    var uprightWidthPx by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    // Field validation: taped distance, a recording window, and the log itself.
+    val validation = remember { com.haraan.app.vision.WicketValidation() }
+    var validationTrueM by remember { mutableStateOf(20.0) }
+    var validationUntilMs by remember { mutableStateOf(0L) }
+    var validationRows by remember { mutableStateOf<List<com.haraan.app.vision.WicketValidation.Row>>(emptyList()) }
+    var validationSavedPath by remember { mutableStateOf<String?>(null) }
+    // How far off level the phone is held, from gravity: the one hint the operator may need
+    // before the stumps can be found. See [rememberDeviceRoll].
+    val deviceRoll by rememberDeviceRoll()
     /** Throttle: panel recomposes at ~5 Hz rather than analysis rate. */
     var lastDiagnosticsMs = remember { 0L }
     var showAdminPanel by remember { mutableStateOf(false) }
@@ -1079,6 +1104,14 @@ private fun CameraMode(
                     val frameW = if (sideways) image.height else image.width
                     val frameH = if (sideways) image.width else image.height
                     if (frameH > 0) uprightAspect = frameW.toFloat() / frameH.toFloat()
+                    if (cameraToFirstFrameMs == null) {
+                        cameraToFirstFrameMs = android.os.SystemClock.elapsedRealtime() - screenOpenedAt
+                    }
+                    if (uprightWidthPx != frameW) {
+                        uprightWidthPx = frameW
+                        cameraIntrinsics = lens?.intrinsics(image.width, image.height, sideways)
+                            ?: com.haraan.app.vision.CameraIntrinsics.assumed(70.0, uprightAspect)
+                    }
 
                     /*
                      * IS THERE ANYTHING TO LOOK FOR?
@@ -1192,13 +1225,16 @@ private fun CameraMode(
 
                         /*
                          * An Auto segment runs for most of a session, not for one ball, so
-                         * the wicket would never be looked at again. Every eighth frame
-                         * with no ball about, the detector gets a turn.
+                         * the wicket would never be looked at again. Every fourth frame with
+                         * no ball about, the detector gets a turn - at the held place only,
+                         * unless nothing is held: a full-resolution patch costs a millisecond
+                         * or two, and a whole-frame search does not belong beside a ball
+                         * tracker.
                          */
                         idleAnalysisFrame++
                         val ballQuiet = latestBall?.let { frameMs - it.timestampMs > 1_500 } ?: true
-                        if (autoSegment && ballQuiet && idleAnalysisFrame % 8 == 0 && stumpDetector.available) {
-                            val wicket = stumpDetector.detectWicket(
+                        if (autoSegment && ballQuiet && idleAnalysisFrame % 4 == 0 && stumpDetector.available) {
+                            val sightings = stumpDetector.detectCandidates(
                                 luma = bytes,
                                 width = image.width,
                                 height = image.height,
@@ -1206,8 +1242,10 @@ private fun CameraMode(
                                 rotationDegrees = image.imageInfo.rotationDegrees,
                                 creases = pitchDetector.creases(),
                                 lookForStones = wicketLock?.kind != com.haraan.app.vision.WicketKind.STUMPS,
+                                focus = wicketTracker.focus(),
+                                allowSearch = wicketLock == null || idleAnalysisFrame % 16 == 0,
                             )
-                            wicketLock = wicketTracker.onFrame(wicket, cameraMove, uprightAspect, frameMs)
+                            wicketLock = wicketTracker.onFrame(sightings, cameraMove, uprightAspect, frameMs)
                         }
                         val sighting = vision.onFrame(
                             luma = bytes,
@@ -1247,26 +1285,72 @@ private fun CameraMode(
                         }
 
                         if (lookingForWicket) {
-                            val wicket = stumpDetector.detectWicket(
-                                luma = bytes,
-                                width = image.width,
-                                height = image.height,
-                                rowStride = plane.rowStride,
-                                rotationDegrees = image.imageInfo.rotationDegrees,
-                                creases = pitchDetector.creases(),
-                                // A stumps lock is never served by a stone; skipping that
-                                // search is most of this stage's per-frame cost.
-                                lookForStones = wicketLock?.kind != com.haraan.app.vision.WicketKind.STUMPS,
-                            )
-                            wicketLock = wicketTracker.onFrame(
-                                sighting = wicket,
-                                motion = cameraMove,
-                                frameAspect = uprightAspect,
-                                timestampMs = image.imageInfo.timestamp / 1_000_000,
-                            )
+                            /*
+                             * HOW HARD TO LOOK, BY WHAT IS ALREADY KNOWN.
+                             *
+                             * A match is hours of a phone in the sun, and the wicket does not
+                             * move. Once a lock is confirmed and has held, the detector checks
+                             * it on one frame in three, at its own place only - a comb fit on
+                             * a full-resolution patch, a millisecond or two - and camera
+                             * motion carries it between. Coasting behind the striker, the
+                             * patch is checked every frame and the whole frame only every
+                             * fourth. Nothing held: the whole frame, every frame.
+                             */
+                            val held = wicketLock
+                            val steady = held != null &&
+                                held.state == com.haraan.app.vision.WicketTrackState.CONFIRMED &&
+                                held.heldFrames >= STEADY_LOCK_FRAMES
+                            if (steady && idleAnalysisFrame % STEADY_CHECK_EVERY != 0) {
+                                wicketLock = wicketTracker.carry(cameraMove, uprightAspect)
+                            } else {
+                                val allowSearch = when {
+                                    held == null -> true
+                                    held.source == com.haraan.app.vision.WicketLockSource.MANUAL -> false
+                                    held.state == com.haraan.app.vision.WicketTrackState.TENTATIVE -> true
+                                    held.state == com.haraan.app.vision.WicketTrackState.TEMPORARILY_LOST ->
+                                        idleAnalysisFrame % 4 == 0
+                                    else -> false
+                                }
+                                val sightings = stumpDetector.detectCandidates(
+                                    luma = bytes,
+                                    width = image.width,
+                                    height = image.height,
+                                    rowStride = plane.rowStride,
+                                    rotationDegrees = image.imageInfo.rotationDegrees,
+                                    creases = pitchDetector.creases(),
+                                    // A stumps lock is never served by a stone; skipping that
+                                    // search is most of this stage's per-frame cost.
+                                    lookForStones = held?.kind != com.haraan.app.vision.WicketKind.STUMPS,
+                                    focus = wicketTracker.focus(),
+                                    allowSearch = allowSearch,
+                                )
+                                wicketLock = wicketTracker.onFrame(
+                                    sightings = sightings,
+                                    motion = cameraMove,
+                                    frameAspect = uprightAspect,
+                                    timestampMs = image.imageInfo.timestamp / 1_000_000,
+                                )
+                            }
                             val now = System.currentTimeMillis()
+                            if (now < validationUntilMs) {
+                                val d = wicketTracker.diagnostics()
+                                validation.record(
+                                    trueDistanceM = validationTrueM,
+                                    timestampMs = image.imageInfo.timestamp / 1_000_000,
+                                    lock = wicketLock,
+                                    camera = cameraIntrinsics,
+                                    uprightWidthPx = uprightWidthPx,
+                                    rollDeg = d.rollDeg,
+                                    timeToReadyMs = d.timeToReadyMs,
+                                )
+                            }
                             if (now - lastDiagnosticsMs >= 200L) {
                                 wicketDiagnostics = wicketTracker.diagnostics()
+                                if (showAdminPanel) stumpReport = stumpDetector.report()
+                                if (validationUntilMs != 0L && now >= validationUntilMs) {
+                                    validationUntilMs = 0L
+                                    validationRows = validation.summary()
+                                }
                                 lastDiagnosticsMs = now
                             }
                         }
@@ -1676,6 +1760,21 @@ private fun CameraMode(
          * measured against, and the bounce is the one thing on this screen with a position
          * in metres.
          */
+        if (granted && showAdminPanel) {
+            wicketLock?.let { lock ->
+                val label = com.haraan.app.vision.wicketRegionLabel(
+                    lock, cameraIntrinsics, uprightWidthPx, wicketDiagnostics.rollDeg,
+                )
+                Canvas(Modifier.fillMaxSize()) {
+                    drawWicketRegion(
+                        lock = lock,
+                        box = com.haraan.app.vision.FrameBox.letterbox(size.width, size.height, uprightAspect),
+                        label = label,
+                        density = this,
+                    )
+                }
+            }
+        }
         if (granted) {
             wicketLock?.let { lock ->
                 Canvas(Modifier.fillMaxSize()) {
@@ -1969,11 +2068,19 @@ private fun CameraMode(
          */
         if (!wicketTapping && !stumpCalTapping) {
             val currentLock = wicketLock
+            /*
+             * READY IS A PROMISE TO THE PLAYER, SO IT DOES NOT FLICKER.
+             *
+             * Five tracker states are for the diagnostics panel. The person holding the
+             * phone needs two: still looking, or ready. A confirmed lock coasting behind the
+             * striker is still ready - the wicket has not gone anywhere and the numbers are
+             * taken from the lock it is carrying - so it stays "Ready" rather than blinking
+             * back to "Detecting" every time somebody walks past the stumps.
+             */
             val isReady = currentLock != null && (
-                currentLock.state == com.haraan.app.vision.WicketTrackState.CONFIRMED ||
-                    currentLock.source == com.haraan.app.vision.WicketLockSource.MANUAL
+                currentLock.source == com.haraan.app.vision.WicketLockSource.MANUAL ||
+                    currentLock.state != com.haraan.app.vision.WicketTrackState.TENTATIVE
                 )
-            val byHand = currentLock?.source == com.haraan.app.vision.WicketLockSource.MANUAL
 
             // Said in the hand the moment the wicket locks — once, on the way in. Through the
             // Vibrator, not performHapticFeedback: MIUI and other skins mute View haptics when
@@ -2073,11 +2180,11 @@ private fun CameraMode(
                 if (recording) {
                     RecTimecode(recording = true, fps = recordingFps)
                 } else {
+                    // Two words for the player. Everything else is in the developer readout.
                     val (dot, words) = when {
                         thermalThrottled -> Warn to "Phone is hot · tracking paused"
-                        byHand -> Good to "Wicket set by hand"
-                        isReady -> Good to "Wicket locked"
-                        else -> Ink.copy(alpha = 0.45f) to "Point at the far wicket"
+                        isReady -> Good to "READY"
+                        else -> Ink.copy(alpha = 0.45f) to "Detecting stumps…"
                     }
                     Row(
                         modifier = Modifier
@@ -2099,15 +2206,48 @@ private fun CameraMode(
 
                 if (showAdminPanel) {
                     Spacer(Modifier.height(10.dp))
+                    Column(
+                        Modifier
+                            .heightIn(max = 520.dp)
+                            .verticalScroll(androidx.compose.foundation.rememberScrollState()),
+                    ) {
                     WicketDiagnosticsPanel(
                         diagnostics = wicketDiagnostics,
                         lock = currentLock,
+                        report = stumpReport,
+                        deviceRollDeg = deviceRoll,
+                        camera = cameraIntrinsics,
+                        uprightWidthPx = uprightWidthPx,
+                        cameraToFirstFrameMs = cameraToFirstFrameMs,
                         modifier = Modifier
                             .widthIn(max = 300.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .background(Color.Black.copy(alpha = 0.82f))
                             .padding(12.dp),
                     )
+                    Spacer(Modifier.height(8.dp))
+                    val validationContext = LocalContext.current
+                    com.haraan.app.vision.WicketValidationPanel(
+                        trueDistanceM = validationTrueM,
+                        onDistanceChange = { validationTrueM = it },
+                        recording = validationUntilMs != 0L,
+                        onRecord = {
+                            validationSavedPath = null
+                            validationUntilMs = System.currentTimeMillis() + VALIDATION_RECORD_MS
+                        },
+                        onSave = {
+                            validationSavedPath = saveValidationCsv(validationContext, validation, cameraIntrinsics?.source)
+                        },
+                        onClear = {
+                            validation.clear()
+                            validationRows = emptyList()
+                            validationSavedPath = null
+                        },
+                        rows = validationRows,
+                        savedPath = validationSavedPath,
+                        modifier = Modifier.widthIn(max = 300.dp),
+                    )
+                    }
                 }
             }
 
@@ -4007,6 +4147,122 @@ private fun Modifier.clickableCapture(
 /** Server ceiling is 10s; stop just under it so container rounding cannot push us over. */
 /** Points kept on the live overlay. Enough to see a path, few enough to stay readable. */
 private const val CAMERA_TRAIL_POINTS = 30
+
+/**
+ * Analysed frames a confirmed lock must have held before it is checked only on one frame
+ * in [STEADY_CHECK_EVERY]. About two thirds of a second: long enough that a lock still
+ * settling gets every frame, short enough that the saving starts almost at once.
+ */
+private const val STEADY_LOCK_FRAMES = 20
+private const val STEADY_CHECK_EVERY = 3
+
+/** How long one validation recording runs: about ninety analysed frames. */
+private const val VALIDATION_RECORD_MS = 3_000L
+
+/**
+ * The back camera's lens, as Camera2 reports it — the camera CameraX's DEFAULT_BACK_CAMERA
+ * binds (the first LENS_FACING_BACK id).
+ *
+ * Preferred source: LENS_INTRINSIC_CALIBRATION, the focal length in active-array pixels,
+ * measured per device at the factory. Fallback: the nominal focal length over the sensor's
+ * physical width. Both are mapped onto the analysis frame on the assumption that a 16:9
+ * stream uses the sensor's full width — see [com.haraan.app.vision.CameraIntrinsics].
+ */
+private class BackLens(
+    val focalMm: Double,
+    val sensorWidthMm: Double,
+    /** Calibrated focal over active-array width, or null when the device does not publish it. */
+    val calibratedFocalOverWidth: Double?,
+) {
+    fun intrinsics(outWidth: Int, outHeight: Int, sideways: Boolean): com.haraan.app.vision.CameraIntrinsics? {
+        val uprightWidth = if (sideways) outHeight else outWidth
+        calibratedFocalOverWidth?.let { ratio ->
+            return com.haraan.app.vision.CameraIntrinsics(ratio * outWidth / uprightWidth, "lens calibration")
+        }
+        return com.haraan.app.vision.CameraIntrinsics.fromLens(focalMm, sensorWidthMm, outWidth, outHeight, sideways)
+    }
+}
+
+private fun readBackLens(context: Context): BackLens? = runCatching {
+    val manager = context.getSystemService(Context.CAMERA_SERVICE) as android.hardware.camera2.CameraManager
+    val id = manager.cameraIdList.firstOrNull { cid ->
+        manager.getCameraCharacteristics(cid).get(android.hardware.camera2.CameraCharacteristics.LENS_FACING) ==
+            android.hardware.camera2.CameraCharacteristics.LENS_FACING_BACK
+    } ?: return null
+    val c = manager.getCameraCharacteristics(id)
+    val focal = c.get(android.hardware.camera2.CameraCharacteristics.LENS_INFO_AVAILABLE_FOCAL_LENGTHS)?.firstOrNull()
+        ?: return null
+    val sensor = c.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_PHYSICAL_SIZE) ?: return null
+    val calibrated = if (android.os.Build.VERSION.SDK_INT >= 28) {
+        val k = c.get(android.hardware.camera2.CameraCharacteristics.LENS_INTRINSIC_CALIBRATION)
+        val active = c.get(android.hardware.camera2.CameraCharacteristics.SENSOR_INFO_ACTIVE_ARRAY_SIZE)
+        if (k != null && k.isNotEmpty() && k[0] > 0f && active != null && active.width() > 0) {
+            k[0].toDouble() / active.width()
+        } else {
+            null
+        }
+    } else {
+        null
+    }
+    BackLens(focal.toDouble(), sensor.width.toDouble(), calibrated)
+}.getOrNull()
+
+/** Write the validation log to the app's external files; returns the path for `adb pull`. */
+private fun saveValidationCsv(context: Context, log: com.haraan.app.vision.WicketValidation, cameraSource: String?): String =
+    runCatching {
+        val dir = File(context.getExternalFilesDir(null), "validation").apply { mkdirs() }
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.ROOT).format(java.util.Date())
+        val file = File(dir, "stumps-$stamp.csv")
+        file.writeText(log.csv(cameraSource))
+        file.absolutePath
+    }.getOrElse { "save failed: ${it.message}" }
+
+/**
+ * How far the phone is rolled off the picture's own level, in degrees, from gravity.
+ *
+ * MAGNITUDE ONLY, ON PURPOSE. The angle is measured off the NEAREST quarter turn of the
+ * device, which is the picture's up however the phone is held, so no display-rotation
+ * convention can get its sign backwards — and nothing uses its sign: it drives one hint
+ * and one diagnostics row. Null when the phone points at the sky or the ground, where roll
+ * has no meaning, or when the device has no such sensor.
+ *
+ * TYPE_GRAVITY is the fused, low-pass sensor: low power, and steady enough to read at UI
+ * rate for a whole match.
+ */
+@Composable
+private fun rememberDeviceRoll(): androidx.compose.runtime.State<Float?> {
+    val context = LocalContext.current
+    val roll = remember { mutableStateOf<Float?>(null) }
+    androidx.compose.runtime.DisposableEffect(context) {
+        val manager = context.getSystemService(android.content.Context.SENSOR_SERVICE) as? android.hardware.SensorManager
+        val sensor = manager?.getDefaultSensor(android.hardware.Sensor.TYPE_GRAVITY)
+            ?: manager?.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)
+        val listener = object : android.hardware.SensorEventListener {
+            override fun onSensorChanged(event: android.hardware.SensorEvent) {
+                val gx = event.values[0]
+                val gy = event.values[1]
+                val gz = event.values[2]
+                val inPlane = kotlin.math.hypot(gx, gy)
+                if (inPlane < 0.5f * kotlin.math.hypot(inPlane, gz)) {
+                    roll.value = null
+                    return
+                }
+                val angle = Math.toDegrees(kotlin.math.atan2(gx.toDouble(), gy.toDouble()))
+                var off = ((angle % 90.0) + 90.0) % 90.0
+                if (off > 45.0) off -= 90.0
+                val next = off.toFloat()
+                roll.value = roll.value?.let { it + (next - it) * 0.2f } ?: next
+            }
+
+            override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) = Unit
+        }
+        if (manager != null && sensor != null) {
+            manager.registerListener(listener, sensor, android.hardware.SensorManager.SENSOR_DELAY_UI)
+        }
+        onDispose { manager?.unregisterListener(listener) }
+    }
+    return roll
+}
 
 /**
  * How well-behaved a sighting was, as a colour: amber for barely, blue for thoroughly.

@@ -50,7 +50,7 @@ enum class WicketLockSource {
  * stone is automatic and carries nothing.
  */
 enum class WicketKind {
-    /** Three bars, or two tapped stump bases. The span is [PitchGeometry.STUMP_SET_WIDTH_M]. */
+    /** Three bars, or two tapped stumps. The span is [PitchGeometry.STUMP_CENTRES_SPAN_M]. */
     STUMPS,
 
     /** A stone, a brick, a stick. Fixes a place on the ground and no distance whatsoever. */
@@ -59,6 +59,11 @@ enum class WicketKind {
 
 /**
  * Where the wicket is, as two points on the ground and optionally one above them.
+ *
+ * THE TWO POINTS ARE THE OUTER STUMPS' CENTRES, at their feet. That is what every detector
+ * measures, what the replay and the calibration already assumed, and what a hand-placed
+ * lock is converted to (the operator taps the outside edges, which are easier to see).
+ * Mixing the two conventions was an 18% scale error; see [PitchGeometry.STUMP_CENTRES_SPAN_M].
  *
  * TWO POINTS RATHER THAN A CENTRE AND A WIDTH, and this is not tidiness. A scalar width
  * only describes a horizontal thing. The moment the phone is turned, or rolls on a cheap
@@ -206,39 +211,51 @@ data class WicketLock(
     val heldFrames: Int,
     /** The upright frame's width over its height, as it was when this lock was produced. */
     val aspect: Float,
+    /**
+     * Whether the lock's bar positions are sub-pixel — from the full-resolution comb fit,
+     * or placed by hand — rather than whole contour boxes on a scaled frame.
+     */
+    val subPixel: Boolean = false,
+    /** How the latest sighting that agreed with this lock was found. */
+    val method: StumpMethod? = null,
 ) {
     val base: Point2 get() = anchor.base
 
-    /** Outside to outside in the picture, frame widths. */
+    /** Outer stump centre to centre in the picture, frame widths. */
     val span: Float get() = anchor.span(aspect)
 
     /**
      * Whether anything may be measured from this lock.
      *
-     * Three conditions, all of them necessary. CONFIRMED, because a tentative lock has not
-     * yet shown it can be seen twice in the same place. Still, because a lock jittering by
-     * a tenth of its own width is not a fixed landmark. And STUMPS, because that is the
-     * only kind that carries a real-world distance at all.
+     * Four conditions, all of them necessary. CONFIRMED, because a tentative lock has not
+     * yet shown it can be seen twice in the same place. Still, RELATIVE TO ITS OWN SIZE,
+     * because a lock wandering by a third of its span is not a fixed landmark — and an
+     * absolute limit would be meaningless at one distance or the other. STUMPS, because that
+     * is the only kind that carries a real-world distance. And big enough: how big depends
+     * on how precisely the bars were found — see [WicketTracker.MIN_MEASURABLE_SPAN].
      */
     val isMeasurable: Boolean
         get() = kind == WicketKind.STUMPS &&
             (state == WicketTrackState.CONFIRMED || state == WicketTrackState.REACQUIRE) &&
-            jitter <= WicketTracker.MAX_MEASURABLE_JITTER &&
-            span >= WicketTracker.MIN_MEASURABLE_SPAN
+            jitter <= WicketTracker.measurableJitter(span) &&
+            span >= minimumSpan
+
+    private val minimumSpan: Float
+        get() = if (subPixel) WicketTracker.MIN_MEASURABLE_SPAN_SUBPIXEL else WicketTracker.MIN_MEASURABLE_SPAN
 
     /**
      * Metres per frame width ALONG THE STUMP LINE, or null.
      *
      * The one honest scale a wicket gives you on its own, and the reason [WicketKind]
-     * exists: three stumps are 0.2286 m outside to outside by the Laws, so their span in
+     * exists: the outer stumps' centres are 0.1936 m apart by the Laws, so their span in
      * the picture fixes a distance along the line they stand on. It fixes nothing in any
      * other direction — see [metresPerUnitDown], which needs a separate measurement.
      */
     fun metresPerUnitAcross(): Double? {
         if (!isMeasurable) return null
         val s = span
-        if (s < WicketTracker.MIN_MEASURABLE_SPAN) return null
-        return PitchGeometry.STUMP_SET_WIDTH_M / s
+        if (s < minimumSpan) return null
+        return PitchGeometry.STUMP_CENTRES_SPAN_M / s
     }
 
     /**
@@ -256,10 +273,24 @@ data class WicketLock(
     fun metresPerUnitDown(): Double? {
         if (!isMeasurable) return null
         val rise = anchor.rise(aspect) ?: return null
-        if (rise < WicketTracker.MIN_MEASURABLE_SPAN) return null
+        if (rise < minimumSpan) return null
         return PitchGeometry.STUMP_HEIGHT_M / rise
     }
 }
+
+/** Where the detector should look next, and how sure the tracker is it will be there. */
+data class WicketFocus(
+    val anchor: WicketAnchor,
+    val kind: WicketKind,
+    /**
+     * How far the span may differ from the anchor's, as a fraction. Tight for a confirmed
+     * lock, which is measured; loose for a memory or a candidate, which is a hint.
+     */
+    val spanTolerance: Double,
+    /** How far from the anchor to search, in half-spans either side. */
+    val searchHalfSpans: Double,
+    val aspect: Float,
+)
 
 /** Everything the tracker knows about how it is doing, for a screen to print. */
 data class WicketDiagnostics(
@@ -306,6 +337,29 @@ data class WicketDiagnostics(
     val kind: WicketKind?,
     /** Why the last frame went the way it did, in words, for the line under the readout. */
     val note: String?,
+    /** Candidate places being weighed, while searching; challengers, while locked. */
+    val hypotheses: Int = 0,
+    /** How long ago a lost lock's place is still remembered from, or null for none. */
+    val memoryAgeMs: Long? = null,
+    /** Median gap between detector runs, ms. Grace periods scale with it. */
+    val cadenceMs: Float = 0f,
+    /** The camera's roll as read off the locked stumps, degrees, or null before any. */
+    val rollDeg: Float? = null,
+    /** Whether the lock rests on sub-pixel comb fits. */
+    val subPixel: Boolean = false,
+    /** Re-acquired straight from memory, without a fresh search. */
+    val memoryReacquires: Int = 0,
+    /**
+     * From the first frame this tracker saw to the first frame with any sighting, and to
+     * the first frame it was READY (confirmed, or placed by hand). Camera clock, measured;
+     * null until it happens. Startup speed, as it actually was on this phone.
+     */
+    val timeToFirstSightingMs: Long? = null,
+    val timeToReadyMs: Long? = null,
+    /** How the sighting that got the lock CONFIRMED was found. */
+    val foundBy: StumpMethod? = null,
+    /** How the latest agreeing sighting was found. */
+    val method: StumpMethod? = null,
 )
 
 /**
@@ -314,25 +368,46 @@ data class WicketDiagnostics(
  * WHAT WAS WRONG BEFORE THIS FILE. [OpenCvStumpDetector] answers one question about one
  * frame, honestly and with no memory. Everything else was left to whoever called it, and
  * the only caller — the pitch-check screen — did the least it could: draw the newest
- * sighting, hold the last one for twelve frames, throw it away. That has three specific
- * failures, and they are the reason this exists.
+ * sighting, hold the last one for twelve frames, throw it away.
  *
- *   A SINGLE LUCKY FRAME LOOKED IDENTICAL TO A REAL LOCK. Three bars that happen to line
- *   up for one frame — a bat, a pad and a boot; three fence palings past a gap in the
- *   sightscreen — were drawn exactly like a wicket seen for a hundred frames. Multi-frame
- *   confirmation is the fix: a candidate has to be found in the SAME PLACE repeatedly
- *   before it is called anything.
+ * WHAT WAS STILL WRONG AFTER THE FIRST VERSION OF IT, found by tracing a real delivery
+ * through it rather than by changing a number:
  *
- *   "THE SAME PLACE" WAS UNDEFINABLE. On a phone, between two frames, everything moves a
- *   little — so either the test was loose enough to accept a different object, or tight
- *   enough that a breath of wind broke the lock. [CameraMotion] removes the camera's own
- *   contribution first, and then a tight test means what it says.
+ *   ONE CANDIDATE AT A TIME. The first sighting was seeded as THE candidate; a better one
+ *   elsewhere on the next frame was "dissent" and needed five frames in a row to be heard.
+ *   A pad-and-bat triple that happened to come first held the search hostage while the
+ *   real wicket, seen on every frame, waited. Now every place is weighed at once
+ *   ([Hypothesis]), and the one that keeps turning up wins.
  *
- *   THE HOLD WAS A TIMER, NOT A STATE. Twelve frames of grace, applied identically to a
- *   lock that vanished behind the bowler's run-up and a lock that vanished because the
- *   phone was pointed at the car park. The states below tell those apart, and the one that
- *   matters — a lock coasting on prediction — announces itself instead of being drawn like
- *   a detection.
+ *   A COAST MEASURED IN BLINKS. Eight frames, 400 ms, then the lock was gone — and the far
+ *   wicket filmed from behind the bowler spends whole seconds behind the striker taking
+ *   guard, the keeper, the bowler in the delivery stride. Every one of those dropped the
+ *   lock and forced a fresh search. A stationary object on a camera whose motion is KNOWN
+ *   can be carried for seconds; what limits the coast is the camera going blind or the
+ *   anchor leaving the picture, so those are now the limits.
+ *
+ *   NO MEMORY OF WHERE IT WAS. A dropped lock was forgotten completely, so finding the same
+ *   wicket in the same place a moment later took the full tentative-then-confirm path again.
+ *   Its place is now remembered, carried on camera motion, and a sighting there goes
+ *   straight back to REACQUIRE.
+ *
+ *   GRACE IN FRAMES, CALLED AT A RATE THAT VARIES EIGHTFOLD. In Auto the detector runs on
+ *   one frame in eight, a quarter of a second apart, and a 250 ms grace expired on the
+ *   first miss. Grace now scales with the measured gap between detector runs.
+ *
+ * THE STATES, AND WHAT MOVES BETWEEN THEM:
+ *
+ *   LOST → TENTATIVE      any sighting; it becomes a hypothesis.
+ *   LOST → REACQUIRE      a sighting where a lost lock is remembered, at the same size.
+ *   TENTATIVE → CONFIRMED a hypothesis seen [CONFIRM_FRAMES] times, steady, and clearly
+ *                         ahead of any rival.
+ *   TENTATIVE → LOST      every hypothesis missed past its grace.
+ *   CONFIRMED → TEMPORARILY_LOST   not seen this frame.
+ *   TEMPORARILY_LOST → REACQUIRE   seen again inside the widened gate.
+ *   TEMPORARILY_LOST → LOST        unseen for [MAX_COAST_MS], or the camera blind for
+ *                                  [MAX_COAST_FRAMES], or carried out of the picture.
+ *   REACQUIRE → CONFIRMED          seen [REACQUIRE_CONFIRM_FRAMES] times.
+ *   any locked → TENTATIVE         a challenger elsewhere persists while the lock is unseen.
  *
  * PURE KOTLIN. No OpenCV, no Android, no clock of its own: timestamps arrive as arguments.
  * Every transition in here is reachable from a unit test, which is the only way a state
@@ -340,14 +415,44 @@ data class WicketDiagnostics(
  */
 class WicketTracker {
 
+    /**
+     * One place that might be the wicket, with the evidence for it.
+     *
+     * Kept per place rather than per frame so that evidence ACCUMULATES: a wicket seen on
+     * eight frames out of ten beats a fence seen on the two it outscored the wicket on.
+     */
+    private class Hypothesis(
+        var anchor: WicketAnchor,
+        val kind: WicketKind,
+        var scoreEma: Float,
+        val bornMs: Long,
+        var lastSeenMs: Long,
+        var subPixel: Boolean,
+    ) {
+        var hits = 1
+        var misses = 0
+        val residuals = ArrayDeque<Float>()
+        var method: StumpMethod? = null
+
+        /** Persistence times quality, with misses taken off. Ranks; not a probability. */
+        val evidence: Float get() = (hits - 0.5f * misses).coerceAtLeast(0f) * scoreEma
+    }
+
+    /** Where a confirmed lock was when it was given up. */
+    private class Memory(var anchor: WicketAnchor, val kind: WicketKind, val lostMs: Long)
+
+    /** The locked wicket. Null unless CONFIRMED, TEMPORARILY_LOST or REACQUIRE (or by hand). */
     private var anchor: WicketAnchor? = null
     private var kind: WicketKind? = null
     private var source: WicketLockSource = WicketLockSource.DETECTED
     private var state: WicketTrackState = WicketTrackState.LOST
+    private var subPixel = false
+
+    /** Candidates while searching; challengers while locked. */
+    private val hypotheses = ArrayList<Hypothesis>()
+    private var memory: Memory? = null
 
     private var streak = 0
-    /** Frames a TENTATIVE candidate has gone unseen since it was last found. */
-    private var tentativeMisses = 0
     /** When the current search began — the first frame with nothing locked. */
     private var searchStartMs: Long? = null
     private var lastLockMs: Long? = null
@@ -355,6 +460,7 @@ class WicketTracker {
     private var heldFrames = 0
     private var ageFrames = 0
     private var lastSeenMs: Long? = null
+    private var lastFrameMs: Long? = null
     private var aspect: Float = 1f
 
     /** Consecutive frames whose camera motion could not be resolved. */
@@ -366,13 +472,26 @@ class WicketTracker {
     /** The detector's own score, smoothed, so one weak frame does not collapse confidence. */
     private var scoreEma = 0f
 
+    /** Roll as read off the stumps, smoothed. Null until a comb fit has supplied one. */
+    private var rollEma: Float? = null
+
     /** Frame timestamps, for a measured frame rate rather than an assumed one. */
     private val frameTimes = ArrayDeque<Long>()
+
+    /** Gaps between detector runs, for grace periods that scale with how often it runs. */
+    private val gaps = ArrayDeque<Long>()
+
+    private var firstFrameMs: Long? = null
+    private var firstSightingMs: Long? = null
+    private var firstReadyMs: Long? = null
+    private var method: StumpMethod? = null
+    private var foundBy: StumpMethod? = null
 
     private var framesSeen = 0
     private var framesWithSighting = 0
     private var confirmations = 0
     private var reacquires = 0
+    private var memoryReacquires = 0
     private var drops = 0
     private var gateRejections = 0
     private var rotations = 0
@@ -380,21 +499,20 @@ class WicketTracker {
     private var lastMotion: FrameMotion = FrameMotion.STILL
     private var note: String? = "nothing tracked yet"
 
-    /**
-     * Sightings that agreed with each other but not with the lock.
-     *
-     * The escape hatch from a lock that is simply wrong. If the detector insists, frame
-     * after frame, that the wicket is somewhere else — because the operator repointed the
-     * phone, or because the first lock was a fence — refusing forever is worse than
-     * starting again. This counts the insistence.
-     */
-    private var dissent = 0
-    private var dissentAnchor: WicketAnchor? = null
+    /** One sighting or none. See the list overload, which is what the camera screen calls. */
+    @Synchronized
+    fun onFrame(
+        sighting: WicketSighting?,
+        motion: FrameMotion,
+        frameAspect: Float,
+        timestampMs: Long,
+    ): WicketLock? = onFrame(listOfNotNull(sighting), motion, frameAspect, timestampMs)
 
     /**
      * One frame's worth of evidence, and the lock that comes out of it.
      *
-     * @param sighting what the detector found in THIS frame, or null when it found nothing
+     * @param sightings every wicket the detector found in THIS frame, best first; empty when
+     *   it looked and found nothing. Several, not one: see [StumpSearch.ranked].
      * @param motion how the camera moved since the previous frame. [FrameMotion.STILL]
      *   means UNKNOWN, not "held still" — see [FrameMotion.isUsable].
      * @param frameAspect the upright frame's width over its height
@@ -404,7 +522,7 @@ class WicketTracker {
      */
     @Synchronized
     fun onFrame(
-        sighting: WicketSighting?,
+        sightings: List<WicketSighting>,
         motion: FrameMotion,
         frameAspect: Float,
         timestampMs: Long,
@@ -413,33 +531,50 @@ class WicketTracker {
         aspect = if (frameAspect > 0f) frameAspect else aspect
         lastMotion = motion
         recordFrameTime(timestampMs)
+        val previousFrameMs = lastFrameMs
+        lastFrameMs = timestampMs
 
         /*
          * THE CAMERA MOVES FIRST, ALWAYS.
          *
-         * The anchor is where the wicket was in the PREVIOUS frame's picture. Before this
-         * frame's sighting can be compared to it, it has to be moved into this frame's
-         * picture — otherwise every comparison is measuring the tripod, and a gate tight
-         * enough to be useful would reject the wicket on any frame the phone breathed.
+         * Everything held — the lock, every candidate, the memory — is where it was in the
+         * PREVIOUS frame's picture. Before this frame's sightings can be compared to any of
+         * it, it has to be moved into this frame's picture; otherwise every comparison is
+         * measuring the tripod.
          */
+        applyMotion(motion)
+
+        if (firstFrameMs == null) firstFrameMs = timestampMs
+        if (sightings.isNotEmpty()) {
+            framesWithSighting++
+            if (firstSightingMs == null) firstSightingMs = timestampMs
+        }
+        if (anchor == null && searchStartMs == null) searchStartMs = timestampMs
+        expireMemory(timestampMs)
+
+        val lock = when (source) {
+            WicketLockSource.MANUAL -> stepManual(sightings, timestampMs)
+            WicketLockSource.DETECTED -> stepDetected(sightings, timestampMs)
+        }
+
+        heldFrames = if (lock == null) 0 else heldFrames + 1
+        if (firstReadyMs == null && lock != null && lock.state != WicketTrackState.TENTATIVE) {
+            firstReadyMs = timestampMs
+        }
+        recordGap(previousFrameMs, timestampMs)
+        return lock
+    }
+
+    private fun applyMotion(motion: FrameMotion) {
         if (motion.isUsable) {
             blindFrames = 0
             anchor = anchor?.map { motion.apply(it, aspect) }
+            memory?.let { it.anchor = it.anchor.map { p -> motion.apply(p, aspect) } }
+            for (h in hypotheses) h.anchor = h.anchor.map { motion.apply(it, aspect) }
         } else {
             motionUnresolved++
             blindFrames++
         }
-
-        if (sighting != null) framesWithSighting++
-        if (anchor == null && searchStartMs == null) searchStartMs = timestampMs
-
-        val lock = when (source) {
-            WicketLockSource.MANUAL -> stepManual(sighting, timestampMs)
-            WicketLockSource.DETECTED -> stepDetected(sighting, timestampMs)
-        }
-
-        heldFrames = if (lock == null) 0 else heldFrames + 1
-        return lock
     }
 
     /**
@@ -455,17 +590,20 @@ class WicketTracker {
      * motion estimate for several frames the anchor is a memory of where the wicket was
      * before an unknown amount of movement, and saying so is the only honest option.
      */
-    private fun stepManual(sighting: WicketSighting?, timestampMs: Long): WicketLock? {
+    private fun stepManual(sightings: List<WicketSighting>, timestampMs: Long): WicketLock? {
         val held = anchor ?: return null
 
-        if (sighting != null && WicketAnchor.kindOf(sighting) == kind) {
-            val observed = WicketAnchor.of(sighting)
+        val sameKind = sightings.filter { WicketAnchor.kindOf(it) == kind }
+        val nearest = sameKind.minByOrNull { distance(WicketAnchor.of(it).base, held.base) }
+        if (nearest != null) {
+            val observed = WicketAnchor.of(nearest)
             val gate = gateFor(held, MANUAL_NUDGE_GATE_SPANS)
             val error = distance(observed.base, held.base)
-            if (error <= gate) {
+            if (error <= gate && spanAgrees(held, observed, kind)) {
                 anchor = held.blend(observed, MANUAL_NUDGE_WEIGHT)
-                pushResidual(error)
-                scoreEma = scoreEma + (sighting.score - scoreEma) * SCORE_SMOOTHING
+                pushResidual(residuals, error)
+                scoreEma = scoreEma + (nearest.score - scoreEma) * SCORE_SMOOTHING
+                noteRoll(nearest)
                 ageFrames = 0
                 lastSeenMs = timestampMs
                 note = "hand-placed, confirmed by the detector"
@@ -500,65 +638,247 @@ class WicketTracker {
         return currentLock()
     }
 
-    private fun stepDetected(sighting: WicketSighting?, timestampMs: Long): WicketLock? {
-        if (sighting == null) return stepMiss(timestampMs)
+    private fun stepDetected(sightings: List<WicketSighting>, timestampMs: Long): WicketLock? =
+        if (anchor != null) stepLocked(sightings, timestampMs) else stepSearching(sightings, timestampMs)
 
-        val observed = WicketAnchor.of(sighting)
-        val observedKind = WicketAnchor.kindOf(sighting)
-        val held = anchor
+    // ---- searching: LOST and TENTATIVE ----------------------------------------------------
 
-        // A stone where a set of stumps was locked is not the same object seen worse. It
-        // is a different claim with a different guarantee, and blending the two would give
-        // a lock that carries a scale on the strength of frames that never measured one.
-        if (held == null || kind != observedKind) {
-            return seed(observed, observedKind, sighting.score, timestampMs)
+    private fun stepSearching(sightings: List<WicketSighting>, timestampMs: Long): WicketLock? {
+        /*
+         * BACK WHERE IT WAS LOST. Checked before anything is weighed as new: the wicket
+         * has not moved, the camera's motion has been carried, and a sighting of the same
+         * size in the same place is the same wicket coming out from behind the batter. It
+         * does not need to prove itself from nothing again.
+         */
+        val remembered = memory
+        if (remembered != null) {
+            val back = sightings.firstOrNull { matchesMemory(it, remembered) }
+            if (back != null) {
+                val observed = WicketAnchor.of(back)
+                anchor = remembered.anchor.blend(observed, REACQUIRE_BLEND)
+                kind = remembered.kind
+                source = WicketLockSource.DETECTED
+                state = WicketTrackState.REACQUIRE
+                streak = 1
+                coastFrames = 0
+                ageFrames = 0
+                lastSeenMs = timestampMs
+                residuals.clear()
+                pushResidual(residuals, distance(observed.base, remembered.anchor.base))
+                scoreEma = back.score
+                subPixel = isSubPixel(back)
+                method = methodOf(back)
+                noteRoll(back)
+                hypotheses.clear()
+                memory = null
+                reacquires++
+                memoryReacquires++
+                note = "found again where it was lost %.1f s ago".format((timestampMs - remembered.lostMs) / 1000f)
+                return currentLock()
+            }
         }
 
-        val error = distance(observed.base, held.base)
+        associate(sightings, timestampMs)
+        decayUnseen(timestampMs)
+
+        val lead = lead()
+        if (lead == null) {
+            state = WicketTrackState.LOST
+            note = if (memory != null) "searching — remembering where it was" else "searching"
+            return null
+        }
+
+        if (readyToConfirm(lead)) {
+            promote(lead, timestampMs)
+            return currentLock()
+        }
+
+        state = WicketTrackState.TENTATIVE
+        streak = lead.hits
+        note = buildString {
+            append("tentative, ${lead.hits} of $CONFIRM_FRAMES")
+            if (lead.misses > 0) append(" · missed ${lead.misses}")
+            if (hypotheses.size > 1) append(" · ${hypotheses.size} places weighed")
+        }
+        return currentLock()
+    }
+
+    /**
+     * Match this frame's sightings to the places already being weighed.
+     *
+     * Greedy, best sighting first, each to the nearest place of its kind inside the gate and
+     * of a consistent size. A sighting that matches nothing is a new place.
+     */
+    private fun associate(sightings: List<WicketSighting>, timestampMs: Long) {
+        val claimed = HashSet<Hypothesis>()
+        for (s in sightings.sortedByDescending { it.score }) {
+            val observed = WicketAnchor.of(s)
+            val observedKind = WicketAnchor.kindOf(s)
+            val match = hypotheses
+                .filter { it !in claimed && it.kind == observedKind && spanAgrees(it.anchor, observed, observedKind) }
+                .map { it to distance(observed.base, it.anchor.base) }
+                .filter { (h, d) -> d <= gateFor(h.anchor, LOCK_GATE_SPANS) }
+                .minByOrNull { it.second }
+            if (match != null) {
+                val h = match.first
+                claimed.add(h)
+                pushResidual(h.residuals, match.second)
+                h.anchor = h.anchor.blend(observed, TENTATIVE_BLEND)
+                h.hits++
+                h.misses = 0
+                h.lastSeenMs = timestampMs
+                h.scoreEma += (s.score - h.scoreEma) * SCORE_SMOOTHING
+                h.subPixel = isSubPixel(s)
+                h.method = methodOf(s)
+            } else {
+                val fresh = Hypothesis(observed, observedKind, s.score, timestampMs, timestampMs, isSubPixel(s))
+                fresh.method = methodOf(s)
+                claimed.add(fresh)
+                if (hypotheses.size < MAX_HYPOTHESES) {
+                    hypotheses.add(fresh)
+                } else {
+                    // A full pool gives up its weakest place, never its strongest.
+                    val weakest = hypotheses.filter { it !in claimed }.minByOrNull { it.evidence }
+                    if (weakest != null && weakest.evidence < fresh.evidence + 1e-6f) {
+                        hypotheses.remove(weakest)
+                        hypotheses.add(fresh)
+                    }
+                }
+            }
+        }
+        for (h in hypotheses) if (h !in claimed) h.misses++
+    }
+
+    /**
+     * A SHORT GRACE, NOT NONE — AND MEASURED IN THE DETECTOR'S OWN TIME.
+     *
+     * A far wicket is found on some frames and not the next. With no grace at all, every gap
+     * wiped the candidate and a wicket seen on alternate frames never got two in a row.
+     * Two missed runs is room for that flicker and nothing more; the wall-clock cap stretches
+     * with the gap between runs, because a quarter second is eight runs at full rate and one
+     * in Auto.
+     */
+    private fun decayUnseen(timestampMs: Long) {
+        val grace = tentativeGraceMs()
+        hypotheses.removeAll { h ->
+            h.misses > 0 && (h.misses > TENTATIVE_MISS_ALLOWANCE || timestampMs - h.lastSeenMs > grace)
+        }
+    }
+
+    private fun lead(): Hypothesis? = hypotheses.maxByOrNull { it.evidence }
+
+    /**
+     * Seen enough, steady enough, and ahead of every rival.
+     *
+     * The rival test is what multi-candidate buys. Two places both seen on every frame —
+     * the wicket, and a fence triple behind it — are not settled by whichever was seen
+     * first. The better-evidenced one is promoted only once it is clearly ahead, or once
+     * enough frames have passed that waiting longer will not change the order.
+     */
+    private fun readyToConfirm(lead: Hypothesis): Boolean {
+        /*
+         * A STONE MUST PERSIST. Three stumps are confirmed by the comb's geometry on every
+         * sighting — spacing, proportions, open ground beside them — so two agreeing frames
+         * is a lot of evidence. A "stone" is a compact pale lump, and a batter standing at
+         * the crease or a kit bag is one too; a fraction of a second more is the cheapest
+         * defence there is.
+         */
+        val needed = if (lead.kind == WicketKind.STONE) STONE_CONFIRM_FRAMES else CONFIRM_FRAMES
+        if (lead.hits < needed) return false
+        if (jitterOf(lead.residuals) > confirmJitter(lead.anchor.span(aspect))) return false
+        val rival = hypotheses.filter { it !== lead && it.hits >= CONFIRM_FRAMES }.maxByOrNull { it.evidence }
+            ?: return true
+        return lead.evidence >= rival.evidence * RIVAL_MARGIN || lead.hits >= CONFIRM_FRAMES + RIVAL_PATIENCE
+    }
+
+    private fun promote(lead: Hypothesis, timestampMs: Long) {
+        anchor = lead.anchor
+        kind = lead.kind
+        source = WicketLockSource.DETECTED
+        state = WicketTrackState.CONFIRMED
+        subPixel = lead.subPixel
+        method = lead.method
+        foundBy = lead.method
+        streak = lead.hits
+        coastFrames = 0
+        ageFrames = 0
+        lastSeenMs = lead.lastSeenMs
+        residuals.clear()
+        residuals.addAll(lead.residuals)
+        scoreEma = lead.scoreEma
+        confirmations++
+        searchStartMs?.let { lastLockMs = timestampMs - it }
+        searchStartMs = null
+        note = "confirmed after ${lead.hits} sightings in the same place" +
+            if (hypotheses.size > 1) " (of ${hypotheses.size} weighed)" else ""
+        hypotheses.clear()
+        memory = null
+    }
+
+    // ---- locked: CONFIRMED, TEMPORARILY_LOST, REACQUIRE ------------------------------------
+
+    private fun stepLocked(sightings: List<WicketSighting>, timestampMs: Long): WicketLock? {
+        val held = anchor ?: return stepSearching(sightings, timestampMs)
+        val heldKind = kind
+
         val gate = gateFor(
             held,
             when (state) {
                 // Wider while coasting, and only while coasting. The anchor has been
-                // carried on prediction for several frames, so its own uncertainty has
-                // grown — the gate grows with it rather than being permanently loose.
+                // carried on prediction, so its own uncertainty has grown.
                 WicketTrackState.TEMPORARILY_LOST -> REACQUIRE_GATE_SPANS
                 else -> LOCK_GATE_SPANS
             },
         )
 
-        if (error > gate) return stepDissent(observed, observedKind, sighting.score, timestampMs, error)
+        var match: WicketSighting? = null
+        var matchError = Float.MAX_VALUE
+        for (s in sightings) {
+            if (WicketAnchor.kindOf(s) != heldKind) continue
+            val observed = WicketAnchor.of(s)
+            if (!spanAgrees(held, observed, heldKind)) continue
+            val error = distance(observed.base, held.base)
+            if (error <= gate && error < matchError) { match = s; matchError = error }
+        }
 
-        // Inside the gate: this is the same wicket.
-        dissent = 0
-        tentativeMisses = 0
-        dissentAnchor = null
-        pushResidual(error)
-        scoreEma = scoreEma + (sighting.score - scoreEma) * SCORE_SMOOTHING
+        // Everything else is a challenger. Counted as refused when it is the lock's kind,
+        // which is the number that says the detector keeps seeing a wicket somewhere else.
+        val others = sightings.filter { it !== match }
+        gateRejections += others.count { WicketAnchor.kindOf(it) == heldKind }
+        associate(others, timestampMs)
+        decayChallengers(timestampMs)
+
+        val lock = if (match != null) seen(held, match, matchError, timestampMs) else missed(timestampMs)
+
+        // A challenger that has persisted while the lock has not: the lock is the mistake.
+        val switched = challengerTakesOver(timestampMs)
+        if (switched != null) return switched
+
+        if (match == null && anchor != null && others.isNotEmpty() && note?.startsWith("not seen") == true) {
+            note = "sighting elsewhere, ignored (${hypotheses.maxOfOrNull { it.hits } ?: 0} of $DISSENT_FRAMES)"
+        }
+        return lock
+    }
+
+    /** Inside the gate: this is the same wicket. */
+    private fun seen(held: WicketAnchor, sighting: WicketSighting, error: Float, timestampMs: Long): WicketLock? {
+        val observed = WicketAnchor.of(sighting)
+        pushResidual(residuals, error)
+        scoreEma += (sighting.score - scoreEma) * SCORE_SMOOTHING
+        subPixel = isSubPixel(sighting)
+        method = methodOf(sighting)
+        noteRoll(sighting)
         ageFrames = 0
-        coastFrames = 0
         lastSeenMs = timestampMs
 
         when (state) {
-            WicketTrackState.TENTATIVE -> {
-                streak++
-                anchor = held.blend(observed, TENTATIVE_BLEND)
-                if (streak >= CONFIRM_FRAMES && jitter() <= MAX_CONFIRM_JITTER) {
-                    state = WicketTrackState.CONFIRMED
-                    confirmations++
-                    searchStartMs?.let { lastLockMs = timestampMs - it }
-                    searchStartMs = null
-                    note = "confirmed after $streak frames in the same place"
-                } else {
-                    note = "tentative, $streak of $CONFIRM_FRAMES"
-                }
-            }
-
             WicketTrackState.TEMPORARILY_LOST -> {
                 state = WicketTrackState.REACQUIRE
                 reacquires++
                 streak = 1
                 anchor = held.blend(observed, REACQUIRE_BLEND)
                 note = "re-acquired after coasting $coastFrames frames"
+                coastFrames = 0
             }
 
             WicketTrackState.REACQUIRE -> {
@@ -572,94 +892,48 @@ class WicketTracker {
                 }
             }
 
-            WicketTrackState.CONFIRMED -> {
+            else -> {
                 streak++
                 /*
                  * A LIGHT BLEND, DELIBERATELY.
                  *
                  * A confirmed lock on a stationary object should move almost entirely on
                  * camera motion and only trim itself against detections. Tracking the
-                 * detector closely would import its per-frame noise — a threshold that
-                 * catches one more row of a stump on alternate frames — into a landmark
+                 * detector closely would import its per-frame noise into a landmark
                  * everything downstream is measured from, and a scale that breathes is
                  * worse than one that is slightly stale.
                  */
                 anchor = held.blend(observed, CONFIRMED_BLEND)
+                state = WicketTrackState.CONFIRMED
                 note = null
             }
-
-            WicketTrackState.LOST -> return seed(observed, observedKind, sighting.score, timestampMs)
         }
-
         return currentLock()
     }
 
     /**
-     * A sighting that is nowhere near the lock.
+     * Not seen this frame — or what was seen was not it.
      *
-     * Refused, and remembered. One of these is the detector having a bad frame and the
-     * lock is right to ignore it. Several in a row, all agreeing with EACH OTHER, means
-     * the lock is the thing that is wrong — the phone was repointed, or the first lock was
-     * a fence — and continuing to refuse would be a tracker defending a mistake.
+     * HOW LONG A LOCK MAY COAST is decided by what is known, not by a frame count. The
+     * wicket does not move; the camera's motion is being measured and applied. So while
+     * that measurement holds, the anchor is a good prediction for as long as the striker
+     * cares to stand in front of it. What ends a coast:
+     *
+     *   the camera going blind — no motion estimate for [MAX_COAST_FRAMES] frames, after
+     *   which the anchor is a guess about an unknown move;
+     *
+     *   the anchor being carried out of the picture — the phone was pointed elsewhere;
+     *
+     *   [MAX_COAST_MS] with no sighting at all, as a backstop.
+     *
+     * A lock given up for the third reason, with the camera still tracked, leaves a MEMORY:
+     * the place, carried on, so the same wicket found there again is re-acquired at once.
      */
-    private fun stepDissent(
-        observed: WicketAnchor,
-        observedKind: WicketKind,
-        score: Float,
-        timestampMs: Long,
-        error: Float,
-    ): WicketLock? {
-        gateRejections++
-        val previousDissent = dissentAnchor
-        val agrees = previousDissent != null &&
-            distance(observed.base, previousDissent.base) <= gateFor(observed, LOCK_GATE_SPANS)
-
-        dissent = if (agrees) dissent + 1 else 1
-        dissentAnchor = observed
-
-        if (dissent >= DISSENT_FRAMES) {
-            note = "the wicket is somewhere else — re-seeding after $dissent frames"
-            drops++
-            return seed(observed, observedKind, score, timestampMs)
-        }
-
-        note = "sighting %.3f from the lock, ignored ($dissent of $DISSENT_FRAMES)".format(error)
-        return stepMiss(timestampMs)
-    }
-
-    /** Nothing was seen this frame — or what was seen was refused. */
-    private fun stepMiss(timestampMs: Long): WicketLock? {
-        if (anchor == null) {
-            state = WicketTrackState.LOST
-            note = "searching"
-            return null
-        }
-
+    private fun missed(timestampMs: Long): WicketLock? {
         ageFrames++
         val elapsed = lastSeenMs?.let { timestampMs - it } ?: 0L
 
         when (state) {
-            /*
-             * A SHORT GRACE, NOT NONE.
-             *
-             * A far wicket filmed from behind the arm is a few pixels of bar, and the
-             * detector finds it on some frames and not the next. With no grace at all, every
-             * gap wiped the candidate and the next sighting started from one again, so a
-             * wicket seen on alternate frames never got two in a row and the screen sat on
-             * SEARCHING at an obvious wicket. Two missed frames inside a quarter second is
-             * room for that flicker and nothing more: confirmation still needs the same
-             * place found twice, and a tentative lock is never measured from.
-             */
-            WicketTrackState.TENTATIVE -> {
-                tentativeMisses++
-                if (tentativeMisses > TENTATIVE_MISS_ALLOWANCE || elapsed > TENTATIVE_GRACE_MS) {
-                    clearLock()
-                    note = "tentative candidate not seen again"
-                } else {
-                    note = "tentative, $streak of $CONFIRM_FRAMES · missed $tentativeMisses"
-                }
-            }
-
             WicketTrackState.CONFIRMED, WicketTrackState.REACQUIRE -> {
                 state = WicketTrackState.TEMPORARILY_LOST
                 coastFrames = 1
@@ -667,43 +941,77 @@ class WicketTracker {
                 note = "not seen — coasting"
             }
 
-            WicketTrackState.TEMPORARILY_LOST -> {
+            else -> {
                 coastFrames++
-                if (coastFrames > MAX_COAST_FRAMES || elapsed > MAX_COAST_MS) {
-                    drops++
-                    clearLock()
-                    note = "lost after coasting $coastFrames frames"
-                } else {
-                    note = "coasting $coastFrames of $MAX_COAST_FRAMES"
-                }
+                note = "not seen — coasting %.1f s".format(elapsed / 1000f)
             }
-
-            WicketTrackState.LOST -> Unit
         }
 
+        val held = anchor
+        val outOfFrame = held != null && !inFrame(held)
+        val blind = blindFrames > MAX_COAST_FRAMES
+        if (elapsed > MAX_COAST_MS || blind || outOfFrame) {
+            drops++
+            val heldKind = kind
+            if (!blind && !outOfFrame && held != null && heldKind != null) {
+                memory = Memory(held, heldKind, timestampMs)
+            }
+            clearLock()
+            note = when {
+                outOfFrame -> "carried out of the picture — lock given up"
+                blind -> "camera motion lost for $blindFrames frames — lock given up"
+                else -> "not seen for %.1f s — remembering where it was".format(elapsed / 1000f)
+            }
+        }
         return currentLock()
     }
 
-    private fun seed(
-        observed: WicketAnchor,
-        observedKind: WicketKind,
-        score: Float,
-        timestampMs: Long,
-    ): WicketLock? {
-        anchor = observed
-        kind = observedKind
-        source = WicketLockSource.DETECTED
+    private fun decayChallengers(timestampMs: Long) = decayUnseen(timestampMs)
+
+    /**
+     * THE ESCAPE HATCH. If the detector insists, frame after frame, that the wicket is
+     * somewhere else, refusing forever is worse than starting again — the phone was
+     * repointed, or the first lock was a fence.
+     *
+     * Two ways to insist. While the lock itself is NOT being seen, [DISSENT_FRAMES] sightings
+     * of one other place. While it IS being seen too — two wickets in frame, or a lock on the
+     * wrong one of two — nothing less than a long, clearly better record, because both are
+     * real objects and only one of them can be the one that was confirmed.
+     */
+    private fun challengerTakesOver(timestampMs: Long): WicketLock? {
+        val lastSeen = lastSeenMs
+        val best = hypotheses.maxByOrNull { it.evidence } ?: return null
+        val lockUnseenSinceItAppeared = anchor == null || lastSeen == null || lastSeen < best.bornMs
+        /*
+         * Comb-verified stumps outrank a stone at once. A stone lock is the weaker claim —
+         * no scale, and the kind of lump a batter's pads can pass for — so verified stumps
+         * seen twice anywhere replace it rather than waiting out the dissent count.
+         */
+        if (kind == WicketKind.STONE && best.kind == WicketKind.STUMPS && best.subPixel && best.hits >= CONFIRM_FRAMES) {
+            drops++
+            val rivals = hypotheses.filter { it !== best }
+            clearLock()
+            hypotheses.clear()
+            hypotheses.add(best)
+            hypotheses.addAll(rivals)
+            promote(best, timestampMs)
+            note = "stumps found — replacing the stone"
+            return currentLock()
+        }
+        val outright = lockUnseenSinceItAppeared && best.hits >= DISSENT_FRAMES
+        val onMerit = best.hits >= DISSENT_FRAMES * 3 && best.scoreEma > scoreEma + CHALLENGER_SCORE_MARGIN
+        if (!outright && !onMerit) return null
+
+        drops++
+        val rivals = hypotheses.filter { it !== best }
+        clearLock()
+        hypotheses.clear()
+        hypotheses.add(best)
+        hypotheses.addAll(rivals)
         state = WicketTrackState.TENTATIVE
-        streak = 1
-        tentativeMisses = 0
-        coastFrames = 0
-        ageFrames = 0
-        lastSeenMs = timestampMs
-        dissent = 0
-        dissentAnchor = null
-        residuals.clear()
-        scoreEma = score
-        note = "tentative, 1 of $CONFIRM_FRAMES"
+        streak = best.hits
+        searchStartMs = timestampMs
+        note = "the wicket is somewhere else — re-seeding after ${best.hits} frames"
         return currentLock()
     }
 
@@ -712,16 +1020,15 @@ class WicketTracker {
         kind = null
         source = WicketLockSource.DETECTED
         state = WicketTrackState.LOST
+        subPixel = false
+        method = null
         streak = 0
-        tentativeMisses = 0
         coastFrames = 0
         ageFrames = 0
         heldFrames = 0
         lastSeenMs = null
         residuals.clear()
         scoreEma = 0f
-        dissent = 0
-        dissentAnchor = null
     }
 
     /**
@@ -730,28 +1037,22 @@ class WicketTracker {
      * A DIFFERENT THING FROM A MISS, and the distinction is the reason this method exists
      * rather than callers passing a null sighting. A miss is evidence: the detector looked
      * and did not find the wicket, which should age the lock towards LOST. This is the
-     * absence of evidence: the camera screen deliberately does not run a 960-wide contour
-     * sweep while a ball is in the air, because the delivery is the measurement that cannot
-     * be taken again and the wicket is not going anywhere.
+     * absence of evidence: the camera screen deliberately does not run the detector while a
+     * ball is in the air, and runs it only on some frames once a lock is steady.
      *
-     * Passing null through [onFrame] during a delivery would drop a perfectly good lock
-     * eight frames in, every single ball, and the readout would blame a detector that was
-     * never asked. So the anchor moves with the camera, the state does not change, and the
-     * note says plainly that nothing looked.
+     * Passing null through [onFrame] then would drop a perfectly good lock eight frames in,
+     * every single ball, and the readout would blame a detector that was never asked. So
+     * everything held moves with the camera, the state does not change, and the note says
+     * plainly that nothing looked.
      */
     @Synchronized
     fun carry(motion: FrameMotion, frameAspect: Float): WicketLock? {
         aspect = if (frameAspect > 0f) frameAspect else aspect
         lastMotion = motion
-        if (anchor == null) return null
+        if (anchor == null && hypotheses.isEmpty() && memory == null) return null
 
-        if (motion.isUsable) {
-            blindFrames = 0
-            anchor = anchor?.map { motion.apply(it, aspect) }
-        } else {
-            motionUnresolved++
-            blindFrames++
-        }
+        applyMotion(motion)
+        if (anchor == null) return currentLock()
 
         /*
          * The one thing that CAN still degrade a carried lock.
@@ -776,13 +1077,11 @@ class WicketTracker {
      * @param quarterTurnsCw how many quarter turns clockwise the CONTENT rotated, which is
      *   the change in `ImageInfo.rotationDegrees` divided by ninety.
      *
-     * The alternative — dropping the lock on every rotation — is what the ball tracker
-     * does, and is right there: a flight that jumps a quarter turn mid-air is not one ball.
-     * A wicket is different. It is still in the same place in the world, the operator has
-     * not changed their mind about where it is, and a hand-placed lock in particular must
-     * survive this or the feature is a toy. So the anchor is mapped exactly and the state
-     * drops to REACQUIRE, which says the coordinates are a prediction to be confirmed
-     * rather than a fresh measurement.
+     * A wicket is still in the same place in the world, the operator has not changed their
+     * mind about where it is, and a hand-placed lock in particular must survive this. So the
+     * anchor is mapped exactly and the state drops to REACQUIRE, which says the coordinates
+     * are a prediction to be confirmed rather than a fresh measurement. Candidates and the
+     * memory are mapped too: they are places in the same world.
      */
     @Synchronized
     fun onRotation(quarterTurnsCw: Int, newAspect: Float) {
@@ -790,6 +1089,11 @@ class WicketTracker {
         if (turns == 0) return
         rotations++
         if (newAspect > 0f) aspect = newAspect
+
+        for (h in hypotheses) { h.anchor = h.anchor.rotated(turns); h.residuals.clear() }
+        memory?.let { it.anchor = it.anchor.rotated(turns) }
+        // The roll was measured against the old frame's axes and describes nothing now.
+        rollEma = null
 
         val held = anchor
         if (held == null) {
@@ -821,15 +1125,18 @@ class WicketTracker {
      * TWO POINTS, NOT ONE, and this is the difference between a marker and a calibration.
      * One tap fixes a place and hands back no distance — the same nothing a stone gives.
      * Two taps, on the outside of the leg stump and the outside of the off stump, fix a
-     * line of known length, and 0.2286 m is the entire reason anything downstream can
-     * report a speed in km/h rather than in frame widths per second.
+     * line of known length, which is the entire reason anything downstream can report a
+     * speed in km/h rather than in frame widths per second.
+     *
+     * The taps are on the OUTSIDE edges, because those are what a person can see and hit;
+     * the anchor stores stump CENTRES, because that is what every detector measures. The
+     * conversion is exact along the line: the centres are the outsides pulled in towards
+     * the middle by 0.1936 / 0.2286.
      *
      * @param top optional third tap, on the top of a stump. It buys a scale in the vertical
-     *   direction, which the base pair cannot give at any price: those two points are
-     *   collinear, and a line fixes distances only along itself.
-     * @param kind [WicketKind.STUMPS] when the taps were on stumps and the span really is
-     *   0.2286 m; [WicketKind.STONE] when the operator pointed at a stone, which fixes a
-     *   place and nothing else.
+     *   direction, which the base pair cannot give at any price.
+     * @param kind [WicketKind.STUMPS] when the taps were on stumps; [WicketKind.STONE] when
+     *   the operator pointed at a stone, which fixes a place and nothing else.
      */
     @Synchronized
     fun lockManually(
@@ -844,17 +1151,30 @@ class WicketTracker {
         // does not matter to a span, and asking somebody to tap in a prescribed order at
         // arm's length in the sun is how a calibration gets done wrong.
         val ordered = if (baseLeft.x <= baseRight.x) baseLeft to baseRight else baseRight to baseLeft
-        anchor = WicketAnchor(ordered.first, ordered.second, top)
+        val (l, r) = if (kind == WicketKind.STUMPS) {
+            val k = PitchGeometry.STUMP_CENTRES_SPAN_M / PitchGeometry.STUMP_SET_WIDTH_M
+            val mx = (ordered.first.x + ordered.second.x) / 2.0
+            val my = (ordered.first.y + ordered.second.y) / 2.0
+            Point2(mx + (ordered.first.x - mx) * k, my + (ordered.first.y - my) * k) to
+                Point2(mx + (ordered.second.x - mx) * k, my + (ordered.second.y - my) * k)
+        } else {
+            ordered
+        }
+        anchor = WicketAnchor(l, r, top)
         this.kind = kind
         source = WicketLockSource.MANUAL
         state = WicketTrackState.CONFIRMED
+        subPixel = true
+        method = StumpMethod.MANUAL
+        foundBy = StumpMethod.MANUAL
+        if (firstReadyMs == null) firstReadyMs = lastFrameMs
         streak = CONFIRM_FRAMES
         coastFrames = 0
         ageFrames = 0
         heldFrames = 1
         blindFrames = 0
-        dissent = 0
-        dissentAnchor = null
+        hypotheses.clear()
+        memory = null
         residuals.clear()
         scoreEma = 1f
         note = "hand-placed"
@@ -865,6 +1185,8 @@ class WicketTracker {
     fun clearManualLock() {
         if (source != WicketLockSource.MANUAL) return
         clearLock()
+        hypotheses.clear()
+        memory = null
         note = "hand-placed lock cleared"
     }
 
@@ -872,15 +1194,26 @@ class WicketTracker {
     @Synchronized
     fun reset() {
         clearLock()
+        hypotheses.clear()
+        memory = null
+        rollEma = null
         searchStartMs = null
         lastLockMs = null
+        lastFrameMs = null
+        firstFrameMs = null
+        firstSightingMs = null
+        firstReadyMs = null
+        method = null
+        foundBy = null
         residuals.clear()
         frameTimes.clear()
+        gaps.clear()
         blindFrames = 0
         framesSeen = 0
         framesWithSighting = 0
         confirmations = 0
         reacquires = 0
+        memoryReacquires = 0
         drops = 0
         gateRejections = 0
         rotations = 0
@@ -892,6 +1225,32 @@ class WicketTracker {
     /** The lock as it stands, without advancing anything. */
     @Synchronized
     fun lock(): WicketLock? = currentLock()
+
+    /**
+     * Where the detector should look on the next frame it runs, or null to search the lot.
+     *
+     * The lock, while there is one, or the remembered place of a lost one. The detector
+     * looks there at FULL sensor resolution first — which is what keeps a far lock alive and
+     * what makes holding one cheap.
+     *
+     * NEVER A MERE CANDIDATE. A focus hit skips the whole-frame search, so focusing on the
+     * leading candidate would let whichever place led first — a pad-and-bat triple — be the
+     * only place ever looked at again, and the weighing of rivals would be over before it
+     * started. While searching, the whole frame is searched.
+     */
+    @Synchronized
+    fun focus(): WicketFocus? {
+        anchor?.let { a ->
+            val k = kind ?: return null
+            return when (state) {
+                WicketTrackState.CONFIRMED -> WicketFocus(a, k, 0.22, 1.2, aspect)
+                WicketTrackState.REACQUIRE -> WicketFocus(a, k, 0.3, 1.6, aspect)
+                else -> WicketFocus(a, k, 0.35, REACQUIRE_GATE_SPANS * 2.0, aspect)
+            }
+        }
+        memory?.let { return WicketFocus(it.anchor, it.kind, 0.4, REACQUIRE_GATE_SPANS * 2.0, aspect) }
+        return null
+    }
 
     @Synchronized
     fun diagnostics() = WicketDiagnostics(
@@ -905,114 +1264,219 @@ class WicketTracker {
         rotations = rotations,
         motionUnresolved = motionUnresolved,
         blindFrames = blindFrames,
-        ageFrames = ageFrames,
+        ageFrames = if (anchor == null) lead()?.misses ?: 0 else ageFrames,
         heldFrames = heldFrames,
         confidence = confidence(),
-        jitter = jitter(),
+        jitter = currentJitter(),
         motionConfidence = lastMotion.confidence,
         motionMagnitude = lastMotion.magnitude,
         framesPerSecond = framesPerSecond(),
         lastLockMs = lastLockMs,
         lockSource = if (anchor == null) null else source,
-        kind = kind,
+        kind = kind ?: lead()?.kind,
         note = note,
+        hypotheses = hypotheses.size,
+        memoryAgeMs = memory?.let { m -> lastFrameMs?.let { it - m.lostMs } },
+        cadenceMs = cadenceMs().toFloat(),
+        rollDeg = rollEma,
+        subPixel = if (anchor == null) lead()?.subPixel ?: false else subPixel,
+        memoryReacquires = memoryReacquires,
+        timeToFirstSightingMs = firstSightingMs?.let { s -> firstFrameMs?.let { s - it } },
+        timeToReadyMs = firstReadyMs?.let { r -> firstFrameMs?.let { r - it } },
+        foundBy = foundBy,
+        method = if (anchor == null) lead()?.method else method,
     )
 
     private fun currentLock(): WicketLock? {
-        val held = anchor ?: return null
-        val heldKind = kind ?: return null
+        val held = anchor
+        val heldKind = kind
+        if (held != null && heldKind != null) {
+            return WicketLock(
+                anchor = held,
+                kind = heldKind,
+                source = source,
+                state = state,
+                confidence = confidence(),
+                ageFrames = ageFrames,
+                jitter = jitterOf(residuals),
+                heldFrames = heldFrames,
+                aspect = aspect,
+                subPixel = subPixel,
+                method = method,
+            )
+        }
+        val lead = lead() ?: return null
         return WicketLock(
-            anchor = held,
-            kind = heldKind,
-            source = source,
-            state = state,
+            anchor = lead.anchor,
+            kind = lead.kind,
+            source = WicketLockSource.DETECTED,
+            state = WicketTrackState.TENTATIVE,
             confidence = confidence(),
-            ageFrames = ageFrames,
-            jitter = jitter(),
+            ageFrames = lead.misses,
+            jitter = jitterOf(lead.residuals),
             heldFrames = heldFrames,
             aspect = aspect,
+            subPixel = lead.subPixel,
+            method = lead.method,
         )
     }
 
     /**
      * How much the lock is worth right now, 0..1.
      *
-     * Four independent ways a lock goes bad, multiplied rather than averaged — because any
-     * one of them being terrible should sink the number on its own, and an average lets
-     * three good terms hide a fatal one. A rock-steady lock on a wicket the camera has not
-     * seen for five frames is not three-quarters of a lock.
+     * Independent ways a lock goes bad, multiplied rather than averaged — because any one
+     * of them being terrible should sink the number on its own, and an average lets three
+     * good terms hide a fatal one.
      */
     private fun confidence(): Float {
-        if (anchor == null) return 0f
+        val lead = if (anchor == null) lead() else null
+        if (anchor == null && lead == null) return 0f
 
-        val stateTerm = when (state) {
-            WicketTrackState.CONFIRMED -> 1f
-            WicketTrackState.REACQUIRE -> 0.8f
-            WicketTrackState.TENTATIVE -> 0.25f + 0.2f * (streak.toFloat() / CONFIRM_FRAMES).coerceAtMost(1f)
-            WicketTrackState.TEMPORARILY_LOST -> 0.55f
-            WicketTrackState.LOST -> 0f
+        val stateTerm = when {
+            lead != null -> 0.25f + 0.2f * (lead.hits.toFloat() / CONFIRM_FRAMES).coerceAtMost(1f)
+            state == WicketTrackState.CONFIRMED -> 1f
+            state == WicketTrackState.REACQUIRE -> 0.8f
+            state == WicketTrackState.TEMPORARILY_LOST -> 0.55f
+            else -> 0f
         }
 
         /*
          * WHAT "STALE" MEANS DEPENDS ENTIRELY ON WHERE THE LOCK CAME FROM.
          *
-         * Caught on a phone, pointed at a wicket placed by hand: the panel read
-         * "STUMPS · CONFIRMED · BY HAND" in green above a confidence of 0.15 and a red bar.
-         * Both were computed correctly and they contradicted each other, which is precisely
-         * the failure this class exists to stop.
-         *
-         * The cause: [ageFrames] counts frames since a DETECTION last agreed with the lock.
-         * For a detected lock that is exactly the right measure of staleness. For a
-         * hand-placed one it measures nothing at all — the operator pointed at the wicket,
-         * the detector's opinion was never part of the claim, and a detector that never
-         * finds it again changes nothing about where it is.
-         *
-         * What DOES make a hand-placed lock stale is losing track of the camera, because
-         * then the anchor is no longer being carried. So that is what its age term reads.
+         * For a detected lock, staleness is time since the detector last agreed — measured
+         * in TIME now, since the coast is. For a hand-placed one it measures nothing at
+         * all: the operator pointed at the wicket, and what makes that stale is losing
+         * track of the camera, so that is what its age term reads.
          */
-        val ageTerm = if (source == WicketLockSource.MANUAL) {
-            (1f - blindFrames.toFloat() / (MAX_BLIND_FRAMES + 1)).coerceIn(0.2f, 1f)
-        } else {
-            // Linear in the age, to zero at the coasting limit. A coasting lock is drawn
-            // from a prediction and the prediction gets worse every frame; the number
-            // should say so continuously rather than falling off a cliff at the limit.
-            (1f - ageFrames.toFloat() / (MAX_COAST_FRAMES + 1)).coerceIn(0.15f, 1f)
+        val ageTerm = when {
+            source == WicketLockSource.MANUAL && anchor != null ->
+                (1f - blindFrames.toFloat() / (MAX_BLIND_FRAMES + 1)).coerceIn(0.2f, 1f)
+            lead != null -> (1f - lead.misses.toFloat() / (TENTATIVE_MISS_ALLOWANCE + 1)).coerceIn(0.3f, 1f)
+            else -> {
+                val elapsed = (lastFrameMs ?: 0L) - (lastSeenMs ?: lastFrameMs ?: 0L)
+                val byTime = 1f - elapsed.toFloat() / MAX_COAST_MS
+                val byFrames = 1f - ageFrames.toFloat() / (MAX_COAST_FRAMES * 8 + 1)
+                minOf(byTime, byFrames).coerceIn(0.15f, 1f)
+            }
         }
 
-        val jitterTerm = (1f - jitter() / MAX_MEASURABLE_JITTER).coerceIn(0.2f, 1f)
+        val span = (anchor ?: lead?.anchor)?.span(aspect) ?: 0f
+        val jitterTerm = (1f - currentJitter() / measurableJitter(span)).coerceIn(0.2f, 1f)
 
         // Never zero: a still scene with no trackable corners is not the same as a scene
-        // where the camera is known to have lurched, and a lock should not be written off
-        // for being pointed at a plain wall.
+        // where the camera is known to have lurched.
         val motionTerm = if (lastMotion.isUsable) 1f else (1f - blindFrames * 0.15f).coerceIn(0.4f, 1f)
 
-        val scoreTerm = if (source == WicketLockSource.MANUAL) 1f else scoreEma.coerceIn(0.35f, 1f)
+        val scoreTerm = when {
+            source == WicketLockSource.MANUAL && anchor != null -> 1f
+            lead != null -> lead.scoreEma.coerceIn(0.35f, 1f)
+            else -> scoreEma.coerceIn(0.35f, 1f)
+        }
 
         return (stateTerm * ageTerm * jitterTerm * motionTerm * scoreTerm).coerceIn(0f, 1f)
     }
 
-    /** RMS of the recent residuals, in frame widths. Zero when there are none yet. */
-    private fun jitter(): Float {
-        if (residuals.isEmpty()) return 0f
+    private fun currentJitter(): Float =
+        if (anchor != null) jitterOf(residuals) else lead()?.let { jitterOf(it.residuals) } ?: 0f
+
+    /** RMS of recent residuals, in frame widths. Zero when there are none yet. */
+    private fun jitterOf(values: ArrayDeque<Float>): Float {
+        if (values.isEmpty()) return 0f
         var sum = 0.0
-        for (r in residuals) sum += r.toDouble() * r
-        return sqrt(sum / residuals.size).toFloat()
+        for (r in values) sum += r.toDouble() * r
+        return sqrt(sum / values.size).toFloat()
     }
 
-    private fun pushResidual(value: Float) {
-        residuals.addLast(value)
-        while (residuals.size > JITTER_WINDOW) residuals.removeFirst()
+    private fun pushResidual(into: ArrayDeque<Float>, value: Float) {
+        into.addLast(value)
+        while (into.size > JITTER_WINDOW) into.removeFirst()
+    }
+
+    private fun noteRoll(sighting: WicketSighting) {
+        val roll = (sighting as? WicketSighting.Stumps)?.set?.rollDeg ?: return
+        rollEma = rollEma?.let { it + (roll - it) * 0.15f } ?: roll
+    }
+
+    private fun methodOf(sighting: WicketSighting): StumpMethod? =
+        (sighting as? WicketSighting.Stumps)?.set?.method
+
+    private fun isSubPixel(sighting: WicketSighting) =
+        (sighting as? WicketSighting.Stumps)?.set?.subPixel == true
+
+    private fun matchesMemory(sighting: WicketSighting, remembered: Memory): Boolean {
+        if (WicketAnchor.kindOf(sighting) != remembered.kind) return false
+        val observed = WicketAnchor.of(sighting)
+        if (!spanAgrees(remembered.anchor, observed, remembered.kind, MEMORY_SPAN_RATIO)) return false
+        return distance(observed.base, remembered.anchor.base) <= gateFor(remembered.anchor, REACQUIRE_GATE_SPANS)
+    }
+
+    /**
+     * Forget where a lost lock was once that place means nothing any more: too long ago,
+     * the camera's motion unknown for long enough that it may have been moved, or carried
+     * out of the picture.
+     */
+    private fun expireMemory(timestampMs: Long) {
+        val m = memory ?: return
+        if (timestampMs - m.lostMs > MEMORY_MS || blindFrames > MAX_BLIND_FRAMES || !inFrame(m.anchor)) {
+            memory = null
+        }
+    }
+
+    /**
+     * Whether two readings of a wicket are the same SIZE.
+     *
+     * A wicket's span does not change while the camera stands still. The near wicket and
+     * the far one, a pad-and-bat triple, a fence two metres behind — these can sit inside a
+     * position gate and differ in size by half or double, and a stumps lock that accepted
+     * them would be measuring speed with the wrong ruler. Stones carry no agreed size and
+     * are not held to this.
+     */
+    private fun spanAgrees(a: WicketAnchor, b: WicketAnchor, k: WicketKind?, ratio: Float = SPAN_RATIO): Boolean {
+        if (k != WicketKind.STUMPS) return true
+        val sa = a.span(aspect)
+        val sb = b.span(aspect)
+        if (sa <= 1e-6f || sb <= 1e-6f) return true
+        val r = if (sa > sb) sa / sb else sb / sa
+        return r <= ratio
+    }
+
+    private fun inFrame(a: WicketAnchor): Boolean {
+        val b = a.base
+        return b.x in -IN_FRAME_MARGIN..(1.0 + IN_FRAME_MARGIN) && b.y in -IN_FRAME_MARGIN..(1.0 + IN_FRAME_MARGIN)
     }
 
     private fun recordFrameTime(timestampMs: Long) {
         // A clock that went backwards is a different session's timestamps, or the UI clock
         // being handed in by mistake. Either way the window is meaningless now.
-        if (frameTimes.isNotEmpty() && timestampMs < frameTimes.last()) frameTimes.clear()
+        if (frameTimes.isNotEmpty() && timestampMs < frameTimes.last()) {
+            frameTimes.clear()
+            gaps.clear()
+            lastFrameMs = null
+        }
         frameTimes.addLast(timestampMs)
         while (frameTimes.size > FPS_WINDOW) frameTimes.removeFirst()
     }
 
-    /** Measured over the rolling window, or zero when there is not enough of one. */
+    /** Recorded AFTER a frame is judged, so a gap is never the excuse for itself. */
+    private fun recordGap(previousMs: Long?, timestampMs: Long) {
+        val last = previousMs ?: return
+        val gap = timestampMs - last
+        if (gap <= 0L) return
+        gaps.addLast(gap)
+        while (gaps.size > CADENCE_WINDOW) gaps.removeFirst()
+    }
+
+    /** Median gap between detector runs, or a full-rate frame when none is known yet. */
+    private fun cadenceMs(): Long {
+        if (gaps.isEmpty()) return DEFAULT_CADENCE_MS
+        val sorted = gaps.sorted()
+        return sorted[sorted.size / 2]
+    }
+
+    private fun tentativeGraceMs(): Long =
+        maxOf(TENTATIVE_GRACE_MS, (cadenceMs() * (TENTATIVE_MISS_ALLOWANCE + 0.5)).toLong())
+
+    /** Measured, over the rolling window, or zero when there is not enough of one. */
     private fun framesPerSecond(): Float {
         if (frameTimes.size < 2) return 0f
         val elapsed = frameTimes.last() - frameTimes.first()
@@ -1026,8 +1490,7 @@ class WicketTracker {
      * SCALED BY THE WICKET'S OWN SIZE, which is the only way one number works at every
      * distance. A wicket filling a fifth of the frame from ten metres and one three percent
      * wide from forty are the same object; a fixed gate is either far too tight for the
-     * first or hopelessly loose for the second — loose enough, at forty metres, to accept
-     * something a couple of metres away on the ground.
+     * first or hopelessly loose for the second.
      */
     private fun gateFor(held: WicketAnchor, spans: Float): Float {
         val span = held.span(aspect)
@@ -1043,41 +1506,62 @@ class WicketTracker {
     companion object {
 
         /**
-         * Frames a candidate must be found in the same place before it is a lock.
+         * Sightings of one place before it is a lock.
          *
-         * Four, at the twenty to thirty frames a second this screen manages with both
-         * detectors running, is about a sixth of a second. Long enough that a coincidental
-         * alignment of a bat, a pad and a boot has to hold still through it — which it does
-         * not, because a batter moves — and short enough that the operator does not watch
-         * the screen say SEARCHING at an obvious wicket.
+         * Two, at the rate this runs, is under a tenth of a second — and is not the only
+         * test: the place must also be steady ([confirmJitter]) and clearly ahead of every
+         * other place being weighed ([RIVAL_MARGIN]).
          */
         const val CONFIRM_FRAMES = 2
 
-        /** Missed frames a TENTATIVE candidate survives. See [stepMiss]. */
+        /** Sightings of one place before a STONE is a lock. See [readyToConfirm]. */
+        const val STONE_CONFIRM_FRAMES = 12
+
+        /** Missed detector runs a TENTATIVE candidate survives. */
         const val TENTATIVE_MISS_ALLOWANCE = 2
 
-        /** And the wall-clock cap on that grace, for when frames arrive slowly. */
+        /** And the wall-clock floor on that grace; it stretches with the detector's cadence. */
         const val TENTATIVE_GRACE_MS = 250L
 
         /** Frames to re-confirm after coasting. Fewer: it was already proved once. */
         const val REACQUIRE_CONFIRM_FRAMES = 2
 
         /**
-         * Frames a confirmed lock may coast without being seen.
+         * Consecutive frames with NO camera-motion estimate a lock may coast through.
          *
-         * Eight is a quarter to a third of a second — a bowler crossing the wicket in the
-         * delivery stride, the batter's backlift covering it, one badly blurred frame. It
-         * is deliberately far short of the twelve the pitch-check screen used to hold for,
-         * because that was long enough to survive the phone being turned away from the
-         * pitch entirely, which it duly did on the first field test.
+         * Not a limit on being unseen — see [MAX_COAST_MS] — but on being BLIND: once the
+         * camera's own movement has been unknown for this long the anchor is a guess, and
+         * the phone may well be pointing at the car park.
          */
         const val MAX_COAST_FRAMES = 8
 
-        /** And a wall-clock limit, for when frames are arriving slowly. */
-        const val MAX_COAST_MS = 400L
+        /**
+         * Longest a lock may go unseen with the camera tracked.
+         *
+         * Three seconds: a striker taking guard in front of the far stumps, the keeper
+         * settling, the bowler's delivery stride. Long enough for every routine occlusion of
+         * a wicket filmed from behind the arm; and the lock does not vanish after it — its
+         * place is remembered for [MEMORY_MS].
+         */
+        const val MAX_COAST_MS = 3_000L
+
+        /** How long a lost lock's place is remembered for instant re-acquisition. */
+        const val MEMORY_MS = 30_000L
 
         /** Agreeing sightings away from the lock before the lock is the thing that is wrong. */
         const val DISSENT_FRAMES = 5
+
+        /** How much better a challenger seen ALONGSIDE the lock must score to replace it. */
+        const val CHALLENGER_SCORE_MARGIN = 0.15f
+
+        /** Places weighed at once. More than this is a fence, and looking harder won't help. */
+        const val MAX_HYPOTHESES = 6
+
+        /** A leader is promoted once its evidence is this multiple of the runner-up's... */
+        const val RIVAL_MARGIN = 1.25f
+
+        /** ...or once it has this many sightings beyond [CONFIRM_FRAMES] regardless. */
+        const val RIVAL_PATIENCE = 3
 
         /** Frames without a camera motion estimate before a manual lock stops being a fact. */
         const val MAX_BLIND_FRAMES = 6
@@ -1088,14 +1572,27 @@ class WicketTracker {
         /** Frame times kept for the measured rate. */
         const val FPS_WINDOW = 30
 
+        /** Detector gaps kept for the cadence. */
+        const val CADENCE_WINDOW = 7
+        const val DEFAULT_CADENCE_MS = 33L
+
         /** Gates, as multiples of the locked wicket's own span in the picture. */
         const val LOCK_GATE_SPANS = 0.9f
         const val REACQUIRE_GATE_SPANS = 2.0f
         const val MANUAL_NUDGE_GATE_SPANS = 1.2f
 
+        /** Largest ratio between two spans that are still the same wicket. */
+        const val SPAN_RATIO = 1.45f
+
+        /** Looser for a memory, which has been carried for seconds. */
+        const val MEMORY_SPAN_RATIO = 1.6f
+
         /** Floor and ceiling, in frame widths, for wickets that are tiny or enormous. */
         const val MIN_GATE = 0.012f
         const val MAX_GATE = 0.20f
+
+        /** How far outside the picture a carried anchor may drift before it has left it. */
+        const val IN_FRAME_MARGIN = 0.02
 
         /** How hard each state pulls the anchor towards the newest sighting. */
         const val TENTATIVE_BLEND = 0.5f
@@ -1106,29 +1603,51 @@ class WicketTracker {
         /** How fast the detector's score is followed. */
         const val SCORE_SMOOTHING = 0.25f
 
-        /** Jitter above which a candidate is not steady enough to be promoted. */
+        /** Absolute ceiling on promotion jitter, frame widths. */
         const val MAX_CONFIRM_JITTER = 0.048f
 
-        /**
-         * Jitter above which nothing may be MEASURED from the lock.
-         *
-         * Looser than the promotion threshold on purpose. Promotion is a one-time decision
-         * made when the evidence is freshest and can afford to be strict; this is applied
-         * continuously, and a lock flickering in and out of measurable on alternate frames
-         * would produce a speed readout that appears and vanishes for no reason the
-         * operator can see.
-         */
+        /** Absolute ceiling on measurable jitter, frame widths. */
         const val MAX_MEASURABLE_JITTER = 0.05f
 
         /**
-         * A span below this is too few pixels to divide 0.2286 m by.
+         * Jitter allowed at promotion: a quarter of the wicket's own span.
          *
-         * At 1.5% of the frame width a 960-wide analysis frame gives the whole wicket
-         * fourteen pixels, so one pixel of error in either outer stump is a seven percent
-         * error in every metre that comes out of it. Refusing is the only honest answer;
-         * the operator needs to move closer or zoom, and a screen that says so is more
-         * use than a number that is quietly a tenth out.
+         * RELATIVE, because the old absolute 0.048 frame widths was looser than a whole far
+         * wicket — a lock could hop between two different objects six metres apart and
+         * still be called steady.
+         */
+        fun confirmJitter(span: Float): Float = (span * 0.25f).coerceIn(0.004f, MAX_CONFIRM_JITTER)
+
+        /**
+         * Jitter above which nothing may be MEASURED from the lock: a third of its span.
+         *
+         * Looser than promotion on purpose: this is applied continuously, and a lock
+         * flickering in and out of measurable would make a speed readout appear and vanish
+         * for no reason the operator can see.
+         */
+        fun measurableJitter(span: Float): Float = (span * 0.33f).coerceIn(0.005f, MAX_MEASURABLE_JITTER)
+
+        /**
+         * A span below this is too few pixels to divide 0.1936 m by — for CONTOUR boxes.
+         *
+         * At 1.5% of a 960-wide frame a wicket is fourteen pixels, and a contour box is good
+         * to a pixel, so each metre out of it carries 7% error.
          */
         const val MIN_MEASURABLE_SPAN = 0.015f
+
+        /**
+         * The same floor for a SUB-PIXEL lock — a comb fit at full resolution, or taps.
+         *
+         * SET FROM MEASUREMENT, NOT TASTE. `WicketPipelineSimTest` runs physically scaled
+         * frames (70° lens, 1280 wide, sensor noise, a jittering tripod) through the comb
+         * and the tracker: the locked span is within about 1% of the truth out to 30 m —
+         * 0.0046 of the frame — and 3.7% at 34 m. 0.45% of the width is therefore ~30 m on
+         * that camera, which covers the far wicket from anywhere behind the bowler's arm.
+         *
+         * A simulation has no lens aberration and no video compression; a real phone will
+         * do worse. Read the span error off a ground with a tape measure before trusting a
+         * speed taken near this floor.
+         */
+        const val MIN_MEASURABLE_SPAN_SUBPIXEL = 0.0045f
     }
 }

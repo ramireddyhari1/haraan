@@ -285,13 +285,17 @@ private fun PitchCheckScreen() {
                     // AFTER the pitch detector, never before, and with the creases from
                     // THIS frame: the wicket ranking uses them, and stale ones would be
                     // worse than an empty list.
-                    val sighting = stumpDetector.detectWicket(
+                    // Every distinct wicket, best first, looked for at the tracker's
+                    // focus first: the same path the camera screen takes, so what this
+                    // screen shows is what a match would get.
+                    val sightings = stumpDetector.detectCandidates(
                         luma = bytes,
                         width = image.width,
                         height = image.height,
                         rowStride = plane.rowStride,
                         rotationDegrees = rotation,
                         creases = detector.creases(),
+                        focus = wicketTracker.focus(),
                     )
 
                     /*
@@ -303,7 +307,7 @@ private fun PitchCheckScreen() {
                      * read as whatever the UI thread happened to be doing.
                      */
                     wicketLock = wicketTracker.onFrame(
-                        sighting = sighting,
+                        sightings = sightings,
                         motion = motion,
                         frameAspect = aspect,
                         timestampMs = image.imageInfo.timestamp / 1_000_000,

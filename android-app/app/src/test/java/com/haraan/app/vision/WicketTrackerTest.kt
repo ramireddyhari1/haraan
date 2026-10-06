@@ -27,6 +27,7 @@ class WicketTrackerTest {
         span: Float = 0.10f,
         height: Float = 0.12f,
         score: Float = 0.8f,
+        subPixel: Boolean = true,
     ): WicketSighting.Stumps {
         fun bar(cx: Float) = StumpCandidate(centreX = cx, baseY = baseY, topY = baseY - height)
         return WicketSighting.Stumps(
@@ -35,6 +36,8 @@ class WicketTrackerTest {
                 middle = bar(x),
                 right = bar(x + span / 2f),
                 score = score,
+                subPixel = subPixel,
+                method = if (subPixel) StumpMethod.MERGED_COMB else StumpMethod.CONTOUR_TRIPLE,
             ),
         )
     }
@@ -172,18 +175,99 @@ class WicketTrackerTest {
         assertEquals(WicketTrackState.CONFIRMED, settled!!.state)
     }
 
+    /**
+     * Blind is what ends a coast quickly: with the camera's motion unknown frame after
+     * frame, the anchor is a guess about an unknown move, and the phone may well be
+     * pointing at the car park — the failure the twelve-frame hold used to survive.
+     */
     @Test
-    fun `coasting past the limit gives the lock up`() {
+    fun `coasting blind past the limit gives the lock up and remembers nothing`() {
         val tracker = WicketTracker()
         tracker.feed(stumps(), frames = WicketTracker.CONFIRM_FRAMES)
 
         var last: WicketLock? = null
         for (i in 0..WicketTracker.MAX_COAST_FRAMES) {
-            last = tracker.onFrame(null, steady(), aspect, 200L + i * 20L)
+            last = tracker.onFrame(null, FrameMotion.STILL, aspect, 200L + i * 20L)
         }
-        assertNull("this is the failure the twelve-frame hold used to survive", last)
+        assertNull(last)
         assertEquals(WicketTrackState.LOST, tracker.diagnostics().state)
         assertEquals(1, tracker.diagnostics().drops)
+        assertNull("a place lost while blind is not worth remembering", tracker.diagnostics().memoryAgeMs)
+    }
+
+    /**
+     * The far wicket from behind the arm spends whole seconds behind the striker taking
+     * guard. The old eight-frame coast dropped the lock every time and forced a fresh
+     * search; with the camera tracked, a stationary wicket is carried straight through.
+     */
+    @Test
+    fun `a striker standing in front of the stumps for a second and a half does not drop the lock`() {
+        val tracker = WicketTracker()
+        tracker.feed(stumps(), frames = WicketTracker.CONFIRM_FRAMES)
+
+        var last: WicketLock? = null
+        for (i in 1..45) last = tracker.onFrame(null, steady(), aspect, 33L + i * 33L)
+        assertEquals(WicketTrackState.TEMPORARILY_LOST, last!!.state)
+        assertEquals(0, tracker.diagnostics().drops)
+
+        val back = tracker.onFrame(stumps(), steady(), aspect, 33L + 46 * 33L)
+        assertEquals(WicketTrackState.REACQUIRE, back!!.state)
+        assertEquals(0, tracker.diagnostics().drops)
+    }
+
+    @Test
+    fun `a lock carried out of the picture by a pan is given up at once`() {
+        val tracker = WicketTracker()
+        tracker.feed(stumps(x = 0.8f), frames = WicketTracker.CONFIRM_FRAMES)
+        // The phone swings left: content slides right, out of frame.
+        val pan = FrameMotion(0.25f, 0f, 1f, 0f, inliers = 30, total = 32)
+        tracker.onFrame(null, pan, aspect, 100L)
+        val after = tracker.onFrame(null, pan, aspect, 133L)
+        assertNull(after)
+        assertEquals(1, tracker.diagnostics().drops)
+        assertNull("nothing to remember outside the picture", tracker.diagnostics().memoryAgeMs)
+    }
+
+    /**
+     * Lost for longer than the coast — the striker, then the umpire, then the bowler walking
+     * back — and found again in the same place: back to REACQUIRE on the frame it is seen,
+     * without the full tentative search from nothing.
+     */
+    @Test
+    fun `a lock lost after a long occlusion is re-acquired from memory in one frame`() {
+        val tracker = WicketTracker()
+        tracker.feed(stumps(), frames = WicketTracker.CONFIRM_FRAMES)
+        tracker.onFrame(null, steady(), aspect, 100L)
+        assertNull(tracker.onFrame(null, steady(), aspect, 100L + WicketTracker.MAX_COAST_MS + 10L))
+        assertNotNull(tracker.diagnostics().memoryAgeMs)
+
+        val back = tracker.onFrame(stumps(x = 0.505f), steady(), aspect, 5_000L)
+        assertEquals(WicketTrackState.REACQUIRE, back!!.state)
+        assertEquals(1, tracker.diagnostics().memoryReacquires)
+        val settled = tracker.onFrame(stumps(x = 0.505f), steady(), aspect, 5_033L)
+        assertEquals(WicketTrackState.CONFIRMED, settled!!.state)
+    }
+
+    @Test
+    fun `memory is carried on camera motion and refuses a wicket of a different size`() {
+        val nudge = FrameMotion(0.05f, 0f, 1f, 0f, inliers = 30, total = 32)
+        fun lostWicket() = WicketTracker().apply {
+            feed(stumps(x = 0.5f, span = 0.06f), frames = WicketTracker.CONFIRM_FRAMES)
+            onFrame(null, steady(), aspect, 100L)
+            onFrame(null, steady(), aspect, 100L + WicketTracker.MAX_COAST_MS + 10L)
+            // The tripod is nudged while nothing is locked; the memory moves with it.
+            onFrame(null, nudge, aspect, 3_300L)
+        }
+
+        // A wicket twice the size at the old place is the near one, or a pad: not this.
+        val wrong = lostWicket()
+        val wrongSize = wrong.onFrame(stumps(x = 0.55f, span = 0.12f), steady(), aspect, 3_333L)
+        assertEquals(WicketTrackState.TENTATIVE, wrongSize!!.state)
+        assertEquals(0, wrong.diagnostics().memoryReacquires)
+
+        val right = lostWicket()
+        val back = right.onFrame(stumps(x = 0.55f, span = 0.06f), steady(), aspect, 3_333L)
+        assertEquals(WicketTrackState.REACQUIRE, back!!.state)
     }
 
     @Test
@@ -253,20 +337,32 @@ class WicketTrackerTest {
     @Test
     fun `a stone lock never carries a scale however well tracked`() {
         val tracker = WicketTracker()
-        val lock = tracker.feed(stone(), frames = WicketTracker.CONFIRM_FRAMES * 3)
+        val lock = tracker.feed(stone(), frames = WicketTracker.STONE_CONFIRM_FRAMES)
         assertEquals(WicketTrackState.CONFIRMED, lock!!.state)
         assertEquals(WicketKind.STONE, lock.kind)
         assertFalse(lock.isMeasurable)
         assertNull("a stone has no agreed width", lock.metresPerUnitAcross())
     }
 
+    /**
+     * One lump on one frame is not a reason to throw away a confirmed stumps lock — that was
+     * a single-frame hard commitment. It is a challenger, and it takes over only if it
+     * persists while the stumps are not seen. It never BLENDS: a stone carries no scale.
+     */
     @Test
-    fun `a stone where stumps were locked re-seeds rather than blending`() {
+    fun `a stone where stumps were locked challenges and takes over only if it persists`() {
         val tracker = WicketTracker()
         tracker.feed(stumps(), frames = WicketTracker.CONFIRM_FRAMES)
-        val after = tracker.onFrame(stone(), steady(), aspect, 200L)
-        assertEquals(WicketKind.STONE, after!!.kind)
-        assertEquals(WicketTrackState.TENTATIVE, after.state)
+        val once = tracker.onFrame(stone(), steady(), aspect, 200L)
+        assertEquals(WicketKind.STUMPS, once!!.kind)
+        assertEquals(WicketTrackState.TEMPORARILY_LOST, once.state)
+
+        var last: WicketLock? = null
+        for (i in 1 until WicketTracker.DISSENT_FRAMES) {
+            last = tracker.onFrame(stone(), steady(), aspect, 200L + i * 33L)
+        }
+        assertEquals(WicketKind.STONE, last!!.kind)
+        assertEquals(WicketTrackState.TENTATIVE, last.state)
     }
 
     // ---- scale ---------------------------------------------------------------------------
@@ -276,14 +372,45 @@ class WicketTrackerTest {
         val tracker = WicketTracker()
         val lock = tracker.feed(stumps(span = 0.10f), frames = WicketTracker.CONFIRM_FRAMES)!!
         val scale = lock.metresPerUnitAcross()!!
-        assertEquals(PitchGeometry.STUMP_SET_WIDTH_M / 0.10, scale, 1e-3)
+        // Detected bars are CENTRES: 0.10 of the frame is the 0.1936 m between the outer
+        // stumps' centres. Dividing the 0.2286 m outside width by it read 18% long.
+        assertEquals(PitchGeometry.STUMP_CENTRES_SPAN_M / 0.10, scale, 1e-3)
+    }
+
+    /**
+     * Two taps on the outside edges and a detection of the same wicket must agree on the
+     * scale — they did not, by 18%, while one used the outside width and the other centres.
+     */
+    @Test
+    fun `a hand-placed lock and a detected lock of the same wicket give the same scale`() {
+        val outsideSpan = 0.10
+        val centreSpan = outsideSpan * PitchGeometry.STUMP_CENTRES_SPAN_M / PitchGeometry.STUMP_SET_WIDTH_M
+        val manual = WicketTracker().apply {
+            lockManually(Point2(0.5 - outsideSpan / 2, 0.7), Point2(0.5 + outsideSpan / 2, 0.7), frameAspect = aspect)
+        }.lock()!!.metresPerUnitAcross()!!
+        val detected = WicketTracker().feed(stumps(span = centreSpan.toFloat()), frames = WicketTracker.CONFIRM_FRAMES)!!
+            .metresPerUnitAcross()!!
+        assertEquals(manual, detected, manual * 1e-4)
+    }
+
+    @Test
+    fun `a far wicket found to sub-pixel precision is measurable where a contour box is not`() {
+        fun far(subPixel: Boolean): WicketSighting.Stumps {
+            val base = stumps(span = 0.008f, height = 0.04f)
+            return WicketSighting.Stumps(base.set.copy(subPixel = subPixel))
+        }
+        val coarse = WicketTracker().feed(far(false), frames = WicketTracker.CONFIRM_FRAMES)!!
+        val fine = WicketTracker().feed(far(true), frames = WicketTracker.CONFIRM_FRAMES)!!
+        assertFalse(coarse.isMeasurable)
+        assertTrue(fine.isMeasurable)
+        assertTrue(fine.subPixel)
     }
 
     @Test
     fun `a wicket too small in frame is refused rather than divided by`() {
         val tracker = WicketTracker()
         val lock = tracker.feed(
-            stumps(span = WicketTracker.MIN_MEASURABLE_SPAN / 2f, height = 0.02f),
+            stumps(span = WicketTracker.MIN_MEASURABLE_SPAN / 2f, height = 0.02f, subPixel = false),
             frames = WicketTracker.CONFIRM_FRAMES,
         )!!
         assertFalse(lock.isMeasurable)
@@ -566,5 +693,170 @@ class WicketTrackerTest {
         assertEquals(0, diagnostics.confirmations)
         assertEquals(0, diagnostics.rotations)
         assertEquals(0, diagnostics.reacquires)
+    }
+
+    // ---- multi-candidate -----------------------------------------------------------------
+
+    /**
+     * The single-commitment failure: a pad-and-bat triple seen first used to become THE
+     * candidate, and the real wicket — seen on every frame after — was dissent that needed
+     * five frames to be heard. Every place is weighed now, and the one that persists wins.
+     */
+    @Test
+    fun `a decoy seen first does not hold the search hostage`() {
+        val tracker = WicketTracker()
+        tracker.onFrame(stumps(x = 0.25f, score = 0.9f), steady(), aspect, 0L)
+        var last: WicketLock? = null
+        for (i in 1..3) last = tracker.onFrame(stumps(x = 0.6f), steady(), aspect, i * 33L)
+        assertEquals(WicketTrackState.CONFIRMED, last!!.state)
+        assertEquals(0.6, last.base.x, 0.01)
+    }
+
+    @Test
+    fun `when the detector alternates between two places the persistent one is locked`() {
+        val tracker = WicketTracker()
+        var last: WicketLock? = null
+        for (i in 0 until 8) {
+            val sightings = if (i % 3 == 2) {
+                listOf(stumps(x = 0.25f, score = 0.85f), stumps(x = 0.6f, score = 0.7f))
+            } else {
+                listOf(stumps(x = 0.6f, score = 0.7f))
+            }
+            last = tracker.onFrame(sightings, steady(), aspect, i * 33L)
+        }
+        assertEquals(WicketTrackState.CONFIRMED, last!!.state)
+        assertEquals(0.6, last.base.x, 0.01)
+    }
+
+    @Test
+    fun `two places seen equally are not promoted on a coin toss`() {
+        val tracker = WicketTracker()
+        val both = listOf(stumps(x = 0.3f, score = 0.8f), stumps(x = 0.7f, score = 0.8f))
+        tracker.onFrame(both, steady(), aspect, 0L)
+        val early = tracker.onFrame(both, steady(), aspect, 33L)
+        assertEquals(WicketTrackState.TENTATIVE, early!!.state)
+        assertEquals(2, tracker.diagnostics().hypotheses)
+    }
+
+    @Test
+    fun `a second wicket seen alongside the lock does not displace it`() {
+        val tracker = WicketTracker()
+        tracker.feed(stumps(x = 0.5f), frames = WicketTracker.CONFIRM_FRAMES)
+        var last: WicketLock? = null
+        for (i in 1..20) {
+            last = tracker.onFrame(
+                listOf(stumps(x = 0.5f), stumps(x = 0.2f, span = 0.06f)),
+                steady(), aspect, 33L + i * 33L,
+            )
+        }
+        assertEquals(WicketTrackState.CONFIRMED, last!!.state)
+        assertEquals(0.5, last.base.x, 0.01)
+    }
+
+    // ---- cadence -------------------------------------------------------------------------
+
+    /**
+     * In Auto the detector runs on one frame in eight, 267 ms apart. A fixed 250 ms grace
+     * expired on the first miss, so a flickering far wicket could never confirm there.
+     */
+    @Test
+    fun `grace stretches with the detector cadence`() {
+        val tracker = WicketTracker()
+        val gap = 267L
+        // Settle the cadence on a few empty runs, then: seen, missed, seen.
+        for (i in 0 until 4) tracker.onFrame(null, steady(), aspect, i * gap)
+        tracker.onFrame(stumps(), steady(), aspect, 4 * gap)
+        val missed = tracker.onFrame(null, steady(), aspect, 5 * gap)
+        assertEquals(WicketTrackState.TENTATIVE, missed!!.state)
+        val lock = tracker.onFrame(stumps(), steady(), aspect, 6 * gap)
+        assertEquals(WicketTrackState.CONFIRMED, lock!!.state)
+        assertEquals(gap.toFloat(), tracker.diagnostics().cadenceMs, 1f)
+    }
+
+    // ---- focus and roll ------------------------------------------------------------------
+
+    @Test
+    fun `focus points the detector at the lock, then at the memory, then at nothing`() {
+        val tracker = WicketTracker()
+        assertNull(tracker.focus())
+        tracker.feed(stumps(x = 0.4f), frames = WicketTracker.CONFIRM_FRAMES)
+        assertEquals(0.4, tracker.focus()!!.anchor.base.x, 1e-3)
+        tracker.onFrame(null, steady(), aspect, 100L)
+        tracker.onFrame(null, steady(), aspect, 100L + WicketTracker.MAX_COAST_MS + 10L)
+        val remembered = tracker.focus()!!
+        assertEquals(0.4, remembered.anchor.base.x, 1e-3)
+        assertTrue("a memory is searched more loosely", remembered.spanTolerance > 0.3)
+        tracker.reset()
+        assertNull(tracker.focus())
+    }
+
+    @Test
+    fun `a mere candidate is never a focus, so rivals keep being searched for`() {
+        val tracker = WicketTracker()
+        tracker.onFrame(stumps(x = 0.3f), steady(), aspect, 0L)
+        assertEquals(WicketTrackState.TENTATIVE, tracker.diagnostics().state)
+        assertNull(tracker.focus())
+    }
+
+    @Test
+    fun `roll read off the stumps is smoothed into the diagnostics`() {
+        val tracker = WicketTracker()
+        val rolled = WicketSighting.Stumps(stumps().set.copy(rollDeg = 3f, subPixel = true))
+        tracker.feed(rolled, frames = 6)
+        assertEquals(3f, tracker.diagnostics().rollDeg!!, 0.01f)
+        tracker.onRotation(1, 1f / aspect)
+        assertNull("roll is measured against the frame's axes", tracker.diagnostics().rollDeg)
+    }
+
+    // ---- startup, stones, method ----------------------------------------------------------
+
+    @Test
+    fun `startup times are measured from the first frame, on the camera clock`() {
+        val tracker = WicketTracker()
+        tracker.onFrame(null, steady(), aspect, 10_000L)
+        tracker.onFrame(null, steady(), aspect, 10_033L)
+        tracker.onFrame(stumps(), steady(), aspect, 10_066L)
+        tracker.onFrame(stumps(), steady(), aspect, 10_099L)
+        val d = tracker.diagnostics()
+        assertEquals(66L, d.timeToFirstSightingMs)
+        assertEquals(99L, d.timeToReadyMs)
+        assertEquals(StumpMethod.MERGED_COMB, d.foundBy)
+        tracker.reset()
+        assertNull(tracker.diagnostics().timeToReadyMs)
+    }
+
+    @Test
+    fun `a stone needs to persist before it is READY`() {
+        val tracker = WicketTracker()
+        val early = tracker.feed(stone(), frames = WicketTracker.STONE_CONFIRM_FRAMES - 1)
+        assertEquals(WicketTrackState.TENTATIVE, early!!.state)
+        val later = tracker.onFrame(stone(), steady(), aspect, 33L * WicketTracker.STONE_CONFIRM_FRAMES)
+        assertEquals(WicketTrackState.CONFIRMED, later!!.state)
+    }
+
+    /**
+     * A batter's pads can pass for a gully stone. When comb-verified stumps appear, they
+     * replace a stone lock at once instead of waiting out the dissent count.
+     */
+    @Test
+    fun `verified stumps replace a stone lock as soon as they are seen twice`() {
+        val tracker = WicketTracker()
+        tracker.feed(stone(x = 0.3f), frames = WicketTracker.STONE_CONFIRM_FRAMES)
+        assertEquals(WicketKind.STONE, tracker.lock()!!.kind)
+        tracker.onFrame(listOf(stone(x = 0.3f), stumps(x = 0.6f)), steady(), aspect, 1_000L)
+        val after = tracker.onFrame(listOf(stone(x = 0.3f), stumps(x = 0.6f)), steady(), aspect, 1_033L)
+        assertEquals(WicketKind.STUMPS, after!!.kind)
+        assertEquals(WicketTrackState.CONFIRMED, after.state)
+        assertEquals(0.6, after.base.x, 0.01)
+    }
+
+    @Test
+    fun `contour-only stumps do not displace a stone`() {
+        val tracker = WicketTracker()
+        tracker.feed(stone(x = 0.3f), frames = WicketTracker.STONE_CONFIRM_FRAMES)
+        repeat(3) { i ->
+            tracker.onFrame(listOf(stone(x = 0.3f), stumps(x = 0.6f, subPixel = false)), steady(), aspect, 1_000L + i * 33L)
+        }
+        assertEquals(WicketKind.STONE, tracker.lock()!!.kind)
     }
 }

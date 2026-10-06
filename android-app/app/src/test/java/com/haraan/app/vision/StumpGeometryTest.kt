@@ -201,11 +201,13 @@ class StumpGeometryTest {
     fun `the span fixes a scale along the wicket line and nowhere else`() {
         val set = StumpGeometry.findSet(wicket(span = 0.04f))!!
 
-        // 0.2286 m across 0.04 of the frame width.
+        // The bars are found by their CENTRES, so 0.04 of the frame is the 0.1936 m between
+        // the outer stumps' centres — not the 0.2286 m outside to outside, which overstated
+        // every distance by 18%.
         val scale = StumpGeometry.metresPerUnitAcross(set)!!
         // Loose enough to survive the float subtraction that produces the span; the claim
         // under test is the ratio, not the last decimal place of it.
-        assertEquals(PitchGeometry.STUMP_SET_WIDTH_M / 0.04, scale, 1e-3)
+        assertEquals(PitchGeometry.STUMP_CENTRES_SPAN_M / 0.04, scale, 1e-3)
     }
 
     @Test
@@ -231,6 +233,21 @@ class StumpGeometryTest {
         if (set != null) {
             assertTrue(set.left.centreX < set.middle.centreX)
             assertTrue(set.middle.centreX < set.right.centreX)
+        }
+    }
+
+    @Test
+    fun `runners-up are handed on, one per place`() {
+        // The wicket, and a fence-like triple well to the right of it.
+        val bars = wicket(centreX = 0.3f, span = 0.04f) + wicket(centreX = 0.7f, span = 0.05f)
+        val ranked = StumpGeometry.search(bars).ranked
+        assertTrue("both places should be offered, got ${ranked.size}", ranked.size >= 2)
+        val mids = ranked.map { (it.left.centreX + it.right.centreX) / 2f }
+        assertTrue(mids.any { kotlin.math.abs(it - 0.3f) < 0.01f })
+        assertTrue(mids.any { kotlin.math.abs(it - 0.7f) < 0.01f })
+        // And no place twice.
+        for (i in mids.indices) for (j in i + 1 until mids.size) {
+            assertTrue(kotlin.math.abs(mids[i] - mids[j]) > 0.015f)
         }
     }
 }

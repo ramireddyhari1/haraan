@@ -1,6 +1,7 @@
 package com.haraan.app.vision
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -521,6 +522,141 @@ fun DrawScope.drawWicketLock(lock: WicketLock, box: FrameBox, density: Density) 
 }
 
 /**
+ * The detected stump region, boxed and labelled, for the developer readout only.
+ *
+ * The box is the stumps' own extent — outer feet to top, padded by a third of the span —
+ * and the label is the five numbers a tester needs to judge a lock at a glance: confidence,
+ * estimated distance, span in pixels, roll, and how it was found. Never drawn for players.
+ */
+fun DrawScope.drawWicketRegion(lock: WicketLock, box: FrameBox, label: String, density: Density) {
+    val a = lock.anchor
+    val left = box.toView(a.baseLeft)
+    val right = box.toView(a.baseRight)
+    val foot = box.toView(a.base)
+    val top = a.top?.let { box.toView(it) }
+    val spanPx = hypot(right.x - left.x, right.y - left.y)
+    val heightPx = top?.let { abs(foot.y - it.y) } ?: (spanPx * 3.7f)
+    val pad = maxOf(spanPx / 3f, with(density) { 6.dp.toPx() })
+    val x0 = minOf(left.x, right.x) - pad
+    val x1 = maxOf(left.x, right.x) + pad
+    val y1 = maxOf(left.y, right.y) + pad
+    val y0 = y1 - pad * 2 - heightPx
+    val colour = when (lock.state) {
+        WicketTrackState.CONFIRMED -> VisionPalette.GOOD
+        WicketTrackState.TENTATIVE -> VisionPalette.WARN
+        else -> VisionPalette.WARN.copy(alpha = 0.8f)
+    }
+    val stroke = with(density) { 1.5.dp.toPx() }
+    drawRect(
+        color = colour,
+        topLeft = Offset(x0, y0),
+        size = androidx.compose.ui.geometry.Size(x1 - x0, y1 - y0),
+        style = Stroke(width = stroke),
+    )
+    val paint = Paint().apply {
+        color = android.graphics.Color.WHITE
+        textSize = with(density) { 11.sp.toPx() }
+        typeface = Typeface.MONOSPACE
+        isAntiAlias = true
+    }
+    val bg = Paint().apply { color = android.graphics.Color.argb(200, 0, 0, 0) }
+    val textW = paint.measureText(label)
+    val tx = (x0).coerceIn(4f, (size.width - textW - 8f).coerceAtLeast(4f))
+    val ty = (y0 - with(density) { 6.dp.toPx() }).coerceAtLeast(paint.textSize + 4f)
+    drawContext.canvas.nativeCanvas.apply {
+        drawRect(tx - 4f, ty - paint.textSize, tx + textW + 4f, ty + 5f, bg)
+        drawText(label, tx, ty, paint)
+    }
+}
+
+/** The label [drawWicketRegion] puts over the box. */
+fun wicketRegionLabel(lock: WicketLock, camera: CameraIntrinsics?, uprightWidthPx: Int, rollDeg: Float?): String =
+    buildString {
+        append("%.0f%%".format(lock.confidence * 100f))
+        if (camera != null) WicketRange.fromSpan(lock, camera)?.let { append(" · %.1f m est".format(it)) }
+        if (uprightWidthPx > 0) append(" · %.1f px".format(WicketRange.spanPx(lock, uprightWidthPx)))
+        rollDeg?.let { append(" · %+.1f°".format(it)) }
+        append(" · ").append(lock.method?.label ?: lock.state.name.lowercase())
+    }
+
+/**
+ * Taped-distance validation, for the developer readout: say how far the phone really is from
+ * the stumps, record a few seconds, move, repeat, save the CSV.
+ */
+@Composable
+fun WicketValidationPanel(
+    trueDistanceM: Double,
+    onDistanceChange: (Double) -> Unit,
+    recording: Boolean,
+    onRecord: () -> Unit,
+    onSave: () -> Unit,
+    onClear: () -> Unit,
+    rows: List<WicketValidation.Row>,
+    savedPath: String?,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.Black.copy(alpha = 0.62f))
+            .padding(horizontal = 13.dp, vertical = 11.dp),
+    ) {
+        Text("FIELD VALIDATION", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+        Spacer(Modifier.height(6.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ValidationButton("−") { onDistanceChange((trueDistanceM - 1.0).coerceAtLeast(1.0)) }
+            Text(
+                "%.0f m taped".format(trueDistanceM),
+                color = Color.White,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.padding(horizontal = 10.dp),
+            )
+            ValidationButton("+") { onDistanceChange((trueDistanceM + 1.0).coerceAtMost(60.0)) }
+        }
+        Spacer(Modifier.height(6.dp))
+        Row {
+            ValidationButton(if (recording) "Recording…" else "Record 3 s", enabled = !recording, onClick = onRecord)
+            Spacer(Modifier.width(6.dp))
+            ValidationButton("Save CSV", enabled = rows.isNotEmpty() && !recording, onClick = onSave)
+            Spacer(Modifier.width(6.dp))
+            ValidationButton("Clear", enabled = rows.isNotEmpty() && !recording, onClick = onClear)
+        }
+        if (rows.isNotEmpty()) {
+            Spacer(Modifier.height(6.dp))
+            DiagnosticRow("taped", "ready · est ± sd · err")
+            for (r in rows) {
+                DiagnosticRow(
+                    "%.0f m".format(r.trueDistanceM),
+                    "%.0f%% · %s · %s".format(
+                        r.readyRate * 100,
+                        r.meanEstimateM?.let { m -> "%.1f±%.1f".format(m, r.sdEstimateM ?: 0.0) } ?: "—",
+                        r.errorPct?.let { e -> "%+.1f%%".format(e) } ?: "—",
+                    ),
+                )
+            }
+        }
+        savedPath?.let {
+            Spacer(Modifier.height(4.dp))
+            Text(it, color = Color.White.copy(alpha = 0.55f), fontSize = 9.5.sp, fontFamily = FontFamily.Monospace)
+        }
+    }
+}
+
+@Composable
+private fun ValidationButton(label: String, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (enabled) Color(0xFF2563EB) else Color.White.copy(alpha = 0.12f))
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+    ) {
+        Text(label, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/**
  * Everything the tracker knows, in a column somebody can read at arm's length in the sun.
  *
  * MONOSPACE VALUES IN A FIXED COLUMN, because the numbers here are watched while they
@@ -534,6 +670,16 @@ fun WicketDiagnosticsPanel(
     lock: WicketLock?,
     modifier: Modifier = Modifier,
     detectorAvailable: Boolean = true,
+    /** The detector's own account of its last frame, when the screen has one. */
+    report: StumpDetectorReport? = null,
+    /** How far off level the phone is, from gravity; magnitude only. */
+    deviceRollDeg: Float? = null,
+    /** The lens, for a distance estimate; null when the device reported nothing usable. */
+    camera: CameraIntrinsics? = null,
+    /** The upright analysis frame's width in pixels, for the span in pixels. */
+    uprightWidthPx: Int = 0,
+    /** From the screen opening the camera to the first analysed frame, wall clock. */
+    cameraToFirstFrameMs: Long? = null,
 ) {
     Column(
         modifier
@@ -580,7 +726,19 @@ fun WicketDiagnosticsPanel(
         ConfidenceBar(diagnostics.confidence)
         Spacer(Modifier.height(7.dp))
 
-        DiagnosticRow("confidence", "%.2f".format(diagnostics.confidence))
+        DiagnosticRow("confidence", "%.0f%%".format(diagnostics.confidence * 100f))
+        // STARTUP, as measured on this phone: camera open → first analysed frame (wall
+        // clock), then first frame → first sighting → READY (camera clock).
+        DiagnosticRow("camera → frame", cameraToFirstFrameMs?.let { "$it ms" } ?: "—")
+        DiagnosticRow("→ first detection", diagnostics.timeToFirstSightingMs?.let { "$it ms" } ?: "—")
+        DiagnosticRow("→ READY", diagnostics.timeToReadyMs?.let { "$it ms" } ?: "—")
+        DiagnosticRow(
+            "method",
+            buildString {
+                append(diagnostics.method?.label ?: "—")
+                diagnostics.foundBy?.takeIf { it != diagnostics.method }?.let { append(" (found: ${it.label})") }
+            },
+        )
         DiagnosticRow("fps", if (diagnostics.framesPerSecond <= 0f) "—" else "%.1f".format(diagnostics.framesPerSecond))
         DiagnosticRow("time to lock", diagnostics.lastLockMs?.let { "%.1f s".format(it / 1000f) } ?: "—")
         // What staleness MEANS differs by source, so the row does too rather than printing
@@ -612,10 +770,70 @@ fun WicketDiagnosticsPanel(
             "seen",
             "${diagnostics.framesWithSighting}/${diagnostics.framesSeen}",
         )
+        // Multi-candidate and memory: how many places are being weighed, and whether a lost
+        // lock's place is still held for an instant re-acquire.
+        DiagnosticRow("places", "${diagnostics.hypotheses}")
+        DiagnosticRow(
+            "memory",
+            diagnostics.memoryAgeMs?.let { "%.1f s · %d back".format(it / 1000f, diagnostics.memoryReacquires) }
+                ?: "— · ${diagnostics.memoryReacquires} back",
+        )
+        DiagnosticRow("cadence", if (diagnostics.cadenceMs <= 0f) "—" else "%.0f ms".format(diagnostics.cadenceMs))
+        DiagnosticRow("precision", if (diagnostics.subPixel) "sub-pixel" else "contour")
+        DiagnosticRow(
+            "roll",
+            buildString {
+                append(diagnostics.rollDeg?.let { "stumps %+.1f°".format(it) } ?: "stumps —")
+                deviceRollDeg?.let { append(" · phone %.1f°".format(kotlin.math.abs(it))) }
+            },
+        )
+
+        report?.let { r ->
+            Spacer(Modifier.height(5.dp))
+            DiagnosticRow("detector", "${r.mode} · ${r.lastProcessingMs} ms (avg %.0f)".format(r.averageProcessingMs))
+            DiagnosticRow("comb", "${r.combFits}/${r.probes} fits")
+            DiagnosticRow(
+                "fit",
+                if (r.lastNcc == null) "—" else "ncc %.2f · snr %.0f".format(r.lastNcc, r.lastSnr ?: 0f),
+            )
+            DiagnosticRow(
+                "focus hits",
+                if (r.focusRuns == 0) "—" else "${r.focusHits}/${r.focusRuns}",
+            )
+            DiagnosticRow("threshold", "C %.1f · %s".format(r.adaptiveC, if (r.stumpsWereDark) "dark" else "pale"))
+            DiagnosticRow("bars", "${r.barsFound}" + if (r.barsAboveHorizon > 0) " (+${r.barsAboveHorizon} sky)" else "")
+            r.lastRejection?.takeIf { it.isNotBlank() }?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    it,
+                    color = Color.White.copy(alpha = 0.55f),
+                    fontSize = 10.sp,
+                    lineHeight = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+        }
 
         lock?.let {
             Spacer(Modifier.height(5.dp))
-            DiagnosticRow("span", "%.4f fw".format(it.span))
+            DiagnosticRow(
+                "span",
+                if (uprightWidthPx > 0) "%.1f px · %.4f fw".format(WicketRange.spanPx(it, uprightWidthPx), it.span)
+                else "%.4f fw".format(it.span),
+            )
+            if (camera != null && it.kind == WicketKind.STUMPS) {
+                val bySpan = WicketRange.fromSpan(it, camera)
+                val byHeight = WicketRange.fromHeight(it, camera)
+                // "est." and the lens source, every time: unvalidated until a taped check.
+                DiagnosticRow(
+                    "distance (est.)",
+                    buildString {
+                        append(bySpan?.let { d -> "%.1f m".format(d) } ?: "—")
+                        byHeight?.let { d -> append(" · h %.1f m".format(d)) }
+                    },
+                )
+                DiagnosticRow("lens", "%s · %.0f°".format(camera.source, camera.horizontalFovDeg))
+            }
             DiagnosticRow(
                 "scale",
                 it.metresPerUnitAcross()?.let { m -> "%.3f m/fw".format(m) }

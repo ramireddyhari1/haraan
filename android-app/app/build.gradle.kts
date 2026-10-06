@@ -204,6 +204,18 @@ dependencies {
    */
   testImplementation("org.json:json:20240303")
   testImplementation(libs.kotlinx.coroutines.test)
+  /*
+   * OpenCV with DESKTOP natives, for the unit tests only.
+   *
+   * The Android AAR carries .so files for phones and nothing a JVM on a laptop can load,
+   * so until now every test of the stump detector stopped at the pure-Kotlin half and the
+   * whole-frame search — the very first thing that runs when the camera opens — was never
+   * exercised off a device. This jar bundles Windows/Linux/macOS natives exporting the same
+   * org.opencv JNI entry points the detector calls (threshold, morphology, contours,
+   * resize, rotate), so OpenCvStumpDetector runs unchanged on synthetic frames in a test.
+   * Test scope only; the app ships the AAR.
+   */
+  testImplementation("org.openpnp:opencv:4.9.0-0")
 
   // Instrumented tests: jUnit rules and runners
   androidTestImplementation(libs.androidx.test.core)
