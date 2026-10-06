@@ -908,12 +908,12 @@ private fun CameraMode(
     var validationUntilMs by remember { mutableStateOf(0L) }
     var validationRows by remember { mutableStateOf<List<com.haraan.app.vision.WicketValidation.Row>>(emptyList()) }
     var validationSavedPath by remember { mutableStateOf<String?>(null) }
-    // How far off level the phone is held, from gravity: the one hint the operator may need
-    // before the stumps can be found. See [rememberDeviceRoll].
-    val deviceRoll by rememberDeviceRoll()
     /** Throttle: panel recomposes at ~5 Hz rather than analysis rate. */
     var lastDiagnosticsMs = remember { 0L }
     var showAdminPanel by remember { mutableStateOf(false) }
+    // How far off level the phone is held, from gravity, for the developer readout only.
+    // See [rememberDeviceRoll].
+    val deviceRoll by rememberDeviceRoll(enabled = showAdminPanel)
 
     /** The wicket placed by hand, two taps at the base of the outer stumps. */
     var wicketTapping by remember { mutableStateOf(false) }
@@ -1087,6 +1087,8 @@ private fun CameraMode(
 
         /** The turn the previous frame arrived at, so a rotation can be told from a pan. */
         var lastTurn: Int? = null
+        /** Camera-clock ms of the last frame on which the detector saw anything at all. */
+        var lastSightingMs = 0L
         var idleAnalysisFrame = 0
 
         ImageAnalysis.Analyzer { image ->
@@ -1300,7 +1302,21 @@ private fun CameraMode(
                             val steady = held != null &&
                                 held.state == com.haraan.app.vision.WicketTrackState.CONFIRMED &&
                                 held.heldFrames >= STEADY_LOCK_FRAMES
-                            if (steady && idleAnalysisFrame % STEADY_CHECK_EVERY != 0) {
+                            /*
+                             * NOTHING IN VIEW: SEARCH LESS OFTEN.
+                             *
+                             * Pointed at the pavilion through an innings break, the cold
+                             * search — both polarities, a dozen comb fits, the stone pass —
+                             * ran on every frame for as long as nothing was found. After a
+                             * few quiet seconds it runs on one frame in three; the first
+                             * sighting of anything puts it straight back to every frame.
+                             */
+                            val frameClockMs = image.imageInfo.timestamp / 1_000_000
+                            if (lastSightingMs == 0L) lastSightingMs = frameClockMs
+                            val idle = held == null && frameClockMs - lastSightingMs > SEARCH_BACKOFF_AFTER_MS
+                            if (idle && idleAnalysisFrame % SEARCH_BACKOFF_EVERY != 0) {
+                                wicketLock = wicketTracker.carry(cameraMove, uprightAspect)
+                            } else if (steady && idleAnalysisFrame % STEADY_CHECK_EVERY != 0) {
                                 wicketLock = wicketTracker.carry(cameraMove, uprightAspect)
                             } else {
                                 val allowSearch = when {
@@ -1324,11 +1340,12 @@ private fun CameraMode(
                                     focus = wicketTracker.focus(),
                                     allowSearch = allowSearch,
                                 )
+                                if (sightings.isNotEmpty()) lastSightingMs = frameClockMs
                                 wicketLock = wicketTracker.onFrame(
                                     sightings = sightings,
                                     motion = cameraMove,
                                     frameAspect = uprightAspect,
-                                    timestampMs = image.imageInfo.timestamp / 1_000_000,
+                                    timestampMs = frameClockMs,
                                 )
                             }
                             val now = System.currentTimeMillis()
@@ -1760,34 +1777,40 @@ private fun CameraMode(
          * measured against, and the bounce is the one thing on this screen with a position
          * in metres.
          */
+        /*
+         * READ THE LOCK WHILE DRAWING, NOT WHILE COMPOSING.
+         *
+         * The analyser replaces the lock on every frame (its confidence and anchor move a
+         * little each time). Read here in composition, that invalidated the whole of
+         * CameraMode — two thousand lines of layout — thirty times a second on the main
+         * thread, while the phone was also recording. Read inside the Canvas, it only
+         * invalidates the draw of these two layers.
+         */
         if (granted && showAdminPanel) {
-            wicketLock?.let { lock ->
-                val label = com.haraan.app.vision.wicketRegionLabel(
-                    lock, cameraIntrinsics, uprightWidthPx, wicketDiagnostics.rollDeg,
+            Canvas(Modifier.fillMaxSize()) {
+                val lock = wicketLock ?: return@Canvas
+                drawWicketRegion(
+                    lock = lock,
+                    box = com.haraan.app.vision.FrameBox.letterbox(size.width, size.height, uprightAspect),
+                    label = com.haraan.app.vision.wicketRegionLabel(
+                        lock, cameraIntrinsics, uprightWidthPx, wicketDiagnostics.rollDeg,
+                    ),
+                    density = this,
                 )
-                Canvas(Modifier.fillMaxSize()) {
-                    drawWicketRegion(
-                        lock = lock,
-                        box = com.haraan.app.vision.FrameBox.letterbox(size.width, size.height, uprightAspect),
-                        label = label,
-                        density = this,
-                    )
-                }
             }
         }
         if (granted) {
-            wicketLock?.let { lock ->
-                Canvas(Modifier.fillMaxSize()) {
-                    drawWicketLock(
-                        lock = lock,
-                        box = com.haraan.app.vision.FrameBox.letterbox(
-                            size.width,
-                            size.height,
-                            uprightAspect,
-                        ),
-                        density = this,
-                    )
-                }
+            Canvas(Modifier.fillMaxSize()) {
+                val lock = wicketLock ?: return@Canvas
+                drawWicketLock(
+                    lock = lock,
+                    box = com.haraan.app.vision.FrameBox.letterbox(
+                        size.width,
+                        size.height,
+                        uprightAspect,
+                    ),
+                    density = this,
+                )
             }
         }
 
@@ -2067,7 +2090,6 @@ private fun CameraMode(
          * gradient rims, no forever-pulsing lights.
          */
         if (!wicketTapping && !stumpCalTapping) {
-            val currentLock = wicketLock
             /*
              * READY IS A PROMISE TO THE PLAYER, SO IT DOES NOT FLICKER.
              *
@@ -2077,10 +2099,16 @@ private fun CameraMode(
              * taken from the lock it is carrying - so it stays "Ready" rather than blinking
              * back to "Detecting" every time somebody walks past the stumps.
              */
-            val isReady = currentLock != null && (
-                currentLock.source == com.haraan.app.vision.WicketLockSource.MANUAL ||
-                    currentLock.state != com.haraan.app.vision.WicketTrackState.TENTATIVE
-                )
+            // Derived, so the chrome recomposes when READY flips — not on every frame's lock.
+            val isReady by remember {
+                androidx.compose.runtime.derivedStateOf {
+                    val l = wicketLock
+                    l != null && (
+                        l.source == com.haraan.app.vision.WicketLockSource.MANUAL ||
+                            l.state != com.haraan.app.vision.WicketTrackState.TENTATIVE
+                        )
+                }
+            }
 
             // Said in the hand the moment the wicket locks — once, on the way in. Through the
             // Vibrator, not performHapticFeedback: MIUI and other skins mute View haptics when
@@ -2213,7 +2241,7 @@ private fun CameraMode(
                     ) {
                     WicketDiagnosticsPanel(
                         diagnostics = wicketDiagnostics,
-                        lock = currentLock,
+                        lock = wicketLock,
                         report = stumpReport,
                         deviceRollDeg = deviceRoll,
                         camera = cameraIntrinsics,
@@ -4156,6 +4184,10 @@ private const val CAMERA_TRAIL_POINTS = 30
 private const val STEADY_LOCK_FRAMES = 20
 private const val STEADY_CHECK_EVERY = 3
 
+/** Quiet camera-clock ms before the empty-frame search slows to one frame in [SEARCH_BACKOFF_EVERY]. */
+private const val SEARCH_BACKOFF_AFTER_MS = 4_000L
+private const val SEARCH_BACKOFF_EVERY = 3
+
 /** How long one validation recording runs: about ninety analysed frames. */
 private const val VALIDATION_RECORD_MS = 3_000L
 
@@ -4230,10 +4262,16 @@ private fun saveValidationCsv(context: Context, log: com.haraan.app.vision.Wicke
  * rate for a whole match.
  */
 @Composable
-private fun rememberDeviceRoll(): androidx.compose.runtime.State<Float?> {
+private fun rememberDeviceRoll(enabled: Boolean): androidx.compose.runtime.State<Float?> {
     val context = LocalContext.current
     val roll = remember { mutableStateOf<Float?>(null) }
-    androidx.compose.runtime.DisposableEffect(context) {
+    // Only while someone is looking at it: the readout is its one reader, and a sensor
+    // streaming into Compose state for a three-hour match is battery for nothing.
+    androidx.compose.runtime.DisposableEffect(context, enabled) {
+        if (!enabled) {
+            roll.value = null
+            return@DisposableEffect onDispose { }
+        }
         val manager = context.getSystemService(android.content.Context.SENSOR_SERVICE) as? android.hardware.SensorManager
         val sensor = manager?.getDefaultSensor(android.hardware.Sensor.TYPE_GRAVITY)
             ?: manager?.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)

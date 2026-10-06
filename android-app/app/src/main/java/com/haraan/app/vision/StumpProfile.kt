@@ -189,6 +189,7 @@ object StumpProfile {
         var g = coarse.halfSpan
         var ncc = coarse.ncc
         columnProfile(roi, r0, r1, refY, k, profile)
+        val other = DoubleArray(roi.width)
         repeat(3) {
             var dc = 0.25
             while (dc >= 0.03) {
@@ -209,7 +210,6 @@ object StumpProfile {
             }
             for (cand in doubleArrayOf(k - SHEAR_STEP / 3, k + SHEAR_STEP / 3)) {
                 if (abs(cand) > probe.maxShear + 1e-9) continue
-                val other = DoubleArray(roi.width)
                 columnProfile(roi, r0, r1, refY, cand, other)
                 val v = ncc(other, c, g)
                 if (abs(v) > abs(ncc)) { ncc = v; k = cand; other.copyInto(profile) }
@@ -393,13 +393,17 @@ object StumpProfile {
      */
     internal fun backgroundSpread(profile: DoubleArray, c: Double, g: Double): Double? {
         val reach = WINDOW_HALF_SPANS * g + 1.0
-        val outside = ArrayList<Double>()
-        for (x in profile.indices) if (x + 1 < c - reach || x > c + reach) outside.add(profile[x])
-        if (outside.size < 6) return null
-        val sorted = outside.sorted()
-        val median = sorted[sorted.size / 2]
-        val dev = outside.map { abs(it - median) }.sorted()
-        return max(dev[dev.size / 2] * 1.4826, 0.5)
+        var n = 0
+        for (x in profile.indices) if (x + 1 < c - reach || x > c + reach) n++
+        if (n < 6) return null
+        val outside = DoubleArray(n)
+        var i = 0
+        for (x in profile.indices) if (x + 1 < c - reach || x > c + reach) outside[i++] = profile[x]
+        outside.sort()
+        val median = outside[n / 2]
+        for (k in 0 until n) outside[k] = abs(outside[k] - median)
+        outside.sort()
+        return max(outside[n / 2] * 1.4826, 0.5)
     }
 
     /** Regression slope of profile on template: full-coverage bar minus ground, grey levels. */
@@ -424,17 +428,19 @@ object StumpProfile {
      */
     private fun profileNoise(roi: UprightRoi, r0: Int, r1: Int, refY: Double, k: Double, c: Double, g: Double): Double {
         val window = windowOf(roi.width, c, g)
-        val diffs = ArrayList<Double>((r1 - r0) * (window.last - window.first + 1))
+        val count = (r1 - r0 - 1).coerceAtLeast(0) * (window.last - window.first + 1)
+        if (count <= 0) return 1.0
+        val diffs = DoubleArray(count)
+        var i = 0
         for (y in r0 until r1 - 1) {
             for (x in window) {
                 val a = roi.sampleX(x + k * (y + 0.5 - refY), y)
                 val b = roi.sampleX(x + k * (y + 1.5 - refY), y + 1)
-                diffs.add(abs((a - b).toDouble()))
+                diffs[i++] = abs((a - b).toDouble())
             }
         }
-        if (diffs.isEmpty()) return 1.0
         diffs.sort()
-        val mad = diffs[diffs.size / 2]
+        val mad = diffs[count / 2]
         // MAD of a difference of two samples → sigma of one, then of an average of rows.
         val sigma = mad * 1.4826 / sqrt(2.0)
         return sigma / sqrt((r1 - r0).toDouble())

@@ -667,27 +667,31 @@ class OpenCvStumpDetector(
         return BarPass(sightings, rejection)
     }
 
-    private var integral: DoubleArray? = null
+    private var integral: IntArray? = null
     private var integralW = 0
+    private var integralMat: Mat? = null
 
-    /** The grey frame's integral image, read out once, for O(1) box means. */
+    /**
+     * The grey frame's integral image, read out once, for O(1) box means.
+     *
+     * 32-bit and reused. As 64-bit doubles in a fresh Mat it was 4 MB allocated, filled and
+     * copied across JNI on every search frame; a 960×540 frame of 8-bit pixels sums to at
+     * most 132 million, which an Int holds, so half the bytes and no allocation.
+     */
     private fun loadIntegral(gray: Mat) {
-        val sum = Mat()
-        try {
-            Imgproc.integral(gray, sum, CvType.CV_64F)
-            val n = sum.rows() * sum.cols()
-            val out = integral?.takeIf { it.size == n } ?: DoubleArray(n).also { integral = it }
-            sum.get(0, 0, out)
-            integralW = sum.cols()
-        } finally {
-            sum.release()
-        }
+        val sum = integralMat?.takeIf { it.rows() == gray.rows() + 1 && it.cols() == gray.cols() + 1 }
+            ?: Mat().also { integralMat?.release(); integralMat = it }
+        Imgproc.integral(gray, sum, CvType.CV_32S)
+        val n = sum.rows() * sum.cols()
+        val out = integral?.takeIf { it.size == n } ?: IntArray(n).also { integral = it }
+        sum.get(0, 0, out)
+        integralW = sum.cols()
     }
 
     private fun boxSum(x0: Int, y0: Int, x1: Int, y1: Int): Double {
         val s = integral ?: return 0.0
         val w = integralW
-        return s[y1 * w + x1] - s[y0 * w + x1] - s[y1 * w + x0] + s[y0 * w + x0]
+        return (s[y1 * w + x1].toLong() - s[y0 * w + x1] - s[y1 * w + x0] + s[y0 * w + x0]).toDouble()
     }
 
     /**
@@ -868,6 +872,8 @@ class OpenCvStumpDetector(
 
     fun release() {
         released = true
+        integralMat?.release()
+        integralMat = null
         scratchFull?.release()
         scratchFull = null
         scratchPacked = null
