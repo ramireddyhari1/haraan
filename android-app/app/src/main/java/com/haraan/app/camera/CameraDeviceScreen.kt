@@ -919,6 +919,11 @@ private fun CameraMode(
      */
     var calledFlight by remember { mutableStateOf<List<com.haraan.app.vision.BallSighting>?>(null) }
 
+    // The striker's hand, for the line card. Set by the operator; this phone is never told.
+    var batterHand by androidx.compose.runtime.saveable.rememberSaveable {
+        mutableStateOf(com.haraan.app.vision.BatterHand.RIGHT)
+    }
+
     /*
      * ROTATION, now that the Activity survives one.
      *
@@ -1946,6 +1951,15 @@ private fun CameraMode(
                     // Dim only while the ball is still in the air; once it is called, these
                     // are this ball's numbers even though the clip is still recording.
                     stale = recording && calledFlight == null,
+                    showLine = session.role == com.haraan.app.data.MatchDeviceRole.LBW_REVIEW,
+                    hand = batterHand,
+                    onToggleHand = {
+                        batterHand = if (batterHand == com.haraan.app.vision.BatterHand.RIGHT) {
+                            com.haraan.app.vision.BatterHand.LEFT
+                        } else {
+                            com.haraan.app.vision.BatterHand.RIGHT
+                        }
+                    },
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .statusBarsPadding()
@@ -2619,14 +2633,209 @@ private fun DeliveryMetricsStack(
     metrics: com.haraan.app.vision.FlightMetrics?,
     stale: Boolean,
     modifier: Modifier = Modifier,
+    /** Behind the bowler's arm only: side-on, off and leg are not in the picture. */
+    showLine: Boolean = false,
+    hand: com.haraan.app.vision.BatterHand = com.haraan.app.vision.BatterHand.RIGHT,
+    onToggleHand: () -> Unit = {},
 ) {
     val cards = metricCards(metrics)
     Column(modifier.width(IntrinsicSize.Max), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         cards.forEachIndexed { index, card ->
             MetricCard(card = card, stale = stale, delayMs = index * 90L, generation = metrics)
         }
+        if (showLine) {
+            LineCard(
+                line = metrics?.let { com.haraan.app.vision.DeliveryLines.of(it, hand) },
+                hand = hand,
+                stale = stale,
+                generation = metrics,
+                onToggleHand = onToggleHand,
+            )
+        }
     }
 }
+
+/**
+ * THE LINE, as a word and a picture of the stumps.
+ *
+ * The word is the broadcast's — "Outside off", "Leg stump" — in the batter's terms. The
+ * picture is drawn the way this phone sees it, from behind the bowler: three stumps, the
+ * crossing point as a dot that slides in from middle, the projection's error as a faint
+ * bar either side of it, and where the ball pitched as a ring when the pitch is calibrated.
+ *
+ * Off and leg depend on the striker, and this phone is a guest that is never told who is
+ * batting, so the RHB/LHB chip is the operator's to set. It flips the words and the side
+ * labels; the dot stays where the ball actually went.
+ */
+@Composable
+private fun LineCard(
+    line: com.haraan.app.vision.DeliveryLine?,
+    hand: com.haraan.app.vision.BatterHand,
+    stale: Boolean,
+    generation: Any?,
+    onToggleHand: () -> Unit,
+) {
+    val view = LocalView.current
+    var open by remember { mutableStateOf(false) }
+    val dim by animateFloatAsState(if (stale) 0.4f else 1f, tween(260), label = "lineStale")
+    val shape = RoundedCornerShape(14.dp)
+    val blue = Color(0xFF8DB0FF)
+    val right = hand == com.haraan.app.vision.BatterHand.RIGHT
+
+    // Back to the picture's own left/right for drawing: the dot goes where the ball went.
+    fun pictureRight(offTowardsOff: Double) = if (right) -offTowardsOff else offTowardsOff
+    val dotTarget = line?.atStumpsOffM?.let { pictureRight(it) }
+    val slide = remember { Animatable(0f) }
+    val pop = remember { Animatable(1f) }
+    LaunchedEffect(generation, dotTarget) {
+        if (dotTarget == null) {
+            slide.snapTo(0f)
+            return@LaunchedEffect
+        }
+        delay(3 * 90L)
+        slide.snapTo(0f)
+        launch {
+            pop.snapTo(0.92f)
+            pop.animateTo(1f, spring(dampingRatio = 0.42f, stiffness = 520f))
+        }
+        slide.animateTo(dotTarget.toFloat(), tween(650, easing = FastOutSlowInEasing))
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .widthIn(min = 108.dp, max = 190.dp)
+            .graphicsLayer {
+                scaleX = pop.value
+                scaleY = pop.value
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f)
+            }
+            .clip(shape)
+            .background(Color(0xA8070B14))
+            .border(1.dp, Color.White.copy(alpha = 0.10f), shape)
+            .clickable {
+                view.performHapticFeedback(Feel.SELECT)
+                open = !open
+            }
+            .animateContentSize(spring(dampingRatio = 0.8f, stiffness = 500f))
+            .padding(start = 12.dp, end = 10.dp, top = 9.dp, bottom = 10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "LINE",
+                color = Color.White.copy(alpha = 0.58f),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.1.sp,
+            )
+            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(10.dp))
+            // The striker's hand: one tap, and it stays for the session.
+            Text(
+                if (right) "RHB" else "LHB",
+                color = Color.White,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 0.8.sp,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color(0xFF2F5BEA))
+                    .clickable {
+                        view.performHapticFeedback(Feel.SELECT)
+                        onToggleHand()
+                    }
+                    .padding(horizontal = 8.dp, vertical = 2.dp),
+            )
+        }
+        Spacer(Modifier.height(3.dp))
+        Column(Modifier.graphicsLayer { alpha = dim }) {
+            Text(
+                line?.atStumps?.spoken ?: "—",
+                color = if (line?.atStumps == null) Color.White.copy(alpha = 0.32f) else Color.White,
+                fontSize = if (line?.atStumps == null) 24.sp else 19.sp,
+                fontFamily = ArchivoDisplay,
+                letterSpacing = (-0.2).sp,
+                maxLines = 1,
+            )
+            Spacer(Modifier.height(6.dp))
+            Row {
+                Text(if (right) "OFF" else "LEG", color = Color.White.copy(alpha = 0.4f), fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.weight(1f))
+                Text(if (right) "LEG" else "OFF", color = Color.White.copy(alpha = 0.4f), fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
+            }
+            val pitchedAt = line?.pitchedOffM?.let { pictureRight(it) }
+            val band = line?.uncertaintyM
+            Canvas(
+                Modifier
+                    .fillMaxWidth()
+                    .height(30.dp),
+            ) {
+                val cx = size.width / 2f
+                val pxPerM = (size.width / 2f) / LINE_VIEW_HALF_M
+                fun x(m: Double) = (cx + m * pxPerM).toFloat().coerceIn(0f, size.width)
+                val ground = size.height - 3.dp.toPx()
+
+                // The crease, faint, edge to edge.
+                drawLine(Color.White.copy(alpha = 0.18f), Offset(0f, ground), Offset(size.width, ground), 1.dp.toPx())
+                // Three stumps.
+                for (m in listOf(-STUMP_CENTRE_M, 0.0, STUMP_CENTRE_M)) {
+                    drawLine(
+                        Color.White.copy(alpha = 0.85f),
+                        Offset(x(m), ground),
+                        Offset(x(m), ground - 17.dp.toPx()),
+                        2.dp.toPx(),
+                        StrokeCap.Round,
+                    )
+                }
+                // Where it pitched, when the pitch is calibrated.
+                if (pitchedAt != null) {
+                    drawCircle(
+                        Color.White.copy(alpha = 0.55f),
+                        radius = 4.dp.toPx(),
+                        center = Offset(x(pitchedAt), ground),
+                        style = Stroke(1.4.dp.toPx()),
+                    )
+                }
+                if (dotTarget != null) {
+                    val at = slide.value.toDouble()
+                    val dotY = ground - 9.dp.toPx()
+                    if (band != null) {
+                        drawLine(
+                            blue.copy(alpha = 0.28f),
+                            Offset(x(at - band), dotY),
+                            Offset(x(at + band), dotY),
+                            7.dp.toPx(),
+                            StrokeCap.Round,
+                        )
+                    }
+                    drawCircle(blue, radius = 4.5.dp.toPx(), center = Offset(x(at), dotY))
+                }
+            }
+        }
+        if (open) {
+            Spacer(Modifier.height(6.dp))
+            val note = buildString {
+                val off = line?.atStumpsOffM
+                if (off != null) {
+                    append("At the stumps: %.0f cm %s of middle".format(kotlin.math.abs(off) * 100, if (off >= 0) "off side" else "leg side"))
+                    line.uncertaintyM?.let { append(", ±%.0f cm".format(it * 100)) }
+                    append(".")
+                } else {
+                    append("Needs ${(line?.reason ?: "the next ball").removePrefix("needs ")}.")
+                }
+                line?.pitched?.let { append(" Pitched ${it.spoken.lowercase()} (rough sideways).") }
+                    ?: append(" Calibrate the pitch to see where it pitched.")
+            }
+            Text(note, color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp, lineHeight = 15.sp)
+        }
+    }
+}
+
+/** How far either side of middle the line picture shows, in metres. */
+private const val LINE_VIEW_HALF_M = 0.6
+
+/** Outer stump centres from middle: half the wicket less half a stump. */
+private const val STUMP_CENTRE_M = com.haraan.app.vision.PitchGeometry.STUMP_SET_WIDTH_M / 2.0 - 0.0175
 
 @Composable
 private fun MetricCard(
