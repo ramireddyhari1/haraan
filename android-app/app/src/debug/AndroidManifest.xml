@@ -74,5 +74,17 @@
                 <data android:scheme="haraan" android:host="bowler-test" />
             </intent-filter>
         </activity>
+        <activity
+            android:name="com.haraan.app.vision.Replay3dPreviewActivity"
+            android:exported="true"
+            android:label="3D replay preview"
+            android:theme="@style/Theme.Haraan.Camera">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="haraan" android:host="replay-3d" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>

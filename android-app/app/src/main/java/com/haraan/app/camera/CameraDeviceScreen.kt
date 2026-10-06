@@ -919,6 +919,13 @@ private fun CameraMode(
      */
     var calledFlight by remember { mutableStateOf<List<com.haraan.app.vision.BallSighting>?>(null) }
 
+    /*
+     * The 3D replay of the last ball. Opens on its own when a ball is called and a 3D
+     * flight could be fitted (pitch corners marked, bounce found); the next ball closes
+     * it, so it never stands between the operator and a delivery.
+     */
+    var showReplay by remember { mutableStateOf(false) }
+
     // The striker's hand, for the line card. Set by the operator; this phone is never told.
     var batterHand by androidx.compose.runtime.saveable.rememberSaveable {
         mutableStateOf(com.haraan.app.vision.BatterHand.RIGHT)
@@ -1960,6 +1967,7 @@ private fun CameraMode(
                             com.haraan.app.vision.BatterHand.RIGHT
                         }
                     },
+                    onOpenReplay = lastMetrics?.flight3d?.let { { showReplay = true } },
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .statusBarsPadding()
@@ -2116,7 +2124,7 @@ private fun CameraMode(
                 frameAspect = uprightAspect,
                 quad = found,
                 wicket = wicketLock,
-            )
+            ).also { if (it.flight3d != null) showReplay = true }
         }
         // The analyser called the ball done mid-clip: the numbers land now, not when the
         // scorer gets round to the result.
@@ -2142,6 +2150,7 @@ private fun CameraMode(
             lastBounce = null
             lastMetrics = null
             calledFlight = null
+            showReplay = false
             trackingLive = true
             recording = true
             /*
@@ -2343,6 +2352,13 @@ private fun CameraMode(
         // A ball being filmed takes the screen back: the person holding the phone must see
         // that it is recording, and the viewfinder is what they aim with.
         LaunchedEffect(recording) { if (recording) showGallery = false }
+        val replayFlight = lastMetrics?.flight3d
+        if (showReplay && replayFlight != null) {
+            com.haraan.app.vision.FlightReplayOverlay(
+                flight = replayFlight,
+                onClose = { showReplay = false },
+            )
+        }
         if (showGallery) {
             ClipGalleryOverlay(
                 clips = galleryClips,
@@ -2641,6 +2657,8 @@ private fun DeliveryMetricsStack(
     showLine: Boolean = false,
     hand: com.haraan.app.vision.BatterHand = com.haraan.app.vision.BatterHand.RIGHT,
     onToggleHand: () -> Unit = {},
+    /** Null when this ball has no 3D flight to replay. */
+    onOpenReplay: (() -> Unit)? = null,
 ) {
     val cards = metricCards(metrics)
     Column(modifier.width(IntrinsicSize.Max), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2656,6 +2674,38 @@ private fun DeliveryMetricsStack(
                 onToggleHand = onToggleHand,
             )
         }
+        if (onOpenReplay != null && !stale) {
+            ReplayPill(onOpenReplay)
+        }
+    }
+}
+
+/** Reopens the last ball's 3D replay. Brand blue, like every action on this screen. */
+@Composable
+private fun ReplayPill(onClick: () -> Unit) {
+    val view = LocalView.current
+    Row(
+        Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color(0xFF2563EB))
+            .clickable {
+                view.performHapticFeedback(Feel.SELECT)
+                onClick()
+            }
+            .padding(start = 11.dp, end = 13.dp, top = 7.dp, bottom = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Canvas(Modifier.size(9.dp)) {
+            val path = androidx.compose.ui.graphics.Path().apply {
+                moveTo(size.width * 0.15f, 0f)
+                lineTo(size.width, size.height / 2f)
+                lineTo(size.width * 0.15f, size.height)
+                close()
+            }
+            drawPath(path, Color.White)
+        }
+        Spacer(Modifier.width(7.dp))
+        Text("3D replay", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 }
 

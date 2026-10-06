@@ -257,13 +257,7 @@ data class Bounce(
      * centimetre.
      */
     val length: BounceLength
-        get() = when {
-            lengthM < 1.0 -> BounceLength.YORKER
-            lengthM < 3.0 -> BounceLength.FULL
-            lengthM < 6.0 -> BounceLength.GOOD
-            lengthM < 9.0 -> BounceLength.SHORT_OF_A_LENGTH
-            else -> BounceLength.SHORT
-        }
+        get() = BounceLength.of(lengthM)
 }
 
 enum class BounceLength(val spoken: String) {
@@ -272,4 +266,16 @@ enum class BounceLength(val spoken: String) {
     GOOD("good length"),
     SHORT_OF_A_LENGTH("back of a length"),
     SHORT("short"),
+    ;
+
+    companion object {
+        /** The band for a bounce [lengthM] metres from the striker's stumps. */
+        fun of(lengthM: Double): BounceLength = when {
+            lengthM < 1.0 -> YORKER
+            lengthM < 3.0 -> FULL
+            lengthM < 6.0 -> GOOD
+            lengthM < 9.0 -> SHORT_OF_A_LENGTH
+            else -> SHORT
+        }
+    }
 }

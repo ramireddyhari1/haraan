@@ -155,22 +155,31 @@ object QuadSpeed {
     const val MIN_KMH = 25.0
     const val MAX_KMH = 175.0
 
-    fun estimate(
+    /**
+     * The delivery in three dimensions, or why not. [estimate] is this, read for one number;
+     * the 3D replay draws the whole of it.
+     */
+    sealed interface FitResult {
+        data class Ok(val flight: Flight3d) : FitResult
+        data class Refused(val reason: String) : FitResult
+    }
+
+    fun fit(
         run: List<BallSighting>,
         quad: PitchQuad,
         bounce: Bounce,
         frameAspect: Float,
-    ): MetricValue {
+    ): FitResult {
         if (quad.cameraEnd != CameraEnd.BOWLER) {
-            return MetricValue.Unavailable("pitch-corner speed works from behind the bowler's arm only")
+            return FitResult.Refused("pitch-corner speed works from behind the bowler's arm only")
         }
-        val tb = bounce.atMs ?: return MetricValue.Unavailable("the bounce has no time")
+        val tb = bounce.atMs ?: return FitResult.Refused("the bounce has no time")
         val camera = PitchCamera.from(quad, frameAspect)
-            ?: return MetricValue.Unavailable("the pitch corners do not describe a camera — re-mark them")
+            ?: return FitResult.Refused("the pitch corners do not describe a camera — re-mark them")
 
         val air = run.filter { it.timestampMs <= tb && tb - it.timestampMs <= MAX_LOOKBACK_MS }
         if (air.size < MIN_PRE_BOUNCE) {
-            return MetricValue.Unavailable("needs $MIN_PRE_BOUNCE sightings before the bounce, have ${air.size}")
+            return FitResult.Refused("needs $MIN_PRE_BOUNCE sightings before the bounce, have ${air.size}")
         }
 
         /*
@@ -186,6 +195,7 @@ object QuadSpeed {
          */
         val near = run.filter { abs(it.timestampMs - tb) <= MAX_LOOKBACK_MS }
         var best: DoubleArray? = null
+        var bestTb = tb
         var bestError = Double.MAX_VALUE
         var shift = -TB_SEARCH_MS
         while (shift <= TB_SEARCH_MS) {
@@ -193,24 +203,51 @@ object QuadSpeed {
             if (fit != null && fit.second < bestError) {
                 bestError = fit.second
                 best = fit.first
+                bestTb = tb + shift
             }
             shift += TB_STEP_MS
         }
-        val v = best ?: return MetricValue.Unavailable("the sightings around the bounce are too few or too close together to fit")
+        val v = best ?: return FitResult.Refused("the sightings around the bounce are too few or too close together to fit")
 
         // Towards the striker is down the pitch's y.
         if (v[3] >= 0) {
-            return MetricValue.Unavailable("the fitted ball travels away from the batter — check which end the corners were marked from")
+            return FitResult.Refused("the fitted ball travels away from the batter — check which end the corners were marked from")
         }
         val kmh = hypot(v[2], v[3]) * 3.6
         if (kmh < MIN_KMH || kmh > MAX_KMH || kmh.isNaN()) {
-            return MetricValue.Unavailable("the fit gave %.0f km/h, which is not a delivery".format(kmh))
+            return FitResult.Refused("the fit gave %.0f km/h, which is not a delivery".format(kmh))
         }
-        return MetricValue.Estimated(
-            kmh,
+        val hasAfter = v.size == 8 && v[6] < 0
+        return FitResult.Ok(
+            Flight3d(
+                bounceX = v[0],
+                bounceY = v[1],
+                bounceMs = bestTb,
+                inVx = v[2],
+                inVy = v[3],
+                inVzDown = v[4],
+                outVx = if (hasAfter) v[5] else null,
+                outVy = if (hasAfter) v[6] else null,
+                outVzUp = if (hasAfter) v[7] else null,
+                firstSeenMs = near.first().timestampMs.toDouble(),
+                lastSeenMs = near.last().timestampMs.toDouble(),
+                cameraHeightM = camera.heightM,
+            ),
+        )
+    }
+
+    fun estimate(
+        run: List<BallSighting>,
+        quad: PitchQuad,
+        bounce: Bounce,
+        frameAspect: Float,
+    ): MetricValue = when (val result = fit(run, quad, bounce, frameAspect)) {
+        is FitResult.Refused -> MetricValue.Unavailable(result.reason)
+        is FitResult.Ok -> MetricValue.Estimated(
+            result.flight.speedKmh,
             "km/h",
             "average before the bounce, from the pitch corners (camera %.1f m up) — a little under release speed"
-                .format(camera.heightM),
+                .format(result.flight.cameraHeightM),
         )
     }
 
@@ -291,5 +328,77 @@ object QuadSpeed {
             }
         }
         return DoubleArray(n) { m[it][n] / m[it][it] }
+    }
+}
+
+/** A point over the pitch, in metres: x across, y from the striker's stumps, z UP. */
+data class Point3(val x: Double, val y: Double, val z: Double)
+
+/**
+ * One delivery as a path through the air, fitted by [QuadSpeed].
+ *
+ * Ballistic either side of the bounce: steady speed over the ground, gravity on the height.
+ * The "out" leg is null when too little was seen after the bounce to fit one.
+ */
+data class Flight3d(
+    val bounceX: Double,
+    val bounceY: Double,
+    val bounceMs: Double,
+    val inVx: Double,
+    val inVy: Double,
+    /** Positive = coming down at the bounce. */
+    val inVzDown: Double,
+    val outVx: Double?,
+    val outVy: Double?,
+    /** Positive = going up off the bounce. */
+    val outVzUp: Double?,
+    val firstSeenMs: Double,
+    val lastSeenMs: Double,
+    val cameraHeightM: Double,
+) {
+    val speedKmh: Double get() = hypot(inVx, inVy) * 3.6
+    val hasOutLeg: Boolean get() = outVx != null && outVy != null && outVzUp != null
+
+    /** Where the ball was at [ms] on the sightings' clock. Height never below the grass. */
+    fun at(ms: Double): Point3 {
+        val s = (ms - bounceMs) / 1000.0
+        return if (s <= 0 || !hasOutLeg) {
+            Point3(bounceX + inVx * s, bounceY + inVy * s, (-inVzDown * s - G * s * s / 2).coerceAtLeast(0.0))
+        } else {
+            Point3(bounceX + outVx!! * s, bounceY + outVy!! * s, (outVzUp!! * s - G * s * s / 2).coerceAtLeast(0.0))
+        }
+    }
+
+    /**
+     * When it was let go, near enough: the in-leg run back to the bowler's release spot, but
+     * never more than [MAX_BACKFILL_MS] before it was first seen. Drawn, not measured.
+     */
+    val releaseMs: Double
+        get() {
+            val back = if (inVy < 0) (bounceY - RELEASE_Y_M) / inVy * 1000.0 else 0.0
+            return maxOf(bounceMs + back, firstSeenMs - MAX_BACKFILL_MS).coerceAtMost(firstSeenMs)
+        }
+
+    /** When it reaches the stumps' line, or null when there is no out leg to carry it. */
+    val stumpsMs: Double?
+        get() {
+            val vy = outVy ?: return null
+            if (vy >= 0) return null
+            return bounceMs + (0.0 - bounceY) / vy * 1000.0
+        }
+
+    /** Where it would have crossed the striker's stump line, in 3D. */
+    val atStumps: Point3? get() = stumpsMs?.let(::at)
+
+    /** Whether that crossing is on the wicket, ball radius included. Null without an out leg. */
+    val hitsStumps: Boolean?
+        get() = atStumps?.let {
+            abs(it.x) <= LbwProjector.HITTING_LIMIT_M && it.z <= LbwProjector.OVER_THE_TOP_M
+        }
+
+    private companion object {
+        const val G = 9.81
+        const val RELEASE_Y_M = 18.4
+        const val MAX_BACKFILL_MS = 400.0
     }
 }

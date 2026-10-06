@@ -134,6 +134,9 @@ data class FlightMetrics(
 
     /** The wicket the metric rows were scaled by, when one was used. For a readout. */
     val wicket: WicketLock? = null,
+
+    /** The delivery in 3D, from the pitch corners, for the replay. Null without one. */
+    val flight3d: Flight3d? = null,
 ) {
     companion object {
 
@@ -247,6 +250,11 @@ data class FlightMetrics(
                 bounce = bounce,
                 lbw = LbwProjector.project(track, wicket),
                 wicket = wicket,
+                flight3d = if (quad != null && bounce != null) {
+                    (QuadSpeed.fit(run, quad, bounce, frameAspect) as? QuadSpeed.FitResult.Ok)?.flight
+                } else {
+                    null
+                },
             )
         }
 

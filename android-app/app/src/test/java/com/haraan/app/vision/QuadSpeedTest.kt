@@ -171,6 +171,26 @@ class QuadSpeedTest {
     }
 
     @Test
+    fun `the fitted 3D flight pitches where the ball did and carries on to the stumps`() {
+        val lens = lens()
+        val track = delivery(lens, kmh = 120.0, lengthM = 6.0, lineM = 0.1)
+        val quad = quadFrom(lens)
+        val bounce = BouncePoint.find(track, quad)!!
+        val fit = QuadSpeed.fit(track, quad, bounce, aspect.toFloat())
+        assertTrue("expected a fit, got $fit", fit is QuadSpeed.FitResult.Ok)
+        val flight = (fit as QuadSpeed.FitResult.Ok).flight
+        assertEquals(6.0, flight.bounceY, 0.25)
+        assertEquals(0.1, flight.bounceX, 0.1)
+        assertTrue(flight.hasOutLeg)
+        val crossing = flight.atStumps
+        assertNotNull(crossing)
+        assertEquals(0.0, crossing!!.y, 1e-6)
+        // Released at 2.1 m, so the drawn path starts up in the air near the bowler.
+        val release = flight.at(flight.releaseMs)
+        assertTrue("release should be up in the air, was ${release.z}", release.z > 1.0)
+    }
+
+    @Test
     fun `corners from the striker's end are refused`() {
         val lens = lens()
         val quad = quadFrom(lens).copy(cameraEnd = CameraEnd.STRIKER)
