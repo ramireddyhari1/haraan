@@ -136,12 +136,19 @@ object BouncePoint {
         if (pitch.x.isNaN() || pitch.y.isNaN()) return null
         if (!onThePitch(pitch)) return null
 
+        // The same fractional frame on the camera's clock: the bounce lands between
+        // frames, and a speed taken from it needs the moment as finely as the place.
+        val lower = frame.toInt().coerceIn(0, track.size - 2)
+        val atMs = track[lower].timestampMs +
+            ((track[lower + 1].timestampMs - track[lower].timestampMs) * (frame - lower))
+
         return Bounce(
             image = at,
             pitch = pitch,
             sightingsUsed = track.size,
             quadSource = quad.source,
             cameraEnd = quad.cameraEnd,
+            atMs = atMs,
         )
     }
 
@@ -227,6 +234,8 @@ data class Bounce(
     val sightingsUsed: Int,
     val quadSource: QuadSource,
     val cameraEnd: CameraEnd,
+    /** When it landed, on the sightings' clock, between frames. Null for a hand-built bounce. */
+    val atMs: Double? = null,
 ) {
     /** How far up the pitch it landed, in metres from the striker's stumps. */
     val lengthM: Double get() = pitch.y

@@ -172,6 +172,9 @@ data class CreaseSegment(val x1: Float, val y1: Float, val x2: Float, val y2: Fl
  */
 class Homography private constructor(private val h: DoubleArray) {
 
+    /** The 3x3 matrix, row-major, h33 = 1. For recovering the camera behind it. */
+    fun matrix(): DoubleArray = DoubleArray(9) { if (it < 8) h[it] else 1.0 }
+
     /** Map a point from the source plane to the destination plane. */
     fun map(point: Point2): Point2 {
         val denominator = h[6] * point.x + h[7] * point.y + 1.0

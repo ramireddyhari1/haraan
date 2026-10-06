@@ -2589,10 +2589,14 @@ private fun metricCards(metrics: com.haraan.app.vision.FlightMetrics?): List<Met
     return listOf(
         MetricCardData(
             label = "Speed",
-            value = (speed as? com.haraan.app.vision.MetricValue.Measured)?.value,
+            // Measured from the stumps side-on, or estimated from the pitch corners behind
+            // the arm; the note says which.
+            value = (speed as? com.haraan.app.vision.MetricValue.Measured)?.value
+                ?: (speed as? com.haraan.app.vision.MetricValue.Estimated)?.value,
             decimals = 0,
             unit = "km/h",
             note = reason(speed, "After the next ball")
+                ?: (speed as? com.haraan.app.vision.MetricValue.Estimated)?.let { "Estimated: ${it.basis}" }
                 ?: "Over the ground, scaled by the stumps",
         ),
         MetricCardData(

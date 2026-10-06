@@ -73,9 +73,10 @@ data class FlightMetrics(
     /**
      * Speed over the ground, in km/h.
      *
-     * Needs a measurable stumps lock AND a camera square enough to the flight that the
-     * across-the-wicket scale is the right scale for the ball's motion. See
-     * [FlightMetrics.SQUARE_ENOUGH_DEGREES].
+     * Two ways to get one. Measured: a measurable stumps lock AND a camera square enough
+     * to the flight that the across-the-wicket scale is the right scale for the ball's
+     * motion — see [FlightMetrics.SQUARE_ENOUGH_DEGREES]. Estimated: from behind the arm,
+     * the pitch corners plus a found bounce — see [QuadSpeed].
      */
     val groundSpeed: MetricValue,
 
@@ -203,7 +204,9 @@ data class FlightMetrics(
 
             return FlightMetrics(
                 imageSpeed = imageSpeed(run, aspect),
-                groundSpeed = groundSpeed(run, frameAspect, wicket),
+                groundSpeed = groundSpeed(run, frameAspect, wicket).let { fromWicket ->
+                    if (fromWicket is MetricValue.Measured) fromWicket else cornerSpeed(run, quad, bounce, frameAspect, fromWicket)
+                },
                 curve = deviation(run, aspect, "whole flight", scale),
                 swing = when {
                     bounceAt == null -> MetricValue.Unavailable(
@@ -362,6 +365,29 @@ data class FlightMetrics(
                 "scaled by the locked wicket, %.0f° off square — right at the stumps' depth, fast nearer the camera and slow further away"
                     .format(offSquare),
             )
+        }
+
+        /**
+         * The behind-the-arm speed, when the wicket could not give one.
+         *
+         * The refusal keeps the wicket's own reason and adds what would fix it from here,
+         * because both fixes are real: film side-on, or mark the pitch corners.
+         */
+        private fun cornerSpeed(
+            run: List<BallSighting>,
+            quad: PitchQuad?,
+            bounce: Bounce?,
+            frameAspect: Float,
+            fromWicket: MetricValue,
+        ): MetricValue {
+            val why = (fromWicket as? MetricValue.Unavailable)?.reason ?: "no wicket speed"
+            if (quad == null) {
+                return MetricValue.Unavailable("$why; or mark the pitch corners from behind the arm")
+            }
+            if (bounce == null) {
+                return MetricValue.Unavailable("$why; the pitch corners need a bounce in the track to time the ball")
+            }
+            return QuadSpeed.estimate(run, quad, bounce, frameAspect)
         }
 
         /**
