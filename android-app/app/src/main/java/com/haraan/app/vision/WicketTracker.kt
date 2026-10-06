@@ -296,6 +296,12 @@ data class WicketDiagnostics(
     val motionMagnitude: Float,
     /** Measured, over a rolling window of real timestamps. Never a target or a setting. */
     val framesPerSecond: Float,
+    /**
+     * How long the last automatic lock took, from the moment the tracker started looking
+     * to CONFIRMED, in milliseconds of the camera's clock. Null until one has happened.
+     * The number to read on a real ground when the lock "feels slow".
+     */
+    val lastLockMs: Long? = null,
     val lockSource: WicketLockSource?,
     val kind: WicketKind?,
     /** Why the last frame went the way it did, in words, for the line under the readout. */
@@ -340,6 +346,11 @@ class WicketTracker {
     private var state: WicketTrackState = WicketTrackState.LOST
 
     private var streak = 0
+    /** Frames a TENTATIVE candidate has gone unseen since it was last found. */
+    private var tentativeMisses = 0
+    /** When the current search began — the first frame with nothing locked. */
+    private var searchStartMs: Long? = null
+    private var lastLockMs: Long? = null
     private var coastFrames = 0
     private var heldFrames = 0
     private var ageFrames = 0
@@ -420,6 +431,7 @@ class WicketTracker {
         }
 
         if (sighting != null) framesWithSighting++
+        if (anchor == null && searchStartMs == null) searchStartMs = timestampMs
 
         val lock = when (source) {
             WicketLockSource.MANUAL -> stepManual(sighting, timestampMs)
@@ -518,6 +530,7 @@ class WicketTracker {
 
         // Inside the gate: this is the same wicket.
         dissent = 0
+        tentativeMisses = 0
         dissentAnchor = null
         pushResidual(error)
         scoreEma = scoreEma + (sighting.score - scoreEma) * SCORE_SMOOTHING
@@ -532,6 +545,8 @@ class WicketTracker {
                 if (streak >= CONFIRM_FRAMES && jitter() <= MAX_CONFIRM_JITTER) {
                     state = WicketTrackState.CONFIRMED
                     confirmations++
+                    searchStartMs?.let { lastLockMs = timestampMs - it }
+                    searchStartMs = null
                     note = "confirmed after $streak frames in the same place"
                 } else {
                     note = "tentative, $streak of $CONFIRM_FRAMES"
@@ -624,9 +639,25 @@ class WicketTracker {
         val elapsed = lastSeenMs?.let { timestampMs - it } ?: 0L
 
         when (state) {
+            /*
+             * A SHORT GRACE, NOT NONE.
+             *
+             * A far wicket filmed from behind the arm is a few pixels of bar, and the
+             * detector finds it on some frames and not the next. With no grace at all, every
+             * gap wiped the candidate and the next sighting started from one again, so a
+             * wicket seen on alternate frames never got two in a row and the screen sat on
+             * SEARCHING at an obvious wicket. Two missed frames inside a quarter second is
+             * room for that flicker and nothing more: confirmation still needs the same
+             * place found twice, and a tentative lock is never measured from.
+             */
             WicketTrackState.TENTATIVE -> {
-                clearLock()
-                note = "tentative candidate not seen again"
+                tentativeMisses++
+                if (tentativeMisses > TENTATIVE_MISS_ALLOWANCE || elapsed > TENTATIVE_GRACE_MS) {
+                    clearLock()
+                    note = "tentative candidate not seen again"
+                } else {
+                    note = "tentative, $streak of $CONFIRM_FRAMES · missed $tentativeMisses"
+                }
             }
 
             WicketTrackState.CONFIRMED, WicketTrackState.REACQUIRE -> {
@@ -664,6 +695,7 @@ class WicketTracker {
         source = WicketLockSource.DETECTED
         state = WicketTrackState.TENTATIVE
         streak = 1
+        tentativeMisses = 0
         coastFrames = 0
         ageFrames = 0
         lastSeenMs = timestampMs
@@ -681,6 +713,7 @@ class WicketTracker {
         source = WicketLockSource.DETECTED
         state = WicketTrackState.LOST
         streak = 0
+        tentativeMisses = 0
         coastFrames = 0
         ageFrames = 0
         heldFrames = 0
@@ -839,6 +872,8 @@ class WicketTracker {
     @Synchronized
     fun reset() {
         clearLock()
+        searchStartMs = null
+        lastLockMs = null
         residuals.clear()
         frameTimes.clear()
         blindFrames = 0
@@ -877,6 +912,7 @@ class WicketTracker {
         motionConfidence = lastMotion.confidence,
         motionMagnitude = lastMotion.magnitude,
         framesPerSecond = framesPerSecond(),
+        lastLockMs = lastLockMs,
         lockSource = if (anchor == null) null else source,
         kind = kind,
         note = note,
@@ -1016,6 +1052,12 @@ class WicketTracker {
          * the screen say SEARCHING at an obvious wicket.
          */
         const val CONFIRM_FRAMES = 2
+
+        /** Missed frames a TENTATIVE candidate survives. See [stepMiss]. */
+        const val TENTATIVE_MISS_ALLOWANCE = 2
+
+        /** And the wall-clock cap on that grace, for when frames arrive slowly. */
+        const val TENTATIVE_GRACE_MS = 250L
 
         /** Frames to re-confirm after coasting. Fewer: it was already proved once. */
         const val REACQUIRE_CONFIRM_FRAMES = 2

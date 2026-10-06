@@ -905,6 +905,21 @@ private fun CameraMode(
     var lastMetrics by remember { mutableStateOf<com.haraan.app.vision.FlightMetrics?>(null) }
 
     /*
+     * THE BALL, CALLED DONE BEFORE THE CLIP IS.
+     *
+     * The clip runs until the scorer taps the result or the ten-second cap, and the numbers
+     * used to wait for it — up to nine seconds after a ball that was over in one. The
+     * analyser now decides from the track itself ([com.haraan.app.vision.FlightEnd]) and
+     * freezes the flight here; the numbers are worked out from this copy at once, while the
+     * clip keeps recording for the scorer's review.
+     *
+     * Null while the ball is still in the air, and once set the ball tracker stops being fed
+     * for the rest of the clip: what it would see next is the ball after the bat, and the
+     * metrics have already been taken.
+     */
+    var calledFlight by remember { mutableStateOf<List<com.haraan.app.vision.BallSighting>?>(null) }
+
+    /*
      * ROTATION, now that the Activity survives one.
      *
      * A use case's target rotation is fixed at bind time. A turn of the phone used to tear
@@ -1092,8 +1107,13 @@ private fun CameraMode(
                          */
                         wicketLock = wicketTracker.carry(cameraMove, uprightAspect)
 
+                        // The ball has already been called done: the rest of the clip is
+                        // for the scorer, not for measuring.
+                        if (calledFlight != null) return@Analyzer
+
                         // The camera's own monotonic clock, never the UI clock: ball
                         // motion timing has to come from when the sensor saw it.
+                        val frameMs = image.imageInfo.timestamp / 1_000_000
                         val sighting = vision.onFrame(
                             luma = bytes,
                             width = image.width,
@@ -1103,13 +1123,18 @@ private fun CameraMode(
                             // trail was drawn in the sensor's frame and the corridor in the
                             // viewer's, a quarter turn apart on every portrait phone.
                             rotationDegrees = image.imageInfo.rotationDegrees,
-                            timestampMs = image.imageInfo.timestamp / 1_000_000,
+                            timestampMs = frameMs,
                         )
                         if (sighting != null) {
                             trackedPoints = vision.track().size
                             latestBall = sighting
                             ballTrail = vision.track().takeLast(CAMERA_TRAIL_POINTS)
                             trackQuality = vision.quality()
+                        }
+                        // Asked on every frame, sighting or not: going quiet IS the signal.
+                        val flight = vision.track()
+                        if (com.haraan.app.vision.FlightEnd.check(flight, frameMs, uprightAspect, wicketLock) != null) {
+                            calledFlight = flight
                         }
                     } else {
                         // Pitch detector is throttled to once every 4 frames so the Hough
@@ -1134,6 +1159,9 @@ private fun CameraMode(
                                 rowStride = plane.rowStride,
                                 rotationDegrees = image.imageInfo.rotationDegrees,
                                 creases = pitchDetector.creases(),
+                                // A stumps lock is never served by a stone; skipping that
+                                // search is most of this stage's per-frame cost.
+                                lookForStones = wicketLock?.kind != com.haraan.app.vision.WicketKind.STUMPS,
                             )
                             wicketLock = wicketTracker.onFrame(
                                 sighting = wicket,
@@ -1915,7 +1943,9 @@ private fun CameraMode(
             if (!showAdminPanel) {
                 DeliveryMetricsStack(
                     metrics = lastMetrics,
-                    stale = recording,
+                    // Dim only while the ball is still in the air; once it is called, these
+                    // are this ball's numbers even though the clip is still recording.
+                    stale = recording && calledFlight == null,
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .statusBarsPadding()
@@ -2051,6 +2081,35 @@ private fun CameraMode(
          * An anonymous function rather than a lambda so the early return below reads as an
          * early return.
          */
+        /*
+         * THE MEASUREMENT, from one delivery's flight.
+         *
+         * Against the pitch as it was calibrated now, the one the ball was filmed on. Null is
+         * the common answer for the bounce — no calibration, a full toss, too few points —
+         * and simply means nothing is claimed.
+         *
+         * Both landmarks go into the metrics, and they answer different questions: the quad
+         * is the only thing that can say how far UP the pitch the ball landed, and the
+         * wicket lock is the only thing that can put a speed in km/h or a projection in
+         * centimetres. The lock is read through [WicketLock.isMeasurable] inside, not
+         * checked for null here: a lock that is coasting is still a lock and must not be
+         * measured from.
+         */
+        val showFlight: (List<com.haraan.app.vision.BallSighting>) -> Unit = { flight ->
+            lastBounce = found?.let { pitch -> com.haraan.app.vision.BouncePoint.find(flight, pitch) }
+            lastMetrics = com.haraan.app.vision.FlightMetrics.of(
+                track = flight,
+                frameAspect = uprightAspect,
+                quad = found,
+                wicket = wicketLock,
+            )
+        }
+        // The analyser called the ball done mid-clip: the numbers land now, not when the
+        // scorer gets round to the result.
+        LaunchedEffect(calledFlight) {
+            calledFlight?.let(showFlight)
+        }
+
         // `ballSeq`: the scorer's BALL that armed this clip, or null from the phone's own
         // button with no ball in play.
         val armDelivery: (Int?) -> Unit = fun(ballSeq: Int?) {
@@ -2068,6 +2127,7 @@ private fun CameraMode(
             trackQuality = TrackQuality.UNCERTAIN
             lastBounce = null
             lastMetrics = null
+            calledFlight = null
             trackingLive = true
             recording = true
             /*
@@ -2097,35 +2157,11 @@ private fun CameraMode(
                         return@startClip
                     }
                     /*
-                     * The measurement, taken once the delivery is over.
-                     *
-                     * Against the pitch as it was calibrated when the clip started, not as
-                     * it might be now: the ball was filmed on that pitch. Null is the
-                     * common answer — no calibration, a full toss, too few points — and it
-                     * simply means nothing is claimed.
+                     * Usually already done: the ball was called over mid-clip and these
+                     * are on screen. Worked out here only when it never was — a ball the
+                     * tracker lost early, or a hot phone that paused tracking.
                      */
-                    lastBounce = found?.let { pitch ->
-                        com.haraan.app.vision.BouncePoint.find(vision.track(), pitch)
-                    }
-                    /*
-                     * And the rest of the delivery's numbers, from the same track.
-                     *
-                     * Both landmarks go in, and they answer different questions: the quad
-                     * is the only thing that can say how far UP the pitch the ball landed,
-                     * and the wicket lock is the only thing that can put a speed in km/h or
-                     * a projection in centimetres. On most grounds there is no quad and the
-                     * wicket is all there is, which is the entire reason it was built.
-                     *
-                     * The lock is read through [WicketLock.isMeasurable] inside, not
-                     * checked for null here: a lock that is coasting is still a lock and
-                     * must not be measured from.
-                     */
-                    lastMetrics = com.haraan.app.vision.FlightMetrics.of(
-                        track = vision.track(),
-                        frameAspect = uprightAspect,
-                        quad = found,
-                        wicket = wicketLock,
-                    )
+                    if (lastMetrics == null) showFlight(calledFlight ?: vision.track())
                     // The window closed. Nobody pressed stop, so this is the only way to
                     // know it is shut and the next delivery can be armed.
                     view.performHapticFeedback(Feel.TICK)
@@ -2231,7 +2267,7 @@ private fun CameraMode(
          * measured in metres UP the pitch, and only when a pitch was calibrated, so it gets
          * its own place and appears only when it exists.
          */
-        val readout: DeliveryReadout? = lastBounce?.takeIf { !recording }?.let { bounce ->
+        val readout: DeliveryReadout? = lastBounce?.takeIf { !recording || calledFlight != null }?.let { bounce ->
             DeliveryReadout(
                 figure = "%.1f".format(bounce.lengthM),
                 unit = "m",
@@ -2241,6 +2277,7 @@ private fun CameraMode(
         val status = when {
             // The point count is the only honest signal of whether vision is doing
             // anything, and it belongs where the person filming can see it.
+            recording && calledFlight != null -> "Ball done · clip still recording for the scorer"
             recording && trackedPoints > 0 -> "Ball seen in $trackedPoints frames$trackWord"
             recording -> "Filming this ball"
             uploadError != null -> uploadError!!
@@ -2283,7 +2320,8 @@ private fun CameraMode(
             // The camera's own answer, the moment the ball is done — the same one the
             // scorer's REVIEW opens with. Behind the bowler's arm only.
             wickets = lastMetrics?.lbw?.takeIf {
-                !recording && session.role == com.haraan.app.data.MatchDeviceRole.LBW_REVIEW
+                (!recording || calledFlight != null) &&
+                    session.role == com.haraan.app.data.MatchDeviceRole.LBW_REVIEW
             },
             onArm = { armDelivery(latestCue?.takeIf { it.inPlay }?.seq) },
         )

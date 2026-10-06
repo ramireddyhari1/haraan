@@ -148,13 +148,23 @@ class OpenCvStumpDetector(
         rowStride: Int,
         rotationDegrees: Int,
         creases: List<CreaseSegment> = emptyList(),
+        /**
+         * False to look for three bars only.
+         *
+         * The camera screen passes false while it holds a stumps lock. The stone passes are
+         * most of this stage's cost (about 30 ms a frame to 114 on the first field test), and
+         * while the wicket is known to be stumps a lump found on a frame where the bars
+         * flickered out is not the wicket — it is a reason to throw away a good stumps lock
+         * for a worse claim, which is what the tracker does with a change of kind.
+         */
+        lookForStones: Boolean = true,
     ): WicketSighting? {
         if (!available || released || width <= 0 || height <= 0) return null
 
         framesSeen++
         val startedAt = System.nanoTime()
         return try {
-            findWicket(luma, width, height, rowStride, rotationDegrees, creases)
+            findWicket(luma, width, height, rowStride, rotationDegrees, creases, lookForStones)
         } catch (t: Throwable) {
             Log.w(TAG, "stump detection failed", t)
             lastRejection = "OpenCV threw: ${t.javaClass.simpleName}"
@@ -171,6 +181,7 @@ class OpenCvStumpDetector(
         rowStride: Int,
         rotationDegrees: Int,
         creases: List<CreaseSegment>,
+        lookForStones: Boolean,
     ): WicketSighting? {
         barsFound = 0
         barsAboveHorizon = 0
@@ -332,6 +343,13 @@ class OpenCvStumpDetector(
                 "only ${candidates.size} tall thin bars in frame"
             search.reason != null -> "$barsFound bars; nearest miss: ${search.reason}"
             else -> "$barsFound bars, none of them three in a wicket's shape"
+        }
+
+        if (!lookForStones) {
+            bright.release()
+            blurred.release()
+            lastRejection = "$barRejection; stone search off while stumps are locked"
+            return null
         }
 
         /*

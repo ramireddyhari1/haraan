@@ -582,6 +582,7 @@ fun WicketDiagnosticsPanel(
 
         DiagnosticRow("confidence", "%.2f".format(diagnostics.confidence))
         DiagnosticRow("fps", if (diagnostics.framesPerSecond <= 0f) "—" else "%.1f".format(diagnostics.framesPerSecond))
+        DiagnosticRow("time to lock", diagnostics.lastLockMs?.let { "%.1f s".format(it / 1000f) } ?: "—")
         // What staleness MEANS differs by source, so the row does too rather than printing
         // one number that is only meaningful for one of them.
         if (diagnostics.lockSource == WicketLockSource.MANUAL) {

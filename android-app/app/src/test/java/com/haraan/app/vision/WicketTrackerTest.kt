@@ -105,12 +105,37 @@ class WicketTrackerTest {
     }
 
     @Test
-    fun `a tentative candidate that vanishes is dropped at once`() {
+    fun `a tentative candidate that vanishes is dropped after a short grace`() {
         val tracker = WicketTracker()
         tracker.feed(stumps())
-        val after = tracker.feed(null)
-        assertNull("a tentative lock gets no grace at all", after)
+        val held = tracker.feed(null, frames = WicketTracker.TENTATIVE_MISS_ALLOWANCE, startMs = 33L)
+        assertEquals(WicketTrackState.TENTATIVE, held!!.state)
+        assertFalse("a tentative lock in its grace is still never measurable", held.isMeasurable)
+
+        val after = tracker.onFrame(null, steady(), aspect, 33L * (WicketTracker.TENTATIVE_MISS_ALLOWANCE + 1))
+        assertNull(after)
         assertEquals(WicketTrackState.LOST, tracker.diagnostics().state)
+    }
+
+    /**
+     * Why the grace exists: a far wicket filmed from behind the arm is found on some frames
+     * and not the next. Seen on alternate frames, it must still lock.
+     */
+    @Test
+    fun `a wicket seen on alternate frames still confirms`() {
+        val tracker = WicketTracker()
+        tracker.onFrame(stumps(), steady(), aspect, 0L)
+        tracker.onFrame(null, steady(), aspect, 33L)
+        val lock = tracker.onFrame(stumps(), steady(), aspect, 66L)
+        assertEquals(WicketTrackState.CONFIRMED, lock!!.state)
+    }
+
+    @Test
+    fun `the grace is capped in time when frames arrive slowly`() {
+        val tracker = WicketTracker()
+        tracker.onFrame(stumps(), steady(), aspect, 0L)
+        val after = tracker.onFrame(null, steady(), aspect, WicketTracker.TENTATIVE_GRACE_MS + 1)
+        assertNull(after)
     }
 
     // ---- CONFIRMED -> TEMPORARILY_LOST -> REACQUIRE --------------------------------------
