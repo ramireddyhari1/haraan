@@ -35,6 +35,19 @@ internal class PitchCamera private constructor(
     /** How high the lens is above the pitch, in metres. */
     val heightM: Double get() = up * centre[2]
 
+    /**
+     * A point over the pitch ([Point3], z UP) back into the picture, in normalised upright
+     * image coordinates — or null when it is behind the lens. The inverse of [ray].
+     */
+    fun project(p: Point3): Point2? {
+        val d = doubleArrayOf(p.x - centre[0], p.y - centre[1], up * p.z - centre[2])
+        val cx = r[0][0] * d[0] + r[0][1] * d[1] + r[0][2] * d[2]
+        val cy = r[1][0] * d[0] + r[1][1] * d[1] + r[1][2] * d[2]
+        val cz = r[2][0] * d[0] + r[2][1] * d[1] + r[2][2] * d[2]
+        if (cz <= 1e-6) return null
+        return Point2(focal * cx / cz / aspect + 0.5, focal * cy / cz + 0.5)
+    }
+
     /** Unit direction in the world through the picture point ([x], [y]). */
     fun ray(x: Double, y: Double): DoubleArray {
         val cx = (x - 0.5) * aspect / focal

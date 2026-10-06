@@ -191,6 +191,32 @@ class QuadSpeedTest {
     }
 
     @Test
+    fun `the path lands on the real picture - stumps and bounce where the lens put them`() {
+        val lens = lens()
+        val track = delivery(lens, kmh = 120.0, lengthM = 6.0, lineM = 0.1)
+        val quad = quadFrom(lens)
+        val bounce = BouncePoint.find(track, quad)!!
+        val flight = (QuadSpeed.fit(track, quad, bounce, aspect.toFloat()) as QuadSpeed.FitResult.Ok).flight
+        val path = ArPath.fromFlight(flight, quad, aspect.toFloat())!!
+
+        // Middle stump's foot, through the recovered camera and through the true lens.
+        val trueFoot = lens.project(doubleArrayOf(0.0, 0.0, 0.0))
+        val drawnFoot = path.stumps[1].first
+        assertEquals(trueFoot.x, drawnFoot.x, 0.004)
+        assertEquals(trueFoot.y, drawnFoot.y, 0.004)
+        val trueTop = lens.project(doubleArrayOf(0.0, 0.0, PitchGeometry.STUMP_HEIGHT_M))
+        assertEquals(trueTop.y, path.stumps[1].second.y, 0.004)
+
+        // The drawn path passes over the sightings it was fitted to.
+        val seen = track.filter { it.timestampMs.toDouble() in path.startMs..path.endMs }
+        for (s in seen) {
+            val nearest = path.points.minByOrNull { abs(it.ms - s.timestampMs) }!!
+            assertTrue("path strays from the ball at ${s.timestampMs}", abs(nearest.x - s.x) < 0.02 && abs(nearest.y - s.y) < 0.03)
+        }
+        assertTrue(path.points.any { it.leg == ArLeg.IN } && path.points.any { it.leg == ArLeg.OUT })
+    }
+
+    @Test
     fun `corners from the striker's end are refused`() {
         val lens = lens()
         val quad = quadFrom(lens).copy(cameraEnd = CameraEnd.STRIKER)

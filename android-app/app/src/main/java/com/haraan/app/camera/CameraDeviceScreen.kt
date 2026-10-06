@@ -926,6 +926,27 @@ private fun CameraMode(
      */
     var showReplay by remember { mutableStateOf(false) }
 
+    /*
+     * AFTER A BALL, IN ORDER: the path on the real picture, then the 3D replay, and the clip
+     * itself on a tap.
+     *
+     * [arPath] is the delivery drawn in this camera's own picture — from the fitted 3D flight
+     * when the pitch corners are marked, from the raw sightings when not. [replayClip] is a
+     * private copy of the delivery's clip, kept for the slow-motion replay because the
+     * upload queue moves and deletes the original on its own schedule.
+     */
+    var arPath by remember { mutableStateOf<com.haraan.app.vision.ArPath?>(null) }
+    var showAr by remember { mutableStateOf(false) }
+    var replayClip by remember { mutableStateOf<ReplayClip?>(null) }
+    var showVideo by remember { mutableStateOf(false) }
+    /*
+     * When the recording began on the CAMERA's clock — the clock every sighting carries — so
+     * the replay can line the path up with the ball in the video. Set from the first analysed
+     * frame after the recorder reports it has started: right to within a frame.
+     */
+    val pendingClipStart = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    var clipStartSensorMs by remember { mutableStateOf<Double?>(null) }
+
     // The striker's hand, for the line card. Set by the operator; this phone is never told.
     var batterHand by androidx.compose.runtime.saveable.rememberSaveable {
         mutableStateOf(com.haraan.app.vision.BatterHand.RIGHT)
@@ -1012,6 +1033,9 @@ private fun CameraMode(
                     // A quarter turn swaps the picture's width and height. Both engines
                     // report inside the upright frame, so that is the shape to draw into.
                     // Free: read off the frame's metadata, not its pixels.
+                    if (pendingClipStart.compareAndSet(true, false)) {
+                        clipStartSensorMs = image.imageInfo.timestamp / 1_000_000.0
+                    }
                     val turn = ((image.imageInfo.rotationDegrees % 360) + 360) % 360
                     val sideways = turn == 90 || turn == 270
                     val frameW = if (sideways) image.height else image.width
@@ -1968,6 +1992,7 @@ private fun CameraMode(
                         }
                     },
                     onOpenReplay = lastMetrics?.flight3d?.let { { showReplay = true } },
+                    onWatchClip = replayClip?.let { { showVideo = true } },
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .statusBarsPadding()
@@ -2124,7 +2149,18 @@ private fun CameraMode(
                 frameAspect = uprightAspect,
                 quad = found,
                 wicket = wicketLock,
-            ).also { if (it.flight3d != null) showReplay = true }
+            ).also { metrics ->
+                // The path on the real picture first; the 3D replay follows it.
+                val path = metrics.flight3d?.let { f3 ->
+                    found?.let { quad -> com.haraan.app.vision.ArPath.fromFlight(f3, quad, uprightAspect) }
+                } ?: com.haraan.app.vision.ArPath.fromTrack(flight, uprightAspect, wicketLock, metrics.lbw)
+                arPath = path
+                if (!path.isEmpty) {
+                    showAr = true
+                } else if (metrics.flight3d != null) {
+                    showReplay = true
+                }
+            }
         }
         // The analyser called the ball done mid-clip: the numbers land now, not when the
         // scorer gets round to the result.
@@ -2151,6 +2187,12 @@ private fun CameraMode(
             lastMetrics = null
             calledFlight = null
             showReplay = false
+            showAr = false
+            showVideo = false
+            arPath = null
+            replayClip = null
+            clipStartSensorMs = null
+            pendingClipStart.set(false)
             trackingLive = true
             recording = true
             /*
@@ -2168,6 +2210,7 @@ private fun CameraMode(
                 capture = capture,
                 executor = executor,
                 targetFile = clipFile,
+                onStarted = { pendingClipStart.set(true) },
                 onFinished = { file, durationMs ->
                     recording = false
                     trackingLive = false
@@ -2195,6 +2238,21 @@ private fun CameraMode(
                         view.performHapticFeedback(Feel.REMOVE)
                         uploadError = "That clip is too large to send. Record a shorter delivery."
                         return@startClip
+                    }
+                    /*
+                     * A private copy for the slow-motion replay, taken before the queue
+                     * moves the file: only the latest delivery is ever kept, overwritten
+                     * each ball, so it costs one clip of space and no clean-up.
+                     */
+                    val replayFile = File(ctx.cacheDir, "replay/last.mp4")
+                    val copied = runCatching {
+                        replayFile.parentFile?.mkdirs()
+                        file.copyTo(replayFile, overwrite = true)
+                    }.isSuccess
+                    val pathForClip = arPath
+                        ?: com.haraan.app.vision.ArPath.fromTrack(vision.track(), uprightAspect, wicketLock, lastMetrics?.lbw)
+                    if (copied && !pathForClip.isEmpty) {
+                        replayClip = ReplayClip(replayFile, clipStartSensorMs, pathForClip)
                     }
                     /*
                      * Persisted in the review queue:
@@ -2352,6 +2410,32 @@ private fun CameraMode(
         // A ball being filmed takes the screen back: the person holding the phone must see
         // that it is recording, and the viewfinder is what they aim with.
         LaunchedEffect(recording) { if (recording) showGallery = false }
+        val livePath = arPath
+        if (showAr && livePath != null) {
+            LivePathOverlay(
+                path = livePath,
+                uprightAspect = uprightAspect,
+                onFinished = {
+                    if (showAr) {
+                        showAr = false
+                        if (lastMetrics?.flight3d != null) showReplay = true
+                    }
+                },
+            )
+        }
+        val clipToPlay = replayClip
+        if (showVideo && clipToPlay != null) {
+            VideoReplayOverlay(
+                clip = clipToPlay,
+                onClose = { showVideo = false },
+                onOpen3d = lastMetrics?.flight3d?.let {
+                    {
+                        showVideo = false
+                        showReplay = true
+                    }
+                },
+            )
+        }
         val replayFlight = lastMetrics?.flight3d
         if (showReplay && replayFlight != null) {
             com.haraan.app.vision.FlightReplayOverlay(
@@ -2659,6 +2743,8 @@ private fun DeliveryMetricsStack(
     onToggleHand: () -> Unit = {},
     /** Null when this ball has no 3D flight to replay. */
     onOpenReplay: (() -> Unit)? = null,
+    /** Null until the delivery's clip is finished and kept. */
+    onWatchClip: (() -> Unit)? = null,
 ) {
     val cards = metricCards(metrics)
     Column(modifier.width(IntrinsicSize.Max), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2674,15 +2760,18 @@ private fun DeliveryMetricsStack(
                 onToggleHand = onToggleHand,
             )
         }
-        if (onOpenReplay != null && !stale) {
-            ReplayPill(onOpenReplay)
+        if (!stale && (onWatchClip != null || onOpenReplay != null)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                onWatchClip?.let { ReplayPill("Replay", it) }
+                onOpenReplay?.let { ReplayPill("3D", it) }
+            }
         }
     }
 }
 
-/** Reopens the last ball's 3D replay. Brand blue, like every action on this screen. */
+/** Reopens one of the last ball's replays. Brand blue, like every action on this screen. */
 @Composable
-private fun ReplayPill(onClick: () -> Unit) {
+private fun ReplayPill(label: String, onClick: () -> Unit) {
     val view = LocalView.current
     Row(
         Modifier
@@ -2705,7 +2794,7 @@ private fun ReplayPill(onClick: () -> Unit) {
             drawPath(path, Color.White)
         }
         Spacer(Modifier.width(7.dp))
-        Text("3D replay", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Text(label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -3748,6 +3837,7 @@ private fun startClip(
     capture: VideoCapture<Recorder>,
     executor: java.util.concurrent.Executor,
     targetFile: File,
+    onStarted: () -> Unit = {},
     onFinished: (File, Long) -> Unit,
 ): Recording? {
     val options = androidx.camera.video.FileOutputOptions.Builder(targetFile).build()
@@ -3757,6 +3847,7 @@ private fun startClip(
         capture.output
             .prepareRecording(context, options)
             .start(executor) { event ->
+                if (event is VideoRecordEvent.Start) onStarted()
                 if (event is VideoRecordEvent.Finalize) {
                     onFinished(targetFile, System.currentTimeMillis() - startedAt)
                 }

@@ -476,7 +476,7 @@ private fun MicroCaps(text: String) {
 }
 
 /** Fine grain for the strip, made once: a dried pitch is never one flat colour. */
-private fun grainBrush(): ShaderBrush {
+internal fun grainBrush(): ShaderBrush {
     val side = 96
     val pixels = IntArray(side * side)
     val random = java.util.Random(7)
@@ -492,7 +492,7 @@ private fun grainBrush(): ShaderBrush {
 
 // ── The scene ────────────────────────────────────────────────────────────────
 
-private fun DrawScope.drawScene(
+internal fun DrawScope.drawScene(
     camera: ReplayCamera,
     flight: Flight3d,
     startMs: Double,
