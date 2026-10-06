@@ -892,6 +892,23 @@ private fun CameraMode(
 
     /** The wicket placed by hand, two taps at the base of the outer stumps. */
     var wicketTapping by remember { mutableStateOf(false) }
+
+    /*
+     * CALIBRATING FROM THE STUMPS, AND WHICH END THE PHONE IS AT.
+     *
+     * The end is the operator's to say — the phone cannot tell a bowler's stumps from a
+     * batter's — and it decides what every tap means. Six taps, the outer feet and the
+     * middle top at each end, solve the camera outright (see [StumpCalibration]); the quad
+     * that comes out outranks anything tapped or detected, because it was solved from the
+     * one landmark every ground has.
+     */
+    var cameraEnd by androidx.compose.runtime.saveable.rememberSaveable {
+        mutableStateOf(com.haraan.app.vision.CameraEnd.BOWLER)
+    }
+    var stumpCalTapping by remember { mutableStateOf(false) }
+    var stumpCalTaps by remember { mutableStateOf<List<com.haraan.app.vision.Point2>>(emptyList()) }
+    var stumpQuad by remember { mutableStateOf<com.haraan.app.vision.PitchQuad?>(null) }
+    var calibrationNote by remember { mutableStateOf<String?>(null) }
     var wicketTaps by remember { mutableStateOf<List<com.haraan.app.vision.Point2>>(emptyList()) }
 
     /*
@@ -980,6 +997,10 @@ private fun CameraMode(
         pitchQuad = null
         tappedCorners = emptyList()
         tapping = false
+        // Solved in the old orientation: describes nothing in this one.
+        stumpQuad = null
+        stumpCalTaps = emptyList()
+        stumpCalTapping = false
         /*
          * Auto-detected wicket is reset on rotation so it immediately re-detects upright
          * in the new orientation/aspect ratio without carrying stale rotated coordinates.
@@ -1076,7 +1097,8 @@ private fun CameraMode(
                         // Corners set by hand outrank a detected quad, so once there are
                         // four of them the Hough transform is looking for an answer that
                         // has already been given.
-                        tappedCorners.size < 4
+                        tappedCorners.size < 4 &&
+                        stumpQuad == null
                     // Vision yields to heat. Filming is the product; this is bolted to the
                     // side of it, and a phone that throttles its encoder mid-delivery has
                     // lost the thing the operator is actually standing there to do.
@@ -1411,7 +1433,7 @@ private fun CameraMode(
                 ).takeIf { it.isPlausible() }
             }
         }
-        val found = tappedQuad ?: pitchQuad
+        val found = stumpQuad ?: tappedQuad ?: pitchQuad?.copy(cameraEnd = cameraEnd)
         if (showGuide && granted && found != null) {
             /*
              * FOUND. The guide is now the pitch, not a picture of one: drawn from the
@@ -1822,6 +1844,69 @@ private fun CameraMode(
             }
         }
 
+        if (stumpCalTapping && granted) {
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .pointerInput(uprightAspect, cameraEnd) {
+                        detectTapGestures { offset ->
+                            // Normalised against the PICTURE, as every calibration tap must be.
+                            val frame = frameRect(size.width.toFloat(), size.height.toFloat(), uprightAspect)
+                            if (!frame.contains(offset)) return@detectTapGestures
+                            val local = frame.normalise(offset)
+                            val next = stumpCalTaps + com.haraan.app.vision.Point2(local.x.toDouble(), local.y.toDouble())
+                            if (next.size < 6) {
+                                stumpCalTaps = next
+                                calibrationNote = null
+                                view.performHapticFeedback(Feel.TICK)
+                                return@detectTapGestures
+                            }
+                            val result = com.haraan.app.vision.StumpCalibration.solve(
+                                com.haraan.app.vision.StumpCalibration.Taps(next[0], next[1], next[2], next[3], next[4], next[5]),
+                                cameraEnd,
+                                uprightAspect,
+                            )
+                            if (result == null || !result.trustworthy) {
+                                // Kept in the flow: start the six again rather than leave.
+                                stumpCalTaps = emptyList()
+                                calibrationNote = "Those taps don't fit one camera — start again from the near stumps"
+                                view.performHapticFeedback(Feel.REMOVE)
+                            } else {
+                                stumpQuad = result.quad
+                                stumpCalTaps = emptyList()
+                                stumpCalTapping = false
+                                calibrationNote = "Calibrated · camera %.1f m up".format(result.cameraHeightM)
+                                view.performHapticFeedback(Feel.COMMIT)
+                            }
+                        }
+                    },
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val frame = frameRect(size.width, size.height, uprightAspect)
+                    stumpCalTaps.forEachIndexed { i, point ->
+                        val o = frame.at(point.x.toFloat(), point.y.toFloat())
+                        val top = i % 3 == 2
+                        drawCircle(Color(0xFF2563EB), radius = 7.dp.toPx(), center = o)
+                        drawCircle(Color.White, radius = 7.dp.toPx(), center = o, style = Stroke(width = 1.8.dp.toPx()))
+                        // A top is joined down to the feet it stands between.
+                        if (top) {
+                            val l = stumpCalTaps[i - 2]
+                            val r = stumpCalTaps[i - 1]
+                            val foot = frame.at(((l.x + r.x) / 2).toFloat(), ((l.y + r.y) / 2).toFloat())
+                            drawLine(Color.White.copy(alpha = 0.8f), foot, o, strokeWidth = 2.dp.toPx())
+                        } else if (i % 3 == 1) {
+                            drawLine(
+                                Color.White.copy(alpha = 0.8f),
+                                frame.at(stumpCalTaps[i - 1].x.toFloat(), stumpCalTaps[i - 1].y.toFloat()),
+                                o,
+                                strokeWidth = 2.dp.toPx(),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         /*
          * THE PANEL STANDS DOWN WHILE A WICKET IS BEING PLACED.
          *
@@ -1845,7 +1930,7 @@ private fun CameraMode(
          * while filming — how long it has been filming. One flat surface colour, no
          * gradient rims, no forever-pulsing lights.
          */
-        if (!wicketTapping) {
+        if (!wicketTapping && !stumpCalTapping) {
             val currentLock = wicketLock
             val isReady = currentLock != null && (
                 currentLock.state == com.haraan.app.vision.WicketTrackState.CONFIRMED ||
@@ -2041,14 +2126,10 @@ private fun CameraMode(
             Row(railModifier, horizontalArrangement = Arrangement.spacedBy(14.dp)) { tools() }
 
             // ── The gallery, in the corner every camera keeps the last shot ──
-            GalleryButton(
-                latest = galleryClips.firstOrNull(),
-                waitingCount = galleryClips.count { it.state != GalleryClip.State.SENT },
-                onClick = {
-                    uploadQueue.refreshGallery()
-                    showGallery = true
-                },
-                modifier = if (landscape) {
+            // Calibrate sits beside the gallery on the right: on a portrait phone the left
+            // rail has room for two tools before it runs under the shutter.
+            Row(
+                if (landscape) {
                     Modifier
                         .align(Alignment.BottomEnd)
                         .navigationBarsPadding()
@@ -2060,7 +2141,27 @@ private fun CameraMode(
                         .navigationBarsPadding()
                         .padding(end = 22.dp, bottom = 44.dp)
                 },
-            )
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                ToolButton(
+                    label = if (stumpQuad != null) "Re-calibrate" else "Calibrate",
+                    active = stumpQuad != null,
+                    onClick = {
+                        stumpCalTaps = emptyList()
+                        calibrationNote = null
+                        stumpCalTapping = true
+                    },
+                ) { tint -> CalibrateGlyph(Modifier.size(20.dp), tint) }
+                GalleryButton(
+                    latest = galleryClips.firstOrNull(),
+                    waitingCount = galleryClips.count { it.state != GalleryClip.State.SENT },
+                    onClick = {
+                        uploadQueue.refreshGallery()
+                        showGallery = true
+                    },
+                )
+            }
         }
 
         /*
@@ -2073,6 +2174,48 @@ private fun CameraMode(
          */
         if (granted) {
             RecordingEdgeGlow(recording = recording, uprightAspect = uprightAspect)
+        }
+
+        if (stumpCalTapping && granted) {
+            StumpCalibrationPrompt(
+                end = cameraEnd,
+                tapsDone = stumpCalTaps.size,
+                note = calibrationNote,
+                onEnd = { end ->
+                    cameraEnd = end
+                    stumpCalTaps = emptyList()
+                },
+                onUndo = { stumpCalTaps = stumpCalTaps.dropLast(1) },
+                onCancel = {
+                    stumpCalTapping = false
+                    stumpCalTaps = emptyList()
+                    calibrationNote = null
+                },
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .displayCutoutPadding()
+                    .padding(start = 16.dp, end = 16.dp, top = 52.dp),
+            )
+        } else if (calibrationNote != null && !recording) {
+            // The result, briefly, where the prompt was.
+            LaunchedEffect(calibrationNote) {
+                delay(2_500)
+                calibrationNote = null
+            }
+            Text(
+                calibrationNote.orEmpty(),
+                color = Ink,
+                fontSize = 12.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .statusBarsPadding()
+                    .padding(top = 64.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.Black.copy(alpha = 0.66f))
+                    .padding(horizontal = 13.dp, vertical = 9.dp),
+            )
         }
 
         // And what replaces it: the one instruction that matters, and the way out. Bottom
@@ -2143,13 +2286,14 @@ private fun CameraMode(
          * measured from.
          */
         val showFlight: (List<com.haraan.app.vision.BallSighting>) -> Unit = { flight ->
-            lastBounce = found?.let { pitch -> com.haraan.app.vision.BouncePoint.find(flight, pitch) }
             lastMetrics = com.haraan.app.vision.FlightMetrics.of(
                 track = flight,
                 frameAspect = uprightAspect,
                 quad = found,
                 wicket = wicketLock,
             ).also { metrics ->
+                // From the fitted flight when there is one — either end of the pitch.
+                lastBounce = metrics.bounce
                 // The path on the real picture first; the 3D replay follows it.
                 val path = metrics.flight3d?.let { f3 ->
                     found?.let { quad -> com.haraan.app.vision.ArPath.fromFlight(f3, quad, uprightAspect) }
@@ -3402,6 +3546,124 @@ private fun ChromeIconButton(
  * boundary. Selected is a blue tint and a blue edge, the app's selection language — a solid
  * fill would read as a second shutter.
  */
+/**
+ * The stump calibration's instructions: which end, which tap is next, and the way out.
+ * The end can only be changed before the first tap — every tap after it means something
+ * different at the other end.
+ */
+@Composable
+private fun StumpCalibrationPrompt(
+    end: com.haraan.app.vision.CameraEnd,
+    tapsDone: Int,
+    note: String?,
+    onEnd: (com.haraan.app.vision.CameraEnd) -> Unit,
+    onUndo: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val view = LocalView.current
+    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
+        if (tapsDone == 0) {
+            Row(
+                Modifier
+                    .clip(RoundedCornerShape(999.dp))
+                    .background(Color.Black.copy(alpha = 0.66f))
+                    .padding(3.dp),
+            ) {
+                listOf(
+                    com.haraan.app.vision.CameraEnd.BOWLER to "Behind bowler",
+                    com.haraan.app.vision.CameraEnd.STRIKER to "Behind batter",
+                ).forEach { (option, label) ->
+                    val selected = option == end
+                    Text(
+                        label,
+                        color = if (selected) Color.White else Color.White.copy(alpha = 0.65f),
+                        fontSize = 12.5.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(if (selected) Color(0xFF2563EB) else Color.Transparent)
+                            .clickableCapture(enabled = true) {
+                                view.performHapticFeedback(Feel.SELECT)
+                                onEnd(option)
+                            }
+                            .padding(horizontal = 14.dp, vertical = 8.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+        Column(
+            Modifier
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.Black.copy(alpha = 0.7f))
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                "STEP ${tapsDone + 1} OF 6",
+                color = Color.White.copy(alpha = 0.55f),
+                fontSize = 9.5.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.4.sp,
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                com.haraan.app.vision.StumpCalibration.PROMPTS[tapsDone.coerceIn(0, 5)],
+                color = Ink,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            if (note != null) {
+                Spacer(Modifier.height(5.dp))
+                Text(note, color = Color(0xFFFCA5A5), fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (tapsDone > 0) {
+                Text(
+                    "Undo",
+                    color = Color(0xFFBDD3FF),
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.Black.copy(alpha = 0.66f))
+                        .clickableCapture(enabled = true, onClick = onUndo)
+                        .padding(horizontal = 16.dp, vertical = 9.dp),
+                )
+            }
+            Text(
+                "Cancel",
+                color = Color(0xFFBDD3FF),
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Color.Black.copy(alpha = 0.66f))
+                    .clickableCapture(enabled = true, onClick = onCancel)
+                    .padding(horizontal = 16.dp, vertical = 9.dp),
+            )
+        }
+    }
+}
+
+/** A crosshair over a stump: "fix the camera from the stumps". */
+@Composable
+private fun CalibrateGlyph(modifier: Modifier = Modifier, tint: Color = Color.White) {
+    Canvas(modifier) {
+        val s = 1.6.dp.toPx()
+        val c = Offset(size.width / 2f, size.height / 2f)
+        drawCircle(tint, radius = size.minDimension * 0.34f, center = c, style = Stroke(s))
+        drawLine(tint, Offset(c.x, 0f), Offset(c.x, size.height * 0.28f), s, StrokeCap.Round)
+        drawLine(tint, Offset(c.x, size.height * 0.72f), Offset(c.x, size.height), s, StrokeCap.Round)
+        drawLine(tint, Offset(0f, c.y), Offset(size.width * 0.28f, c.y), s, StrokeCap.Round)
+        drawLine(tint, Offset(size.width * 0.72f, c.y), Offset(size.width, c.y), s, StrokeCap.Round)
+        drawCircle(tint, radius = 1.6.dp.toPx(), center = c)
+    }
+}
+
 @Composable
 private fun ToolButton(
     label: String,

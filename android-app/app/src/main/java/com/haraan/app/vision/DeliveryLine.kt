@@ -76,11 +76,9 @@ object DeliveryLines {
     fun of(metrics: FlightMetrics, hand: BatterHand): DeliveryLine {
         val lbw = metrics.lbw
         val stumpsOff = lbw.offsetM?.let { towardsOff(it, hand) }
-        // The bounce's line is only signed from the bowler's end; from the other end the
-        // picture is mirrored and the sign would lie.
-        val pitchedOff = metrics.bounce
-            ?.takeIf { it.cameraEnd == CameraEnd.BOWLER }
-            ?.let { towardsOff(it.lineM, hand) }
+        // Pitch coordinates are absolute — positive is right as seen from the bowler's end
+        // whichever end filmed it — so the bounce's line needs no correction for the camera.
+        val pitchedOff = metrics.bounce?.let { towardsOff(it.lineM, hand) }
         return DeliveryLine(
             atStumps = stumpsOff?.let(::band),
             atStumpsOffM = stumpsOff,

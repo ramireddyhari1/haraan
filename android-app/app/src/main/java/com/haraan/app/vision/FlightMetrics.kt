@@ -188,7 +188,16 @@ data class FlightMetrics(
             val run = TrailGeometry.runs(track).lastOrNull().orEmpty()
             val aspect = if (frameAspect > 0f) frameAspect.toDouble() else 1.0
 
-            val bounce = quad?.let { locateBounce(run, it) }
+            /*
+             * ONE FLIGHT, EVERYTHING FROM IT. With pitch corners the delivery is fitted in
+             * three dimensions — from either end of the pitch — and the bounce, the speed,
+             * the line and the answer at the stumps all come from that one fit, so no two
+             * readouts can disagree. [BouncePoint] only gives the fit a head start.
+             */
+            val roughBounce = quad?.let { locateBounce(run, it) }
+            val fit = quad?.let { QuadSpeed.fit(run, it, roughBounce, frameAspect) }
+            val flight3d = (fit as? QuadSpeed.FitResult.Ok)?.flight
+            val bounce = flight3d?.let { f -> bounceOf(f, quad, frameAspect, run.size) } ?: roughBounce
             val scale = wicket?.takeIf { it.isMeasurable }?.metresPerUnitAcross()
 
             /*
@@ -208,7 +217,7 @@ data class FlightMetrics(
             return FlightMetrics(
                 imageSpeed = imageSpeed(run, aspect),
                 groundSpeed = groundSpeed(run, frameAspect, wicket).let { fromWicket ->
-                    if (fromWicket is MetricValue.Measured) fromWicket else cornerSpeed(run, quad, bounce, frameAspect, fromWicket)
+                    if (fromWicket is MetricValue.Measured) fromWicket else cornerSpeed(quad, fit, fromWicket)
                 },
                 curve = deviation(run, aspect, "whole flight", scale),
                 swing = when {
@@ -248,13 +257,9 @@ data class FlightMetrics(
                     )
                 } ?: MetricValue.Unavailable("nothing tracked yet"),
                 bounce = bounce,
-                lbw = LbwProjector.project(track, wicket),
+                lbw = flight3d?.let(LbwProjector::fromFlight) ?: LbwProjector.project(track, wicket),
                 wicket = wicket,
-                flight3d = if (quad != null && bounce != null) {
-                    (QuadSpeed.fit(run, quad, bounce, frameAspect) as? QuadSpeed.FitResult.Ok)?.flight
-                } else {
-                    null
-                },
+                flight3d = flight3d,
             )
         }
 
@@ -382,20 +387,39 @@ data class FlightMetrics(
          * because both fixes are real: film side-on, or mark the pitch corners.
          */
         private fun cornerSpeed(
-            run: List<BallSighting>,
             quad: PitchQuad?,
-            bounce: Bounce?,
-            frameAspect: Float,
+            fit: QuadSpeed.FitResult?,
             fromWicket: MetricValue,
         ): MetricValue {
             val why = (fromWicket as? MetricValue.Unavailable)?.reason ?: "no wicket speed"
             if (quad == null) {
-                return MetricValue.Unavailable("$why; or mark the pitch corners from behind the arm")
+                return MetricValue.Unavailable("$why; or calibrate the pitch from either end")
             }
-            if (bounce == null) {
-                return MetricValue.Unavailable("$why; the pitch corners need a bounce in the track to time the ball")
+            return when (fit) {
+                is QuadSpeed.FitResult.Ok -> MetricValue.Estimated(
+                    fit.flight.speedKmh,
+                    "km/h",
+                    "average before the bounce, from the pitch calibration (camera %.1f m up) — a little under release speed"
+                        .format(fit.flight.cameraHeightM),
+                )
+                is QuadSpeed.FitResult.Refused -> MetricValue.Unavailable(fit.reason)
+                null -> MetricValue.Unavailable(why)
             }
-            return QuadSpeed.estimate(run, quad, bounce, frameAspect)
+        }
+
+        /** The fitted bounce as a [Bounce], placed back in the picture for drawing. */
+        private fun bounceOf(flight: Flight3d, quad: PitchQuad?, frameAspect: Float, sightings: Int): Bounce? {
+            val q = quad ?: return null
+            val image = PitchCamera.from(q, frameAspect)?.project(Point3(flight.bounceX, flight.bounceY, 0.0))
+                ?: return null
+            return Bounce(
+                image = image,
+                pitch = Point2(flight.bounceX, flight.bounceY),
+                sightingsUsed = sightings,
+                quadSource = q.source,
+                cameraEnd = q.cameraEnd,
+                atMs = flight.bounceMs,
+            )
         }
 
         /**
@@ -501,9 +525,6 @@ data class FlightMetrics(
         private fun bounceUnavailable(run: List<BallSighting>, quad: PitchQuad?) = when {
             quad == null -> MetricValue.Unavailable(
                 "no pitch calibration — a wicket lock cannot give a length up the pitch",
-            )
-            quad.cameraEnd != CameraEnd.BOWLER -> MetricValue.Unavailable(
-                "only measurable from behind the bowler's arm",
             )
             run.size < BouncePoint.MIN_SIGHTINGS -> MetricValue.Unavailable(
                 "needs ${BouncePoint.MIN_SIGHTINGS} sightings in one flight, have ${run.size}",

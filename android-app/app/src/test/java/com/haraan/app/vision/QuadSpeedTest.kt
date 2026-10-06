@@ -2,6 +2,7 @@ package com.haraan.app.vision
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
@@ -216,12 +217,125 @@ class QuadSpeedTest {
         assertTrue(path.points.any { it.leg == ArLeg.IN } && path.points.any { it.leg == ArLeg.OUT })
     }
 
+    // ── Calibrating from the two sets of stumps ──
+
+    private fun stumpTaps(lens: Lens, end: CameraEnd, noise: (Int) -> Double = { 0.0 }): StumpCalibration.Taps {
+        val pts = StumpCalibration.worldPoints(end).mapIndexed { i, p ->
+            val img = lens.project(doubleArrayOf(p.x, p.y, p.z))
+            Point2(img.x + noise(i), img.y + noise(i + 11))
+        }
+        return StumpCalibration.Taps(pts[0], pts[1], pts[2], pts[3], pts[4], pts[5])
+    }
+
     @Test
-    fun `corners from the striker's end are refused`() {
+    fun `six stump taps from behind the bowler give the same pitch as the creases`() {
         val lens = lens()
-        val quad = quadFrom(lens).copy(cameraEnd = CameraEnd.STRIKER)
-        val bounce = Bounce(Point2(0.5, 0.5), Point2(0.0, 6.0), 8, QuadSource.TAPPED, CameraEnd.STRIKER, atMs = 300.0)
-        val value = QuadSpeed.estimate(delivery(lens, 120.0), quad, bounce, aspect.toFloat())
-        assertTrue(value is MetricValue.Unavailable)
+        val result = StumpCalibration.solve(stumpTaps(lens, CameraEnd.BOWLER), CameraEnd.BOWLER, aspect.toFloat())
+        assertNotNull(result)
+        assertTrue("rms ${result!!.rmsError}", result.trustworthy)
+        val truth = quadFrom(lens).corners
+        result.quad.corners.zip(truth).forEach { (got, want) ->
+            assertEquals(want.x, got.x, 0.004)
+            assertEquals(want.y, got.y, 0.004)
+        }
+        assertEquals(1.6, result.cameraHeightM, 0.05)
+    }
+
+    @Test
+    fun `six stump taps from behind the batter calibrate that end, and the speed follows`() {
+        val lens = batterEndLens()
+        val result = StumpCalibration.solve(stumpTaps(lens, CameraEnd.STRIKER), CameraEnd.STRIKER, aspect.toFloat())!!
+        assertTrue(result.trustworthy)
+        val track = delivery(lens, kmh = 130.0, lengthM = 5.0)
+        val fit = QuadSpeed.fit(track, result.quad, null, aspect.toFloat()) as QuadSpeed.FitResult.Ok
+        assertTrue("expected ~130, got ${fit.flight.speedKmh}", abs(fit.flight.speedKmh - 130.0) / 130.0 < 0.05)
+    }
+
+    @Test
+    fun `a pixel of tapping error still gives a usable speed`() {
+        val lens = batterEndLens()
+        val noise = { i: Int -> ((i * 7919) % 11 - 5) / 5.0 * 0.0008 }
+        val result = StumpCalibration.solve(stumpTaps(lens, CameraEnd.STRIKER, noise), CameraEnd.STRIKER, aspect.toFloat())!!
+        val track = delivery(lens, kmh = 120.0, lengthM = 6.0)
+        val fit = QuadSpeed.fit(track, result.quad, null, aspect.toFloat()) as QuadSpeed.FitResult.Ok
+        assertTrue("expected ~120, got ${fit.flight.speedKmh}", abs(fit.flight.speedKmh - 120.0) / 120.0 < 0.10)
+    }
+
+    @Test
+    fun `a tap on the wrong thing is caught`() {
+        val lens = lens()
+        val good = stumpTaps(lens, CameraEnd.BOWLER)
+        // The far top tapped at the far left foot by mistake.
+        val bad = good.copy(farMiddleTop = Point2(good.farLeftFoot.x, good.farLeftFoot.y + 0.05))
+        val result = StumpCalibration.solve(bad, CameraEnd.BOWLER, aspect.toFloat())
+        assertTrue(result == null || !result.trustworthy)
+    }
+
+    /** Behind the BATTER's stumps on a tall tripod, looking back at the bowler — Fulltrack's set-up. */
+    private fun batterEndLens(height: Double = 1.7, behind: Double = 4.0, focal: Double = 1.3) = Lens(
+        centre = doubleArrayOf(0.1, -behind, height),
+        target = doubleArrayOf(0.0, 12.0, 0.0),
+        focal = focal,
+        aspect = aspect,
+    )
+
+    private fun batterEndQuad(lens: Lens) = PitchQuad(
+        corners = PitchGeometry.calibrationCorners(CameraEnd.STRIKER).map {
+            lens.project(doubleArrayOf(it.x, it.y, 0.0))
+        },
+        source = QuadSource.TAPPED,
+        confidence = 1f,
+        cameraEnd = CameraEnd.STRIKER,
+    )
+
+    @Test
+    fun `from the batter's end the camera is recovered`() {
+        val lens = batterEndLens()
+        val camera = PitchCamera.from(batterEndQuad(lens), aspect.toFloat())
+        assertNotNull(camera)
+        assertEquals(1.7, camera!!.heightM, 0.06)
+        assertEquals(-4.0, camera.centre[1], 0.15)
+    }
+
+    @Test
+    fun `from the batter's end the speed and the bounce are found with no bounce to start from`() {
+        val lens = batterEndLens()
+        val quad = batterEndQuad(lens)
+        // The bounce finder refuses this end, by design.
+        val track = delivery(lens, kmh = 125.0, lengthM = 6.0, lineM = 0.1)
+        assertNull(BouncePoint.find(track, quad))
+
+        val fit = QuadSpeed.fit(track, quad, null, aspect.toFloat())
+        assertTrue("expected a fit, got $fit", fit is QuadSpeed.FitResult.Ok)
+        val flight = (fit as QuadSpeed.FitResult.Ok).flight
+        assertTrue("expected ~125 km/h, got ${flight.speedKmh}", abs(flight.speedKmh - 125.0) / 125.0 < 0.05)
+        assertEquals(6.0, flight.bounceY, 0.35)
+    }
+
+    @Test
+    fun `from the batter's end a spinner is read at his speed`() {
+        val lens = batterEndLens(height = 2.0, behind = 6.0, focal = 1.6)
+        val track = delivery(lens, kmh = 85.0, lengthM = 4.5)
+        val fit = QuadSpeed.fit(track, batterEndQuad(lens), null, aspect.toFloat()) as QuadSpeed.FitResult.Ok
+        assertTrue("expected ~85 km/h, got ${fit.flight.speedKmh}", abs(fit.flight.speedKmh - 85.0) / 85.0 < 0.05)
+    }
+
+    @Test
+    fun `behind the bowler the whole-flight search agrees with the bounce-led one`() {
+        val lens = lens()
+        val track = delivery(lens, kmh = 120.0)
+        val quad = quadFrom(lens)
+        val scanned = QuadSpeed.fit(track, quad, null, aspect.toFloat()) as QuadSpeed.FitResult.Ok
+        assertTrue(abs(scanned.flight.speedKmh - 120.0) / 120.0 < 0.05)
+    }
+
+    @Test
+    fun `the 3D flight gives the LBW answer, from either end`() {
+        val lens = batterEndLens()
+        val track = delivery(lens, kmh = 120.0, lengthM = 6.0, lineM = 0.05)
+        val flight = (QuadSpeed.fit(track, batterEndQuad(lens), null, aspect.toFloat()) as QuadSpeed.FitResult.Ok).flight
+        val lbw = LbwProjector.fromFlight(flight)
+        assertNotNull(lbw)
+        assertTrue(lbw!!.verdict != LbwVerdict.UNAVAILABLE)
     }
 }

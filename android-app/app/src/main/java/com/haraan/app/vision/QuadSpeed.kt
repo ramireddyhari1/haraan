@@ -180,19 +180,13 @@ object QuadSpeed {
     fun fit(
         run: List<BallSighting>,
         quad: PitchQuad,
-        bounce: Bounce,
+        bounce: Bounce?,
         frameAspect: Float,
     ): FitResult {
-        if (quad.cameraEnd != CameraEnd.BOWLER) {
-            return FitResult.Refused("pitch-corner speed works from behind the bowler's arm only")
-        }
-        val tb = bounce.atMs ?: return FitResult.Refused("the bounce has no time")
         val camera = PitchCamera.from(quad, frameAspect)
             ?: return FitResult.Refused("the pitch corners do not describe a camera — re-mark them")
-
-        val air = run.filter { it.timestampMs <= tb && tb - it.timestampMs <= MAX_LOOKBACK_MS }
-        if (air.size < MIN_PRE_BOUNCE) {
-            return FitResult.Refused("needs $MIN_PRE_BOUNCE sightings before the bounce, have ${air.size}")
+        if (run.size < MIN_PRE_BOUNCE + 2) {
+            return FitResult.Refused("needs ${MIN_PRE_BOUNCE + 2} sightings in one flight, have ${run.size}")
         }
 
         /*
@@ -201,26 +195,45 @@ object QuadSpeed {
          * [BouncePoint] places the bounce to about a third of a metre at medium pace and
          * nearer a metre at 120 km/h, where the frames are a metre apart — and pinning the
          * flight to a place that is a metre out while keeping its time bends the speed by
-         * a fifth. So its place and moment are only the starting point: the fit takes the
-         * bounce's position as two more unknowns, uses the sightings after it as well
-         * (their own speeds, the same landing spot), and slides the moment a frame either
-         * way to wherever the whole flight agrees best.
+         * a fifth. So its place is never used: the fit takes the bounce's position as two
+         * more unknowns, uses the sightings after it as well (their own speeds, the same
+         * landing spot), and finds the MOMENT wherever the whole flight agrees best.
+         *
+         * WITH NO BOUNCE TO START FROM, IT SEARCHES THE WHOLE FLIGHT. That is what makes the
+         * batter's end work: [BouncePoint] refuses that end — the ball comes at the camera
+         * and its ground reading never turns — but the two-leg flight through the rays does
+         * not care which way the ball is travelling. A bounce from [BouncePoint] only
+         * narrows the search to a frame either side.
          */
-        val near = run.filter { abs(it.timestampMs - tb) <= MAX_LOOKBACK_MS }
+        val first = run.first().timestampMs.toDouble()
+        val last = run.last().timestampMs.toDouble()
+        val (from, to, step) = bounce?.atMs?.let { Triple(it - TB_SEARCH_MS, it + TB_SEARCH_MS, TB_STEP_MS) }
+            ?: Triple(first, last, TB_SCAN_STEP_MS)
+
         var best: DoubleArray? = null
-        var bestTb = tb
+        var bestTb = from
         var bestError = Double.MAX_VALUE
-        var shift = -TB_SEARCH_MS
-        while (shift <= TB_SEARCH_MS) {
-            val fit = fitFlight(near, camera, tb + shift)
-            if (fit != null && fit.second < bestError) {
-                bestError = fit.second
-                best = fit.first
-                bestTb = tb + shift
+        fun scan(a: Double, b: Double, by: Double) {
+            var tb = a
+            while (tb <= b) {
+                val near = run.filter { abs(it.timestampMs - tb) <= MAX_LOOKBACK_MS }
+                val fit = fitFlight(near, camera, tb)
+                if (fit != null && fit.second < bestError) {
+                    bestError = fit.second
+                    best = fit.first
+                    bestTb = tb
+                }
+                tb += by
             }
-            shift += TB_STEP_MS
+        }
+        scan(from, to, step)
+        // A coarse scan, then the frame either side of its answer at full resolution.
+        if (bounce?.atMs == null && best != null) {
+            val coarse = bestTb
+            scan(coarse - TB_SCAN_STEP_MS, coarse + TB_SCAN_STEP_MS, TB_STEP_MS)
         }
         val v = best ?: return FitResult.Refused("the sightings around the bounce are too few or too close together to fit")
+        val near = run.filter { abs(it.timestampMs - bestTb) <= MAX_LOOKBACK_MS }
 
         // Towards the striker is down the pitch's y.
         if (v[3] >= 0) {
@@ -252,7 +265,7 @@ object QuadSpeed {
     fun estimate(
         run: List<BallSighting>,
         quad: PitchQuad,
-        bounce: Bounce,
+        bounce: Bounce?,
         frameAspect: Float,
     ): MetricValue = when (val result = fit(run, quad, bounce, frameAspect)) {
         is FitResult.Refused -> MetricValue.Unavailable(result.reason)
@@ -267,6 +280,9 @@ object QuadSpeed {
     /** Search either side of the bounce finder's moment, and in what steps. */
     private const val TB_SEARCH_MS = 40.0
     private const val TB_STEP_MS = 2.0
+
+    /** The whole-flight search, when no bounce was found to start from. */
+    private const val TB_SCAN_STEP_MS = 8.0
 
     /**
      * One flight through the rays, for a given bounce moment [tb]. Unknowns, all linear:

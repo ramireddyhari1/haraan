@@ -79,9 +79,10 @@ class DeliveryLineTest {
     }
 
     @Test
-    fun `a bounce filmed from the striker's end is not given a side`() {
-        val line = DeliveryLines.of(metrics(pitchedRightM = 0.10, end = CameraEnd.STRIKER), BatterHand.RIGHT)
-        assertNull(line.pitched)
-        assertNotNull(line)
+    fun `pitch coordinates are absolute, so the batter's end gives the same side`() {
+        val fromBowler = DeliveryLines.of(metrics(pitchedRightM = 0.10, end = CameraEnd.BOWLER), BatterHand.RIGHT)
+        val fromBatter = DeliveryLines.of(metrics(pitchedRightM = 0.10, end = CameraEnd.STRIKER), BatterHand.RIGHT)
+        assertNotNull(fromBatter.pitched)
+        assertEquals(fromBowler.pitched, fromBatter.pitched)
     }
 }

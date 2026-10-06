@@ -284,6 +284,44 @@ object LbwProjector {
         )
     }
 
+    /** How far a pitch-calibrated 3D fit can be trusted at the stumps, either side. */
+    const val FLIGHT_UNCERTAINTY_M = 0.035
+
+    /**
+     * The answer from a fitted 3D flight: where it crosses the stump line, and how high.
+     *
+     * Preferred over [project] whenever a flight exists, because it is the same flight the
+     * replay draws and the speed is read from — and because it works from the batter's end,
+     * where a projection across the stump line in the picture means nothing. Null when the
+     * flight has no leg after the bounce to carry on to the stumps.
+     */
+    fun fromFlight(flight: Flight3d): LbwProjection? {
+        val at = flight.atStumps ?: return null
+        val verdict = verdictFor(at.x, FLIGHT_UNCERTAINTY_M, at.z)
+        return LbwProjection(
+            verdict = verdict,
+            offsetM = at.x,
+            uncertaintyM = FLIGHT_UNCERTAINTY_M,
+            heightM = at.z,
+            basis = "the 3D flight fitted from the pitch calibration, carried on to the stumps",
+            limbs = listOf(
+                LbwLimb(
+                    "Would it have hit the stumps?",
+                    when (verdict) {
+                        LbwVerdict.HITTING -> "yes, %.0f cm from the middle stump".format(abs(at.x) * 100)
+                        LbwVerdict.MISSING -> if (at.z - FLIGHT_UNCERTAINTY_M > OVER_THE_TOP_M) {
+                            "no, going over the top"
+                        } else {
+                            "no, %.0f cm outside".format((abs(at.x) - HALF_WICKET_M) * 100)
+                        }
+                        else -> "too close to call — within %.0f cm either way".format(FLIGHT_UNCERTAINTY_M * 100)
+                    },
+                    judged = true,
+                ),
+            ) + UNJUDGED,
+        )
+    }
+
     private fun verdictFor(offsetM: Double, uncertaintyM: Double, heightM: Double?): LbwVerdict {
         // Over the top, and certainly so. Reported as MISSING rather than as its own
         // verdict because for the one question this answers it is the same answer.
