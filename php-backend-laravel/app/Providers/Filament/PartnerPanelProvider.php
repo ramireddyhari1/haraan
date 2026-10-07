@@ -59,6 +59,17 @@ class PartnerPanelProvider extends PanelProvider
             scopes: PartnerLogin::class,
         );
 
+        // "Get the Partner app" footer under the sign-in form (QR + buttons on
+        // desktop, an install strip on phones). Admin switch + copy + Android link
+        // live in /control → Platform rules → Partner web app.
+        FilamentView::registerRenderHook(
+            PanelsRenderHook::FOOTER,
+            fn (): string => \App\Support\PlatformRules::bool('partner_web_app.download_footer')
+                ? Blade::render('@include(\'filament.partner.get-app-footer\')')
+                : '',
+            scopes: PartnerLogin::class,
+        );
+
         // Make the partner LOGIN page discoverable in Google (only this page — the
         // console behind it stays out of the index via robots.txt + auth). The
         // panel emits no description/canonical of its own, so add search metadata
