@@ -169,6 +169,22 @@ html.ha-app.ha-full .ha-nav-cap { opacity: .9; box-shadow: 0 10px 20px -6px rgba
 .ha-mrow b { display: block; font-size: 14.5px; font-weight: 600; }
 .ha-mrow small { display: block; font-size: 12px; color: var(--ha-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ha-mrow > svg:last-child { width: 20px; height: 20px; color: var(--ha-faint); flex: none; }
+/* Haraan manager card — on top of Venues; set per partner in /control */
+.ha-mgr { padding: 16px; }
+.ha-mgr-face { flex: none; width: 54px; height: 54px; margin-right: 14px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px #E6EBF2; background: linear-gradient(135deg, #DCE8FF, #C7D9FF); display: grid; place-items: center; overflow: hidden; color: #1E40AF; }
+.ha-mgr-face img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ha-mgr-face b { font-size: 18px; font-weight: 700; }
+.ha-mgr-face svg { width: 26px; height: 26px; fill: currentColor; }
+.ha-mgr-role { display: block; font-size: 10.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--ha-blue); }
+.ha-mgr-name { display: block; margin-top: 2px; font-size: 17px; font-weight: 700; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ha-mgr-sub { display: flex; align-items: center; gap: 4px; margin-top: 3px; font-size: 12.5px; color: var(--ha-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ha-mgr-sub svg { width: 13px; height: 13px; flex: none; fill: #94A3B8; }
+.ha-mgr-intro { margin: 12px 0 0 !important; font-size: 13.5px; line-height: 19px; color: var(--ha-muted); }
+.ha-mgr-acts { display: flex; gap: 8px; margin-top: 14px; }
+.ha-mgr-btn { flex: 1; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; background: #EFF4FF; color: var(--ha-blue) !important; font: 600 13.5px/1 Inter, system-ui, sans-serif; text-decoration: none !important; transition: transform .22s cubic-bezier(.34, 1.56, .64, 1); -webkit-tap-highlight-color: transparent; }
+.ha-mgr-btn svg { width: 17px; height: 17px; fill: currentColor; }
+.ha-mgr-btn.is-main { background: #2563EB; color: #fff !important; }
+.ha-mgr-btn:active { transform: scale(.95); transition-duration: .07s; }
 .ha-another { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border: 1px solid #E6EBF2; border-radius: 16px; }
 .ha-another > svg { width: 20px; height: 20px; color: var(--ha-muted); flex: none; }
 .ha-another b { display: block; font-size: 14px; font-weight: 600; }

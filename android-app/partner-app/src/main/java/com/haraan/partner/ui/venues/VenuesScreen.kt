@@ -157,12 +157,21 @@ fun VenuesScreen(
         )
     }
     val editHours: (VenueRoom) -> Unit = { if (canPricing) editing = it else onSupport() }
-    RefreshableContent(token, load = { loadRooms(api, token) }, reloadSignal = reload) { rooms ->
+    RefreshableContent(token, load = {
+        coroutineScope {
+            // The manager card is a nicety: if it fails, Venues still loads without it.
+            val manager = async { runCatching { api.manager(token) }.getOrNull() }
+            loadRooms(api, token) to manager.await()
+        }
+    }, reloadSignal = reload) { (rooms, manager) ->
         LazyColumn(
             Modifier.fillMaxSize().background(PageBg),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 120.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            manager?.let { m ->
+                item(key = "manager") { Reveal(0) { ManagerCard(m, onChat = onSupport) } }
+            }
             if (rooms.isEmpty()) {
                 item { NoVenue(onSupport) }
             }

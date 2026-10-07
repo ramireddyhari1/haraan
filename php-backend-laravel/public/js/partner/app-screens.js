@@ -33,6 +33,8 @@
         search: 'M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z',
         arrow: 'M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z',
         near: 'M21 3 3 10.53v.98l6.84 2.65L12.48 21h.98L21 3z',
+        chat: 'M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z',
+        whatsapp: 'M12.04 2a9.9 9.9 0 0 0-8.5 15l-1.4 5 5.12-1.34A9.9 9.9 0 1 0 12.04 2zm0 18.1a8.2 8.2 0 0 1-4.2-1.15l-.3-.18-3.04.8.81-2.96-.2-.3a8.2 8.2 0 1 1 6.93 3.79zm4.5-6.14c-.25-.12-1.46-.72-1.68-.8-.23-.08-.39-.12-.56.12-.16.25-.64.8-.78.97-.15.16-.29.18-.54.06a6.7 6.7 0 0 1-3.32-2.9c-.25-.43.25-.4.72-1.33.08-.16.04-.3-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.4-.41-.56-.42h-.47a.9.9 0 0 0-.66.31 2.77 2.77 0 0 0-.86 2.06c0 1.21.88 2.39 1.01 2.55.12.16 1.74 2.66 4.22 3.73 1.57.68 2.18.74 2.97.62.48-.07 1.46-.6 1.67-1.17.2-.58.2-1.07.15-1.17-.06-.1-.23-.16-.48-.29z',
         stadium: 'M12 4C6.5 4 2 5.6 2 7.5v9C2 18.4 6.5 20 12 20s10-1.6 10-3.5v-9C22 5.6 17.5 4 12 4zm0 2c4.4 0 7.5 1.1 7.9 1.5-.4.4-3.5 1.5-7.9 1.5S4.5 7.9 4.1 7.5C4.5 7.1 7.6 6 12 6zm-2 12.9V15h4v3.9c-.65.06-1.32.1-2 .1s-1.35-.04-2-.1z',
         cricket: BALL, soccer: BALL, tennis: BALL, ball: BALL,
     };
@@ -541,7 +543,36 @@
             + (A.u.support ? '<a class="ha-cta" href="' + esc(A.u.support) + '">Ask Haraan</a>' : '') + '</section>';
     }
 
-    var venuesState = { rooms: null, host: null };
+    /**
+     * The Haraan employee who looks after this partner, set in /control. Same card as
+     * the app's ManagerCard: nobody assigned falls back to plain Haraan support.
+     */
+    function managerCard(r) {
+        if (!r) return '';
+        var m = r.data, assigned = !!(m && m.name);
+        var call = assigned && m.show_call ? m.phone : null;
+        var wa = assigned ? (m.show_whatsapp ? m.phone : null) : r.support_whatsapp;
+        var chat = (!assigned || m.show_chat) && A.u.support;
+        var initials = assigned ? m.name.trim().split(/\s+/).slice(0, 2).map(function (w) { return w.charAt(0).toUpperCase(); }).join('') : '';
+        var face = assigned && m.photo_url ? '<img src="' + esc(m.photo_url) + '" alt="">' : assigned ? '<b>' + esc(initials) + '</b>' : mat('agent');
+        var sub = !assigned ? 'A manager hasn’t been assigned yet' : m.hours;
+        var waDigits = wa ? String(wa).replace(/\D/g, '') : '';
+        if (waDigits.length === 10) waDigits = '91' + waDigits;
+        var btn = function (href, icon, label, main, attrs) {
+            return '<a class="ha-mgr-btn' + (main ? ' is-main' : '') + '" href="' + esc(href) + '"' + (attrs || '') + ' data-mgr>' + mat(icon) + label + '</a>';
+        };
+        var acts = (call ? btn('tel:' + call, 'phone', 'Call', true) : '')
+            + (wa ? btn('https://wa.me/' + waDigits, 'whatsapp', 'WhatsApp', !call, ' target="_blank" rel="noopener"') : '')
+            + (chat ? btn(A.u.support, 'chat', 'Chat', !call && !wa) : '');
+        return '<section class="ha-vcard ha-mgr"><div class="ha-row"><span class="ha-mgr-face">' + face + '</span><span class="ha-grow">'
+            + '<small class="ha-mgr-role">' + esc(assigned ? m.title : 'Haraan support') + '</small>'
+            + '<b class="ha-mgr-name">' + esc(assigned ? m.name : 'We’re here for your venue') + '</b>'
+            + (sub ? '<span class="ha-mgr-sub">' + (assigned ? mat('schedule') : '') + esc(sub) + '</span>' : '') + '</span></div>'
+            + (assigned && m.intro ? '<p class="ha-mgr-intro">' + esc(m.intro) + '</p>' : '')
+            + (acts ? '<div class="ha-mgr-acts">' + acts + '</div>' : '') + '</section>';
+    }
+
+    var venuesState = { rooms: null, host: null, manager: null };
 
     function loadRooms() {
         var today = new Date(), tomorrow = new Date(Date.now() + 86400000);
@@ -575,7 +606,7 @@
         var host = venuesState.host;
         var rooms = venuesState.rooms;
         if (!host || !rooms) return;
-        var out = '';
+        var out = managerCard(venuesState.manager);
         if (!rooms.length) out += noVenue();
         rooms.forEach(function (room) {
             out += venueHero(room) + attentionCard(room) + detailsCard(room.details, room.details != null) + courtsCard(room) + manageCard(room);
@@ -587,7 +618,10 @@
     function loadVenues() {
         var host = venuesState.host;
         if (!venuesState.rooms) host.innerHTML = skeleton(3);
-        loadRooms().then(function (rooms) {
+        // The manager card is a nicety: if it fails, Venues still draws without it.
+        Promise.all([loadRooms(), A.soft(A.api('manager', { branch: false }))]).then(function (p) {
+            var rooms = p[0];
+            venuesState.manager = p[1];
             venuesState.rooms = rooms;
             renderVenues();
         }, function () { if (!venuesState.rooms) failCard(host, loadVenues); });
@@ -598,6 +632,7 @@
             venuesState.host = host;
             host.onclick = function (e) {
                 var t = e.target, b;
+                if (t.closest('[data-mgr]')) vibrate(8);
                 if ((b = t.closest('[data-hours]'))) {
                     var room = (venuesState.rooms || []).filter(function (r) { return r.v.id === +b.dataset.hours; })[0];
                     if (!room) return;

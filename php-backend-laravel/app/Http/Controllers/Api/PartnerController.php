@@ -14,6 +14,7 @@ use App\Models\BatchEnrollment;
 use App\Models\CustomerPackage;
 use App\Models\PackageRedemption;
 use App\Models\VenuePackage;
+use App\Models\PartnerManager;
 use App\Models\PartnerPayoutAccount;
 use App\Models\PayoutBatch;
 use App\Models\User;
@@ -290,6 +291,25 @@ class PartnerController extends Controller
         return response()->json([
             'event'    => $this->eventSummary($event),
             'bookings' => $bookings,
+        ]);
+    }
+
+    /**
+     * GET /api/partner/manager — the Haraan employee assigned to this partner in
+     * /control, for the card on top of Venues. Desk staff see their owner's manager.
+     * `data` is null when nobody is assigned (or the card is hidden); the client then
+     * shows plain Haraan support using `support_whatsapp`.
+     */
+    public function manager(Request $request): JsonResponse
+    {
+        $row = PartnerManager::query()
+            ->with('manager')
+            ->where('partner_id', $request->user()->effectivePartnerId())
+            ->first();
+
+        return response()->json([
+            'data' => $row?->toCard(),
+            'support_whatsapp' => \App\Models\AppSetting::get('support_whatsapp') ?: null,
         ]);
     }
 

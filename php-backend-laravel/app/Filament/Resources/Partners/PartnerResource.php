@@ -8,7 +8,9 @@ use App\Filament\Resources\Partners\Pages\ListPartners;
 use App\Filament\Resources\Partners\Pages\ViewPartner;
 use App\Filament\Resources\Partners\RelationManagers\EventsRelationManager;
 use App\Filament\Resources\Partners\RelationManagers\VenuesRelationManager;
+use App\Filament\Resources\Users\UserResource;
 use App\Filament\Support\AvatarColumn;
+use App\Models\PartnerManager;
 use App\Models\User;
 use App\Support\ContactPrefill;
 use App\Support\PartnerAccountResolver;
@@ -18,6 +20,7 @@ use Filament\Actions\ViewAction;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Infolists\Components\ImageEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Resource;
@@ -178,11 +181,64 @@ class PartnerResource extends Resource
                 ->default('venue')
                 ->helperText('Decides which console they sign in to. Sports venues and cafés both take bookings; cafés also host events.')
                 ->native(false),
+            // User::setStatusAttribute upper-cases on save, so stored rows read ACTIVE /
+            // SUSPENDED. Loading that raw into these lower-case options made every partner
+            // edit fail validation on a status the admin never touched.
             Select::make('status')
                 ->options(['active' => 'Active', 'suspended' => 'Suspended'])
                 ->default('active')
+                ->afterStateHydrated(fn (Select $component, ?string $state) => $component->state(strtolower(trim((string) $state)) ?: 'active'))
                 ->native(false),
+            self::managerSection(),
         ]);
+    }
+
+    /**
+     * The Haraan employee who looks after this partner. Shown as a card on top of the
+     * partner's Venues screen in the app and on the web. Clearing the employee hides it.
+     */
+    private static function managerSection(): Section
+    {
+        return Section::make('Haraan manager')
+            ->description('The Haraan employee this partner talks to. Shown on top of their Venues screen in the partner app and web.')
+            ->icon('heroicon-o-user-circle')
+            ->relationship('partnerManager')
+            ->columns(['default' => 1, 'md' => 2])
+            ->columnSpanFull()
+            ->schema([
+                Select::make('manager_id')
+                    ->label('Employee')
+                    ->options(fn (): array => User::query()
+                        ->whereIn(\Illuminate\Support\Facades\DB::raw('upper(role)'), UserResource::STAFF_ROLES)
+                        ->orderBy('name')
+                        ->pluck('name', 'id')
+                        ->all())
+                    ->searchable()
+                    ->placeholder('Nobody assigned')
+                    ->helperText('Name and photo come from their staff profile. Leave empty to show plain Haraan support.'),
+                TextInput::make('title')
+                    ->label('Card title')
+                    ->placeholder(PartnerManager::DEFAULT_TITLE)
+                    ->maxLength(60),
+                TextInput::make('phone')
+                    ->label('Number to show')
+                    ->tel()
+                    ->maxLength(20)
+                    ->helperText('Used for Call and WhatsApp. Leave empty to use the support WhatsApp from Branding.'),
+                TextInput::make('hours')
+                    ->label('Available')
+                    ->placeholder('Mon–Sat · 9 AM – 8 PM')
+                    ->maxLength(60),
+                TextInput::make('intro')
+                    ->label('Short note')
+                    ->placeholder('Pricing, slots, payouts — message me anytime.')
+                    ->maxLength(160)
+                    ->columnSpanFull(),
+                Toggle::make('show_call')->label('Show Call')->default(true),
+                Toggle::make('show_whatsapp')->label('Show WhatsApp')->default(true),
+                Toggle::make('show_chat')->label('Show Chat (Haraan support inbox)')->default(true),
+                Toggle::make('is_visible')->label('Show the card to the partner')->default(true),
+            ]);
     }
 
     /**
@@ -226,6 +282,10 @@ class PartnerResource extends Resource
                         ->badge()
                         ->formatStateUsing(fn (?string $state): string => ucfirst(strtolower((string) $state)))
                         ->color(fn (?string $state): string => strtolower((string) $state) === 'active' ? 'success' : 'danger'),
+                    TextEntry::make('partnerManager.manager.name')
+                        ->label('Haraan manager')
+                        ->icon('heroicon-m-user-circle')
+                        ->placeholder('Nobody assigned'),
                     TextEntry::make('created_at')
                         ->label('Partner since')
                         ->dateTime('d M Y')
@@ -257,6 +317,10 @@ class PartnerResource extends Resource
                     ->color('info')
                     ->formatStateUsing(fn (?string $state): string => \App\Support\PartnerLane::typeLabel($state))
                     ->placeholder('—'),
+                TextColumn::make('partnerManager.manager.name')
+                    ->label('Haraan manager')
+                    ->placeholder('—')
+                    ->toggleable(),
                 TextColumn::make('status')
                     ->badge()
                     ->color(fn (?string $state): string => $state === 'active' ? 'success' : 'danger'),

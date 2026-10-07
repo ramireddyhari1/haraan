@@ -567,6 +567,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
         Route::get('/events', 'events');
         Route::get('/events/{id}', 'showEvent')->whereNumber('id');
         Route::get('/events/{id}/analytics', 'eventAnalytics')->whereNumber('id');
+        Route::get('/manager', 'manager');
         Route::get('/venues', 'venues');
         Route::get('/venues/{id}', 'showVenue')->whereNumber('id');
         Route::get('/venues/{id}/analytics', 'venueAnalytics')->whereNumber('id');

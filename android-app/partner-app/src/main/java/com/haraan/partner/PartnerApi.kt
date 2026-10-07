@@ -357,6 +357,20 @@ data class EventSummary(
     val revenue: Double,
 )
 
+/** See [PartnerApi.manager]. [name] null = nobody assigned. */
+data class HaraanManager(
+    val name: String?,
+    val photoUrl: String?,
+    val title: String?,
+    val intro: String?,
+    val hours: String?,
+    val phone: String?,
+    val showCall: Boolean,
+    val showWhatsapp: Boolean,
+    val showChat: Boolean,
+    val supportWhatsapp: String?,
+)
+
 data class VenueSummary(
     val id: Long,
     val name: String,
@@ -1177,6 +1191,28 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 revenue = o.optDouble("revenue", 0.0),
             )
         }
+    }
+
+    /**
+     * The Haraan employee assigned to this partner in /control, for the card on top of
+     * Venues. `manager` is null when nobody is assigned; the card then offers plain
+     * Haraan support on [HaraanManager.supportWhatsapp].
+     */
+    suspend fun manager(token: String): HaraanManager = withContext(Dispatchers.IO) {
+        val o = JSONObject(get("/api/partner/manager", token))
+        val d = o.optJSONObject("data")
+        HaraanManager(
+            name = d?.optStringOrNull("name"),
+            photoUrl = d?.optStringOrNull("photo_url"),
+            title = d?.optStringOrNull("title"),
+            intro = d?.optStringOrNull("intro"),
+            hours = d?.optStringOrNull("hours"),
+            phone = d?.optStringOrNull("phone"),
+            showCall = d?.optBoolean("show_call") ?: false,
+            showWhatsapp = d?.optBoolean("show_whatsapp") ?: false,
+            showChat = d?.optBoolean("show_chat", true) ?: true,
+            supportWhatsapp = o.optStringOrNull("support_whatsapp"),
+        )
     }
 
     suspend fun venues(token: String): List<VenueSummary> = withContext(Dispatchers.IO) {
