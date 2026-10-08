@@ -256,7 +256,7 @@
             </a>
         </div>
 
-        {{-- Live / Finished / District / State strip with the sliding indicator. --}}
+        {{-- Live / Finished / Scheduled / District / State strip with the sliding indicator. --}}
         <div class="mab__tabs" role="tablist">
             <button class="mab__tab is-on" role="tab" data-i="0" onclick="mabTab(0)">
                 <span class="mab__tabic">
@@ -270,10 +270,14 @@
                 Finished
             </button>
             <button class="mab__tab" role="tab" data-i="2" onclick="mabTab(2)">
+                <span class="mab__tabic"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 12h-5v5h5v-5zM16 1v2H8V1H6v2H5c-1.11 0-1.99.9-1.99 2L3 19a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-1V1h-2zm3 18H5V8h14v11z"></path></svg></span>
+                Scheduled
+            </button>
+            <button class="mab__tab" role="tab" data-i="3" onclick="mabTab(3)">
                 <span class="mab__tabic"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M17 11V3H7v4H3v14h8v-4h2v4h8V11h-4zM7 19H5v-2h2v2zm0-4H5v-2h2v2zm0-4H5V9h2v2zm4 4H9v-2h2v2zm0-4H9V9h2v2zm0-4H9V5h2v2zm4 8h-2v-2h2v2zm0-4h-2V9h2v2zm0-4h-2V5h2v2zm4 12h-2v-2h2v2zm0-4h-2v-2h2v2z"></path></svg></span>
                 District
             </button>
-            <button class="mab__tab" role="tab" data-i="3" onclick="mabTab(3)">
+            <button class="mab__tab" role="tab" data-i="4" onclick="mabTab(4)">
                 <span class="mab__tabic"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2 2 7v2h20V7L12 2zM4 11v6h3v-6H4zm6.5 0v6h3v-6h-3zM17 11v6h3v-6h-3zM2 21h20v-2H2v2z"></path></svg></span>
                 State
             </button>
@@ -329,8 +333,10 @@
                  @if ($abFinishedRows->isNotEmpty()) hidden @endif>No finished matches yet</div>
         </div>
 
-        {{-- ── TAB 2 / 3: DISTRICT & STATE boards ──────────────────────── --}}
-        @foreach (['district' => 2, 'state' => 3] as $scopeKey => $tabIndex)
+        @include('site.partials.actionboard-scheduled', ['mine' => $abScheduledMine ?? [], 'open' => $abScheduledOpen ?? []])
+
+        {{-- ── TAB 3 / 4: DISTRICT & STATE boards ──────────────────────── --}}
+        @foreach (['district' => 3, 'state' => 4] as $scopeKey => $tabIndex)
             @php $board = $abBoards[$scopeKey]; $rows = $board['rows']; @endphp
             <div class="mab__panel" id="mabPanel{{ $tabIndex }}">
                 @if ($scopeKey === 'district' && $abSummary !== null)
@@ -2748,9 +2754,9 @@ main.container {
     }
     @keyframes mabPulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
     .mab__ind {
-        position: absolute; bottom: 0; left: 0; width: 12.5%; height: 2.5px;
+        position: absolute; bottom: 0; left: 0; width: 10%; height: 2.5px;
         background: #2563EB; border-radius: 2px 2px 0 0;
-        transform: translateX(50%); /* centred in slot 0 at rest: (25% − 12.5%)/2 = 6.25% of track = 50% of self */
+        transform: translateX(50%); /* centred in slot 0 at rest: (20% − 10%)/2 = 5% of track = 50% of self */
         transition: transform .3s cubic-bezier(.2, 0, 0, 1);
     }
     .mab__tabs::after {
@@ -2999,15 +3005,15 @@ main.container {
         mab.querySelectorAll('.mab__tab').forEach(function (t) {
             t.classList.toggle('is-on', +t.dataset.i === i);
         });
-        for (var p = 0; p < 4; p++) {
+        for (var p = 0; p < 5; p++) {
             document.getElementById('mabPanel' + p).classList.toggle('is-on', p === i);
         }
-        // Indicator is 12.5% wide; each slot 25% → offset = slot*i + (slot-ind)/2.
+        // Indicator is 10% wide; each slot 20% → offset = slot*i + (slot-ind)/2.
         var ind = document.getElementById('mabInd');
         ind.style.transform = 'translateX(' + (i * 200 + 50) + '%)';
         // District/State sit on the app's cooler board background (T.BgPage).
-        mab.classList.toggle('is-board', i >= 2);
-        if (i >= 2) mabCountUp();
+        mab.classList.toggle('is-board', i >= 3);
+        if (i >= 3) mabCountUp();
         window.scrollTo({ top: 0 });
     };
 
@@ -3034,11 +3040,11 @@ main.container {
     // Show the cards that match the chip, and let each panel's own empty line speak when
     // none do — one filter over the Live and Finished feeds, which share a card partial.
     function mabFilter() {
-        ['mabPanel0', 'mabPanel1'].forEach(function (id) {
+        ['mabPanel0', 'mabPanel1', 'mabPanel2'].forEach(function (id) {
             var panel = document.getElementById(id);
             if (!panel) return;
             var shown = 0;
-            panel.querySelectorAll('.mab__match[data-sport]').forEach(function (card) {
+            panel.querySelectorAll('[data-sport]:not(.mab__sport)').forEach(function (card) {
                 var ok = currentSport === 'All' || card.dataset.sport === currentSport;
                 card.hidden = !ok;
                 if (ok) shown++;

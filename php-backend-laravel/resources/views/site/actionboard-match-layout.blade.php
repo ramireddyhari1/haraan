@@ -48,6 +48,8 @@
         ['key' => 'commentary', 'label' => 'Commentary', 'route' => route('site.gamehub.actionboard.match.commentary', $id)],
         ['key' => 'live',       'label' => 'Live',       'route' => route('site.gamehub.actionboard.match', $id)],
         ['key' => 'scorecard',  'label' => 'Scorecard',  'route' => route('site.gamehub.actionboard.match.scorecard', $id)],
+        ['key' => 'mvp',        'label' => 'MVP',        'route' => route('site.gamehub.actionboard.match.mvp', $id)],
+        ['key' => 'insights',   'label' => 'Insights',   'route' => route('site.gamehub.actionboard.match.insights', $id)],
     ];
 @endphp
 
@@ -152,6 +154,11 @@
             </a>
         @endforeach
     </nav>
+
+    <script>
+        // Six tabs overflow a phone: keep the open one in view, as the app's tab row does.
+        window.addEventListener('load', function () { var on = document.querySelector('.mdx-tabs .mdx-tab.is-on'); if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest', inline: 'center' }); });
+    </script>
 
     <div class="mdx-content">
         @yield('match_content')
@@ -270,8 +277,9 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-hstat em { color: #64748B; font-weight: 500; font-style: normal; }
 
 /* ── Tabs ── */
-.mdx-tabs { display: flex; background: var(--bg); position: sticky; top: 58px; z-index: 20; border-bottom: 1px solid var(--border); }
-.mdx-tab { flex: 1; text-align: center; padding: 12px 4px; font-size: 12px; font-weight: 600; color: var(--ink2); text-decoration: none; position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
+.mdx-tabs { display: flex; background: var(--bg); position: sticky; top: 58px; z-index: 20; border-bottom: 1px solid var(--border); overflow-x: auto; scrollbar-width: none; }
+.mdx-tabs::-webkit-scrollbar { display: none; }
+.mdx-tab { flex: 1 0 auto; text-align: center; padding: 12px 12px; white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--ink2); text-decoration: none; position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 5px; }
 .mdx-tab.is-on { color: var(--ink); }
 .mdx-tab.is-on::after { content: ""; position: absolute; bottom: -1px; left: 50%; transform: translateX(-50%); width: 22px; height: 2px; border-radius: 2px; background: var(--red); }
 .mdx-tab-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); animation: mdxPulse .9s ease-in-out infinite alternate; }

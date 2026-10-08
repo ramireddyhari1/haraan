@@ -59,7 +59,7 @@
     if ($fb && !empty($fb['clock']['phase']) && $isLive) $chips[] = [ucwords(str_replace('_', ' ', $fb['clock']['phase'])), 'cool'];
 
     $serving = $board['serving'] ?? null;
-    $tabLabels = ['summary' => 'Summary', 'timeline' => $family === 'tally' ? 'Timeline' : 'Play by play', 'players' => 'Players', 'insights' => 'Insights'];
+    $tabLabels = ['summary' => 'Summary', 'timeline' => $family === 'tally' ? 'Timeline' : 'Play by play', 'players' => 'Players', 'stats' => 'Stats', 'box' => 'Box score', 'lineups' => 'Line-ups', 'insights' => 'Insights'];
     $url = fn (string $t) => route('site.gamehub.actionboard.match', ['id' => $match->id, 'tab' => $t]);
 
     // The stats a player row shows, in the sport's own order.
@@ -314,6 +314,105 @@
         @endforeach
         <p class="smx-note">Only what the scorer recorded is shown. A dash means nothing was recorded, not zero.</p>
 
+    @elseif($tab === 'stats')
+        {{-- Football Stats tab (FootballMatchScreen StatsTab): possession, then each stat group. --}}
+        @php $poss = $fb['possession'] ?? null; $fstats = $fb['stats'] ?? null; @endphp
+        @if(! $poss && empty($fstats['has_any']))
+            <div class="smx-empty"><b>No match stats yet</b><br>Shots, corners, fouls, offsides and more appear here as the scorer records them.</div>
+        @else
+            @if($poss)
+                <div class="smx-card smx-poss">
+                    <div class="smx-poss-top">
+                        <b class="{{ $poss['home'] >= $poss['away'] ? 'is-lead' : '' }}">{{ (int) $poss['home'] }}%</b>
+                        <div><span>POSSESSION</span><em>{{ intdiv((int) ($poss['tracked_sec'] ?? 0), 60) }} min tracked</em></div>
+                        <b class="{{ $poss['away'] > $poss['home'] ? 'is-lead is-away' : '' }}">{{ (int) $poss['away'] }}%</b>
+                    </div>
+                    <div class="smx-poss-bar"><i style="flex: {{ max(1, (int) $poss['home']) }}"></i><i style="flex: {{ max(1, (int) $poss['away']) }}"></i></div>
+                    @if($isLive && in_array($poss['current'] ?? null, ['home', 'away'], true))
+                        <div class="smx-poss-now" style="text-align: {{ $poss['current'] === 'home' ? 'left' : 'right' }}">Ball with {{ $poss['current'] === 'home' ? $code1 : $code2 }}</div>
+                    @endif
+                </div>
+            @endif
+            @foreach(($fstats['groups'] ?? []) as $g)
+                @continue(empty($g['rows']))
+                <div class="smx-card">
+                    <div class="smx-eyebrow" style="text-align:center">{{ $g['title'] }}</div>
+                    @foreach($g['rows'] as $r)
+                        @php $tot = max(1, $r['home'] + $r['away']); @endphp
+                        <div class="smx-statrow">
+                            <b>{{ $r['home'] }}</b><span>{{ $r['label'] }}</span><b>{{ $r['away'] }}</b>
+                            <div class="smx-statbar"><i style="width:{{ round($r['home'] * 100 / $tot) }}%"></i></div>
+                        </div>
+                    @endforeach
+                </div>
+            @endforeach
+        @endif
+
+    @elseif($tab === 'box')
+        {{-- Basketball Box score (BoxScoreTable): one table per side, team line as the total. --}}
+        @php
+            $box = is_array($board['box'] ?? null) ? $board['box'] : null;
+            $boxCols = ['pts' => 'PTS', 'reb' => 'REB', 'ast' => 'AST', 'stl' => 'STL', 'blk' => 'BLK', 'fg3' => '3PM', 'ft' => 'FTM', 'to' => 'TO', 'pf' => 'PF'];
+            $hasBox = $box && (count($box['players'] ?? []) > 0
+                || array_sum(array_map(fn ($k) => (int) ($box['team']['home'][$k] ?? 0) + (int) ($box['team']['away'][$k] ?? 0), ['reb', 'pf'])) > 0);
+        @endphp
+        @if(! $hasBox)
+            <div class="smx-empty">Name the shooter, rebounder or fouler when scoring and each player&rsquo;s line appears here.</div>
+        @else
+            @foreach(['home' => $team1, 'away' => $team2] as $side => $teamName)
+                @php $rows = collect($box['players'] ?? [])->where('side', $side)->sortByDesc('pts')->values(); $teamLine = $box['team'][$side] ?? []; @endphp
+                <div class="smx-card smx-card-flush">
+                    <div class="smx-card-head">{{ $teamName }}</div>
+                    @if($rows->isEmpty())
+                        <div class="smx-empty">No named players yet.</div>
+                    @else
+                        <div class="smx-table-wrap">
+                        <table class="smx-grid smx-players">
+                            <thead><tr><th scope="col">Player</th>@foreach($boxCols as $label)<th scope="col">{{ $label }}</th>@endforeach</tr></thead>
+                            <tbody>
+                            @foreach($rows as $p)
+                                <tr><th scope="row">{{ $p['name'] }}</th>@foreach($boxCols as $k => $label)<td>{{ (int) ($p[$k] ?? 0) }}</td>@endforeach</tr>
+                            @endforeach
+                            <tr class="smx-total"><th scope="row">Team</th>@foreach($boxCols as $k => $label)<td>{{ (int) ($teamLine[$k] ?? 0) }}</td>@endforeach</tr>
+                            </tbody>
+                        </table>
+                        </div>
+                    @endif
+                </div>
+            @endforeach
+        @endif
+
+    @elseif($tab === 'lineups')
+        {{-- BoardLineups: who is on each side, straight from the squads the scorer picked. --}}
+        @php
+            $lineup = fn ($raw) => array_values(array_filter(array_map(fn ($m) => [
+                'name' => trim((string) (is_array($m) ? ($m['name'] ?? '') : $m)),
+                'id' => is_array($m) ? trim((string) ($m['id'] ?? '')) : '',
+            ], (array) $raw), fn ($m) => $m['name'] !== '' && strtolower($m['name']) !== 'null'));
+            $sides = [[$team1 ?: 'Home', $lineup($d['homeSquad'] ?? []), 'var(--home)'], [$team2 ?: 'Away', $lineup($d['awaySquad'] ?? []), 'var(--away)']];
+        @endphp
+        @if(count($sides[0][1]) === 0 && count($sides[1][1]) === 0)
+            <div class="smx-empty">No line-ups were recorded for this match.</div>
+        @else
+            @foreach($sides as [$teamName, $squad, $accent])
+                <div class="smx-card smx-lineup" style="--ac: {{ $accent }}">
+                    <div class="smx-lineup-head"><i></i><b>{{ $teamName }}</b><span>{{ count($squad) }}</span></div>
+                    @forelse($squad as $member)
+                        <div class="smx-lineup-row">
+                            <span class="smx-lineup-mono">{{ mb_strtoupper(mb_substr($member['name'], 0, 1)) }}</span>
+                            @if($member['id'] !== '' && strtolower($member['id']) !== 'null')
+                                <a href="{{ route('site.player.profile', $member['id']) }}">{{ $member['name'] }}</a>
+                            @else
+                                <span>{{ $member['name'] }}</span>
+                            @endif
+                        </div>
+                    @empty
+                        <div class="smx-note">No players listed.</div>
+                    @endforelse
+                </div>
+            @endforeach
+        @endif
+
     @elseif($tab === 'insights')
         @php $in = $insights ?? []; $flow = $in['flow'] ?? []; @endphp
         @if(!empty($insightsLock))
@@ -421,6 +520,25 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .smx-card-head { padding: 12px 16px; font-weight: 800; font-size: 14px; border-bottom: 1px solid var(--border); }
 .smx-eyebrow { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; }
 .smx-table-wrap { overflow-x: auto; }
+.smx-poss-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.smx-poss-top b { font-size: 22px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.smx-poss-top b.is-lead { color: var(--home); } .smx-poss-top b.is-lead.is-away { color: var(--away); }
+.smx-poss-top div { display: flex; flex-direction: column; align-items: center; }
+.smx-poss-top span { font-size: 11px; font-weight: 900; letter-spacing: 1px; color: var(--ink2); }
+.smx-poss-top em { font-style: normal; font-size: 10.5px; color: var(--ink2); }
+.smx-poss-bar { display: flex; gap: 3px; height: 8px; border-radius: 4px; overflow: hidden; margin-top: 10px; }
+.smx-poss-bar i:first-child { background: var(--home); } .smx-poss-bar i:last-child { background: var(--away); }
+.smx-poss-now { font-size: 11.5px; font-weight: 700; color: var(--ink2); margin-top: 8px; }
+.smx-players th[scope="row"] { white-space: nowrap; }
+.smx-total th, .smx-total td { font-weight: 800; border-top: 1px solid var(--border); }
+.smx-lineup { margin-bottom: 12px; }
+.smx-lineup-head { display: flex; align-items: center; gap: 9px; margin-bottom: 4px; }
+.smx-lineup-head i { width: 8px; height: 8px; border-radius: 50%; background: var(--ac); }
+.smx-lineup-head b { flex: 1; font-size: 14.5px; font-weight: 700; }
+.smx-lineup-head span { font-size: 12px; font-weight: 600; color: var(--ink2); }
+.smx-lineup-row { display: flex; align-items: center; gap: 10px; padding-top: 9px; font-size: 13.5px; min-width: 0; }
+.smx-lineup-row a, .smx-lineup-row > span:last-child { color: inherit; text-decoration: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.smx-lineup-mono { width: 26px; height: 26px; flex: 0 0 auto; border-radius: 50%; background: color-mix(in srgb, var(--ac) 12%, transparent); color: var(--ac); font-size: 11px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
 .smx-grid { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .smx-grid th, .smx-grid td { padding: 10px 12px; text-align: center; font-size: 13px; border-bottom: 1px solid #F1F5F9; }
 .smx-grid thead th { font-size: 10px; color: var(--muted); font-weight: 700; letter-spacing: .5px; }

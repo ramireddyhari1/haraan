@@ -93,6 +93,12 @@ Route::controller(PublicWebController::class)->group(function (): void {
     Route::get('/gamehub/actionboard/match/{id}/info', 'actionBoardMatchInfo')->name('site.gamehub.actionboard.match.info');
     Route::get('/gamehub/actionboard/match/{id}/commentary', 'actionBoardMatchCommentary')->name('site.gamehub.actionboard.match.commentary');
     Route::get('/gamehub/actionboard/match/{id}/scorecard', 'actionBoardMatchScorecard')->name('site.gamehub.actionboard.match.scorecard');
+    Route::get('/gamehub/actionboard/match/{id}/mvp', 'actionBoardMatchMvp')->name('site.gamehub.actionboard.match.mvp');
+    Route::get('/gamehub/actionboard/match/{id}/insights', 'actionBoardMatchInsights')->name('site.gamehub.actionboard.match.insights');
+    Route::middleware(['auth', 'throttle:20,1'])->post('/gamehub/actionboard/match/{id}/join', 'actionBoardJoin')->whereNumber('id')->name('site.gamehub.actionboard.join');
+    Route::middleware(['auth', 'throttle:20,1'])->delete('/gamehub/actionboard/match/{id}/join', 'actionBoardCancelJoin')->whereNumber('id')->name('site.gamehub.actionboard.join.cancel');
+    Route::middleware(['auth', 'throttle:30,1'])->post('/gamehub/players/{player}/follow', 'followPlayer')->name('site.player.follow');
+    Route::middleware(['auth', 'throttle:30,1'])->delete('/gamehub/players/{player}/follow', 'unfollowPlayer')->name('site.player.unfollow');
     Route::get('/gamehub/actionboard/match/{id}/json', 'actionBoardMatchJson')->name('site.gamehub.actionboard.match.json');
     Route::get('/gamehub/actionboard/matches/json', 'actionBoardMatchesJson')->name('site.gamehub.actionboard.matches.json');
     Route::get('/gamehub/leaderboard', 'leaderboard')->name('site.gamehub.leaderboard');

@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Api\LiveMatchController;
+use App\Http\Controllers\Api\MatchJoinController;
+use App\Http\Controllers\Api\MatchesController;
 use App\Http\Controllers\Controller;
 use App\Models\Ad;
 use App\Models\Event;
@@ -871,10 +873,29 @@ final class PublicWebController extends Controller
             $stateBoard = $leaderboards->monthly('state', null, (string) $viewer->state, 50);
         }
 
+        // Scheduled tab — the app's two lanes, read through the SAME API controllers the
+        // app calls so the web can never disagree with it: "Mine" (the signed-in creator's
+        // not-yet-started matches) and "Open near me" (public matches looking for players,
+        // ranked by the same MatchProximity as the feed).
+        $scheduledMine = [];
+        if ($viewer !== null) {
+            $req = Request::create('/api/matches/scheduled', 'GET');
+            $req->attributes->set('auth_user', $viewer);
+            $scheduledMine = (array) (app(MatchesController::class)->scheduled($req)->getData(true)['data'] ?? []);
+        }
+        $openReq = Request::create('/api/matches/open', 'GET', array_filter([
+            'lat' => $viewerLat, 'lng' => $viewerLng,
+            'district' => $viewer?->district, 'state' => $viewer?->state,
+        ], fn ($v) => $v !== null && $v !== ''));
+        $openReq->attributes->set('auth_user', $viewer);
+        $scheduledOpen = (array) (app(MatchJoinController::class)->open($openReq)->getData(true)['data'] ?? []);
+
         return view('site.actionboard', [
             'title' => 'Action Board',
             'matches' => $matches,
             'abFeed' => $feed,
+            'abScheduledMine' => $scheduledMine,
+            'abScheduledOpen' => $scheduledOpen,
             'abDistrictSummary' => $districtSummary,
             'abDistrictBoard' => $districtBoard,
             'abStateBoard' => $stateBoard,
@@ -920,7 +941,18 @@ final class PublicWebController extends Controller
      */
     private function sportMatchView(LiveMatch $match, string $tab): View
     {
-        $tabs = ['summary', 'timeline', 'players', 'insights'];
+        // Team sports carry a Line-ups tab in the app (BoardLineups); racket sports don't.
+        // The app's per-sport tab rows: football has Stats, basketball a Box score (which
+        // is its player view, so an old ?tab=players link lands there).
+        $tabs = match (strtolower((string) $match->sport)) {
+            'football' => ['summary', 'stats', 'timeline', 'players', 'lineups', 'insights'],
+            'basketball' => ['summary', 'box', 'timeline', 'lineups', 'insights'],
+            'kabaddi', 'volleyball' => ['summary', 'timeline', 'players', 'lineups', 'insights'],
+            default => ['summary', 'timeline', 'players', 'insights'],
+        };
+        if ($tab === 'players' && ! in_array('players', $tabs, true)) {
+            $tab = 'box';
+        }
         $tab = in_array($tab, $tabs, true) ? $tab : 'summary';
         $viewer = auth()->user();
         $member = $viewer instanceof User ? $viewer : null;
@@ -987,6 +1019,100 @@ final class PublicWebController extends Controller
         }
 
         return view('site.actionboard-match-commentary', ['title' => 'Commentary', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'commentary']);
+    }
+
+    /**
+     * "Request to join" from the web Scheduled tab's Open-near-me lane — the session user
+     * goes through the very same MatchJoinController action the app's JWT call does, so
+     * every rule (own match, not open, already started, duplicate) is enforced once.
+     */
+    public function actionBoardJoin(Request $request, string $id): JsonResponse
+    {
+        $request->attributes->set('auth_user', $request->user());
+
+        return app(MatchJoinController::class)->requestJoin($request, $id);
+    }
+
+    public function actionBoardCancelJoin(Request $request, string $id): JsonResponse
+    {
+        $request->attributes->set('auth_user', $request->user());
+
+        return app(MatchJoinController::class)->cancelJoin($request, $id);
+    }
+
+    /**
+     * Follow / unfollow a player from the web (MVP cards). The session user goes through
+     * PlayersController's own actions, so self-follow, blocks and the follow-state
+     * payload are exactly the app's.
+     */
+    public function followPlayer(Request $request, string $player): JsonResponse
+    {
+        $request->attributes->set('auth_user', $request->user());
+
+        return app(\App\Http\Controllers\Api\PlayersController::class)->follow($request, $player);
+    }
+
+    public function unfollowPlayer(Request $request, string $player): JsonResponse
+    {
+        $request->attributes->set('auth_user', $request->user());
+
+        return app(\App\Http\Controllers\Api\PlayersController::class)->unfollow($request, $player);
+    }
+
+    public function actionBoardMatchMvp(string $id): View|RedirectResponse
+    {
+        $match = $this->visibleMatch($id);
+        if (! $this->isCricket($match)) {
+            return redirect()->route('site.gamehub.actionboard.match', ['id' => $id, 'tab' => 'players']);
+        }
+
+        return view('site.actionboard-match-mvp', ['title' => 'MVP', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'mvp']);
+    }
+
+    /**
+     * Cricket Insights — the app's Insights board. Same plan gate as the API
+     * (SportInsightsAccess), checked before CricketInsights replays anything, so a
+     * locked viewer costs nothing. The figures are CricketInsights::facts(), the very
+     * payload GET /api/live-matches/{id}/insights sends the app.
+     */
+    public function actionBoardMatchInsights(string $id): View|RedirectResponse
+    {
+        $match = $this->visibleMatch($id);
+        if (! $this->isCricket($match)) {
+            return redirect()->route('site.gamehub.actionboard.match', ['id' => $id, 'tab' => 'insights']);
+        }
+        $viewer = auth()->user();
+        $member = $viewer instanceof User ? $viewer : null;
+
+        $lock = null;
+        $facts = null;
+        try {
+            app(SportInsightsAccess::class)->authorizeMatch($member, $match);
+            $facts = app(\App\Services\CricketInsights::class)->facts($match);
+        } catch (EntitlementDenied $denied) {
+            $lock = ['message' => $denied->getMessage(), 'code' => $denied->reason, 'signed_in' => $member !== null];
+        }
+
+        // The ground card is public (GET /api/matches/{id}/ground sits outside the plan
+        // gate) — the app shows it even on a locked or not-yet-scored Insights tab.
+        $ground = null;
+        try {
+            $req = Request::create('/api/matches/'.$match->id.'/ground', 'GET');
+            $req->attributes->set('auth_user', $member);
+            $ground = app(MatchesController::class)->ground($req, (string) $match->id)->getData(true)['data'] ?? null;
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        return view('site.actionboard-match-insights', [
+            'ground' => $ground,
+            'title' => 'Insights',
+            'detail' => $this->matchDetailFor($id),
+            'id' => $id,
+            'activeTab' => 'insights',
+            'insights' => $facts,
+            'insightsLock' => $lock,
+        ]);
     }
 
     public function actionBoardMatchScorecard(string $id): View|RedirectResponse
