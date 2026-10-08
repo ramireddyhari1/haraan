@@ -366,13 +366,17 @@ internal fun HoldToBlockButton(
     val progress = remember { Animatable(0f) }
     var holding by remember { mutableStateOf(false) }
     var job by remember { mutableStateOf<Job?>(null) }
+    // A quick tap used to do nothing at all, which read as "broken". Now it shakes,
+    // buzzes no, and the label says to press and hold.
+    var hint by remember { mutableStateOf(false) }
+    val wobble = remember { Animatable(0f) }
     val pressScale by androidx.compose.animation.core.animateFloatAsState(
         if (holding) 0.975f else 1f, spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium), label = "hold-scale",
     )
 
     Box(
         modifier
-            .graphicsLayer { scaleX = pressScale; scaleY = pressScale }
+            .graphicsLayer { scaleX = pressScale; scaleY = pressScale; translationX = wobble.value }
             .fillMaxWidth()
             .height(58.dp)
             .shadow(10.dp, RoundedCornerShape(18.dp), ambientColor = Blue.copy(alpha = 0.25f), spotColor = Blue.copy(alpha = 0.35f))
@@ -403,7 +407,22 @@ internal fun HoldToBlockButton(
                     if (progress.value < 1f) {
                         job?.cancel()
                         holding = false
+                        val early = progress.value < 0.6f
                         scope.launch { progress.animateTo(0f, spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)) }
+                        if (early) {
+                            hint = true
+                            Haptics.reject(view)
+                            scope.launch {
+                                wobble.animateTo(0f, androidx.compose.animation.core.keyframes {
+                                    durationMillis = 360
+                                    -14f at 50; 12f at 110; -8f at 170; 5f at 230; -2f at 290
+                                })
+                            }
+                            scope.launch {
+                                kotlinx.coroutines.delay(2200)
+                                hint = false
+                            }
+                        }
                     }
                 }
             },
@@ -428,7 +447,11 @@ internal fun HoldToBlockButton(
                 Icon(Icons.Outlined.Block, null, tint = Color.White, modifier = Modifier.size(19.dp))
                 Spacer(Modifier.width(10.dp))
                 AnimatedContent(
-                    targetState = if (holding) "Keep holding…" else label,
+                    targetState = when {
+                        holding -> "Keep holding…"
+                        hint -> "Press and hold to block"
+                        else -> label
+                    },
                     transitionSpec = { fadeIn(tween(140)) togetherWith fadeOut(tween(90)) },
                     modifier = Modifier.weight(1f),
                     label = "hold-label",
