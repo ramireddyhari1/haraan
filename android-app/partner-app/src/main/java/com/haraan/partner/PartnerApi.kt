@@ -599,7 +599,25 @@ data class CourtCell(
      * Defaults true so a build talking to an older server behaves as before.
      */
     val allowed: Boolean = true,
+    /** Why this court-hour is off sale when a block took it (maintenance, private hire…). */
+    val block: CourtBlock? = null,
     val bookings: List<DayBooking>,
+)
+
+/**
+ * A court-hour taken by something that isn't a booking. [removable] = a one-off the desk
+ * made and may lift; recurring or whole-venue blocks belong to whoever set them up.
+ */
+data class CourtBlock(
+    val id: Long,
+    val kind: String,
+    val label: String,
+    val reason: String,
+    val note: String?,
+    val start: String?,
+    val end: String?,
+    val allDay: Boolean,
+    val removable: Boolean,
 )
 
 data class DaySlot(
@@ -1366,6 +1384,19 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                     price = c.optDouble("price", 0.0),
                     isPeak = c.optBoolean("is_peak", false),
                     allowed = c.optBoolean("allowed", true),
+                    block = c.optJSONObject("block")?.let { b ->
+                        CourtBlock(
+                            id = b.optLong("id"),
+                            kind = b.optString("kind"),
+                            label = b.optString("label"),
+                            reason = b.optString("reason"),
+                            note = b.optStringOrNull("note"),
+                            start = b.optStringOrNull("start"),
+                            end = b.optStringOrNull("end"),
+                            allDay = b.optBoolean("all_day"),
+                            removable = b.optBoolean("removable"),
+                        )
+                    },
                     bookings = parseDayBookings(c.optJSONArray("bookings")),
                 )
             }
@@ -2037,6 +2068,28 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
 
     suspend fun cancelBooking(token: String, bookingId: Long) = withContext(Dispatchers.IO) {
         post("/api/partner/bookings/$bookingId/cancel", "{}", token)
+        Unit
+    }
+
+    /**
+     * Take one court off sale from [start] to [end] ("HH:mm", end may be "24:00") on
+     * [date]. The server refuses it over any booking or hold, with a message to show.
+     */
+    suspend fun blockCourt(
+        token: String, venueId: Long, courtId: Long, date: String,
+        start: String, end: String, kind: String, note: String?,
+    ) = withContext(Dispatchers.IO) {
+        post(
+            "/api/partner/venues/$venueId/court-blocks",
+            JSONObject().put("court_id", courtId).put("date", date).put("start", start).put("end", end)
+                .put("kind", kind).put("note", note?.takeIf { it.isNotBlank() } ?: JSONObject.NULL).toString(),
+            token,
+        )
+        Unit
+    }
+
+    suspend fun unblockCourt(token: String, venueId: Long, blockId: Long) = withContext(Dispatchers.IO) {
+        request("DELETE", "/api/partner/venues/$venueId/court-blocks/$blockId", null, token)
         Unit
     }
 

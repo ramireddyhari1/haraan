@@ -45,6 +45,8 @@ data class DayBookingsUiState(
     val selectedBookingForDetails: DayBookingItem? = null,
     val walkInTarget: WalkInTarget? = null,
     val isSubmittingWalkIn: Boolean = false,
+    /** A blocked grid cell the desk tapped: why it's blocked, and Unblock. */
+    val blockTarget: BlockTarget? = null,
     val errorMessage: String? = null,
     val successSnackbarMessage: String? = null,
     /**
@@ -55,6 +57,9 @@ data class DayBookingsUiState(
     /** A walk-in paying online right now: the QR/link sheet is open while this is set. */
     val deskPay: DeskPayState? = null,
 )
+
+/** A blocked court-hour opened from the grid. */
+data class BlockTarget(val block: com.haraan.partner.CourtBlock, val courtName: String, val slotTime: String)
 
 /** Where a walk-in's online payment stands while the desk watches it. */
 enum class DeskPayPhase { WAITING, PAID, EXPIRED, FAILED }
@@ -337,6 +342,46 @@ class DayBookingsViewModel(
                         )
                     }
                 }
+            )
+        }
+    }
+
+    /** Take a court off sale from the walk-in sheet (Block mode). */
+    fun blockCourt(courtId: Long, date: String, start: String, end: String, kind: String, note: String?, summary: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSubmittingWalkIn = true) }
+            repository.blockCourt(token, _uiState.value.venueId, courtId, date, start, end, kind, note).fold(
+                onSuccess = {
+                    _uiState.update {
+                        it.copy(walkInTarget = null, isSubmittingWalkIn = false, successSnackbarMessage = summary, successIsMoney = false)
+                    }
+                    loadData(forceRefresh = true)
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(isSubmittingWalkIn = false, errorMessage = e.message ?: "Couldn't block the court") }
+                },
+            )
+        }
+    }
+
+    /** The court-block a tapped grid cell is showing; drives the unblock sheet. */
+    fun openBlock(target: BlockTarget?) {
+        _uiState.update { it.copy(blockTarget = target) }
+    }
+
+    fun unblockCourt(target: BlockTarget) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSubmittingWalkIn = true) }
+            repository.unblockCourt(token, _uiState.value.venueId, target.block.id, _uiState.value.selectedDate).fold(
+                onSuccess = {
+                    _uiState.update {
+                        it.copy(blockTarget = null, isSubmittingWalkIn = false, successSnackbarMessage = "${target.courtName} is open again", successIsMoney = false)
+                    }
+                    loadData(forceRefresh = true)
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(isSubmittingWalkIn = false, errorMessage = e.message ?: "Couldn't unblock the court") }
+                },
             )
         }
     }

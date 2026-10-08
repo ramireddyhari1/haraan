@@ -20,6 +20,7 @@ use App\Models\PayoutBatch;
 use App\Models\User;
 use App\Models\Venue;
 use App\Models\VenueBatch;
+use App\Models\VenueBlock;
 use App\Models\VenueBlockedDate;
 use App\Models\VenueCourt;
 use App\Models\VenueSlot;
@@ -1553,6 +1554,103 @@ class PartnerController extends Controller
             ->whereDate('date', date('Y-m-d', strtotime((string) $data['date'])))->delete();
 
         return response()->json(['status' => 'unblocked', 'date' => $data['date']]);
+    }
+
+    /**
+     * POST /api/partner/venues/{id}/court-blocks — take one court off sale for a window
+     * today or later (maintenance, private hire, coaching…) without a booking or payment.
+     *
+     * Checked against the same grid the desk is looking at: any booked, held or already
+     * blocked court-hour inside the window refuses the whole block, so the desk can never
+     * block over a customer. Blocks are visible and editable by admins in /control
+     * (Venue blocks), with `created_by` saying which partner login made it.
+     */
+    public function blockCourt(Request $request, string $id): JsonResponse
+    {
+        $venue = $this->branch($request, $id);
+        $data = $request->validate([
+            'court_id' => ['required', 'integer'],
+            'date'     => ['required', 'date_format:Y-m-d'],
+            'start'    => ['required', 'date_format:H:i'],
+            'end'      => ['required', 'string', 'regex:/^([01]\d|2[0-4]):[0-5]\d$/'],
+            'kind'     => ['required', 'string', 'in:'.implode(',', array_keys(VenueBlock::KINDS))],
+            'note'     => ['nullable', 'string', 'max:80'],
+        ]);
+
+        $court = VenueCourt::query()->where('venue_id', $venue->id)->findOrFail($data['court_id']);
+        $from = BookingService::timeToMinutes($data['start']);
+        $to = in_array($data['end'], ['00:00', '24:00'], true) ? 24 * 60 : BookingService::timeToMinutes($data['end']);
+
+        if ($from === null || $to === null || $to <= $from) {
+            return response()->json(['message' => 'The block has to end after it starts.'], 422);
+        }
+        if ($data['date'] < BusinessClock::today()) {
+            return response()->json(['message' => 'That day has already gone.'], 422);
+        }
+
+        $grid = VenueDayGrid::build($venue, $data['date']);
+        if (! empty($grid['is_blocked'])) {
+            return response()->json(['message' => 'The venue is closed that day.'], 409);
+        }
+
+        $len = $venue->slotLength();
+        $covered = 0;
+        foreach ($grid['slots'] as $slot) {
+            $s = BookingService::timeToMinutes($slot['time'] ?? null);
+            if ($s === null || $s >= $to || $s + $len <= $from) {
+                continue;
+            }
+            foreach ($slot['courts'] as $cell) {
+                if ((int) $cell['court_id'] !== (int) $court->id) {
+                    continue;
+                }
+                $at = date('g:i A', mktime(intdiv($s, 60), $s % 60));
+                if ($cell['is_booked'] || $cell['is_held']) {
+                    return response()->json(['message' => "{$court->name} is booked at {$at}. Cancel or move that booking first."], 409);
+                }
+                if ($cell['block'] !== null) {
+                    return response()->json(['message' => "{$court->name} is already blocked at {$at}."], 409);
+                }
+                $covered++;
+            }
+        }
+        if ($covered === 0) {
+            return response()->json(['message' => "{$court->name} has no slots in that window."], 422);
+        }
+
+        $block = VenueBlock::query()->create([
+            'venue_id'       => $venue->id,
+            'venue_court_id' => $court->id,
+            'kind'           => $data['kind'],
+            'title'          => trim((string) ($data['note'] ?? '')) ?: null,
+            'starts_on'      => $data['date'],
+            'ends_on'        => $data['date'],
+            'weekday'        => null,
+            'start_time'     => sprintf('%02d:%02d', intdiv($from, 60), $from % 60),
+            'end_time'       => sprintf('%02d:%02d', intdiv($to, 60), $to % 60),
+            'created_by'     => $request->user()->id,
+        ]);
+
+        return response()->json(['data' => VenueDayGrid::block($block)], 201);
+    }
+
+    /**
+     * DELETE /api/partner/venues/{id}/court-blocks/{blockId} — reopen a court. Only the
+     * one-off, single-court blocks the desk can make; recurring or whole-venue blocks
+     * stay with whoever set them up in /control.
+     */
+    public function unblockCourt(Request $request, string $id, string $blockId): JsonResponse
+    {
+        $venue = $this->branch($request, $id);
+        $block = VenueBlock::query()->where('venue_id', $venue->id)->findOrFail($blockId);
+
+        if (! VenueDayGrid::block($block)['removable']) {
+            return response()->json(['message' => 'This block was set up by Haraan. Ask us to change it.'], 403);
+        }
+
+        $block->delete();
+
+        return response()->json(['status' => 'unblocked', 'id' => (int) $blockId]);
     }
 
     /** GET /api/partner/staff — the owner's desk persons. Owner-only. */

@@ -176,6 +176,8 @@ fun WalkInBookingSheet(
     isSubmitting: Boolean,
     onDismiss: () -> Unit,
     onSubmit: (slotId: Long, courtId: Long?, date: String, name: String, phone: String, method: PayMethod) -> Unit,
+    /** Block mode: take the picked court off sale. Null hides the Walk-in / Block switch. */
+    onBlock: ((BlockRequest) -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val view = LocalView.current
@@ -189,6 +191,11 @@ fun WalkInBookingSheet(
     var selectedMethod by remember { mutableStateOf(PayMethod.CASH) }
     // Errors show only once the desk has tried to book, not while they're still typing.
     var triedSubmit by remember { mutableStateOf(false) }
+    // Block mode: the same time and court, taken off sale instead of sold.
+    var blocking by remember { mutableStateOf(false) }
+    var blockSlots by remember { mutableStateOf(1) }
+    var blockKind by remember { mutableStateOf(BlockKinds.first().first) }
+    var blockNote by remember { mutableStateOf("") }
 
     val nameShake = remember { Animatable(0f) }
     val phoneShake = remember { Animatable(0f) }
@@ -230,6 +237,11 @@ fun WalkInBookingSheet(
     val slotRaw = currentSlot?.let { it.time ?: it.label } ?: target.slotTime
     val slotEnd = currentSlot?.let { slotEndLabel(it.label) ?: slotEndLabel(it.time) }
     val slotIndex = slotOptions.indexOfFirst { it.slotId == selectedSlotId }
+    val (blockRun, slotMinutes) = remember(grid, selectedSlotId, selectedCourtId) { freeRun(grid, selectedSlotId, selectedCourtId) }
+    // A shorter run (new court or time) pulls the chosen length back inside it.
+    LaunchedEffect(blockRun.size) { if (blockRun.isNotEmpty() && blockSlots > blockRun.size) blockSlots = blockRun.size }
+    val blockStart = blockRun.firstOrNull()?.let { com.haraan.partner.slotStartMinutes(it.time ?: it.label) }
+    val blockEnd = blockStart?.let { it + blockSlots.coerceAtMost(blockRun.size) * slotMinutes }
 
     val nameValid = guestName.isNotBlank()
     val phoneValid = guestPhone.length == 10
@@ -251,6 +263,20 @@ fun WalkInBookingSheet(
         }
         focus.clearFocus()
         onSubmit(selectedSlotId, selectedCourtId, date, guestName.trim(), guestPhone, selectedMethod)
+    }
+
+    fun commitBlock() {
+        val court = selectedCourtId ?: return
+        val s = blockStart ?: return
+        val e = blockEnd ?: return
+        focus.clearFocus()
+        onBlock?.invoke(
+            BlockRequest(
+                courtId = court, date = date, start = hm(s), end = hm(e.coerceAtMost(24 * 60)),
+                kind = blockKind, note = blockNote.trim().ifEmpty { null },
+                summary = "${courtName ?: "Court"} blocked · ${clock12(s)} – ${clock12(e)}",
+            ),
+        )
     }
 
     ModalBottomSheet(
@@ -280,8 +306,25 @@ fun WalkInBookingSheet(
                     date = friendlyDate(date),
                     court = courtName,
                     onClose = onDismiss,
+                    kind = if (blocking) "Block" else "Walk-in",
+                    end2 = if (blocking && blockEnd != null) clock12(blockEnd) else null,
                     modifier = Modifier.padding(horizontal = 22.dp),
                 )
+
+                if (onBlock != null && !grid?.courts.isNullOrEmpty()) {
+                    Spacer(Modifier.height(18.dp))
+                    ModeSwitch(
+                        blocking = blocking,
+                        onChange = { b ->
+                            if (b != blocking) {
+                                Haptics.tick(view)
+                                blocking = b
+                                if (b) focus.clearFocus()
+                            }
+                        },
+                        modifier = Modifier.padding(horizontal = 22.dp),
+                    )
+                }
 
                 // Time: only a choice when there is one to make.
                 if (slotOptions.size > 1) {
@@ -322,6 +365,7 @@ fun WalkInBookingSheet(
                         courts = gridCourts,
                         selectedCourtId = selectedCourtId,
                         prices = if (pricesDiffer) courtPrices else emptyMap(),
+                        blocking = blocking,
                         onPick = { court ->
                             if (selectedCourtId != court.id) {
                                 Haptics.tick(view)
@@ -333,7 +377,20 @@ fun WalkInBookingSheet(
                     )
                 }
 
-                Column(Modifier.padding(horizontal = 22.dp)) {
+                if (blocking) {
+                    BlockPanel(
+                        run = blockRun,
+                        slotMinutes = slotMinutes,
+                        hours = blockSlots.coerceAtMost(blockRun.size.coerceAtLeast(1)),
+                        onHours = { blockSlots = it },
+                        kind = blockKind,
+                        onKind = { blockKind = it },
+                        note = blockNote,
+                        onNote = { blockNote = it },
+                        courtName = courtName,
+                        modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 24.dp),
+                    )
+                } else Column(Modifier.padding(horizontal = 22.dp)) {
                     Spacer(Modifier.height(24.dp))
                     SectionLabel("Customer")
                     Spacer(Modifier.height(10.dp))
@@ -400,7 +457,14 @@ fun WalkInBookingSheet(
             // runs on underneath it, the way a toolbar edge appears when content passes.
             val edge by animateFloatAsState(if (scroll.canScrollForward) 1f else 0f, tween(160), label = "footer-edge")
             Box(Modifier.fillMaxWidth().height(1.dp).background(Hairline.copy(alpha = edge)))
-            PrimaryCta(
+            if (blocking) HoldToBlockButton(
+                label = "Hold to block ${courtName ?: "court"}",
+                detail = if (blockStart != null && blockEnd != null) durationShort(blockEnd - blockStart) else "",
+                enabled = blockStart != null && selectedCourtId != null,
+                loading = isSubmitting,
+                onCommit = ::commitBlock,
+                modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 12.dp, bottom = 14.dp),
+            ) else PrimaryCta(
                 label = when (selectedMethod) {
                     PayMethod.UPI_QR -> "Book & show QR"
                     PayMethod.LINK -> "Book & send link"
@@ -430,14 +494,21 @@ private fun SlotHeader(
     date: String,
     court: String?,
     onClose: () -> Unit,
+    kind: String = "Walk-in",
+    /** Block mode's end time, which replaces the slot's own end beside the start. */
+    end2: String? = null,
     modifier: Modifier = Modifier,
 ) {
     Row(modifier.fillMaxWidth().padding(top = 2.dp), verticalAlignment = Alignment.Top) {
         Column(Modifier.weight(1f)) {
-            Text("Walk-in  ·  $date", fontSize = 13.sp, color = Muted, fontWeight = FontWeight.Medium)
+            AnimatedContent(
+                targetState = kind,
+                transitionSpec = { fadeIn(tween(180)) togetherWith fadeOut(tween(120)) },
+                label = "sheet-kind",
+            ) { k -> Text("$k  ·  $date", fontSize = 13.sp, color = Muted, fontWeight = FontWeight.Medium) }
             Spacer(Modifier.height(6.dp))
             AnimatedContent(
-                targetState = Triple(order, slotStartLabel(start), end),
+                targetState = Triple(order, slotStartLabel(start), end2 ?: end),
                 transitionSpec = { rollTransition(targetState.first >= initialState.first) },
                 label = "slot-time",
             ) { (_, s, e) ->
@@ -809,6 +880,7 @@ private fun CourtMap(
     onPick: (CourtCol) -> Unit,
     onTaken: () -> Unit,
     modifier: Modifier = Modifier,
+    blocking: Boolean = false,
 ) {
     val paint = remember { Animatable(0f) }
     LaunchedEffect(slot?.slotId) {
@@ -846,6 +918,7 @@ private fun CourtMap(
                     // Each court's fill lands a beat after the one before it.
                     paint = ((paint.value * (courts.size + 1)) - i).coerceIn(0f, 1f),
                     tall = !single,
+                    blocking = blocking,
                     onPick = { onPick(court) },
                     onTaken = onTaken,
                     modifier = laneMod,
@@ -868,14 +941,21 @@ private fun CourtLane(
     onPick: () -> Unit,
     onTaken: () -> Unit,
     modifier: Modifier = Modifier,
+    blocking: Boolean = false,
 ) {
     val interaction = remember { MutableInteractionSource() }
     val scope = rememberCoroutineScope()
     val wobble = remember { Animatable(0f) }
     val free = state == LaneState.Free
+    // Block mode: the picked court's shutter rolls down, with a small overshoot as it lands.
+    val shut by animateFloatAsState(
+        if (selected && free && blocking) 1f else 0f,
+        spring(dampingRatio = 0.62f, stiffness = Spring.StiffnessMediumLow),
+        label = "shutter",
+    )
     // The walk-in's players drop in with a little bounce when their court is picked.
     val arrive by animateFloatAsState(
-        if (selected && free) 1f else 0f,
+        if (selected && free && !blocking) 1f else 0f,
         spring(dampingRatio = 0.48f, stiffness = Spring.StiffnessMediumLow),
         label = "arrive",
     )
@@ -967,6 +1047,7 @@ private fun CourtLane(
                     }
                 }
             }
+            if (shut > 0.01f) shutter(r, radius, shut.coerceAtMost(1.04f).coerceAtMost(1f))
             if (ring > 0f) {
                 val inset = 1.dp.toPx()
                 drawRoundRect(
@@ -985,7 +1066,7 @@ private fun CourtLane(
                 LaneState.Booked -> "Booked"
                 LaneState.Held -> "Paying now"
                 LaneState.Closed -> "Not this sport"
-                LaneState.Free -> if (price != null) "₹" + formatRupees(price) + if (peak) " · peak" else "" else "Free"
+                LaneState.Free -> if (selected && blocking) "Blocking" else if (price != null) "₹" + formatRupees(price) + if (peak) " · peak" else "" else "Free"
             },
             fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1, style = Tabular,
             color = when (state) {
@@ -1189,6 +1270,13 @@ private val PhoneGrouping = VisualTransformation { text ->
             override fun transformedToOriginal(offset: Int) = if (offset > 5) (offset - 1).coerceAtMost(raw.length) else offset
         },
     )
+}
+
+/** "2 hrs", "30 min", "1h 30m": the length a block will run, for the button. */
+private fun durationShort(minutes: Int): String = when {
+    minutes % 60 == 0 -> "${minutes / 60} hr" + if (minutes > 60) "s" else ""
+    minutes > 60 -> "${minutes / 60}h ${minutes % 60}m"
+    else -> "$minutes min"
 }
 
 private fun formatRupees(amount: Double): String =

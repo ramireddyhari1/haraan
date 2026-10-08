@@ -24,6 +24,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.Lock
+import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.EmojiEvents
+import androidx.compose.material.icons.outlined.EventBusy
+import androidx.compose.material.icons.outlined.School
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -38,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.text.TextStyle
+import com.haraan.partner.CourtBlock
 import com.haraan.partner.DayBooking
 import com.haraan.partner.DayGrid
 import com.haraan.partner.DaySlot
@@ -72,6 +82,7 @@ fun LazyListScope.dayBookingsGridItems(
     scrollState: ScrollState,
     onCellClick: (slotId: Long, slotTime: String, courtId: Long, courtName: String, price: Double) -> Unit,
     onBookingClick: (DayBooking) -> Unit,
+    onBlockClick: (block: CourtBlock, courtName: String, slotTime: String) -> Unit = { _, _, _ -> },
 ) {
     stickyHeader(key = "grid-head") { GridHeader(grid, scrollState) }
     if (grid.slots.isEmpty()) {
@@ -83,7 +94,7 @@ fun LazyListScope.dayBookingsGridItems(
         }
     }
     items(grid.slots, key = { "slot-${it.slotId}" }) { slot ->
-        GridSlotRow(slot, grid, canBook, scrollState, onCellClick, onBookingClick)
+        GridSlotRow(slot, grid, canBook, scrollState, onCellClick, onBookingClick, onBlockClick)
     }
     item(key = "grid-foot") {
         Box(
@@ -165,6 +176,7 @@ private fun GridSlotRow(
     scrollState: ScrollState,
     onCellClick: (slotId: Long, slotTime: String, courtId: Long, courtName: String, price: Double) -> Unit,
     onBookingClick: (DayBooking) -> Unit,
+    onBlockClick: (block: CourtBlock, courtName: String, slotTime: String) -> Unit,
 ) {
     val cellWidth = GridCellWidth
     val cellHeight = GridCellHeight
@@ -275,6 +287,12 @@ private fun GridSlotRow(
                                     Text("IN CHECKOUT", fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold, color = AmberColor)
                                     Text("Reserved", fontSize = 8.sp, color = MutedGray)
                                 }
+                            } else if (cell?.block != null && !grid.isBlocked) {
+                                // Taken off sale by the desk or by Haraan: say why, tap for details.
+                                val block = cell.block
+                                BlockedCell(block, cellWidth, cellHeight) {
+                                    onBlockClick(block, court.name, slot.time ?: slot.label)
+                                }
                             } else if (isBlocked) {
                                 // Blocked / Unavailable
                                 Box(
@@ -301,6 +319,76 @@ private fun GridSlotRow(
                         }
                     }
                 }
+}
+
+/**
+ * A court-hour that was taken off sale: a pulled-down shutter, slate slats over the
+ * cell, with the reason on top. Distinct from booked (blue), paying (amber) and open
+ * (green) at a glance, and pressable, because the desk will want to know who and why.
+ */
+@Composable
+private fun BlockedCell(block: CourtBlock, width: Dp, height: Dp, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .pressableTile(cornerRadius = 12.dp, onClick = onClick)
+            .width(width)
+            .height(height)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFFF1F4F8))
+            .border(1.dp, Color(0xFFD5DCE6), RoundedCornerShape(12.dp))
+            .drawBehind {
+                // Shutter slats, with the bottom rail a shade darker.
+                val step = 7.dp.toPx()
+                var y = step
+                while (y < size.height - 4.dp.toPx()) {
+                    drawLine(Color(0xFFE1E6EE), Offset(0f, y), Offset(size.width, y), strokeWidth = 1.dp.toPx())
+                    y += step
+                }
+                drawRect(Color(0xFFCBD3DE), topLeft = Offset(0f, size.height - 3.dp.toPx()), size = Size(size.width, 3.dp.toPx()))
+            }
+            .padding(horizontal = 10.dp, vertical = 9.dp),
+    ) {
+        Column(Modifier.align(Alignment.TopStart)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(blockIcon(block.kind), contentDescription = null, tint = Color(0xFF475569), modifier = Modifier.size(13.dp))
+                Spacer(Modifier.width(5.dp))
+                Text("Blocked", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF475569), maxLines = 1)
+            }
+            Spacer(Modifier.height(5.dp))
+            Text(
+                block.label, fontSize = 13.sp, lineHeight = 15.sp, fontWeight = FontWeight.ExtraBold, color = InkDark,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+            blockWindow(block)?.let {
+                Text(it, fontSize = 10.5.sp, color = MutedGray, maxLines = 1)
+            }
+        }
+    }
+}
+
+/** "6:00 AM – 8:00 AM" for a timed block; "All day" when it has no window. */
+internal fun blockWindow(block: CourtBlock): String? {
+    if (block.allDay) return "All day"
+    fun fmt(hm: String?): String? {
+        val p = hm?.split(":") ?: return null
+        val h = p.getOrNull(0)?.toIntOrNull() ?: return null
+        val m = p.getOrNull(1)?.take(2)?.toIntOrNull() ?: 0
+        val h12 = when { h % 12 == 0 -> 12; else -> h % 12 }
+        return "%d:%02d %s".format(h12, m, if (h in 12..23) "PM" else "AM")
+    }
+    val s = fmt(block.start) ?: return null
+    val e = fmt(block.end) ?: return s
+    return "$s – $e"
+}
+
+/** The picture for each block reason, shared by the grid and the sheets. */
+internal fun blockIcon(kind: String): androidx.compose.ui.graphics.vector.ImageVector = when (kind) {
+    "maintenance" -> Icons.Outlined.Build
+    "private" -> Icons.Outlined.Lock
+    "academy" -> Icons.Outlined.School
+    "tournament" -> Icons.Outlined.EmojiEvents
+    "holiday" -> Icons.Outlined.EventBusy
+    else -> Icons.Outlined.Block
 }
 
 /**

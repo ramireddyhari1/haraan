@@ -52,6 +52,14 @@ class DayBookingsRemoteDataSource(private val api: PartnerApi) {
         return api.checkIn(token, code)
     }
 
+    suspend fun blockCourt(token: String, venueId: Long, courtId: Long, date: String, start: String, end: String, kind: String, note: String?) {
+        api.blockCourt(token, venueId, courtId, date, start, end, kind, note)
+    }
+
+    suspend fun unblockCourt(token: String, venueId: Long, blockId: Long) {
+        api.unblockCourt(token, venueId, blockId)
+    }
+
     suspend fun setDateClosed(token: String, venueId: Long, date: String, closed: Boolean) {
         api.setDateClosed(token, venueId, date, closed)
     }

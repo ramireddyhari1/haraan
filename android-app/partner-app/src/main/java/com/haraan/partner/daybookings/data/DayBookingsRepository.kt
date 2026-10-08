@@ -50,6 +50,9 @@ interface DayBookingsRepository {
     suspend fun cancelBooking(token: String, bookingId: Long, venueId: Long, date: String): Result<Unit>
     suspend fun checkInTicket(token: String, ticketCode: String, venueId: Long, date: String): Result<CheckInResult>
     suspend fun setDateClosed(token: String, venueId: Long, date: String, closed: Boolean): Result<Unit>
+    /** Online only: a block decided offline could land on top of a booking made meanwhile. */
+    suspend fun blockCourt(token: String, venueId: Long, courtId: Long, date: String, start: String, end: String, kind: String, note: String?): Result<Unit>
+    suspend fun unblockCourt(token: String, venueId: Long, blockId: Long, date: String): Result<Unit>
     suspend fun syncOfflineQueue(token: String): SyncResult
     suspend fun getPendingActionCount(): Int
     suspend fun deskPaymentStatus(token: String, bookingId: Long, payment: DeskPayment, close: Boolean = false): Result<PayState>
@@ -204,6 +207,25 @@ class DayBookingsRepositoryImpl(
             onlineCollected = onlineCollected,
             isBlocked = grid?.isBlocked == true,
         )
+    }
+
+    override suspend fun blockCourt(
+        token: String, venueId: Long, courtId: Long, date: String,
+        start: String, end: String, kind: String, note: String?,
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            remoteDataSource.blockCourt(token, venueId, courtId, date, start, end, kind, note)
+            runCatching { localDataSource.saveDayGrid(venueId, date, remoteDataSource.getVenueDay(token, venueId, date)) }
+            Unit
+        }
+    }
+
+    override suspend fun unblockCourt(token: String, venueId: Long, blockId: Long, date: String): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            remoteDataSource.unblockCourt(token, venueId, blockId)
+            runCatching { localDataSource.saveDayGrid(venueId, date, remoteDataSource.getVenueDay(token, venueId, date)) }
+            Unit
+        }
     }
 
     override suspend fun createWalkIn(

@@ -599,6 +599,8 @@ Route::middleware(['auth.jwt', 'auth.partner'])
             Route::post('/venues/{id}/bookings', 'storeOfflineBooking')->whereNumber('id');
             Route::post('/venues/{id}/block', 'blockDate')->whereNumber('id');
             Route::delete('/venues/{id}/block', 'unblockDate')->whereNumber('id');
+            Route::post('/venues/{id}/court-blocks', 'blockCourt')->whereNumber('id');
+            Route::delete('/venues/{id}/court-blocks/{blockId}', 'unblockCourt')->whereNumber('id')->whereNumber('blockId');
             Route::patch('/bookings/{id}/cancel', 'cancelBooking')->whereNumber('id');
             Route::post('/bookings/{id}/cancel', 'cancelBooking')->whereNumber('id'); // app (no PATCH)
             Route::post('/bookings/{id}/payment-status', 'paymentStatus')->whereNumber('id');

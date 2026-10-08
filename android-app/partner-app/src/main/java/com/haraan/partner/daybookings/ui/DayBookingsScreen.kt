@@ -333,6 +333,9 @@ fun DayBookingsScreen(
                                 onCellClick = { slotId, slotTime, courtId, courtName, price ->
                                     viewModel.openWalkInModal(slotId, slotTime, courtId, courtName, price)
                                 },
+                                onBlockClick = { block, courtName, slotTime ->
+                                    viewModel.openBlock(com.haraan.partner.daybookings.viewmodel.BlockTarget(block, courtName, slotTime))
+                                },
                                 onBookingClick = { dayBooking ->
                                     viewModel.openBookingDetails(
                                         DayBookingItem(
@@ -388,7 +391,21 @@ fun DayBookingsScreen(
             onDismiss = { viewModel.closeWalkInModal() },
             onSubmit = { slotId, courtId, date, name, phone, method ->
                 viewModel.submitWalkIn(slotId, courtId, date, name, phone, method)
-            }
+            },
+            onBlock = if (canBookings) { req ->
+                viewModel.blockCourt(req.courtId, req.date, req.start, req.end, req.kind, req.note, req.summary)
+            } else null,
+        )
+    }
+
+    // A blocked court-hour tapped on the grid: why, and Unblock when the desk made it.
+    state.blockTarget?.let { target ->
+        BlockDetailsSheet(
+            target = target,
+            canUnblock = canBookings && target.block.removable,
+            busy = state.isSubmittingWalkIn,
+            onDismiss = { viewModel.openBlock(null) },
+            onUnblock = { viewModel.unblockCourt(target) },
         )
     }
 
