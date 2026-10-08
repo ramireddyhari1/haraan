@@ -307,12 +307,15 @@ class PlayerRepository(
    * standing next to you. Returns empty for anything under 2 characters, and on any
    * failure, so the picker just shows nothing rather than an error mid-typing.
    */
-  suspend fun search(token: String, query: String): List<PlayerLite> = withContext(Dispatchers.IO) {
+  suspend fun search(token: String, query: String, includeSelf: Boolean = false): List<PlayerLite> = withContext(Dispatchers.IO) {
     val q = query.trim()
     if (q.length < 2) return@withContext emptyList()
 
     val encoded = URLEncoder.encode(q, "UTF-8")
-    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/find?q=$encoded").openConnection() as HttpURLConnection).apply {
+    // The server hides the viewer by default (social search); the squad picker opts in
+    // because the match creator is usually one of the players.
+    val self = if (includeSelf) "&include_self=1" else ""
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/find?q=$encoded$self").openConnection() as HttpURLConnection).apply {
       requestMethod = "GET"
       connectTimeout = 10000
       readTimeout = 10000

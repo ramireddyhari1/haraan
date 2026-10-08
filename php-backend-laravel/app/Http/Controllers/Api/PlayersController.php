@@ -1197,10 +1197,14 @@ final class PlayersController extends Controller
         }
 
         $handle = User::normalizeUsername(ltrim($q, '@'));
-        $like = '%'.str_replace(['%', '_'], ['\%', '\_'], $handle).'%';
-        $prefix = str_replace(['%', '_'], ['\%', '\_'], $handle).'%';
+        $escaped = str_replace(['\\', '%', '_'], ['\\\\', '\%', '\_'], $handle);
+        $like = '%'.$escaped.'%';
+        $prefix = $escaped.'%';
 
         $me = $request->attributes->get('auth_user');
+        // The social search hides the viewer; the squad picker opts in, because the
+        // person creating a match is usually playing in it.
+        $includeSelf = $request->boolean('include_self');
 
         $rows = User::query()
             ->where('is_guest', false)
@@ -1210,15 +1214,18 @@ final class PlayersController extends Controller
                 // discoverable so the directory isn't empty.
                 $sub->whereNull('privacy_discoverable')->orWhere('privacy_discoverable', true);
             })
+            // ESCAPE is explicit: SQLite has no default escape character, so without it
+            // `\_` matched only a literal backslash and every handle with an underscore
+            // was unfindable.
             ->where(function ($sub) use ($like, $q): void {
-                $sub->where('username', 'like', $like)
-                    ->orWhere('name', 'like', $like)
-                    ->orWhere('player_id', $q);
+                $sub->whereRaw("username LIKE ? ESCAPE '\\'", [$like])
+                    ->orWhereRaw("name LIKE ? ESCAPE '\\'", [$like])
+                    ->orWhereRaw('UPPER(player_id) = ?', [mb_strtoupper($q)]);
             })
-            ->when($me instanceof User, fn ($query) => $query->where('id', '!=', $me->id))
+            ->when($me instanceof User && ! $includeSelf, fn ($query) => $query->where('id', '!=', $me->id))
             // Prefix matches on the handle first — typing "vir" should surface @virat
             // before someone whose surname merely contains those letters.
-            ->orderByRaw('CASE WHEN username LIKE ? THEN 0 WHEN username IS NOT NULL THEN 1 ELSE 2 END', [$prefix])
+            ->orderByRaw("CASE WHEN username LIKE ? ESCAPE '\\' THEN 0 WHEN username IS NOT NULL THEN 1 ELSE 2 END", [$prefix])
             ->orderByDesc('ranked_xp')
             ->limit(20)
             ->get();

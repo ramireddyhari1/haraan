@@ -129,6 +129,48 @@ class PlayerFollowTest extends TestCase
         $this->assertEmpty($response->json('results'));
     }
 
+    public function test_squad_search_can_include_the_viewer(): void
+    {
+        // The match creator usually plays — the squad picker has to be able to add them.
+        $me = $this->player('virat');
+
+        $response = $this->withHeader('Authorization', 'Bearer ' . $this->token($me))
+            ->getJson('/api/players/find?q=virat&include_self=1')
+            ->assertOk();
+
+        $this->assertSame('virat', $response->json('results.0.username'));
+    }
+
+    public function test_search_matches_handles_containing_underscores(): void
+    {
+        // SQLite has no default LIKE escape character, so an escaped `\_` used to match
+        // only a literal backslash — every handle with an underscore was unfindable.
+        $me = $this->player('rohit');
+        $this->player('hari_ram');
+
+        foreach (['hari_ram', '@hari_r', 'hari'] as $q) {
+            $results = $this->withHeader('Authorization', 'Bearer ' . $this->token($me))
+                ->getJson('/api/players/find?q=' . urlencode($q))
+                ->assertOk()
+                ->json('results');
+
+            $this->assertSame('hari_ram', $results[0]['username'] ?? null, "query: $q");
+        }
+    }
+
+    public function test_search_matches_a_player_id_in_any_case(): void
+    {
+        $me = $this->player('rohit');
+        $them = $this->player('virat');
+
+        $results = $this->withHeader('Authorization', 'Bearer ' . $this->token($me))
+            ->getJson('/api/players/find?q=' . strtolower($them->player_id))
+            ->assertOk()
+            ->json('results');
+
+        $this->assertSame('virat', $results[0]['username'] ?? null);
+    }
+
     public function test_follow_endpoint_returns_the_settled_state(): void
     {
         $me = $this->player('rohit');

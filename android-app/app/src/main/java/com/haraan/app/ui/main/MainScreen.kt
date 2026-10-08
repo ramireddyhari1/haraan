@@ -4710,7 +4710,7 @@ private fun CrexMatchesScreen(
         // authenticated request instead of degrading quietly.
         searchPlayers = { query ->
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
-          if (token == null) emptyList() else playerRepository.search(token, query)
+          if (token == null) emptyList() else playerRepository.search(token, query, includeSelf = true)
         },
         loadBookings = {
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
