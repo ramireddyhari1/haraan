@@ -61,15 +61,16 @@ class EventsListStatsWidget extends Widget
             ->whereIn(\Illuminate\Support\Facades\DB::raw('lower(status)'), $paidStatuses)
             ->sum('total_amount');
 
-        $revenue = $dbRevenue > 0 ? '₹' . number_format($dbRevenue) : '₹18,42,000';
+        $revenue = \App\Support\Rupees::format($dbRevenue);
 
         $organizers = (int) $base()->whereNotNull('partner_id')->distinct('partner_id')->count('partner_id');
-        if ($organizers === 0) {
-            $organizers = max(1, (int) $base()->whereNotNull('user_id')->distinct('user_id')->count('user_id'));
-        }
 
-        $healthScore = min(99.4, max(75.0, round(72 + ($fillPct * 0.22) + ($published > 0 ? 5.2 : 0), 1)));
+        $thisWeek = $base()
+            ->whereRaw("lower(status) = 'published'")
+            ->whereDate('date', '>=', now()->toDateString())
+            ->whereDate('date', '<=', now()->addDays(7)->toDateString())
+            ->count();
 
-        return compact('total', 'published', 'draft', 'upcoming', 'sold', 'capacity', 'fillPct', 'revenue', 'organizers', 'healthScore');
+        return compact('total', 'published', 'draft', 'upcoming', 'sold', 'capacity', 'fillPct', 'revenue', 'organizers', 'thisWeek');
     }
 }

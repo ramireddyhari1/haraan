@@ -180,17 +180,13 @@
         {{-- Catalog Command Strip Header --}}
         <div class="ech-top">
             <div class="ech-title-group">
-                <h3 class="ech-title">Events Catalog Intelligence</h3>
-                <span class="ech-badge">
-                    <x-filament::icon icon="heroicon-m-check-badge" style="width:14px;height:14px;" />
-                    Portfolio Health: {{ $s['healthScore'] }}/100
-                </span>
+                <h3 class="ech-title">All events</h3>
             </div>
 
             <div class="ech-actions">
                 <a href="{{ \App\Filament\Clusters\Events\Pages\EventsOverview::getUrl() }}" class="ech-action-chip">
                     <x-filament::icon icon="heroicon-m-chart-bar" style="width:14px;height:14px;color:var(--ech-primary);" />
-                    Executive Overview
+                    Overview
                 </a>
                 <a href="{{ \App\Filament\Clusters\Events\Pages\TicketCheckIn::getUrl() }}" class="ech-action-chip">
                     <x-filament::icon icon="heroicon-m-qr-code" style="width:14px;height:14px;color:var(--ech-emerald);" />
@@ -203,22 +199,22 @@
             </div>
         </div>
 
-        {{-- 5-Pillar Executive Macro Metrics --}}
+        {{-- Catalogue at a glance --}}
         <div class="ech-grid">
             {{-- 1. Catalog Gross Revenue --}}
             <div class="ech-cell ech-cell--hero">
                 <div class="ech-label">
-                    <span>Catalog Revenue</span>
+                    <span>Ticket takings</span>
                     <x-filament::icon icon="heroicon-m-currency-rupee" style="width:14px;height:14px;color:var(--ech-primary);" />
                 </div>
                 <div class="ech-val" style="color:var(--ech-primary);">{{ $s['revenue'] }}</div>
-                <div class="ech-sub">Gross settled ticketing</div>
+                <div class="ech-sub">Paid bookings, all time</div>
             </div>
 
             {{-- 2. Status & Inventory --}}
             <div class="ech-cell">
                 <div class="ech-label">
-                    <span>Active Status</span>
+                    <span>Published</span>
                     <x-filament::icon icon="heroicon-m-signal" style="width:14px;height:14px;color:var(--ech-emerald);" />
                 </div>
                 <div class="ech-val">{{ number_format($s['published']) }} <span style="font-size:14px;color:var(--ech-text-muted);font-weight:600;">/ {{ number_format($s['total']) }}</span></div>
@@ -228,7 +224,7 @@
             {{-- 3. Capacity & Sell-Through --}}
             <div class="ech-cell">
                 <div class="ech-label">
-                    <span>Capacity Utilization</span>
+                    <span>Seats sold</span>
                     <x-filament::icon icon="heroicon-m-ticket" style="width:14px;height:14px;color:#f59e0b;" />
                 </div>
                 <div class="ech-val">{{ $s['fillPct'] }}%</div>
@@ -245,17 +241,17 @@
                     <x-filament::icon icon="heroicon-m-user-group" style="width:14px;height:14px;color:#6366f1;" />
                 </div>
                 <div class="ech-val">{{ number_format($s['organizers']) }}</div>
-                <div class="ech-sub">Hosting partners active</div>
+                <div class="ech-sub">Partners with at least one event</div>
             </div>
 
-            {{-- 5. AI Health Score --}}
+            {{-- 5. The coming week --}}
             <div class="ech-cell">
                 <div class="ech-label">
-                    <span>Health Score</span>
-                    <x-filament::icon icon="heroicon-m-sparkles" style="width:14px;height:14px;color:var(--ech-emerald);" />
+                    <span>Next 7 days</span>
+                    <x-filament::icon icon="heroicon-m-calendar-days" style="width:14px;height:14px;color:var(--ech-emerald);" />
                 </div>
-                <div class="ech-val" style="color:var(--ech-emerald);">{{ $s['healthScore'] }}</div>
-                <div class="ech-sub">Optimal booking pace</div>
+                <div class="ech-val">{{ number_format($s['thisWeek']) }}</div>
+                <div class="ech-sub">Published events coming up</div>
             </div>
         </div>
     </div>

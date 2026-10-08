@@ -130,7 +130,7 @@ class UsersTable
             ])
             ->filters([
                 SelectFilter::make('cohort')
-                    ->label('Intelligence Cohort')
+                    ->label('Cohort')
                     ->options([
                         'vip_spenders'     => 'VIP Spenders (> ₹5,000)',
                         'frequent_bookers' => 'Frequent Bookers (5+ bookings)',

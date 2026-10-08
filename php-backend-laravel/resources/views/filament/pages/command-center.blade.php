@@ -1,1210 +1,439 @@
 <x-filament-panels::page>
     @php
-        $palette = [
-            'ok'   => ['text' => '#059669', 'dot' => '#10b981', 'tile' => '#ecfdf5', 'bar' => '#10b981'],
-            'warn' => ['text' => '#d97706', 'dot' => '#f59e0b', 'tile' => '#fffbeb', 'bar' => '#f59e0b'],
-            'down' => ['text' => '#e11d48', 'dot' => '#f43f5e', 'tile' => '#fff1f2', 'bar' => '#f43f5e'],
-            'idle' => ['text' => '#64748b', 'dot' => '#94a3b8', 'tile' => '#f8fafc', 'bar' => '#cbd5e1'],
-        ];
-        $hero = $executiveHero ?? [];
-        $ranges = ['today' => 'Today', '7d' => '7D', '30d' => '30D', '90d' => '90D', 'all' => 'All Time'];
+        $ranges = ['today' => 'Today', '7d' => '7 days', '30d' => '30 days', '90d' => '90 days', 'all' => 'All time'];
+        $h = $hero;
+
+        // ── Courts-today strip ─────────────────────────────────────────────
+        $hrs = $venues['hours'] ?? [];
+        $courtCount = max(0, (int) ($venues['courts'] ?? 0));
+        $hourLabel = fn (int $hr) => $hr === 12 ? '12p' : ($hr > 12 ? ($hr - 12).'p' : $hr.'a');
+
+        $splitTone = ['partners' => 'var(--cc-blue)', 'fees' => 'var(--cc-ink)', 'tax' => 'var(--cc-amber)'];
+        $openCount = collect($radar)->where('count', '>', 0)->count();
     @endphp
 
-    <style>
-        /* ── Enterprise Executive Command Center (Clean, White, Premium) ───── */
-        .ecc-root {
-            --ecc-canvas: #f8fafc;
-            --ecc-surface: #ffffff;
-            --ecc-border: #e2e8f0;
-            --ecc-border-subtle: #f1f5f9;
-            --ecc-ink: #0f172a;
-            --ecc-ink-muted: #475569;
-            --ecc-ink-faint: #94a3b8;
-            --ecc-track: #f1f5f9;
-            --ecc-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.03), 0 1px 3px rgba(15, 23, 42, 0.02);
-            --ecc-shadow-card: 0 1px 3px rgba(15, 23, 42, 0.03), 0 4px 14px -2px rgba(15, 23, 42, 0.04);
-            --ecc-shadow-hover: 0 8px 24px -4px rgba(15, 23, 42, 0.08), 0 2px 6px -1px rgba(15, 23, 42, 0.03);
-            display: flex;
-            flex-direction: column;
-            gap: 14px;
-            color: var(--ecc-ink);
-        }
+    @include('filament.partials.cc-styles')
 
-        /* 12-Column Responsive Grid */
-        .ecc-grid-12 {
-            display: grid;
-            grid-template-columns: repeat(12, minmax(0, 1fr));
-            gap: 14px;
-        }
-        .ecc-col-12 { grid-column: span 12 / span 12; }
-        .ecc-col-8  { grid-column: span 8 / span 8; }
-        .ecc-col-7  { grid-column: span 7 / span 7; }
-        .ecc-col-6  { grid-column: span 6 / span 6; }
-        .ecc-col-5  { grid-column: span 5 / span 5; }
-        .ecc-col-4  { grid-column: span 4 / span 4; }
-        .ecc-col-3  { grid-column: span 3 / span 3; }
+    <div class="cc"
+         wire:poll.30s.visible="build"
+         x-data="{ open: false, go() { this.open = true; this.$nextTick(() => this.$refs.q?.focus()) } }"
+         @keydown.window.ctrl.k.prevent="go()"
+         @keydown.window.meta.k.prevent="go()">
 
-        @media (max-width: 1200px) {
-            .ecc-col-8, .ecc-col-7, .ecc-col-5, .ecc-col-4 { grid-column: span 12 / span 12; }
-        }
-        @media (max-width: 900px) {
-            .ecc-col-6, .ecc-col-3 { grid-column: span 12 / span 12; }
-        }
-
-        /* Premium White Cards */
-        .ecc-card {
-            background: var(--ecc-surface);
-            border: 1px solid var(--ecc-border);
-            border-radius: 14px;
-            padding: 16px 18px;
-            box-shadow: var(--ecc-shadow-card);
-            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.2s ease;
-            position: relative;
-        }
-        .ecc-card:hover {
-            box-shadow: var(--ecc-shadow-hover);
-            border-color: #cbd5e1;
-        }
-
-        /* Top Executive Action Bar */
-        .ecc-actionbar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 10px;
-            padding: 8px 14px;
-            background: var(--ecc-surface);
-            border: 1px solid var(--ecc-border);
-            border-radius: 12px;
-            box-shadow: var(--ecc-shadow-sm);
-        }
-        .ecc-search-trigger {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            background: var(--ecc-track);
-            border: 1px solid var(--ecc-border);
-            border-radius: 8px;
-            padding: 6px 12px;
-            font-size: 12px;
-            font-weight: 550;
-            color: var(--ecc-ink-muted);
-            cursor: pointer;
-            transition: all 0.15s ease;
-        }
-        .ecc-search-trigger:hover {
-            background: #e2e8f0;
-            color: var(--ecc-ink);
-            border-color: #cbd5e1;
-        }
-        .ecc-kbd {
-            font-size: 10.5px;
-            font-weight: 700;
-            background: #ffffff;
-            border: 1px solid #cbd5e1;
-            padding: 1px 5px;
-            border-radius: 4px;
-            color: #475569;
-            box-shadow: 0 1px 1px rgba(0, 0, 0, 0.05);
-        }
-
-        /* Range Controls */
-        .ecc-ranges {
-            display: inline-flex;
-            align-items: center;
-            gap: 3px;
-            background: var(--ecc-track);
-            padding: 3px;
-            border-radius: 8px;
-            border: 1px solid var(--ecc-border);
-        }
-        .ecc-range-btn {
-            border: 0;
-            background: transparent;
-            font-size: 11.5px;
-            font-weight: 600;
-            padding: 4px 10px;
-            border-radius: 6px;
-            color: var(--ecc-ink-muted);
-            cursor: pointer;
-            transition: all 0.15s ease;
-        }
-        .ecc-range-btn:hover {
-            color: var(--ecc-ink);
-        }
-        .ecc-range-btn.active {
-            background: #ffffff;
-            color: var(--ecc-ink);
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
-            font-weight: 700;
-        }
-
-        /* Executive Hero Card */
-        .ecc-hero {
-            background: #ffffff;
-            border: 1px solid var(--ecc-border);
-            border-radius: 16px;
-            padding: 20px 24px;
-            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04), 0 10px 30px -10px rgba(15, 23, 42, 0.05);
-            position: relative;
-            overflow: hidden;
-        }
-        .ecc-hero::before {
-            content: "";
-            position: absolute;
-            left: 0;
-            top: 0;
-            right: 0;
-            height: 3.5px;
-            background: linear-gradient(90deg, #10b981 0%, #6366f1 45%, #8b5cf6 100%);
-        }
-        .ecc-hero-main {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 16px;
-        }
-        .ecc-hero-eyebrow {
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-            color: var(--ecc-ink-muted);
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .ecc-hero-gmv {
-            margin: 4px 0 0;
-            font-size: clamp(30px, 3.8vw, 42px);
-            font-weight: 850;
-            letter-spacing: -0.035em;
-            color: var(--ecc-ink);
-            line-height: 1.05;
-            font-variant-numeric: tabular-nums;
-        }
-        .ecc-pill-growth {
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-            padding: 3px 10px;
-            border-radius: 999px;
-            font-size: 11.5px;
-            font-weight: 750;
-            background: #ecfdf5;
-            color: #059669;
-            border: 1px solid rgba(16, 185, 129, 0.25);
-        }
-
-        /* 6 Executive Pillars Ribbon */
-        .ecc-pillars {
-            display: grid;
-            grid-template-columns: repeat(6, 1fr);
-            gap: 12px;
-            margin-top: 18px;
-            padding-top: 16px;
-            border-top: 1px solid var(--ecc-border-subtle);
-        }
-        @media (max-width: 1024px) {
-            .ecc-pillars { grid-template-columns: repeat(3, 1fr); }
-        }
-        @media (max-width: 640px) {
-            .ecc-pillars { grid-template-columns: repeat(2, 1fr); }
-        }
-        .ecc-pillar-item {
-            display: flex;
-            flex-direction: column;
-            gap: 2px;
-        }
-        .ecc-pillar-k {
-            font-size: 11px;
-            font-weight: 600;
-            color: var(--ecc-ink-muted);
-            display: flex;
-            align-items: center;
-            gap: 4px;
-        }
-        .ecc-pillar-v {
-            font-size: 17px;
-            font-weight: 750;
-            letter-spacing: -0.02em;
-            color: var(--ecc-ink);
-            font-variant-numeric: tabular-nums;
-            margin: 2px 0 0;
-        }
-        .ecc-pillar-s {
-            font-size: 10.5px;
-            color: var(--ecc-ink-faint);
-            font-weight: 500;
-        }
-
-        /* Vertical Performance Cards (Events, Venues, SaaS) */
-        .ecc-vcard {
-            background: #ffffff;
-            border: 1px solid var(--ecc-border);
-            border-radius: 14px;
-            padding: 16px 18px;
-            box-shadow: var(--ecc-shadow-card);
-            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-            position: relative;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-        }
-        .ecc-vcard:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--ecc-shadow-hover);
-        }
-        .ecc-vcard-top {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 12px;
-        }
-        .ecc-vcard-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        .ecc-vcard-icon {
-            width: 32px;
-            height: 32px;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex: none;
-        }
-        .ecc-vcard-title {
-            font-size: 13.5px;
-            font-weight: 700;
-            color: var(--ecc-ink);
-            letter-spacing: -0.01em;
-        }
-        .ecc-vcard-badge {
-            font-size: 10.5px;
-            font-weight: 700;
-            padding: 2px 8px;
-            border-radius: 999px;
-        }
-        .ecc-vcard-gmv {
-            font-size: 24px;
-            font-weight: 800;
-            letter-spacing: -0.03em;
-            color: var(--ecc-ink);
-            margin: 4px 0 0;
-            font-variant-numeric: tabular-nums;
-        }
-        .ecc-vcard-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 8px;
-            margin: 12px 0;
-            padding: 10px;
-            background: var(--ecc-track);
-            border-radius: 8px;
-        }
-        .ecc-vcard-kpi-k {
-            font-size: 10.5px;
-            font-weight: 550;
-            color: var(--ecc-ink-muted);
-        }
-        .ecc-vcard-kpi-v {
-            font-size: 13.5px;
-            font-weight: 750;
-            color: var(--ecc-ink);
-            font-variant-numeric: tabular-nums;
-        }
-        .ecc-vcard-tag {
-            font-size: 11px;
-            color: var(--ecc-ink-muted);
-            background: #ffffff;
-            border: 1px solid var(--ecc-border);
-            padding: 4px 8px;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            gap: 5px;
-            margin-top: 6px;
-        }
-
-        /* SVG Sparklines */
-        .ecc-spark-svg {
-            width: 100%;
-            height: 48px;
-            overflow: visible;
-        }
-
-        /* Section Headings */
-        .ecc-sec-head {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 8px;
-        }
-        .ecc-sec-title {
-            font-size: 12px;
-            font-weight: 750;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
-            color: var(--ecc-ink-muted);
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            margin: 0;
-        }
-        .ecc-sec-title::before {
-            content: "";
-            width: 3.5px;
-            height: 12px;
-            background: #6366f1;
-            border-radius: 999px;
-            display: inline-block;
-        }
-        .ecc-sec-desc {
-            font-size: 11.5px;
-            color: var(--ecc-ink-faint);
-            font-weight: 500;
-        }
-
-        /* Live Operations Stream Terminal */
-        .ecc-stream-wrap {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-            max-height: 380px;
-            overflow-y: auto;
-            padding-right: 4px;
-        }
-        .ecc-stream-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            padding: 9px 12px;
-            background: #ffffff;
-            border: 1px solid var(--ecc-border);
-            border-radius: 8px;
-            transition: all 0.15s ease;
-        }
-        .ecc-stream-item:hover {
-            background: #f8fafc;
-            border-color: #cbd5e1;
-            transform: translateX(2px);
-        }
-        .ecc-stream-title {
-            font-size: 12.5px;
-            font-weight: 650;
-            color: var(--ecc-ink);
-        }
-        .ecc-stream-meta {
-            font-size: 11px;
-            color: var(--ecc-ink-faint);
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        /* Geo Regional Velocity */
-        .ecc-geo-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 8px 10px;
-            border-bottom: 1px solid var(--ecc-border-subtle);
-        }
-        .ecc-geo-row:last-child {
-            border-bottom: 0;
-        }
-
-        /* AI Insights Cards */
-        .ecc-ai-card {
-            background: #ffffff;
-            border: 1px solid var(--ecc-border);
-            border-radius: 12px;
-            padding: 14px 16px;
-            box-shadow: var(--ecc-shadow-sm);
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-            gap: 10px;
-            transition: all 0.2s ease;
-        }
-        .ecc-ai-card:hover {
-            border-color: #818cf8;
-            box-shadow: var(--ecc-shadow-card);
-        }
-
-        /* Spotlight Modal Backdrop */
-        .ecc-modal-backdrop {
-            position: fixed;
-            inset: 0;
-            z-index: 9999;
-            background: rgba(15, 23, 42, 0.45);
-            backdrop-filter: blur(8px);
-            display: flex;
-            align-items: flex-start;
-            justify-content: center;
-            padding-top: 10vh;
-        }
-        .ecc-modal-box {
-            width: 100%;
-            max-width: 620px;
-            background: #ffffff;
-            border: 1px solid var(--ecc-border);
-            border-radius: 14px;
-            box-shadow: 0 20px 50px -12px rgba(15, 23, 42, 0.25);
-            overflow: hidden;
-        }
-
-        /* Heartbeat Ping */
-        .ecc-pulse {
-            width: 8px;
-            height: 8px;
-            position: relative;
-            display: inline-block;
-        }
-        .ecc-pulse i {
-            position: absolute;
-            inset: 0;
-            border-radius: 50%;
-            background: #10b981;
-        }
-        .ecc-pulse i.ping {
-            animation: eccping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
-            background: #34d399;
-        }
-        @keyframes eccping {
-            75%, 100% {
-                transform: scale(2.4);
-                opacity: 0;
-            }
-        }
-    </style>
-
-    <div
-        class="ecc-root"
-        wire:poll.30s.visible="build"
-        x-data="{ spotlightOpen: false }"
-        @keydown.window.cmd.k.prevent="spotlightOpen = true; $nextTick(() => $refs.spotlightInput?.focus())"
-        @keydown.window.ctrl.k.prevent="spotlightOpen = true; $nextTick(() => $refs.spotlightInput?.focus())"
-        role="region"
-        aria-label="Haraan Enterprise Executive Command Center"
-    >
-        {{-- ── 1. Top Executive Action & Search Bar ───────────────────── --}}
-        <div class="ecc-actionbar">
-            <div class="flex items-center gap-3 flex-wrap">
-                {{-- Universal Spotlight Trigger --}}
-                <button
-                    type="button"
-                    class="ecc-search-trigger"
-                    @click="spotlightOpen = true; $nextTick(() => $refs.spotlightInput?.focus())"
-                    aria-label="Universal Search Spotlight (Cmd+K)"
-                >
-                    <svg class="w-3.5 h-3.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
-                    <span>Search events, venues, bookings, ledger...</span>
-                    <span class="ecc-kbd">⌘K</span>
+        {{-- ── Today line + tools ─────────────────────────────────────────── --}}
+        <div class="cc-bar">
+            <div class="cc-today">
+                <span class="cc-dot" aria-hidden="true"></span>
+                <span>Today <b class="cc-num">{{ $h['today'] }}</b> from <b class="cc-num">{{ $h['todayOrders'] }}</b> {{ $h['todayOrders'] === 1 ? 'booking' : 'bookings' }}</span>
+                @if (! is_null($h['online']))
+                    <span aria-hidden="true">·</span>
+                    <span><b class="cc-num">{{ $h['online'] }}</b> {{ $h['online'] === 1 ? 'person' : 'people' }} in the app now</span>
+                @endif
+            </div>
+            <div class="cc-tools">
+                <button type="button" class="cc-search" @click="go()" aria-label="Search (Ctrl+K)">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+                    <span class="l">Find an event, venue, person, booking…</span>
+                    <span class="cc-key">Ctrl K</span>
                 </button>
-
-                {{-- Realtime WebSocket Status --}}
-                <div class="inline-flex items-center gap-2 text-[11.5px] font-semibold text-slate-600 dark:text-slate-300">
-                    <span class="ecc-pulse"><i class="ping"></i><i></i></span>
-                    <span>Reverb Live Push</span>
-                </div>
-            </div>
-
-            {{-- Range Filter Switcher --}}
-            <div class="flex items-center gap-2 flex-wrap">
-                <div class="ecc-ranges" role="group" aria-label="Executive Range Filter">
-                    @foreach($ranges as $k => $lbl)
-                        <button
-                            type="button"
-                            wire:click="setRange('{{ $k }}')"
-                            class="ecc-range-btn {{ $range === $k ? 'active' : '' }}"
-                            aria-pressed="{{ $range === $k ? 'true' : 'false' }}"
-                        >
-                            {{ $lbl }}
-                        </button>
+                <div class="cc-seg" role="group" aria-label="Date range">
+                    @foreach ($ranges as $k => $lbl)
+                        <button type="button" wire:click="setRange('{{ $k }}')" aria-pressed="{{ $range === $k ? 'true' : 'false' }}">{{ $lbl }}</button>
                     @endforeach
                 </div>
-
-                <div wire:loading.inline-flex class="items-center gap-1.5 text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-md border border-indigo-200">
-                    <svg class="animate-spin h-3 w-3 text-indigo-600" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path></svg>
-                    Syncing...
-                </div>
             </div>
         </div>
 
-        {{-- ── 2. Full-Width "Executive Hero" (5-Second CEO Synthesis) ─ --}}
-        <div class="ecc-hero">
-            <div class="ecc-hero-main">
-                <div>
-                    <div class="ecc-hero-eyebrow">
-                        <svg class="w-3.5 h-3.5 text-emerald-600" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-                        <span>Gross Platform Volume (GMV)</span>
-                        <span class="text-slate-300">·</span>
-                        <span class="text-slate-500 font-medium">{{ $hero['range_label'] ?? 'Last 30 Days' }}</span>
-                    </div>
-
-                    <div class="flex items-baseline gap-4 flex-wrap mt-1">
-                        <div class="ecc-hero-gmv" aria-label="Gross Platform Volume {{ $hero['gmv'] ?? '₹48,92,450' }}">
-                            {{ $hero['gmv'] ?? '₹48,92,450' }}
-                        </div>
-                        <div class="ecc-pill-growth">
-                            <span>▲</span>
-                            <span>{{ $hero['growth'] ?? '+24.8%' }} vs prior window</span>
-                        </div>
-                    </div>
-
-                    <div class="flex items-center gap-4 text-xs text-slate-500 mt-2 font-medium">
-                        <span>Net Collected: <strong class="text-slate-800">{{ $hero['net'] ?? '₹48,78,250' }}</strong></span>
-                        <span class="text-slate-300">·</span>
-                        <span>Today's Velocity: <strong class="text-slate-800">{{ $hero['today_revenue'] ?? '₹0' }}</strong></span>
-                    </div>
-                </div>
-
-                {{-- Hero Trajectory Sparkline Curve (Clean SVG) --}}
-                <div class="w-full max-w-xs sm:w-64 hidden sm:block">
-                    <div class="text-[10.5px] font-bold text-slate-400 uppercase tracking-wider mb-1 text-right">Trailing Velocity</div>
-                    <svg class="w-full h-12 overflow-visible" viewBox="0 0 140 36">
-                        <defs>
-                            <linearGradient id="heroGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-                                <stop offset="0%" stop-color="#10b981" stop-opacity="0.25"/>
-                                <stop offset="100%" stop-color="#10b981" stop-opacity="0.0"/>
-                            </linearGradient>
-                        </defs>
-                        <path d="M 0,28 Q 20,32 40,24 T 80,18 T 110,12 T 140,4 L 140,36 L 0,36 Z" fill="url(#heroGrad)"/>
-                        <path d="M 0,28 Q 20,32 40,24 T 80,18 T 110,12 T 140,4" fill="none" stroke="#10b981" stroke-width="2.5" stroke-linecap="round"/>
-                        <circle cx="140" cy="4" r="3.5" fill="#10b981" stroke="#ffffff" stroke-width="1.5"/>
-                    </svg>
-                </div>
-            </div>
-
-            {{-- 6 Key Executive Pillars Ribbon --}}
-            <div class="ecc-pillars">
-                <div class="ecc-pillar-item">
-                    <span class="ecc-pillar-k">Gross Revenue</span>
-                    <p class="ecc-pillar-v">{{ $hero['gmv'] ?? '₹0' }}</p>
-                    <span class="ecc-pillar-s text-emerald-600 font-semibold">{{ $hero['growth'] ?? '—' }}</span>
-                </div>
-                <div class="ecc-pillar-item">
-                    <span class="ecc-pillar-k">Platform Revenue</span>
-                    <p class="ecc-pillar-v">{{ $hero['profit'] ?? '₹0' }}</p>
-                    <span class="ecc-pillar-s text-slate-500">{{ $hero['profit_margin'] ?? '—' }} take rate</span>
-                </div>
-                <div class="ecc-pillar-item">
-                    <span class="ecc-pillar-k">Growth Velocity</span>
-                    <p class="ecc-pillar-v text-emerald-600">{{ $hero['growth'] ?? '—' }}</p>
-                    <span class="ecc-pillar-s text-slate-500">{{ $hero['growth_label'] ?? '' }}</span>
-                </div>
-                <div class="ecc-pillar-item">
-                    <span class="ecc-pillar-k">Today's Run-Rate</span>
-                    <p class="ecc-pillar-v">{{ $hero['today_revenue'] ?? '₹1,42,800' }}</p>
-                    <span class="ecc-pillar-s text-slate-500">{{ $hero['today_orders'] ?? 0 }} orders · {{ $hero['today_tickets'] ?? 0 }} tickets</span>
-                </div>
-                <div class="ecc-pillar-item">
-                    <span class="ecc-pillar-k">Live Active Users</span>
-                    <p class="ecc-pillar-v text-indigo-600">{{ $hero['live_users'] ?? 0 }}</p>
-                    <span class="ecc-pillar-s text-slate-500">Seen in the last 5 minutes</span>
-                </div>
-                <div class="ecc-pillar-item">
-                    <span class="ecc-pillar-k">AI Calls Today</span>
-                    <p class="ecc-pillar-v text-emerald-600">{{ $hero['ai_score'] ?? 0 }}</p>
-                    <span class="ecc-pillar-s text-emerald-600 font-semibold">{{ $hero['ai_status'] ?? '' }}</span>
-                </div>
-            </div>
-        </div>
-
-        {{-- ── 3. Three Equal Performance Cards (12-Col: 4 cols each) ─ --}}
-        <div class="ecc-grid-12">
-            {{-- 1. Events & Experiences --}}
-            @php $ev = $verticals['events'] ?? []; @endphp
-            <div class="ecc-col-4 ecc-vcard">
-                <div>
-                    <div class="ecc-vcard-top">
-                        <div class="ecc-vcard-header">
-                            <div class="ecc-vcard-icon bg-indigo-50 text-indigo-600">
-                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z" /></svg>
-                            </div>
-                            <span class="ecc-vcard-title">{{ $ev['title'] ?? 'Events & Experiences' }}</span>
-                        </div>
-                        <span class="ecc-vcard-badge bg-indigo-50 text-indigo-700">{{ $ev['growth'] ?? '+29.2%' }}</span>
-                    </div>
-
-                    <p class="ecc-vcard-gmv">{{ $ev['gmv'] ?? '₹28,42,100' }}</p>
-                    <span class="text-[11px] text-slate-400 font-medium">Gross Event Ticketing Volume</span>
-
-                    <div class="ecc-vcard-grid">
-                        <div>
-                            <span class="ecc-vcard-kpi-k">{{ $ev['count_label'] ?? 'Tickets Issued' }}</span>
-                            <p class="ecc-vcard-kpi-v">{{ $ev['count'] ?? '3,420' }}</p>
-                        </div>
-                        <div>
-                            <span class="ecc-vcard-kpi-k">{{ $ev['primary_rate_label'] ?? 'Sell-Through' }}</span>
-                            <p class="ecc-vcard-kpi-v text-indigo-600">{{ $ev['primary_rate'] ?? '86.4%' }}</p>
-                        </div>
-                        <div>
-                            <span class="ecc-vcard-kpi-k">{{ $ev['active_label'] ?? 'Active Events' }}</span>
-                            <p class="ecc-vcard-kpi-v">{{ $ev['active'] ?? '18 live' }}</p>
-                        </div>
-                        <div>
-                            <span class="ecc-vcard-kpi-k">Yield Index</span>
-                            <p class="ecc-vcard-kpi-v">{{ $ev['secondary_metric'] ?? 'Avg ₹830' }}</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div>
-                    {{-- SVG Sparkline --}}
-                    <svg class="ecc-spark-svg" viewBox="0 0 200 48">
-                        <defs>
-                            <linearGradient id="evGrad" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stop-color="#6366f1" stop-opacity="0.3"/>
-                                <stop offset="100%" stop-color="#6366f1" stop-opacity="0.0"/>
-                            </linearGradient>
-                        </defs>
-                        <path d="M 0,38 Q 30,36 60,26 T 120,20 T 160,10 T 200,4 L 200,48 L 0,48 Z" fill="url(#evGrad)"/>
-                        <path d="M 0,38 Q 30,36 60,26 T 120,20 T 160,10 T 200,4" fill="none" stroke="#6366f1" stroke-width="2.2" stroke-linecap="round"/>
-                    </svg>
-
-                    <div class="ecc-vcard-tag">
-                        <span class="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>
-                        <span class="truncate font-medium">{{ $ev['highlight'] ?? 'Top: Bangalore Open Air 2026 (96% sold)' }}</span>
-                    </div>
-                </div>
-            </div>
-
-            {{-- 2. Sports Venue Booking --}}
-            @php $vn = $verticals['venues'] ?? []; @endphp
-            <div class="ecc-col-4 ecc-vcard">
-                <div>
-                    <div class="ecc-vcard-top">
-                        <div class="ecc-vcard-header">
-                            <div class="ecc-vcard-icon bg-emerald-50 text-emerald-600">
-                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
-                            </div>
-                            <span class="ecc-vcard-title">{{ $vn['title'] ?? 'Sports Venue Booking' }}</span>
-                        </div>
-                        <span class="ecc-vcard-badge bg-emerald-50 text-emerald-700">{{ $vn['growth'] ?? '+22.4%' }}</span>
-                    </div>
-
-                    <p class="ecc-vcard-gmv">{{ $vn['gmv'] ?? '₹14,18,350' }}</p>
-                    <span class="text-[11px] text-slate-400 font-medium">Turf &amp; Court Booking GMV</span>
-
-                    <div class="ecc-vcard-grid">
-                        <div>
-                            <span class="ecc-vcard-kpi-k">{{ $vn['count_label'] ?? 'Slots Booked' }}</span>
-                            <p class="ecc-vcard-kpi-v">{{ $vn['count'] ?? '1,890' }}</p>
-                        </div>
-                        <div>
-                            <span class="ecc-vcard-kpi-k">{{ $vn['primary_rate_label'] ?? 'Utilization' }}</span>
-                            <p class="ecc-vcard-kpi-v text-emerald-600">{{ $vn['primary_rate'] ?? '78.5%' }}</p>
-                        </div>
-                        <div>
-                            <span class="ecc-vcard-kpi-k">{{ $vn['active_label'] ?? 'Active Arenas' }}</span>
-                            <p class="ecc-vcard-kpi-v">{{ $vn['active'] ?? '24 venues' }}</p>
-                        </div>
-                        <div>
-                            <span class="ecc-vcard-kpi-k">Occupancy</span>
-                            <p class="ecc-vcard-kpi-v">{{ $vn['secondary_metric'] ?? 'Peak: 6-11 PM' }}</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div>
-                    {{-- SVG Sparkline --}}
-                    <svg class="ecc-spark-svg" viewBox="0 0 200 48">
-                        <defs>
-                            <linearGradient id="vnGrad" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stop-color="#10b981" stop-opacity="0.3"/>
-                                <stop offset="100%" stop-color="#10b981" stop-opacity="0.0"/>
-                            </linearGradient>
-                        </defs>
-                        <path d="M 0,34 Q 40,30 80,24 T 140,16 T 170,12 T 200,6 L 200,48 L 0,48 Z" fill="url(#vnGrad)"/>
-                        <path d="M 0,34 Q 40,30 80,24 T 140,16 T 170,12 T 200,6" fill="none" stroke="#10b981" stroke-width="2.2" stroke-linecap="round"/>
-                    </svg>
-
-                    <div class="ecc-vcard-tag">
-                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                        <span class="truncate font-medium">{{ $vn['highlight'] ?? 'Turfpark Indiranagar at 94% occupancy' }}</span>
-                    </div>
-                </div>
-            </div>
-
-            {{-- 3. SaaS Products & Subscriptions --}}
-            @php $sa = $verticals['saas'] ?? []; @endphp
-            <div class="ecc-col-4 ecc-vcard">
-                <div>
-                    <div class="ecc-vcard-top">
-                        <div class="ecc-vcard-header">
-                            <div class="ecc-vcard-icon bg-purple-50 text-purple-600">
-                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                            </div>
-                            <span class="ecc-vcard-title">{{ $sa['title'] ?? 'SaaS & Subscriptions' }}</span>
-                        </div>
-                        <span class="ecc-vcard-badge bg-purple-50 text-purple-700">{{ $sa['growth'] ?? '+34.1%' }}</span>
-                    </div>
-
-                    <p class="ecc-vcard-gmv">{{ $sa['gmv'] ?? '₹6,32,000' }}</p>
-                    <span class="text-[11px] text-slate-400 font-medium">Monthly Recurring Revenue (MRR)</span>
-
-                    <div class="ecc-vcard-grid">
-                        <div>
-                            <span class="ecc-vcard-kpi-k">{{ $sa['count_label'] ?? 'Active Partners' }}</span>
-                            <p class="ecc-vcard-kpi-v">{{ $sa['count'] ?? '142' }}</p>
-                        </div>
-                        <div>
-                            <span class="ecc-vcard-kpi-k">{{ $sa['primary_rate_label'] ?? 'Churn Rate' }}</span>
-                            <p class="ecc-vcard-kpi-v text-purple-600">{{ $sa['primary_rate'] ?? '0.6%' }}</p>
-                        </div>
-                        <div>
-                            <span class="ecc-vcard-kpi-k">{{ $sa['active_label'] ?? 'Delivery SLA' }}</span>
-                            <p class="ecc-vcard-kpi-v">{{ $sa['active'] ?? '99.94%' }}</p>
-                        </div>
-                        <div>
-                            <span class="ecc-vcard-kpi-k">Partner ARPU</span>
-                            <p class="ecc-vcard-kpi-v">{{ $sa['secondary_metric'] ?? 'Avg ₹4,450' }}</p>
-                        </div>
-                    </div>
-                </div>
-
-                <div>
-                    {{-- SVG Sparkline --}}
-                    <svg class="ecc-spark-svg" viewBox="0 0 200 48">
-                        <defs>
-                            <linearGradient id="saGrad" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stop-color="#8b5cf6" stop-opacity="0.3"/>
-                                <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0.0"/>
-                            </linearGradient>
-                        </defs>
-                        <path d="M 0,40 Q 30,34 70,28 T 130,18 T 170,10 T 200,3 L 200,48 L 0,48 Z" fill="url(#saGrad)"/>
-                        <path d="M 0,40 Q 30,34 70,28 T 130,18 T 170,10 T 200,3" fill="none" stroke="#8b5cf6" stroke-width="2.2" stroke-linecap="round"/>
-                    </svg>
-
-                    <div class="ecc-vcard-tag">
-                        <span class="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
-                        <span class="truncate font-medium">{{ $sa['highlight'] ?? 'Growth tier upgrades +18% this month' }}</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        {{-- ── 4. Analytics Trajectory & Conversion Funnel (12-Col: 8 + 4) --}}
-        <div class="ecc-grid-12">
-            {{-- Multi-Stream Revenue Trajectory (8 Columns) --}}
-            <div class="ecc-col-8 ecc-card">
-                <div class="flex items-center justify-between mb-4 flex-wrap gap-2">
+        {{-- ── Money + attention ──────────────────────────────────────────── --}}
+        <div class="cc-grid">
+            <section class="cc-card cc-s8" aria-label="Paid bookings">
+                <div class="cc-money-top">
                     <div>
-                        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2 m-0">
-                            <span class="w-2 h-2 rounded-full bg-indigo-500"></span>
-                            Multi-Stream Revenue Trajectory
-                        </h2>
-                        <span class="text-xs text-slate-400 font-medium">Daily consolidated GMV across Events, Sports Venues, and SaaS</span>
-                    </div>
-
-                    <div class="flex items-center gap-3 text-xs font-semibold text-slate-500">
-                        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-indigo-500"></span> Events</span>
-                        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span> Sports Venues</span>
-                        <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-purple-500"></span> SaaS CRM</span>
-                    </div>
-                </div>
-
-                {{-- Interactive Multi-Series Vector Graph --}}
-                <div class="w-full h-56 relative pt-2">
-                    <svg class="w-full h-44 overflow-visible" viewBox="0 0 640 160" preserveAspectRatio="none">
-                        {{-- Subtle Grid Lines --}}
-                        <line x1="0" y1="40" x2="640" y2="40" stroke="#f1f5f9" stroke-width="1"/>
-                        <line x1="0" y1="80" x2="640" y2="80" stroke="#f1f5f9" stroke-width="1"/>
-                        <line x1="0" y1="120" x2="640" y2="120" stroke="#f1f5f9" stroke-width="1"/>
-
-                        {{-- Area 1: SaaS (Purple) --}}
-                        <path d="M 0,148 Q 100,146 200,144 T 400,140 T 540,135 T 640,130 L 640,160 L 0,160 Z" fill="#ede9fe" opacity="0.45"/>
-                        <path d="M 0,148 Q 100,146 200,144 T 400,140 T 540,135 T 640,130" fill="none" stroke="#8b5cf6" stroke-width="2"/>
-
-                        {{-- Area 2: Venues (Emerald) --}}
-                        <path d="M 0,125 Q 100,118 200,114 T 400,102 T 540,84 T 640,86 L 640,160 L 0,160 Z" fill="#d1fae5" opacity="0.35"/>
-                        <path d="M 0,125 Q 100,118 200,114 T 400,102 T 540,84 T 640,86" fill="none" stroke="#10b981" stroke-width="2"/>
-
-                        {{-- Area 3: Events (Indigo) --}}
-                        <path d="M 0,95 Q 100,82 200,88 T 400,64 T 540,32 T 640,42 L 640,160 L 0,160 Z" fill="#e0e7ff" opacity="0.35"/>
-                        <path d="M 0,95 Q 100,82 200,88 T 400,64 T 540,32 T 640,42" fill="none" stroke="#6366f1" stroke-width="2.5"/>
-
-                        {{-- Data Point Indicators --}}
-                        <circle cx="540" cy="32" r="4.5" fill="#6366f1" stroke="#ffffff" stroke-width="2"/>
-                        <circle cx="540" cy="84" r="4" fill="#10b981" stroke="#ffffff" stroke-width="2"/>
-                        <circle cx="540" cy="135" r="4" fill="#8b5cf6" stroke="#ffffff" stroke-width="2"/>
-                    </svg>
-
-                    {{-- Horizontal Day Axis Labels --}}
-                    <div class="flex justify-between text-[11px] font-semibold text-slate-400 mt-2 px-1">
-                        @foreach(($trajectory['labels'] ?? ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']) as $idx => $day)
-                            <div class="text-center">
-                                <span>{{ $day }}</span>
-                                <div class="text-[10px] text-slate-500 font-bold">{{ ($trajectory['totals'] ?? [])[$idx] ?? '' }}</div>
-                            </div>
-                        @endforeach
-                    </div>
-                </div>
-            </div>
-
-            {{-- Conversion Funnel & Unit Economics (4 Columns) --}}
-            <div class="ecc-col-4 ecc-card flex flex-col justify-between">
-                <div>
-                    <div class="flex items-center justify-between mb-3">
-                        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700 m-0">Conversion Funnel</h2>
-                        <span class="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">97.2% Checkout</span>
-                    </div>
-
-                    {{-- Progressive Funnel Steps --}}
-                    <div class="flex flex-col gap-2">
-                        @foreach(($conversionFunnel['steps'] ?? []) as $step)
-                            <div class="p-2 rounded-lg bg-slate-50 border border-slate-100 flex items-center justify-between text-xs">
-                                <div>
-                                    <span class="font-semibold text-slate-700">{{ $step['name'] }}</span>
-                                    <div class="text-[10.5px] text-slate-400 font-medium">{{ $step['drop'] }}</div>
-                                </div>
-                                <span class="font-extrabold text-slate-900 tabular-nums">{{ $step['value'] }}</span>
-                            </div>
-                        @endforeach
-                    </div>
-                </div>
-
-                {{-- Unit Economics Distribution --}}
-                <div class="pt-3 mt-3 border-t border-slate-100">
-                    <span class="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 block mb-2">Platform Unit Economics</span>
-                    <div class="flex h-2.5 rounded-full overflow-hidden gap-0.5 mb-2">
-                        <div style="width: 85.5%; background: #3b82f6;" title="Partner Share 85.5%"></div>
-                        <div style="width: 12.0%; background: #10b981;" title="Haraan Take 12.0%"></div>
-                        <div style="width: 2.5%; background: #94a3b8;" title="Gateway & Infra 2.5%"></div>
-                    </div>
-                    <div class="flex items-center justify-between text-[11px] text-slate-600">
-                        <span>Partner: <strong>85.5%</strong></span>
-                        <span>Commission: <strong class="text-emerald-600">12.0%</strong></span>
-                        <span>Infra: <strong>2.5%</strong></span>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        {{-- ── 5. Live Operations Stream & Geo Heatmaps (12-Col: 7 + 5) --}}
-        <div class="ecc-grid-12">
-            {{-- Live Operations Stream (7 Columns) --}}
-            <div class="ecc-col-7 ecc-card">
-                <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-                    <div>
-                        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2 m-0">
-                            <span class="ecc-pulse"><i class="ping"></i><i></i></span>
-                            Live Operations Stream
-                        </h2>
-                        <span class="text-xs text-slate-400 font-medium">Real-time transaction capture and partner activity</span>
-                    </div>
-
-                    {{-- Stream Filter Pills --}}
-                    <div class="flex items-center gap-1.5 text-xs">
-                        <button type="button" wire:click="setStreamFilter('all')" class="px-2.5 py-1 rounded-md text-[11px] font-bold {{ $activeStreamFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600' }}">All</button>
-                        <button type="button" wire:click="setStreamFilter('venues')" class="px-2.5 py-1 rounded-md text-[11px] font-bold {{ $activeStreamFilter === 'venues' ? 'bg-emerald-600 text-white' : 'bg-slate-100 text-slate-600' }}">Venues</button>
-                        <button type="button" wire:click="setStreamFilter('events')" class="px-2.5 py-1 rounded-md text-[11px] font-bold {{ $activeStreamFilter === 'events' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600' }}">Events</button>
-                        <button type="button" wire:click="setStreamFilter('saas')" class="px-2.5 py-1 rounded-md text-[11px] font-bold {{ $activeStreamFilter === 'saas' ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-600' }}">SaaS</button>
-                    </div>
-                </div>
-
-                {{-- Activity Feed List --}}
-                <div class="ecc-stream-wrap">
-                    @foreach($liveStream as $item)
-                        @if($activeStreamFilter === 'all' || $activeStreamFilter === $item['type'])
-                            <div class="ecc-stream-item">
-                                <div class="flex items-center gap-3">
-                                    <div class="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-600 flex-none">
-                                        <x-filament::icon :icon="$item['icon']" class="w-4 h-4" />
-                                    </div>
-                                    <div>
-                                        <p class="ecc-stream-title m-0">{{ $item['title'] }}</p>
-                                        <div class="ecc-stream-meta">
-                                            <span>{{ $item['user'] }}</span>
-                                            <span>·</span>
-                                            <span>{{ $item['time'] }}</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="text-right">
-                                    <p class="text-xs font-bold text-slate-900 m-0 tabular-nums">{{ $item['amount'] }}</p>
-                                    <span class="inline-block text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">{{ $item['status'] }}</span>
-                                </div>
-                            </div>
+                        <div class="cc-eyebrow">Paid bookings · {{ $h['rangeLabel'] }}</div>
+                        <div class="cc-gmv cc-num">{{ $h['gmv'] }}</div>
+                        @if ($h['delta'])
+                            <span class="cc-delta {{ $h['delta']['dir'] }}">
+                                @if ($h['delta']['dir'] === 'up')
+                                    <svg width="12" height="12" viewBox="0 0 12 12"><path d="M6 2.5 10 8H2z" fill="currentColor"/></svg>
+                                @elseif ($h['delta']['dir'] === 'down')
+                                    <svg width="12" height="12" viewBox="0 0 12 12"><path d="M6 9.5 2 4h8z" fill="currentColor"/></svg>
+                                @endif
+                                {{ $h['delta']['label'] }}
+                            </span>
                         @endif
-                    @endforeach
-                </div>
-            </div>
-
-            {{-- Geo Heatmaps & Regional Velocity (5 Columns) --}}
-            <div class="ecc-col-5 ecc-card">
-                <div class="flex items-center justify-between mb-3">
-                    <div>
-                        <h2 class="text-xs font-bold uppercase tracking-wider text-slate-700 m-0">Regional Hub Velocity</h2>
-                        <span class="text-xs text-slate-400 font-medium">City-level GMV contribution and venue density</span>
                     </div>
-                    <span class="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">5 Hubs Live</span>
+                    <div class="cc-facts">
+                        <div class="cc-fact"><span>Orders</span><b class="cc-num">{{ number_format($h['orders']) }}</b></div>
+                        <div class="cc-fact"><span>Average order</span><b class="cc-num">{{ $h['avg'] }}</b></div>
+                        <div class="cc-fact"><span>Refunded</span><b class="cc-num" @if($h['refundsRaw'] > 0) style="color: var(--cc-red)" @endif>{{ $h['refunds'] }}</b></div>
+                    </div>
                 </div>
 
-                <div class="flex flex-col gap-1.5 mt-2">
-                    @foreach($geoVelocity as $hub)
-                        <div class="ecc-geo-row">
-                            <div class="flex items-center gap-2.5">
-                                <span class="w-6 h-6 rounded-md bg-slate-100 text-slate-700 text-xs font-bold flex items-center justify-center">{{ $hub['state'] }}</span>
-                                <div>
-                                    <p class="text-xs font-bold text-slate-800 m-0 flex items-center gap-1.5">
-                                        {{ $hub['city'] }}
-                                        @if($hub['lead'])
-                                            <span class="text-[9.5px] font-bold text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">HQ Lead</span>
-                                        @endif
-                                    </p>
-                                    <span class="text-[10.5px] text-slate-400">{{ $hub['venues'] }} partner arenas</span>
-                                </div>
-                            </div>
+                @include('filament.partials.cc-bar-chart', ['series' => $series, 'emptyText' => 'No paid bookings '.($range === 'today' ? 'yet today' : 'in this window').'.'])
 
-                            <div class="text-right">
-                                <p class="text-xs font-extrabold text-slate-900 m-0 tabular-nums">{{ $hub['gmv'] }}</p>
-                                <span class="text-[10.5px] font-semibold text-emerald-600">{{ $hub['growth'] }}</span>
-                            </div>
+                @if (! empty($split))
+                    <div class="cc-split">
+                        <div class="cc-eyebrow" style="margin-bottom: 8px">Where it went</div>
+                        <div class="cc-split-bar" role="img" aria-label="Split of paid bookings">
+                            @foreach ($split as $p)
+                                <i style="width: {{ max(0.5, $p['pct']) }}%; background: {{ $splitTone[$p['key']] }}" title="{{ $p['label'] }} {{ $p['fmt'] }}"></i>
+                            @endforeach
                         </div>
-                    @endforeach
+                        <div class="cc-split-legend">
+                            @foreach ($split as $p)
+                                <span title="{{ $p['note'] }}"><i style="background: {{ $splitTone[$p['key']] }}"></i>{{ $p['label'] }} <b class="cc-num">{{ $p['fmt'] }}</b> <span style="color: var(--cc-ink-3)">{{ $p['pct'] }}%</span></span>
+                            @endforeach
+                        </div>
+                    </div>
+                @endif
+            </section>
+
+            <section class="cc-card cc-s4 cc-side" aria-label="Needs a person">
+                <div class="cc-card-h">
+                    <div>
+                        <h2 class="cc-card-t">Needs a person</h2>
+                        <div class="cc-card-sub">{{ $openCount === 0 ? 'Nothing is waiting on you' : $openCount.' of '.count($radar).' have something waiting' }}</div>
+                    </div>
                 </div>
-            </div>
-        </div>
 
-        {{-- ── 6. AI Predictive Insights & Optimization Engine (3 Cards) --}}
-        <div>
-            <div class="ecc-sec-head">
-                <h2 class="ecc-sec-title">AI Predictive Recommendations &amp; Autonomous Telemetry</h2>
-                <span class="ecc-sec-desc">Neural analysis of real-time supply, demand elasticity, and system anomalies</span>
-            </div>
-
-            <div class="ecc-grid-12">
-                @foreach($aiInsights as $insight)
-                    <div class="ecc-col-4 ecc-ai-card">
+                @if ($openCount === 0)
+                    <div class="cc-clear">
+                        {{-- Clipboard, every line ticked --}}
+                        <svg width="64" height="72" viewBox="0 0 64 72" fill="none" aria-hidden="true">
+                            <rect x="6" y="8" width="52" height="60" rx="8" fill="var(--cc-surface)" stroke="var(--cc-ink)" stroke-width="2"/>
+                            <rect x="20" y="3" width="24" height="11" rx="4" fill="var(--cc-sunk)" stroke="var(--cc-ink)" stroke-width="2"/>
+                            <path d="M16 30l3.5 3.5L26 27" stroke="var(--cc-green)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M31 30.5h17" stroke="var(--cc-line)" stroke-width="3" stroke-linecap="round"/>
+                            <path d="M16 44l3.5 3.5L26 41" stroke="var(--cc-green)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M31 44.5h12" stroke="var(--cc-line)" stroke-width="3" stroke-linecap="round"/>
+                            <path d="M16 58l3.5 3.5L26 55" stroke="var(--cc-green)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
+                            <path d="M31 58.5h15" stroke="var(--cc-line)" stroke-width="3" stroke-linecap="round"/>
+                        </svg>
                         <div>
-                            <div class="flex items-center justify-between mb-2">
-                                <span class="text-[10.5px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-100">
-                                    {{ $insight['type'] }}
-                                </span>
-                                <span class="text-[10.5px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
-                                    {{ $insight['badge'] }}
-                                </span>
-                            </div>
-                            <h3 class="text-sm font-bold text-slate-900 m-0">{{ $insight['title'] }}</h3>
-                            <p class="text-xs text-slate-500 mt-2 leading-relaxed">{{ $insight['desc'] }}</p>
-                        </div>
-
-                        <div class="pt-3 border-t border-slate-100 flex items-center justify-between">
-                            <span class="text-xs font-bold text-slate-800">{{ $insight['metric'] }}</span>
-                            <button
-                                type="button"
-                                wire:click="applyAiAction('{{ $insight['key'] }}')"
-                                class="text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 px-3 py-1.5 rounded-lg shadow-sm transition-all"
-                            >
-                                {{ $insight['action_label'] }}
-                            </button>
+                            <p>All clear</p>
+                            <span>No support waiting, payouts due or failed payments.</span>
                         </div>
                     </div>
-                @endforeach
-            </div>
-        </div>
+                @endif
 
-        {{-- ── 7. Capital & Settlements (Financial Overview Ledger) ─── --}}
-        <section aria-labelledby="cc-sec-money">
-            <div class="ecc-sec-head">
-                <h2 id="cc-sec-money" class="ecc-sec-title">Capital &amp; Settlements</h2>
-                <span class="ecc-sec-desc">What Haraan earned, tax held, and what partners are still owed — from real bookings and payouts</span>
-            </div>
-
-            <div class="ecc-card">
-                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-                    <div>
-                        <span class="text-[11px] font-semibold text-slate-500 block">Gross Inflow</span>
-                        <p class="text-lg font-extrabold text-slate-900 m-0 mt-1 tabular-nums">{{ $financialLedger['gross_collected'] ?? '₹0' }}</p>
-                        <span class="text-[10.5px] text-slate-400">Total collections</span>
-                    </div>
-                    <div>
-                        <span class="text-[11px] font-semibold text-slate-500 block">Platform Commission</span>
-                        <p class="text-lg font-extrabold text-emerald-600 m-0 mt-1 tabular-nums">{{ $financialLedger['platform_commission'] ?? '₹0' }}</p>
-                        <span class="text-[10.5px] text-emerald-600 font-semibold">{{ $financialLedger['take_rate'] ?? '' }}</span>
-                    </div>
-                    <div>
-                        <span class="text-[11px] font-semibold text-slate-500 block">Gateway Fees Collected</span>
-                        <p class="text-lg font-extrabold text-slate-700 m-0 mt-1 tabular-nums">{{ $financialLedger['gateway_deductions'] ?? '₹0' }}</p>
-                        <span class="text-[10.5px] text-slate-400">Paid by customers</span>
-                    </div>
-                    <div>
-                        <span class="text-[11px] font-semibold text-slate-500 block">Owed to Partners</span>
-                        <p class="text-lg font-extrabold text-amber-600 m-0 mt-1 tabular-nums">{{ $financialLedger['partner_payouts_due'] ?? '₹0' }}</p>
-                        <span class="text-[10.5px] text-amber-600 font-semibold">Not yet paid or batched</span>
-                    </div>
-                    <div>
-                        <span class="text-[11px] font-semibold text-slate-500 block">Tax Collected</span>
-                        <p class="text-lg font-extrabold text-indigo-600 m-0 mt-1 tabular-nums">{{ $financialLedger['escrow_reserve'] ?? '₹0' }}</p>
-                        <span class="text-[10.5px] text-indigo-600 font-semibold">Owed to the tax authority</span>
-                    </div>
-                    <div>
-                        <span class="text-[11px] font-semibold text-slate-500 block">Net Settled Today</span>
-                        <p class="text-lg font-extrabold text-emerald-600 m-0 mt-1 tabular-nums">{{ $financialLedger['net_settled_today'] ?? '₹0' }}</p>
-                        <span class="text-[10.5px] text-slate-400">Payout batches marked paid</span>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        {{-- ── 8. Enterprise SLA Health Status ──────────────────────── --}}
-        <div class="ecc-card !py-3">
-            <div class="flex items-center justify-between flex-wrap gap-3">
-                <div class="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center gap-2">
-                    <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-                    Enterprise Infrastructure SLA
-                </div>
-
-                <div class="flex items-center gap-4 flex-wrap">
-                    @foreach($systemHealth as $node)
-                        <div class="flex items-center gap-2 text-xs">
-                            <span class="w-1.5 h-1.5 rounded-full {{ $node['ok'] ? 'bg-emerald-500' : 'bg-amber-500' }}"></span>
-                            <span class="font-bold text-slate-800">{{ $node['name'] }}</span>
-                            <span class="text-slate-400 text-[11px] font-mono">({{ $node['ping'] }})</span>
-                        </div>
-                    @endforeach
-                </div>
-            </div>
-        </div>
-
-        {{-- ── 9. Operational Radar & Activity Timeline (12-Col: 6 + 6) ─ --}}
-        <div class="ecc-grid-12">
-            {{-- Operational Radar (6 Columns) --}}
-            <section class="ecc-col-6" aria-labelledby="cc-sec-radar">
-                <div class="ecc-sec-head">
-                    <h2 id="cc-sec-radar" class="ecc-sec-title">Operational Radar</h2>
-                    <span class="ecc-sec-desc">Items requiring immediate action or triage</span>
-                </div>
-
-                <div class="flex flex-col gap-2">
-                    @foreach($radar as $item)
-                        <a
-                            href="{{ $item['url'] }}"
-                            class="ecc-card !p-3 flex items-center justify-between gap-3 text-decoration-none"
-                        >
-                            <div class="flex items-center gap-3">
-                                <div class="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center text-slate-700 flex-none">
-                                    <x-filament::icon :icon="$item['icon']" class="w-4 h-4" />
-                                </div>
-                                <div>
-                                    <p class="text-xs font-bold text-slate-900 m-0">{{ $item['title'] }}</p>
-                                    <span class="text-[11px] text-slate-500">{{ $item['sub'] }}</span>
-                                </div>
-                            </div>
-
-                            @if($item['count'] > 0)
-                                <div class="flex items-center gap-2">
-                                    <span class="text-xs font-extrabold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">{{ $item['count'] }}</span>
-                                    <span class="text-xs font-bold text-indigo-600 hover:text-indigo-800">Inspect &rarr;</span>
-                                </div>
-                            @else
-                                <span class="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">Clear</span>
-                            @endif
+                <div class="cc-rows">
+                    @foreach ($radar as $item)
+                        <a href="{{ $item['url'] }}" class="cc-row {{ $item['count'] > 0 ? 'hot' : '' }}">
+                            <span class="cc-row-ic"><x-filament::icon :icon="$item['icon']" /></span>
+                            <span class="cc-row-main">
+                                <span class="cc-row-t" style="display:block">{{ $item['title'] }}</span>
+                                <span class="cc-row-s" style="display:block">{{ $item['sub'] }}</span>
+                            </span>
+                            <span class="cc-count cc-num {{ $item['count'] > 0 ? '' : 'zero' }}">{{ $item['count'] > 0 ? $item['count'] : '0' }}</span>
                         </a>
                     @endforeach
                 </div>
             </section>
-
-            {{-- Executive Activity Timeline (6 Columns) --}}
-            <div class="ecc-col-6">
-                <div class="ecc-sec-head">
-                    <h2 class="ecc-sec-title">Audit &amp; Operations Timeline</h2>
-                    <span class="ecc-sec-desc">Latest entries from the audit log (System → Audit Log)</span>
-                </div>
-
-                <div class="ecc-card flex flex-col gap-3">
-                    @forelse($activityTimeline as $act)
-                        <div class="flex items-start gap-3 text-xs pb-2 border-b border-slate-100 last:border-0 last:pb-0">
-                            <span class="font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded flex-none">{{ $act['time'] }}</span>
-                            <div class="flex-1">
-                                <p class="text-slate-800 font-semibold m-0">{{ $act['title'] }}</p>
-                                <span class="text-[10.5px] text-slate-400">Actor: {{ $act['role'] }}</span>
-                            </div>
-                        </div>
-                    @empty
-                        <p class="text-xs text-slate-400 m-0">No admin actions recorded yet.</p>
-                    @endforelse
-                </div>
-            </div>
         </div>
 
-        {{-- ── 10. Universal Search Spotlight Modal (Alpine.js) ──────── --}}
-        <div
-            x-show="spotlightOpen"
-            x-transition:enter="transition ease-out duration-150"
-            x-transition:enter-start="opacity-0"
-            x-transition:enter-end="opacity-100"
-            x-transition:leave="transition ease-in duration-100"
-            x-transition:leave-start="opacity-100"
-            x-transition:leave-end="opacity-0"
-            class="ecc-modal-backdrop"
-            style="display: none;"
-            @click.self="spotlightOpen = false"
-            @keydown.escape.window="spotlightOpen = false"
-        >
-            <div
-                class="ecc-modal-box"
-                @click.stop
-            >
-                <div class="p-3 border-b border-slate-200 flex items-center gap-3 bg-slate-50">
-                    <svg class="w-4 h-4 text-slate-400 flex-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path></svg>
-                    <input
-                        x-ref="spotlightInput"
-                        type="text"
-                        wire:model.live.debounce.150ms="searchQuery"
-                        placeholder="Search events, arenas, partners, settlement batches, transactions..."
-                        class="w-full bg-transparent border-0 text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-0"
-                    />
-                    <button type="button" @click="spotlightOpen = false" class="text-slate-400 hover:text-slate-600">
-                        <span class="ecc-kbd">ESC</span>
-                    </button>
+        {{-- ── Lines of business: each drawing is a picture of its own number ── --}}
+        <div class="cc-grid">
+            {{-- Events — a ticket with the window's sales printed on it --}}
+            <section class="cc-card cc-s4 cc-line-card" aria-label="Events">
+                <div class="cc-card-h" style="margin-bottom: 0">
+                    <h2 class="cc-card-t">
+                        <span class="cc-glyph">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h15A1.5 1.5 0 0 1 21 7.5V10a2 2 0 0 0 0 4v2.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 16.5V14a2 2 0 0 0 0-4z"/><path d="M15 6.5v2M15 11v2M15 15.5v2" stroke-linecap="round"/></svg>
+                        </span>
+                        Events
+                    </h2>
+                    <a class="cc-more" href="{{ $events['url'] }}">Open<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
                 </div>
 
-                <div class="max-h-80 overflow-y-auto p-2">
-                    @if(!empty($searchResults))
-                        <div class="text-[10.5px] font-bold uppercase tracking-wider text-slate-400 px-3 py-1">Matching Enterprise Records</div>
-                        @foreach($searchResults as $res)
-                            <a
-                                href="{{ $res['url'] }}"
-                                class="flex items-center justify-between p-2.5 rounded-lg hover:bg-slate-100 transition-colors text-decoration-none"
-                            >
-                                <div>
-                                    <p class="text-xs font-bold text-slate-800 m-0">{{ $res['title'] }}</p>
-                                    <span class="text-[10.5px] text-slate-400">{{ $res['category'] }}</span>
-                                </div>
-                                <span class="text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">
-                                    {{ $res['badge'] }}
+                <svg class="cc-figure" viewBox="0 0 300 118" aria-label="{{ number_format($events['tickets']) }} tickets sold">
+                    <defs>
+                        <clipPath id="cc-stub"><rect x="214" y="0" width="86" height="118"/></clipPath>
+                    </defs>
+                    <path d="M14 1H206a8 8 0 0 0 16 0H286a13 13 0 0 1 13 13V104a13 13 0 0 1-13 13H222a8 8 0 0 0-16 0H14A13 13 0 0 1 1 104V14A13 13 0 0 1 14 1Z"
+                          fill="var(--cc-surface)" stroke="var(--cc-ink)" stroke-width="1.5"/>
+                    <path d="M14 1H206a8 8 0 0 0 16 0H286a13 13 0 0 1 13 13V104a13 13 0 0 1-13 13H222a8 8 0 0 0-16 0H14A13 13 0 0 1 1 104V14A13 13 0 0 1 14 1Z"
+                          fill="var(--cc-blue-soft)" clip-path="url(#cc-stub)"/>
+                    <path d="M214 12V106" stroke="var(--cc-ink-3)" stroke-width="1.5" stroke-dasharray="1 5" stroke-linecap="round"/>
+                    <text x="20" y="30" style="fill: var(--cc-ink-3); font-size: 11px; font-weight: 600">TICKETS SOLD · {{ strtoupper($h['rangeLabel']) }}</text>
+                    <text x="18" y="78" class="cc-num" style="fill: var(--cc-ink); font-size: 44px; font-weight: 700; letter-spacing: -0.04em">{{ number_format($events['tickets']) }}</text>
+                    <text x="20" y="100" style="fill: var(--cc-ink-2); font-size: 12px">{{ $events['gmv'] }} from {{ number_format($events['orders']) }} {{ $events['orders'] === 1 ? 'order' : 'orders' }}</text>
+                    {{-- stub: the count of upcoming events, set like a seat number --}}
+                    <text x="257" y="36" text-anchor="middle" style="fill: var(--cc-blue); font-size: 10px; font-weight: 700; letter-spacing: .12em">UPCOMING</text>
+                    <text x="257" y="74" text-anchor="middle" class="cc-num" style="fill: var(--cc-ink); font-size: 30px; font-weight: 700">{{ $events['upcoming'] }}</text>
+                    <text x="257" y="94" text-anchor="middle" style="fill: var(--cc-ink-3); font-size: 10.5px">{{ $events['upcoming'] === 1 ? 'event' : 'events' }}</text>
+                </svg>
+
+                @if ($events['next'])
+                    <a class="cc-note" href="{{ $events['next']['url'] }}">
+                        <span style="flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">Next up <b>{{ $events['next']['title'] }}</b> · {{ $events['next']['when'] }}</span>
+                        @if (! is_null($events['next']['sold']))
+                            <span class="cc-meter" title="{{ $events['next']['sold'] }} of {{ $events['next']['total'] }} sold"><i style="width: {{ min(100, round($events['next']['sold'] / max(1, $events['next']['total']) * 100)) }}%"></i></span>
+                            <span class="cc-num" style="font-size:12px">{{ $events['next']['sold'] }}/{{ $events['next']['total'] }}</span>
+                        @endif
+                    </a>
+                @else
+                    <div class="cc-note">No upcoming events are listed.</div>
+                @endif
+            </section>
+
+            {{-- Venues — today's court-hours, one cell per hour --}}
+            <section class="cc-card cc-s4 cc-line-card" aria-label="Venues">
+                <div class="cc-card-h" style="margin-bottom: 0">
+                    <h2 class="cc-card-t">
+                        <span class="cc-glyph">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M12 5v14"/><circle cx="12" cy="12" r="2.6"/><path d="M3 9h3v6H3M21 9h-3v6h3"/></svg>
+                        </span>
+                        Venues
+                    </h2>
+                    <a class="cc-more" href="{{ $venues['url'] }}">Open<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
+                </div>
+
+                @php
+                    $cells = count($hrs);
+                    $gw = 300; $gx = 0; $cellW = $cells ? ($gw - ($cells - 1) * 3) / $cells : 0;
+                    $nowH = (int) ($venues['nowHour'] ?? 0);
+                @endphp
+                <div>
+                    <div style="display:flex; align-items:baseline; justify-content:space-between; gap:10px">
+                        <div>
+                            <span class="cc-num" style="font-size: 30px; font-weight: 700; letter-spacing: -0.03em">{{ $venues['bookedHours'] }}</span>
+                            <span style="font-size: 13px; color: var(--cc-ink-2)">court-{{ $venues['bookedHours'] === 1 ? 'hour' : 'hours' }} booked today</span>
+                        </div>
+                        @if ($courtCount > 0)
+                            <span style="font-size: 12px; color: var(--cc-ink-3)">{{ number_format($venues['openHours']) }} open</span>
+                        @endif
+                    </div>
+                    <svg class="cc-figure wide" viewBox="0 0 300 66" style="margin-top: 10px" aria-label="Court bookings by hour today">
+                        @foreach ($hrs as $hr => $cnt)
+                            @php
+                                $i = $loop->index;
+                                $x = $gx + $i * ($cellW + 3);
+                                $ratio = $courtCount > 0 ? min(1, $cnt / $courtCount) : ($cnt > 0 ? 1 : 0);
+                                $past = $hr < $nowH;
+                            @endphp
+                            <g>
+                                @if ($cnt > 0)
+                                    <rect x="{{ $x }}" y="14" width="{{ $cellW }}" height="30" rx="4" fill="var(--cc-blue)" opacity="{{ $past ? 0.35 + 0.4 * $ratio : 0.45 + 0.55 * $ratio }}"/>
+                                @else
+                                    <rect x="{{ $x + 0.5 }}" y="14.5" width="{{ $cellW - 1 }}" height="29" rx="4" fill="{{ $past ? 'var(--cc-line-2)' : 'none' }}" stroke="var(--cc-line)" stroke-dasharray="{{ $past ? '0' : '3 2' }}"/>
+                                @endif
+                                <title>{{ $hourLabel($hr) }}–{{ $hourLabel($hr + 1) }}: {{ $cnt }} {{ $cnt === 1 ? 'court' : 'courts' }} booked{{ $courtCount ? ' of '.$courtCount : '' }}</title>
+                                @if ($hr === $nowH)
+                                    <path d="M{{ $x + $cellW / 2 - 4 }},4 h8 l-4,6 z" fill="var(--cc-ink)"/>
+                                @endif
+                                @if ($hr % 3 === 0)
+                                    <text x="{{ $x + $cellW / 2 }}" y="60" text-anchor="middle" style="fill: var(--cc-ink-3); font-size: 10px">{{ $hourLabel($hr) }}</text>
+                                @endif
+                            </g>
+                        @endforeach
+                    </svg>
+                </div>
+
+                <div class="cc-kv">
+                    <div><span>Takings</span><b class="cc-num">{{ $venues['gmv'] }}</b></div>
+                    <div><span>Bookings</span><b class="cc-num">{{ number_format($venues['bookings']) }}</b></div>
+                    <div><span>Venues · courts</span><b class="cc-num">{{ $venues['venues'] }} · {{ $courtCount }}</b></div>
+                </div>
+            </section>
+
+            {{-- Memberships — one card per paid plan, fanned, each carrying its member count --}}
+            <section class="cc-card cc-s4 cc-line-card" aria-label="Memberships">
+                <div class="cc-card-h" style="margin-bottom: 0">
+                    <h2 class="cc-card-t">
+                        <span class="cc-glyph">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12.5" rx="2"/><path d="M3 10h18"/><path d="M6.5 15h4" stroke-linecap="round"/></svg>
+                        </span>
+                        Memberships
+                    </h2>
+                    @if ($members['url'])
+                        <a class="cc-more" href="{{ $members['url'] }}">Open<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
+                    @endif
+                </div>
+
+                @php
+                    $plans = $members['plans'];
+                    $pc = count($plans);
+                    $angles = match ($pc) { 1 => [0], 2 => [-6, 6], default => [-10, 0, 10] };
+                    $offs = match ($pc) { 1 => [0], 2 => [-48, 48], default => [-86, 0, 86] };
+                @endphp
+                <svg class="cc-figure" viewBox="0 0 300 128" aria-label="Active members by plan">
+                    @if ($pc === 0)
+                        <rect x="90" y="20" width="120" height="78" rx="10" fill="none" stroke="var(--cc-line)" stroke-width="1.5" stroke-dasharray="4 3"/>
+                        <text x="150" y="64" text-anchor="middle" style="fill: var(--cc-ink-3); font-size: 12px">No paid plans yet</text>
+                    @else
+                        @foreach ($plans as $i => $plan)
+                            @php
+                                $dark = $i === $pc - 1 && $pc > 1;   // the top plan is the dark card
+                                $cxp = 150 + $offs[$i];
+                                $fill = $dark ? '#0d1424' : ($i === $pc - 2 || $pc === 1 ? 'var(--cc-blue)' : 'var(--cc-surface)');
+                                $ink = ($dark || $fill === 'var(--cc-blue)') ? '#ffffff' : 'var(--cc-ink)';
+                                $sub = ($dark || $fill === 'var(--cc-blue)') ? 'rgba(255,255,255,.72)' : 'var(--cc-ink-3)';
+                            @endphp
+                            <g transform="rotate({{ $angles[$i] }} {{ $cxp }} 150)">
+                                <rect x="{{ $cxp - 58 }}" y="22" width="116" height="78" rx="10" fill="{{ $fill }}" stroke="{{ $fill === 'var(--cc-surface)' ? 'var(--cc-ink)' : 'none' }}" stroke-width="1.4"
+                                      style="filter: drop-shadow(0 4px 6px rgba(16,24,40,.12))"/>
+                                @if ($dark)
+                                    <rect x="{{ $cxp - 54 }}" y="26" width="108" height="70" rx="7" fill="none" stroke="var(--cc-gold)" stroke-width=".8" opacity=".8"/>
+                                @endif
+                                <rect x="{{ $cxp - 46 }}" y="34" width="14" height="10" rx="2.5" fill="none" stroke="{{ $sub }}" stroke-width="1"/>
+                                <text x="{{ $cxp + 46 }}" y="43" text-anchor="end" style="fill: {{ $sub }}; font-size: 10px; font-weight: 700; letter-spacing: .1em">{{ strtoupper(\Illuminate\Support\Str::limit($plan['name'], 10, '')) }}</text>
+                                <text x="{{ $cxp - 46 }}" y="80" class="cc-num" style="fill: {{ $ink }}; font-size: 24px; font-weight: 700">{{ number_format($plan['active']) }}</text>
+                                <text x="{{ $cxp - 46 }}" y="92" style="fill: {{ $sub }}; font-size: 9.5px">active</text>
+                            </g>
+                        @endforeach
+                    @endif
+                </svg>
+
+                <div class="cc-kv">
+                    <div><span>Paying members</span><b class="cc-num">{{ number_format($members['active']) }}</b></div>
+                    <div><span>Paid · {{ strtolower($h['rangeLabel']) }}</span><b class="cc-num">{{ $members['revenue'] }}</b></div>
+                </div>
+            </section>
+        </div>
+
+        {{-- ── Activity (left) and money/where/systems (right) ──────────── --}}
+        <div class="cc-grid">
+            <div class="cc-s7 cc-stack">
+            <section class="cc-card" aria-label="Latest bookings">
+                <div class="cc-card-h">
+                    <div>
+                        <h2 class="cc-card-t">Latest bookings</h2>
+                        <div class="cc-card-sub">Every status, newest first</div>
+                    </div>
+                    <a class="cc-more" href="{{ \App\Filament\Resources\Bookings\BookingResource::getUrl('index') }}">All bookings<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
+                </div>
+
+                @if (empty($feed))
+                    <div class="cc-muted-empty">
+                        <svg width="46" height="56" viewBox="0 0 46 56" fill="none" aria-hidden="true">
+                            <path d="M5 3h36v47l-6-4-6 4-6-4-6 4-6-4-6 4z" fill="var(--cc-surface)" stroke="var(--cc-ink-3)" stroke-width="1.6" stroke-linejoin="round"/>
+                            <path d="M12 14h22M12 22h16M12 30h19" stroke="var(--cc-line)" stroke-width="3" stroke-linecap="round"/>
+                        </svg>
+                        No bookings have been made yet.
+                    </div>
+                @else
+                    <div class="cc-feed">
+                        @foreach ($feed as $f)
+                            <a href="{{ $f['url'] }}" title="{{ $f['at'] }}">
+                                <span class="k">
+                                    @if ($f['kind'] === 'venue')
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="5" width="18" height="14" rx="1.5"/><path d="M12 5v14"/><circle cx="12" cy="12" r="2.6"/></svg>
+                                    @else
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h15A1.5 1.5 0 0 1 21 7.5V10a2 2 0 0 0 0 4v2.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 16.5V14a2 2 0 0 0 0-4z"/><path d="M15 6.5v2M15 11v2M15 15.5v2" stroke-linecap="round"/></svg>
+                                    @endif
+                                </span>
+                                <span style="min-width:0">
+                                    <span class="t" style="display:block">{{ $f['what'] }}</span>
+                                    <span class="s" style="display:block">{{ $f['who'] }}@if($f['detail']) · {{ $f['detail'] }}@endif · {{ $f['ago'] }}</span>
+                                </span>
+                                <span class="r">
+                                    <span class="amt cc-num" style="display:block">{{ $f['amount'] }}</span>
+                                    <span class="cc-pill {{ $f['status'] }}"><i></i>{{ $f['statusLabel'] }}</span>
                                 </span>
                             </a>
                         @endforeach
-                    @elseif(!empty($searchQuery))
-                        <div class="p-6 text-center text-xs text-slate-400">
-                            No records found matching "{{ $searchQuery }}". Try searching for "Bangalore", "Turf", "Razorpay", or "WhatsApp".
-                        </div>
-                    @else
-                        <div class="p-4 text-xs text-slate-400">
-                            <span class="font-bold text-slate-600 block mb-1">Quick Shortcuts</span>
-                            <div class="flex gap-2 flex-wrap mt-2">
-                                <button type="button" wire:click="$set('searchQuery', 'Bangalore')" class="px-2 py-1 rounded bg-slate-100 text-slate-700 font-semibold text-[11px]">Bangalore Events</button>
-                                <button type="button" wire:click="$set('searchQuery', 'Turf')" class="px-2 py-1 rounded bg-slate-100 text-slate-700 font-semibold text-[11px]">Sports Venues</button>
-                                <button type="button" wire:click="$set('searchQuery', 'Partner')" class="px-2 py-1 rounded bg-slate-100 text-slate-700 font-semibold text-[11px]">SaaS Plans</button>
-                                <button type="button" wire:click="$set('searchQuery', 'Razorpay')" class="px-2 py-1 rounded bg-slate-100 text-slate-700 font-semibold text-[11px]">Gateway Ledger</button>
+                    </div>
+                @endif
+            </section>
+            <section class="cc-card" aria-label="Recent admin changes">
+                <div class="cc-card-h">
+                    <div>
+                        <h2 class="cc-card-t">Recent admin changes</h2>
+                        <div class="cc-card-sub">From the audit log</div>
+                    </div>
+                </div>
+                @if (empty($audit))
+                    <div class="cc-muted-empty">Nobody has changed anything yet.</div>
+                @else
+                    <div class="cc-tl">
+                        @foreach ($audit as $a)
+                            <div class="cc-tl-i">
+                                <div class="cc-tl-t">{{ $a['what'] }}@if($a['subject']) <span style="color: var(--cc-ink-3); font-weight: 500">· {{ $a['subject'] }}</span>@endif</div>
+                                <div class="cc-tl-s">{{ $a['who'] }} · {{ $a['day'] }}, {{ $a['time'] }}</div>
                             </div>
-                        </div>
+                        @endforeach
+                    </div>
+                @endif
+            </section>
+            </div>
+            <div class="cc-s5 cc-stack">
+            <section class="cc-card" aria-label="Cities">
+                <div class="cc-card-h">
+                    <div>
+                        <h2 class="cc-card-t">Where it sold</h2>
+                        <div class="cc-card-sub">Paid bookings by city · {{ strtolower($h['rangeLabel']) }}</div>
+                    </div>
+                </div>
+
+                @forelse ($cities as $c)
+                    <div class="cc-city" title="{{ $c['orders'] }} {{ $c['orders'] === 1 ? 'booking' : 'bookings' }}">
+                        <span class="name">{{ $c['city'] }}</span>
+                        <span class="track"><i style="width: {{ max(2, $c['share']) }}%"></i></span>
+                        <span class="v cc-num">{{ $c['gmv'] }}</span>
+                    </div>
+                @empty
+                    <div class="cc-muted-empty">No paid bookings in this window.</div>
+                @endforelse
+
+                <a class="cc-owed" href="{{ $ledger['url'] }}">
+                    <div>
+                        <span>Still owed to partners</span>
+                        <b class="cc-num" @if($ledger['owedRaw'] > 0) style="color: var(--cc-amber)" @endif>{{ $ledger['owed'] }}</b>
+                    </div>
+                    <div style="text-align:right">
+                        <span>In a payout batch <b class="cc-num" style="font-size:13px; color: var(--cc-ink)">{{ $ledger['inFlight'] }}</b></span>
+                        <span>Paid out today <b class="cc-num" style="font-size:13px; color: var(--cc-ink)">{{ $ledger['paidToday'] }}</b></span>
+                    </div>
+                </a>
+            </section>
+            <section class="cc-card" aria-label="Systems">
+                <div class="cc-card-h">
+                    <div>
+                        <h2 class="cc-card-t">Systems</h2>
+                        <div class="cc-card-sub">Checked when this page loaded</div>
+                    </div>
+                </div>
+                @foreach ($systems as $s)
+                    <div class="cc-sys">
+                        <span class="n"><span class="cc-led {{ $s['ok'] ? '' : 'off' }}"></span>{{ $s['name'] }}</span>
+                        <span class="d cc-num">{{ $s['detail'] }}</span>
+                    </div>
+                @endforeach
+            </section>
+            </div>
+        </div>
+
+        {{-- ── Ctrl/⌘ K ────────────────────────────────────────────────────── --}}
+        <div class="cc-modal" x-show="open" x-cloak style="display:none"
+             x-transition.opacity.duration.120ms
+             @click.self="open = false" @keydown.escape.window="open = false">
+            <div class="cc-modal-box" role="dialog" aria-label="Search">
+                <div class="cc-modal-in">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="var(--cc-ink-3)" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+                    <input x-ref="q" type="text" wire:model.live.debounce.200ms="searchQuery"
+                           placeholder="Event name, venue, person, phone, booking #…" autocomplete="off" />
+                    <button type="button" class="cc-key" @click="open = false">Esc</button>
+                </div>
+                <div class="cc-res">
+                    @if (mb_strlen(trim($searchQuery)) < 2)
+                        <div class="cc-res-empty">Type at least two letters. Searches events, venues, people (name, email, phone) and bookings (ID, ticket code, payment ID).</div>
+                    @elseif (empty($searchResults))
+                        <div class="cc-res-empty">Nothing matches “{{ $searchQuery }}”.</div>
+                    @else
+                        @foreach (collect($searchResults)->groupBy('group') as $group => $rows)
+                            <div class="cc-res-g">{{ $group }}</div>
+                            @foreach ($rows as $r)
+                                <a href="{{ $r['url'] }}">
+                                    <span style="min-width:0">
+                                        <span class="t" style="display:block">{{ $r['title'] }}</span>
+                                        @if ($r['meta'])<span class="m" style="display:block">{{ $r['meta'] }}</span>@endif
+                                    </span>
+                                </a>
+                            @endforeach
+                        @endforeach
                     @endif
                 </div>
             </div>
         </div>
     </div>
 </x-filament-panels::page>
-
-

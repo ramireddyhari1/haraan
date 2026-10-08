@@ -146,7 +146,7 @@ class UserInfolist
 
             // 2. GameHub & Sports Profile
             Section::make('GameHub & Sports Profile')
-                ->description('Player statistics, ActionBoard ranking, and sports telemetry.')
+                ->description('Player statistics and ActionBoard ranking.')
                 ->collapsible()
                 ->columns(['default' => 1, 'md' => 4])
                 ->schema([
@@ -194,7 +194,7 @@ class UserInfolist
                 ]),
 
             // 3. Security, Sessions & Device Telemetry
-            Section::make('Security & Session Telemetry')
+            Section::make('Security & sessions')
                 ->description('Access credentials, active sessions, and authentication state.')
                 ->collapsible()
                 ->columns(['default' => 1, 'md' => 4])

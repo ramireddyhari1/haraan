@@ -67,7 +67,7 @@
             color:var(--hrn-ink,#0f172a);font-variant-numeric:tabular-nums;}
         .tck-eh-sub{font-size:11.5px;color:var(--hrn-ink-3,#64748b);font-weight:550;}
 
-        /* Grid Layout: Camera Stage (Left) & Gate Telemetry Console (Right) */
+        /* Grid Layout: Camera Stage (Left) & gate panel (Right) */
         .tck-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:22px;align-items:start;}
         @media(max-width:960px){.tck-grid{grid-template-columns:1fr;}}
 
@@ -304,47 +304,52 @@
         </div>
 
         @php
-            $gateTel = $this->getExecutiveGateTelemetry();
+            $gate = $this->getGateFigures();
+            $insidePct = $gate['expected'] > 0 ? (int) round($gate['inside'] / $gate['expected'] * 100) : 0;
         @endphp
 
-        {{-- Executive Gate Command Strip --}}
+        {{-- Gate strip: this session's tally and who is already in --}}
         <div class="tck-executive-hero">
             <div class="tck-eh-cell tck-eh-cell--hero">
                 <div class="tck-eh-label">
-                    <span>Live Gate Velocity</span>
-                    <x-filament::icon icon="heroicon-m-bolt" style="width:14px;height:14px;color:var(--tck-accent);" />
+                    <span>Inside · {{ $gate['scope'] }}</span>
+                    <x-filament::icon icon="heroicon-m-user-group" style="width:14px;height:14px;color:var(--tck-accent);" />
                 </div>
-                <div class="tck-eh-val" style="color:var(--tck-accent);">{{ $gateTel['velocity'] }}</div>
-                <div class="tck-eh-sub">Real-time arrival rate</div>
+                <div class="tck-eh-val" style="color:var(--tck-accent);">{{ number_format($gate['inside']) }}<span style="font-size:14px;font-weight:600;color:#64748b;"> / {{ number_format($gate['expected']) }}</span></div>
+                <div class="tck-eh-sub">
+                    @if ($gate['expected'] > 0)
+                        <span style="display:block;height:5px;border-radius:3px;background:#e8edf5;overflow:hidden;margin-top:4px"><span style="display:block;height:100%;width:{{ $insidePct }}%;background:var(--tck-accent);border-radius:3px"></span></span>
+                    @else
+                        No paid tickets for {{ $gate['scope'] }}
+                    @endif
+                </div>
             </div>
 
             <div class="tck-eh-cell">
                 <div class="tck-eh-label">
-                    <span>QR Recognition Success</span>
+                    <span>Let in by you</span>
                     <x-filament::icon icon="heroicon-m-check-badge" style="width:14px;height:14px;color:#10b981;" />
                 </div>
-                <div class="tck-eh-val" style="color:#10b981;">{{ $gateTel['qr_success'] }}</div>
-                <div class="tck-eh-sub">Sub-150ms optical decode</div>
+                <div class="tck-eh-val" style="color:#10b981;">{{ number_format($gate['admitted']) }}</div>
+                <div class="tck-eh-sub">Since this page was opened</div>
             </div>
 
             <div class="tck-eh-cell">
                 <div class="tck-eh-label">
-                    <span>No-Show Prediction</span>
-                    <x-filament::icon icon="heroicon-m-user-minus" style="width:14px;height:14px;color:#6366f1;" />
+                    <span>Scanned again</span>
+                    <x-filament::icon icon="heroicon-m-arrow-path" style="width:14px;height:14px;color:#d97706;" />
                 </div>
-                <div class="tck-eh-val">{{ $gateTel['no_show_risk'] }}</div>
-                <div class="tck-eh-sub">{!! $gateTel['no_show_desc'] !!}</div>
+                <div class="tck-eh-val" style="color:{{ $gate['repeats'] > 0 ? '#d97706' : 'inherit' }};">{{ number_format($gate['repeats']) }}</div>
+                <div class="tck-eh-sub">Ticket was already used</div>
             </div>
 
             <div class="tck-eh-cell">
                 <div class="tck-eh-label">
-                    <span>Fraud & Duplication</span>
-                    <x-filament::icon icon="heroicon-m-shield-exclamation" style="width:14px;height:14px;color:{{ $gateTel['fraud_alerts'] > 0 ? '#ef4444' : '#10b981' }};" />
+                    <span>Not valid</span>
+                    <x-filament::icon icon="heroicon-m-x-circle" style="width:14px;height:14px;color:{{ $gate['rejected'] > 0 ? '#ef4444' : '#94a3b8' }};" />
                 </div>
-                <div class="tck-eh-val" style="color:{{ $gateTel['fraud_alerts'] > 0 ? '#ef4444' : '#0f172a' }};">
-                    {{ $gateTel['fraud_alerts'] }} <span style="font-size:13px;font-weight:600;color:#64748b;">flagged</span>
-                </div>
-                <div class="tck-eh-sub">{{ $gateTel['fraud_status'] }}</div>
+                <div class="tck-eh-val" style="color:{{ $gate['rejected'] > 0 ? '#ef4444' : 'inherit' }};">{{ number_format($gate['rejected']) }}</div>
+                <div class="tck-eh-sub">Unknown code or another event</div>
             </div>
         </div>
 
@@ -354,7 +359,7 @@
                 <div class="tck-stage" id="tck-stage">
                     <div class="tck-stage-top">
                         <span class="tck-live" id="tck-live"><span class="dot"></span><span id="tck-live-txt">Camera off</span></span>
-                        <span class="tck-badge-tag">Haraan Gate Console</span>
+                        <span class="tck-badge-tag">Gate scanner</span>
                     </div>
 
                     <div class="tck-viewport">
@@ -425,7 +430,7 @@
                 </p>
             </div>
 
-            {{-- ── Right Stage: Gate Telemetry & Recent Scans ───────────── --}}
+            {{-- ── Right Stage: gate panel & recent scans ───────────── --}}
             <div class="tck-side">
                 {{-- High-Visibility Gate Tally --}}
                 <div class="tck-tally">
@@ -436,7 +441,7 @@
                             $totalScans = $admitted + $repeats + $rejected;
                             $passRate = $totalScans > 0 ? round(($admitted / $totalScans) * 100) : 100;
                         @endphp
-                        <div class="tck-stat-sub">{{ $passRate }}% pass rate</div>
+                        <div class="tck-stat-sub">{{ $totalScans > 0 ? $passRate."% of scans" : "No scans yet" }}</div>
                     </div>
                     <div class="tck-stat tck-stat--warn">
                         <div class="n">{{ $repeats }}</div>

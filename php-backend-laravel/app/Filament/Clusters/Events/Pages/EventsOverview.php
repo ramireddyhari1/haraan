@@ -5,21 +5,23 @@ declare(strict_types=1);
 namespace App\Filament\Clusters\Events\Pages;
 
 use App\Filament\Clusters\Events\EventsCluster;
+use App\Filament\Resources\Bookings\BookingResource;
+use App\Filament\Resources\Events\EventResource;
 use App\Models\Booking;
 use App\Models\Event;
+use App\Support\BusinessClock;
+use App\Support\Rupees;
+use App\Support\TakingsSeries;
 use BackedEnum;
-use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Livewire\Attributes\On;
 
 /**
- * Enterprise Events Executive Command Center — C-Suite Macro Portfolio Surface.
- *
- * Provides:
- *   1. Executive Hero — Total Event Revenue, Active Live Events, Tickets Sold, Check-in Rate, Trailing Sparkline.
- *   2. 12-Column Analytics — Revenue & Attendance Trajectory, Regional City Velocity, Top Venues, AI Insights.
- *   3. Floating Universal Search & Quick Action Toolbar.
+ * Events at a glance: ticket takings, what is on sale and how full it is, where tickets
+ * sell, and the latest orders. Every figure is read from bookings and events at render
+ * time; an empty platform shows empty states, never sample numbers.
  */
 class EventsOverview extends Page
 {
@@ -35,22 +37,33 @@ class EventsOverview extends Page
 
     protected string $view = 'filament.clusters.events.events-overview';
 
-    /** Paid statuses representing settled ticketing revenue */
     private const PAID = ['confirmed', 'paid', 'completed', 'checked_in'];
 
     public string $range = '30d';
 
-    public array $executiveHero = [];
+    /** @var array<string,mixed> */
+    public array $hero = [];
 
-    public array $revenueTrends = [];
+    /** @var array<string,mixed> */
+    public array $series = [];
 
-    public array $topCities = [];
+    /** @var array<int,array<string,mixed>> */
+    public array $onSale = [];
 
-    public array $topVenues = [];
+    /** @var array<int,array<string,mixed>> */
+    public array $categories = [];
 
-    public array $aiInsights = [];
+    /** @var array<int,array<string,mixed>> */
+    public array $cities = [];
 
-    public array $recentTransactions = [];
+    /** @var array<int,array<string,mixed>> */
+    public array $places = [];
+
+    /** @var array<int,array<string,mixed>> */
+    public array $orders = [];
+
+    /** @var array<int,array<string,mixed>> */
+    public array $watch = [];
 
     public function mount(): void
     {
@@ -63,113 +76,182 @@ class EventsOverview extends Page
         $this->build();
     }
 
-    public function applyAiOptimization(string $key): void
-    {
-        Notification::make()
-            ->title('AI Pricing / Inventory Strategy Applied')
-            ->body("Optimization action '{$key}' has been dispatched to event scheduling.")
-            ->success()
-            ->send();
-    }
-
+    #[On('haraan-content-updated')]
     public function build(): void
     {
-        $since = match ($this->range) {
-            'today' => now()->startOfDay(),
+        $since = $this->since();
+
+        $this->hero = $this->buildHero($since);
+        $this->series = TakingsSeries::build($this->range, $this->paid());
+        $this->onSale = $this->buildOnSale();
+        $this->categories = $this->groupBy("coalesce(nullif(trim(events.category), ''), 'Uncategorised')", $since, 5);
+        $this->cities = $this->groupBy("coalesce(nullif(trim(events.city), ''), 'Unknown')", $since, 5);
+        $this->places = $this->groupBy("coalesce(nullif(trim(events.venue), ''), nullif(trim(events.location), ''), 'Not set')", $since, 5);
+        $this->orders = $this->buildOrders();
+        $this->watch = $this->buildWatch();
+    }
+
+    private function since(): ?Carbon
+    {
+        return match ($this->range) {
+            'today' => BusinessClock::now()->startOfDay()->setTimezone(config('app.timezone')),
             '7d' => now()->subDays(7),
             '90d' => now()->subDays(90),
             'all' => null,
             default => now()->subDays(30),
         };
+    }
 
-        // 1. Executive Hero Telemetry
-        $eventBookingsQ = Booking::query()->whereIn(DB::raw('lower(status)'), self::PAID)
-            ->where(fn ($q) => $q->where('booking_type', 'event')->orWhereNotNull('event_id'));
-        $dbRevenue = (float) ($since ? (clone $eventBookingsQ)->where('created_at', '>=', $since)->sum('total_amount') : $eventBookingsQ->sum('total_amount'));
-        $dbTickets = (int) ($since ? (clone $eventBookingsQ)->where('created_at', '>=', $since)->count() : $eventBookingsQ->count());
-        $dbCheckedIn = (int) ($since ? (clone $eventBookingsQ)->where('created_at', '>=', $since)->whereRaw("lower(status) = 'checked_in'")->count() : $eventBookingsQ->whereRaw("lower(status) = 'checked_in'")->count());
-        $liveEventsCount = Event::where('status', 'published')->whereDate('date', '>=', now()->startOfDay())->count();
+    /** Paid event bookings. */
+    private function paid()
+    {
+        return Booking::query()
+            ->whereIn(DB::raw('lower(bookings.status)'), self::PAID)
+            ->whereNotNull('bookings.event_id');
+    }
 
-        $revenue = $dbRevenue > 0 ? $dbRevenue : 2842100.00;
-        $tickets = $dbTickets > 0 ? $dbTickets : 3420;
-        $activeEvents = $liveEventsCount > 0 ? $liveEventsCount : 18;
-        $checkinRate = $tickets > 0 ? round(($dbCheckedIn > 0 ? ($dbCheckedIn / $tickets * 100) : 82.4), 1) : 82.4;
+    private function windowed(?Carbon $since)
+    {
+        return $this->paid()->when($since, fn ($q) => $q->where('bookings.created_at', '>=', $since));
+    }
 
-        $this->executiveHero = [
-            'revenue_raw' => $revenue,
-            'revenue' => '₹' . number_format($revenue),
-            'growth' => '+29.2%',
-            'growth_label' => 'MoM Ticketing Expansion',
-            'active_events' => $activeEvents,
-            'tickets_sold' => number_format($tickets),
-            'checkin_rate' => $checkinRate . '%',
-            'today_revenue' => '₹94,200',
-            'avg_ticket' => '₹' . number_format(round($revenue / max(1, $tickets))),
-            'sparkline' => [24, 30, 38, 35, 52, 60, 68, 72, 85, 94],
+    private function buildHero(?Carbon $since): array
+    {
+        $revenue = (float) $this->windowed($since)->sum('total_amount');
+        $orders = (int) $this->windowed($since)->count();
+        $tickets = (int) $this->windowed($since)->sum('quantity');
+
+        // Show-up rate only over events that have already happened, or it reads as a no-show.
+        $held = $this->windowed($since)
+            ->join('events', 'events.id', '=', 'bookings.event_id')
+            ->whereDate('events.date', '<', BusinessClock::todayDate());
+        $heldTickets = (int) (clone $held)->sum('bookings.quantity');
+        $heldIn = (int) (clone $held)->sum('bookings.checked_in_count');
+
+        return [
+            'revenue' => Rupees::format($revenue),
+            'orders' => $orders,
+            'tickets' => $tickets,
+            'avgTicket' => $tickets > 0 ? Rupees::format($revenue / $tickets) : '—',
+            'showUp' => $heldTickets > 0 ? (int) round(min($heldIn, $heldTickets) / $heldTickets * 100).'%' : '—',
+            'onSaleCount' => $this->upcoming()->count(),
+            'showUpNote' => $heldTickets > 0 ? number_format($heldIn).' of '.number_format($heldTickets).' tickets scanned' : 'No finished events in this window',
+            'rangeLabel' => match ($this->range) {
+                'today' => 'Today so far',
+                '7d' => 'Last 7 days',
+                '90d' => 'Last 90 days',
+                'all' => 'All time',
+                default => 'Last 30 days',
+            },
         ];
+    }
 
-        // 2. Revenue & Attendance Trajectory
-        $this->revenueTrends = [
-            'labels' => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-            'music'  => [180000, 220000, 210000, 280000, 420000, 580000, 540000],
-            'sports' => [80000,  95000,  90000,  120000, 160000, 240000, 210000],
-            'tech'   => [50000,  65000,  60000,  70000,  90000,  110000, 85000],
-            'arts'   => [20000,  25000,  22000,  30000,  45000,  60000,  55000],
-            'totals' => ['₹3.3L', '₹4.0L', '₹3.8L', '₹5.0L', '₹7.1L', '₹9.9L', '₹8.9L'],
-        ];
+    /** Upcoming, customer-visible events, soonest first, with how full each is. */
+    private function buildOnSale(): array
+    {
+        return $this->upcoming()
+            ->orderBy('date')->orderBy('time')
+            ->limit(6)
+            ->get(['id', 'title', 'date', 'time', 'city', 'venue', 'total_slots', 'available_slots', 'is_sold_out'])
+            ->map(function (Event $e): array {
+                $cap = max(0, (int) $e->total_slots);
+                $sold = $cap > 0 ? max(0, $cap - max(0, (int) $e->available_slots)) : 0;
+                $date = $e->date ? Carbon::parse($e->date) : null;
 
-        // 3. Top Regional Cities
-        $this->topCities = [
-            ['city' => 'Bengaluru', 'gmv' => '₹14.8L', 'pct' => 52.1, 'events' => 8, 'growth' => '+34% MoM', 'lead' => true],
-            ['city' => 'Mumbai', 'gmv' => '₹6.4L', 'pct' => 22.5, 'events' => 4, 'growth' => '+26% MoM', 'lead' => false],
-            ['city' => 'Hyderabad', 'gmv' => '₹4.1L', 'pct' => 14.4, 'events' => 3, 'growth' => '+42% MoM', 'lead' => false],
-            ['city' => 'Delhi NCR', 'gmv' => '₹2.1L', 'pct' => 7.4, 'events' => 2, 'growth' => '+19% MoM', 'lead' => false],
-            ['city' => 'Chennai', 'gmv' => '₹1.0L', 'pct' => 3.6, 'events' => 1, 'growth' => '+14% MoM', 'lead' => false],
-        ];
+                return [
+                    'title' => $e->title,
+                    'when' => $date ? $date->format('D j M') : 'Date not set',
+                    'days' => $date ? (int) BusinessClock::todayDate()->diffInDays($date, false) : null,
+                    'where' => $e->venue ?: $e->city,
+                    'sold' => $sold,
+                    'cap' => $cap,
+                    'pct' => $cap > 0 ? (int) round($sold / $cap * 100) : null,
+                    'soldOut' => (bool) $e->is_sold_out || ($cap > 0 && $sold >= $cap),
+                    'url' => EventResource::getUrl('edit', ['record' => $e]),
+                ];
+            })
+            ->all();
+    }
 
-        // 4. Top Performing Venues
-        $this->topVenues = [
-            ['name' => 'Palace Grounds, Bengaluru', 'gmv' => '₹11.2L', 'occupancy' => '96.2%', 'events' => 4, 'type' => 'Open Air Arena'],
-            ['name' => 'Indiranagar Club Arena', 'gmv' => '₹6.8L', 'occupancy' => '92.0%', 'events' => 3, 'type' => 'Concert Hall'],
-            ['name' => 'Phoenix Marketcity Amphitheatre', 'gmv' => '₹4.5L', 'occupancy' => '88.5%', 'events' => 3, 'type' => 'Amphitheatre'],
-            ['name' => 'HITEX Exhibition Center, Hyderabad', 'gmv' => '₹3.8L', 'occupancy' => '84.0%', 'events' => 2, 'type' => 'Convention Hall'],
-        ];
+    private function upcoming()
+    {
+        return Event::query()
+            ->whereDate('date', '>=', BusinessClock::todayDate())
+            ->whereRaw("lower(coalesce(status, '')) not in ('draft', 'cancelled', 'canceled')");
+    }
 
-        // 5. AI Predictive Insights
-        $this->aiInsights = [
-            [
-                'key' => 'surge_vip',
-                'badge' => 'High Impact',
-                'title' => 'VIP Lounge Pass Surge Recommendation',
-                'desc' => 'VIP pass demand for Bangalore Open Air is pacing at 3.2x normal velocity. Dynamic +18% price surge on remaining 45 passes will capture ₹38,000 additional gross margin.',
-                'metric' => '+₹38,000 Yield',
-                'action' => 'Apply +18% Surge',
-            ],
-            [
-                'key' => 'inventory_velocity',
-                'badge' => 'Sellout Imminent',
-                'title' => 'Electronic Nights Phase 1 Inventory Critical',
-                'desc' => 'Only 32 Phase 1 passes remain. Sellout predicted within 18 hours. Automatically unlock Phase 2 tier (+₹250) to prevent checkout cart abandonment.',
-                'metric' => '18h to Stockout',
-                'action' => 'Auto-Unlock Phase 2',
-            ],
-            [
-                'key' => 'gate_load',
-                'badge' => 'Gate Operations',
-                'title' => 'Pre-Opening Crowd Queue Triage',
-                'desc' => '65% of attendees reported early arrival preference on WhatsApp notifications. Recommend opening Door B 30 minutes early to prevent gate bottle-necking.',
-                'metric' => '30m Early Access',
-                'action' => 'Notify Gate Leads',
-            ],
-        ];
+    /** Paid ticket takings grouped by an events expression, biggest first. */
+    private function groupBy(string $expr, ?Carbon $since, int $limit): array
+    {
+        $rows = $this->windowed($since)
+            ->join('events', 'events.id', '=', 'bookings.event_id')
+            ->selectRaw("{$expr} as k, sum(bookings.total_amount) as v, sum(bookings.quantity) as t")
+            ->groupBy('k')
+            ->orderByDesc('v')
+            ->limit($limit)
+            ->toBase()
+            ->get();
 
-        // 6. Recent Transactions
-        $this->recentTransactions = [
-            ['id' => 'TX-9102', 'event' => 'Bangalore Open Air 2026', 'buyer' => 'Sneha Rao', 'amount' => '₹9,600', 'qty' => 4, 'time' => '1m ago', 'status' => 'CONFIRMED'],
-            ['id' => 'TX-9101', 'event' => 'Neon Music Festival', 'buyer' => 'Aditya Verma', 'amount' => '₹4,800', 'qty' => 2, 'time' => '4m ago', 'status' => 'CONFIRMED'],
-            ['id' => 'TX-9100', 'event' => 'Tech Leaders Summit 2026', 'buyer' => 'Karthik Raja', 'amount' => '₹12,500', 'qty' => 1, 'time' => '12m ago', 'status' => 'CONFIRMED'],
-            ['id' => 'TX-9099', 'event' => 'Bangalore Open Air 2026', 'buyer' => 'Pooja Nair', 'amount' => '₹2,400', 'qty' => 1, 'time' => '18m ago', 'status' => 'CONFIRMED'],
+        $total = (float) $this->windowed($since)->sum('total_amount');
+        $top = (float) ($rows->max('v') ?: 0);
+
+        return $rows->map(fn ($r): array => [
+            'label' => (string) $r->k,
+            'value' => Rupees::format((float) $r->v),
+            'tickets' => (int) $r->t,
+            'share' => $total > 0 ? round((float) $r->v / $total * 100, 1) : 0,
+            'bar' => $top > 0 ? (int) round((float) $r->v / $top * 100) : 0,
+        ])->all();
+    }
+
+    private function buildOrders(): array
+    {
+        return Booking::query()
+            ->whereNotNull('event_id')
+            ->with(['user:id,name', 'event:id,title'])
+            ->latest('id')
+            ->limit(7)
+            ->get()
+            ->map(function (Booking $b): array {
+                $s = strtolower((string) $b->status);
+
+                return [
+                    'who' => $b->user?->name ?: ($b->attendee_name ?: ($b->guest_name ?: 'Guest')),
+                    'event' => $b->event?->title ?? 'Event #'.$b->event_id,
+                    'qty' => (int) $b->quantity,
+                    'amount' => Rupees::format((float) $b->total_amount),
+                    'tone' => in_array($s, self::PAID, true) ? 'ok' : (in_array($s, ['pending', 'reserved'], true) ? 'warn' : (in_array($s, ['failed', 'refunded'], true) ? 'down' : 'idle')),
+                    'status' => ucwords(str_replace('_', ' ', $s)),
+                    'ago' => $b->created_at?->diffForHumans(short: true) ?? '',
+                    'url' => BookingResource::getUrl('edit', ['record' => $b]),
+                ];
+            })
+            ->all();
+    }
+
+    /** Things an events manager should look at, each a count with a link. */
+    private function buildWatch(): array
+    {
+        $today = BusinessClock::todayDate();
+        $week = $today->copy()->addDays(7);
+        $list = EventResource::getUrl('index');
+
+        $soonAndThin = $this->upcoming()
+            ->whereDate('date', '<=', $week)
+            ->where('total_slots', '>', 0)
+            ->whereRaw('(total_slots - available_slots) < total_slots * 0.3')
+            ->count();
+
+        $soldOut = $this->upcoming()
+            ->where(fn ($q) => $q->where('is_sold_out', true)->orWhere(fn ($w) => $w->where('total_slots', '>', 0)->where('available_slots', '<=', 0)))
+            ->count();
+
+        $drafts = Event::query()->whereRaw("lower(coalesce(status, '')) = 'draft'")->whereDate('date', '>=', $today)->count();
+
+        return [
+            ['title' => 'Under 30% sold, this week', 'sub' => 'Starts within 7 days', 'count' => $soonAndThin, 'icon' => 'heroicon-o-clock', 'url' => $list],
+            ['title' => 'Sold out', 'sub' => 'Upcoming, no seats left', 'count' => $soldOut, 'icon' => 'heroicon-o-check-badge', 'url' => $list, 'good' => true],
+            ['title' => 'Drafts with a future date', 'sub' => 'Not visible to customers yet', 'count' => $drafts, 'icon' => 'heroicon-o-pencil-square', 'url' => $list],
         ];
     }
 }
-

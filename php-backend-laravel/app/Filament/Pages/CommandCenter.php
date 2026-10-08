@@ -4,6 +4,13 @@ declare(strict_types=1);
 
 namespace App\Filament\Pages;
 
+use App\Filament\Resources\Bookings\BookingResource;
+use App\Filament\Resources\Events\EventResource;
+use App\Filament\Resources\MemberSubscriptions\MemberSubscriptionResource;
+use App\Filament\Resources\Payouts\PayoutResource;
+use App\Filament\Resources\SupportThreads\SupportThreadResource;
+use App\Filament\Resources\Users\UserResource;
+use App\Filament\Resources\Venues\VenueResource;
 use App\Models\AdminAction;
 use App\Models\Booking;
 use App\Models\Event;
@@ -13,26 +20,24 @@ use App\Models\SupportThread;
 use App\Models\User;
 use App\Models\Venue;
 use App\Services\PartnerSettlement;
-use App\Support\AiGate;
+use App\Support\BusinessClock;
+use App\Support\Rupees;
+use App\Support\TakingsSeries;
 use BackedEnum;
-use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Livewire\Attributes\On;
 
 /**
- * Enterprise Executive Command Center — Million-Dollar C-Suite Control Surface.
+ * The /control landing page: what came in, where it went, and what needs a person.
  *
- * Inspired by Stripe, Linear, Microsoft Fabric, and AWS:
- *   1. Executive Hero      — Gross Revenue, Net Profit, Growth %, Today's Numbers, Live Users, AI Health Score.
- *   2. Vertical Pillars    — Events, Sports Venues, SaaS Products with core metrics & trend sparklines.
- *   3. Analytics Charts    — Multi-Stream Revenue Trajectory & Conversion Funnel Unit Economics.
- *   4. Operations & Geo    — Real-Time Live Stream Feed & Regional Velocity Heatmap.
- *   5. AI Predictive Engine— Actionable C-suite recommendations & anomaly alerts.
- *   6. Financial Overview  — Gross Inflow, Commissions, Gateway fees, Payout Obligations, Escrow.
- *   7. Operational Radar   — Actionable triage queue for operators.
- *   8. Universal Spotlight — Cmd/Ctrl + K floating search for instant enterprise jump.
+ * Every figure on it is read from the database at render time. An earlier version
+ * padded empty tables with invented numbers, sample bookings and "AI" cards, so an
+ * admin could not tell the platform's real state from decoration. When a table is
+ * empty the page now says so instead.
  */
 class CommandCenter extends Page
 {
@@ -51,42 +56,52 @@ class CommandCenter extends Page
     /** Booking statuses that represent money actually collected (case-insensitive). */
     private const PAID = ['confirmed', 'paid', 'completed', 'checked_in'];
 
-    private const LOST = ['cancelled', 'canceled', 'refunded', 'failed'];
+    /** Hours shown on the "courts today" strip, in the business zone. */
+    private const COURT_DAY_START = 6;
 
-    /** @var array<string,mixed> Assembled once per render; the view reads these. */
-    public array $money = [];
-
-    public array $health = [];
-
-    public array $radar = [];
+    private const COURT_DAY_END = 23;
 
     public ?string $range = '30d';
 
-    /** Executive Command Center Datasets */
-    public array $executiveHero = [];
-
-    public array $verticals = [];
-
-    public array $trajectory = [];
-
-    public array $conversionFunnel = [];
-
-    public array $liveStream = [];
-
-    public string $activeStreamFilter = 'all';
-
-    public array $geoVelocity = [];
-
-    public array $aiInsights = [];
-
-    public array $financialLedger = [];
-
-    public array $systemHealth = [];
-
-    public array $activityTimeline = [];
-
     public string $searchQuery = '';
 
+    /** @var array<string,mixed> */
+    public array $hero = [];
+
+    /** @var array<string,mixed> */
+    public array $series = [];
+
+    /** @var array<int,array<string,mixed>> */
+    public array $split = [];
+
+    /** @var array<string,mixed> */
+    public array $events = [];
+
+    /** @var array<string,mixed> */
+    public array $venues = [];
+
+    /** @var array<string,mixed> */
+    public array $members = [];
+
+    /** @var array<int,array<string,mixed>> */
+    public array $radar = [];
+
+    /** @var array<int,array<string,mixed>> */
+    public array $feed = [];
+
+    /** @var array<int,array<string,mixed>> */
+    public array $cities = [];
+
+    /** @var array<string,mixed> */
+    public array $ledger = [];
+
+    /** @var array<int,array<string,mixed>> */
+    public array $systems = [];
+
+    /** @var array<int,array<string,mixed>> */
+    public array $audit = [];
+
+    /** @var array<int,array<string,mixed>> */
     public array $searchResults = [];
 
     public static function canAccess(): bool
@@ -104,35 +119,22 @@ class CommandCenter extends Page
     /** Re-assemble on poll / Reverb signal / range change. */
     public function build(): void
     {
-        $since = match ($this->range) {
-            'today' => now()->startOfDay(),
-            '7d' => now()->subDays(7),
-            '90d' => now()->subDays(90),
-            'all' => null,
-            default => now()->subDays(30),
-        };
-        $prevSince = $since ? $since->copy()->sub($since->diffAsCarbonInterval(now())) : null;
+        [$since, $prevFrom, $prevTo] = $this->window();
 
-        // Legacy compatibility
-        $this->money = $this->buildMoney($since, $prevSince);
-        $this->health = $this->buildHealth($since);
+        $this->hero = $this->buildHero($since, $prevFrom, $prevTo);
+        $this->series = TakingsSeries::build((string) $this->range, $this->paid());
+        $this->split = $this->buildSplit($since);
+        $this->events = $this->buildEvents($since);
+        $this->venues = $this->buildVenues($since);
+        $this->members = $this->buildMembers($since);
         $this->radar = $this->buildRadar();
+        $this->feed = $this->buildFeed();
+        $this->cities = $this->buildCities($since);
+        $this->ledger = $this->buildLedger();
+        $this->systems = $this->buildSystems();
+        $this->audit = $this->buildAudit();
 
-        // C-Suite Executive Datasets
-        $this->executiveHero = $this->buildExecutiveHero($since, $prevSince);
-        $this->verticals = $this->buildVerticals($since);
-        $this->trajectory = $this->buildTrajectory($since);
-        $this->conversionFunnel = $this->buildConversionFunnel();
-        $this->liveStream = $this->buildLiveStream();
-        $this->geoVelocity = $this->buildGeoVelocity();
-        $this->aiInsights = $this->buildAiInsights();
-        $this->financialLedger = $this->buildFinancialLedger((float) ($this->executiveHero['gmv_raw'] ?? 4892450.0));
-        $this->systemHealth = $this->buildSystemHealth();
-        $this->activityTimeline = $this->buildActivityTimeline();
-
-        if (! empty($this->searchQuery)) {
-            $this->filterSearch();
-        }
+        $this->filterSearch();
     }
 
     public function setRange(string $range): void
@@ -141,48 +143,9 @@ class CommandCenter extends Page
         $this->build();
     }
 
-    public function setStreamFilter(string $filter): void
-    {
-        $this->activeStreamFilter = in_array($filter, ['all', 'bookings', 'venues', 'saas', 'security'], true) ? $filter : 'all';
-    }
-
-    public function applyAiAction(string $actionKey): void
-    {
-        Notification::make()
-            ->title('AI Optimization Executed')
-            ->body("Dynamic strategy '{$actionKey}' was scheduled across active inventory nodes.")
-            ->success()
-            ->send();
-    }
-
     public function updatedSearchQuery(): void
     {
         $this->filterSearch();
-    }
-
-    private function filterSearch(): void
-    {
-        $q = mb_strtolower(trim($this->searchQuery));
-        if (mb_strlen($q) < 2) {
-            $this->searchResults = [];
-
-            return;
-        }
-
-        $items = [
-            ['title' => 'Bangalore Open Air Concert 2026', 'category' => 'Events', 'url' => url('control/events/events'), 'badge' => '96% Sold', 'type' => 'event'],
-            ['title' => 'Indiranagar Prime Turf Arena', 'category' => 'Sports Venues', 'url' => url('control/events/venues'), 'badge' => '94% Occupied', 'type' => 'venue'],
-            ['title' => 'Koramangala Box Cricket Arena', 'category' => 'Sports Venues', 'url' => url('control/events/venues'), 'badge' => 'Active', 'type' => 'venue'],
-            ['title' => 'Partner Plan: WhatsApp CRM Growth Tier', 'category' => 'SaaS Products', 'url' => url('control/system/partners'), 'badge' => '₹4,999/mo', 'type' => 'saas'],
-            ['title' => 'Razorpay Payment Gateway Ledger', 'category' => 'Finance', 'url' => url('control/finance/payouts'), 'badge' => 'Verified 99.98%', 'type' => 'finance'],
-            ['title' => 'Settlement Batch #2026-B81 (₹4.2L)', 'category' => 'Finance', 'url' => url('control/finance/payouts'), 'badge' => 'Ready for Payout', 'type' => 'finance'],
-            ['title' => 'VIP Lounge Pass - Electronic Nights', 'category' => 'Tickets', 'url' => url('control/events/bookings'), 'badge' => 'Checked In', 'type' => 'booking'],
-            ['title' => 'System Infrastructure SLA & Nodes', 'category' => 'Operations', 'url' => url('control/command-center'), 'badge' => 'Optimal SLA', 'type' => 'system'],
-        ];
-
-        $this->searchResults = array_values(array_filter($items, function ($item) use ($q) {
-            return str_contains(mb_strtolower($item['title']), $q) || str_contains(mb_strtolower($item['category']), $q);
-        }));
     }
 
     /** Reverb push: a content.updated broadcast (via the panel realtime bridge) rebuilds live. */
@@ -193,68 +156,121 @@ class CommandCenter extends Page
     }
 
     // ---------------------------------------------------------------------
-    // Executive Datasets Builders
+    // Window
     // ---------------------------------------------------------------------
 
-    private function buildExecutiveHero(?Carbon $since, ?Carbon $prevSince): array
+    /**
+     * The selected window and the equal-length window before it, both in the app zone so
+     * they compare correctly against created_at. "Today" is the business day (IST), not UTC.
+     *
+     * @return array{0:?Carbon,1:?Carbon,2:?Carbon}
+     */
+    private function window(): array
     {
-        $paidQ = fn () => Booking::query()->whereIn(DB::raw('lower(status)'), self::PAID);
-        $scope = fn ($q) => $since ? $q->where('created_at', '>=', $since) : $q;
+        $appZone = config('app.timezone');
+        $now = now();
 
-        // Real figures only. This page used to substitute a made-up "baseline" (₹48.9L GMV,
-        // a flat 21.4% margin, 384 live users…) whenever the database had less — an admin
-        // could not tell the platform's real state from decoration. Empty now reads as ₹0.
-        $gmv = (float) $scope($paidQ())->sum('total_amount');
-        $refunds = (float) $scope(Booking::query()->whereRaw('lower(status) = ?', ['refunded']))->sum('total_amount');
-        $net = $gmv - $refunds;
-        $platform = $this->platformRevenue($since);
-        $margin = $gmv > 0 ? round($platform / $gmv * 100, 1).'%' : '—';
+        $since = match ($this->range) {
+            'today' => BusinessClock::now()->startOfDay()->setTimezone($appZone),
+            '7d' => $now->copy()->subDays(7),
+            '90d' => $now->copy()->subDays(90),
+            'all' => null,
+            default => $now->copy()->subDays(30),
+        };
 
-        $prevGmv = ($since && $prevSince)
-            ? (float) $paidQ()->whereBetween('created_at', [$prevSince, $since])->sum('total_amount')
+        if (! $since) {
+            return [null, null, null];
+        }
+
+        // Today compares with yesterday up to this same clock time; the others with the
+        // equal-length window that ended where this one starts.
+        if ($this->range === 'today') {
+            return [$since, $since->copy()->subDay(), $now->copy()->subDay()];
+        }
+
+        return [$since, $since->copy()->subSeconds((int) $since->diffInSeconds($now)), $since];
+    }
+
+    private function paid()
+    {
+        return Booking::query()->whereIn(DB::raw('lower(status)'), self::PAID);
+    }
+
+    private function inWindow($query, ?Carbon $since)
+    {
+        return $since ? $query->where('created_at', '>=', $since) : $query;
+    }
+
+    // ---------------------------------------------------------------------
+    // Money
+    // ---------------------------------------------------------------------
+
+    private function buildHero(?Carbon $since, ?Carbon $prevFrom, ?Carbon $prevTo): array
+    {
+        $gmv = (float) $this->inWindow($this->paid(), $since)->sum('total_amount');
+        $orders = (int) $this->inWindow($this->paid(), $since)->count();
+        $refunds = (float) $this->inWindow(Booking::query()->whereRaw('lower(status) = ?', ['refunded']), $since)->sum('total_amount');
+
+        $prev = ($prevFrom && $prevTo)
+            ? (float) $this->paid()->whereBetween('created_at', [$prevFrom, $prevTo])->sum('total_amount')
             : 0.0;
-        if ($prevGmv <= 0) {
-            $growth = '—';
-            $growthDirection = 'ok';
+
+        if (! $since) {
+            $delta = null;
+        } elseif ($prev <= 0) {
+            $delta = $gmv > 0 ? ['label' => 'First sales in this window', 'dir' => 'flat'] : null;
         } else {
-            $pct = round((($gmv - $prevGmv) / $prevGmv) * 100, 1);
-            $growth = ($pct >= 0 ? '+' : '').$pct.'%';
-            $growthDirection = $pct >= 0 ? 'ok' : 'down';
+            $pct = (int) round(($gmv - $prev) / $prev * 100);
+            $delta = [
+                'label' => ($pct > 0 ? '+' : '').$pct.'% vs the '.$this->previousLabel().' ('.$this->inr($prev).')',
+                'dir' => $pct > 0 ? 'up' : ($pct < 0 ? 'down' : 'flat'),
+            ];
         }
 
-        $todaySince = now()->startOfDay();
-        $todayQ = fn () => $paidQ()->where('created_at', '>=', $todaySince);
-
-        // 14-day daily GMV, scaled 0–100 for the sparkline.
-        $days = [];
-        for ($i = 13; $i >= 0; $i--) {
-            $day = now()->subDays($i)->startOfDay();
-            $days[] = (float) $paidQ()->whereBetween('created_at', [$day, $day->copy()->endOfDay()])->sum('total_amount');
-        }
-        $peak = max($days) ?: 1.0;
-        $sparkline = array_map(fn (float $v): int => (int) round($v / $peak * 100), $days);
-
-        $aiOn = AiGate::enabled(AiGate::MATCH_COMMENTARY)
-            || AiGate::enabled(AiGate::CAREER_READ);
+        $todaySince = BusinessClock::now()->startOfDay()->setTimezone(config('app.timezone'));
 
         return [
-            'gmv_raw' => $gmv,
-            'gmv' => '₹'.number_format($gmv),
-            'net' => '₹'.number_format($net),
-            'profit' => '₹'.number_format($platform),
-            'profit_margin' => $margin,
-            'growth' => $growth,
-            'growth_label' => $prevGmv > 0 ? 'vs the previous period' : 'No earlier period to compare',
-            'growth_direction' => $growthDirection,
-            'today_revenue' => '₹'.number_format((float) $todayQ()->sum('total_amount')),
-            'today_orders' => (int) $todayQ()->count(),
-            'today_tickets' => (int) $todayQ()->sum('quantity'),
-            'live_users' => (int) User::query()->where('last_seen_at', '>=', now()->subMinutes(5))->count(),
-            'ai_score' => number_format(AiGate::usedToday()),
-            'ai_status' => $aiOn ? 'AI features on' : 'AI switched off',
-            'sparkline' => $sparkline,
-            'range_label' => $this->rangeLabel(),
+            'gmv' => $this->inr($gmv),
+            'gmvRaw' => $gmv,
+            'orders' => $orders,
+            'avg' => $orders > 0 ? $this->inr($gmv / $orders) : '—',
+            'refunds' => $this->inr($refunds),
+            'refundsRaw' => $refunds,
+            'delta' => $delta,
+            'today' => $this->inr((float) $this->paid()->where('created_at', '>=', $todaySince)->sum('total_amount')),
+            'todayOrders' => (int) $this->paid()->where('created_at', '>=', $todaySince)->count(),
+            'online' => Schema::hasColumn('users', 'last_seen_at')
+                ? (int) User::query()->where('last_seen_at', '>=', now()->subMinutes(5))->count()
+                : null,
+            'rangeLabel' => $this->rangeLabel(),
         ];
+    }
+
+    /**
+     * Where the window's paid takings went: Haraan's fees, tax held, the partners' share,
+     * plus refunds shown beside (they left the platform, so they are not part of the bar).
+     */
+    private function buildSplit(?Carbon $since): array
+    {
+        $gmv = (float) ($this->hero['gmvRaw'] ?? 0);
+        if ($gmv <= 0) {
+            return [];
+        }
+
+        $fees = $this->platformRevenue($since);
+        $tax = (float) $this->inWindow($this->paid(), $since)->sum('tax_amount');
+        $partners = max(0.0, $gmv - $fees - $tax);
+
+        $parts = [
+            ['key' => 'partners', 'label' => 'Partners', 'note' => 'hosts and venues', 'value' => $partners],
+            ['key' => 'fees', 'label' => 'Haraan fees', 'note' => 'platform, gateway, commission', 'value' => $fees],
+            ['key' => 'tax', 'label' => 'Tax held', 'note' => 'owed to the tax authority', 'value' => $tax],
+        ];
+
+        return array_values(array_map(fn (array $p): array => $p + [
+            'fmt' => $this->inr($p['value']),
+            'pct' => round($p['value'] / $gmv * 100, 1),
+        ], array_filter($parts, fn (array $p): bool => $p['value'] > 0)));
     }
 
     /**
@@ -264,494 +280,493 @@ class CommandCenter extends Page
      */
     private function platformRevenue(?Carbon $since): float
     {
-        $q = Booking::query()->whereIn(DB::raw('lower(status)'), self::PAID);
-        if ($since) {
-            $q->where('created_at', '>=', $since);
-        }
-
-        return (float) $q->sum(DB::raw(
+        return (float) $this->inWindow($this->paid(), $since)->sum(DB::raw(
             "platform_fee + gateway_fee + host_deduction + CASE WHEN booking_type = 'venue' THEN 0 ELSE convenience_fee END"
         ));
     }
 
-    private function buildVerticals(?Carbon $since): array
+    /** Money still owed to partners and what moved today, all time. */
+    private function buildLedger(): array
     {
-        // 1. Events Vertical
-        $eventBookingsQ = Booking::query()->whereIn(DB::raw('lower(status)'), self::PAID)
-            ->where(fn ($q) => $q->where('booking_type', 'event')->orWhereNotNull('event_id'));
-        $dbEventGmv = (float) ($since ? (clone $eventBookingsQ)->where('created_at', '>=', $since)->sum('total_amount') : $eventBookingsQ->sum('total_amount'));
-        $dbEventTickets = (int) ($since ? (clone $eventBookingsQ)->where('created_at', '>=', $since)->count() : $eventBookingsQ->count());
-        $liveEventsCount = Event::where('is_active', true)->whereDate('date', '>=', now()->startOfDay())->count();
-
-        $eventGmv = $dbEventGmv > 0 ? $dbEventGmv : 2842100.00;
-        $eventTickets = $dbEventTickets > 0 ? $dbEventTickets : 3420;
-        $eventsLive = $liveEventsCount > 0 ? $liveEventsCount : 18;
-
-        // 2. Sports Venues Vertical
-        $venueBookingsQ = Booking::query()->whereIn(DB::raw('lower(status)'), self::PAID)
-            ->where(fn ($q) => $q->where('booking_type', 'venue')->orWhereNotNull('venue_id'));
-        $dbVenueGmv = (float) ($since ? (clone $venueBookingsQ)->where('created_at', '>=', $since)->sum('total_amount') : $venueBookingsQ->sum('total_amount'));
-        $dbVenueSlots = (int) ($since ? (clone $venueBookingsQ)->where('created_at', '>=', $since)->count() : $venueBookingsQ->count());
-        $venuesCount = Venue::where('is_active', true)->count();
-
-        $venueGmv = $dbVenueGmv > 0 ? $dbVenueGmv : 1418350.00;
-        $venueSlots = $dbVenueSlots > 0 ? $dbVenueSlots : 1890;
-        $activeVenues = $venuesCount > 0 ? $venuesCount : 24;
-
-        // 3. SaaS Products Vertical (Partner Subscriptions & Marketing Automations)
-        $activeSubsCount = DB::table('partner_subscriptions')->where('status', 'active')->count();
-        $dbSaasMrr = (float) DB::table('partner_subscriptions')
-            ->join('partner_plans', 'partner_subscriptions.plan_id', '=', 'partner_plans.id')
-            ->where('partner_subscriptions.status', 'active')
-            ->sum('partner_plans.price_inr');
-
-        $saasMrr = $dbSaasMrr > 0 ? $dbSaasMrr : 632000.00;
-        $activeSubs = $activeSubsCount > 0 ? $activeSubsCount : 142;
-
-        return [
-            'events' => [
-                'title' => 'Events & Experiences',
-                'gmv' => '₹'.number_format($eventGmv),
-                'count_label' => 'Tickets Issued',
-                'count' => number_format($eventTickets),
-                'primary_rate_label' => 'Sell-Through',
-                'primary_rate' => '86.4%',
-                'active_label' => 'Active Events',
-                'active' => $eventsLive.' live',
-                'secondary_metric' => 'Avg ₹'.number_format(round($eventGmv / max(1, $eventTickets))),
-                'highlight' => 'Top: Bangalore Open Air 2026 (96% sold)',
-                'growth' => '+29.2%',
-                'growth_ok' => true,
-                'accent' => '#6366f1',
-                'accent_light' => '#e0e7ff',
-                'sparkline' => [28, 32, 45, 40, 58, 62, 70, 68, 79, 85, 92],
-                'route' => url('control/events/events'),
-            ],
-            'venues' => [
-                'title' => 'Sports Venue Booking',
-                'gmv' => '₹'.number_format($venueGmv),
-                'count_label' => 'Slots Booked',
-                'count' => number_format($venueSlots),
-                'primary_rate_label' => 'Utilization',
-                'primary_rate' => '78.5%',
-                'active_label' => 'Active Arenas',
-                'active' => $activeVenues.' venues / 72 courts',
-                'secondary_metric' => 'Peak: 6 PM – 11 PM',
-                'highlight' => 'Turfpark Indiranagar at 94% occupancy',
-                'growth' => '+22.4%',
-                'growth_ok' => true,
-                'accent' => '#059669',
-                'accent_light' => '#d1fae5',
-                'sparkline' => [35, 38, 42, 50, 48, 60, 65, 72, 70, 78, 84],
-                'route' => url('control/events/venues'),
-            ],
-            'saas' => [
-                'title' => 'SaaS & Subscriptions',
-                'gmv' => '₹'.number_format($saasMrr),
-                'count_label' => 'Active Partners',
-                'count' => number_format($activeSubs),
-                'primary_rate_label' => 'Churn Rate',
-                'primary_rate' => '0.6% (Ultra-low)',
-                'active_label' => 'Delivery SLA',
-                'active' => '99.94% WhatsApp',
-                'secondary_metric' => 'ARPU ₹'.number_format(round($saasMrr / max(1, $activeSubs))),
-                'highlight' => 'Growth tier upgrades +18% this month',
-                'growth' => '+34.1%',
-                'growth_ok' => true,
-                'accent' => '#8b5cf6',
-                'accent_light' => '#ede9fe',
-                'sparkline' => [20, 24, 28, 35, 42, 49, 56, 62, 71, 80, 88],
-                'route' => url('control/system/partners'),
-            ],
-        ];
-    }
-
-    private function buildTrajectory(?Carbon $since): array
-    {
-        return [
-            'labels' => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
-            'events' => [320000, 390000, 370000, 460000, 680000, 920000, 840000],
-            'venues' => [180000, 210000, 220000, 240000, 290000, 380000, 360000],
-            'saas' => [85000,  88000,  92000,  90000,  94000,  98000, 102000],
-            'totals' => ['₹5.85L', '₹6.88L', '₹6.82L', '₹7.90L', '₹10.64L', '₹13.98L', '₹13.02L'],
-        ];
-    }
-
-    private function buildConversionFunnel(): array
-    {
-        return [
-            'steps' => [
-                ['name' => '1. Platform Visitors', 'value' => '142,500', 'drop' => '100% Top', 'color' => '#6366f1'],
-                ['name' => '2. Slot / Pass Viewers', 'value' => '68,200', 'drop' => '47.8% Interest', 'color' => '#3b82f6'],
-                ['name' => '3. Checkout Initiated', 'value' => '18,400', 'drop' => '27.0% Intent', 'color' => '#0ea5e9'],
-                ['name' => '4. Payment Completed', 'value' => '17,890', 'drop' => '97.2% Captured', 'color' => '#10b981'],
-            ],
-            'economics' => [
-                ['label' => 'Partner Share', 'pct' => '85.5%', 'amount' => '₹41.82L', 'color' => '#3b82f6'],
-                ['label' => 'Haraan Take Rate', 'pct' => '12.0%', 'amount' => '₹5.87L', 'color' => '#10b981'],
-                ['label' => 'Gateway & Infra', 'pct' => '2.5%', 'amount' => '₹1.22L', 'color' => '#94a3b8'],
-            ],
-        ];
-    }
-
-    private function buildLiveStream(): array
-    {
-        return [
-            [
-                'id' => 'tx_8912',
-                'type' => 'venues',
-                'title' => 'Turfpark Indiranagar — Court 2 (2 hrs)',
-                'user' => 'Aditya Verma',
-                'amount' => '₹2,400',
-                'status' => 'CONFIRMED',
-                'status_color' => 'emerald',
-                'time' => '12s ago',
-                'icon' => 'heroicon-o-calendar',
-            ],
-            [
-                'id' => 'tx_8911',
-                'type' => 'events',
-                'title' => 'Bangalore Open Air 2026 — 4x Phase 1 Passes',
-                'user' => 'Sneha Rao',
-                'amount' => '₹9,600',
-                'status' => 'CONFIRMED',
-                'status_color' => 'emerald',
-                'time' => '42s ago',
-                'icon' => 'heroicon-o-ticket',
-            ],
-            [
-                'id' => 'tx_8910',
-                'type' => 'saas',
-                'title' => 'Neon Sports Hub upgraded to Growth Tier',
-                'user' => 'Kunal Joshi',
-                'amount' => '₹4,999/mo',
-                'status' => 'ACTIVE',
-                'status_color' => 'indigo',
-                'time' => '2m ago',
-                'icon' => 'heroicon-o-sparkles',
-            ],
-            [
-                'id' => 'tx_8909',
-                'type' => 'venues',
-                'title' => 'Koramangala Box Cricket — Prime Weekend Slot',
-                'user' => 'Rohan Mehta',
-                'amount' => '₹3,200',
-                'status' => 'CONFIRMED',
-                'status_color' => 'emerald',
-                'time' => '4m ago',
-                'icon' => 'heroicon-o-check-circle',
-            ],
-            [
-                'id' => 'tx_8908',
-                'type' => 'security',
-                'title' => 'Razorpay Webhook Verified (Signature Validated)',
-                'user' => 'Gateway Engine',
-                'amount' => '18ms latency',
-                'status' => 'SECURE',
-                'status_color' => 'blue',
-                'time' => '7m ago',
-                'icon' => 'heroicon-o-shield-check',
-            ],
-            [
-                'id' => 'tx_8907',
-                'type' => 'bookings',
-                'title' => 'Partner Settlement #B-809 Settled to HDFC',
-                'user' => 'Finance Desk',
-                'amount' => '₹42,800',
-                'status' => 'SETTLED',
-                'status_color' => 'teal',
-                'time' => '11m ago',
-                'icon' => 'heroicon-o-banknotes',
-            ],
-        ];
-    }
-
-    private function buildGeoVelocity(): array
-    {
-        return [
-            ['city' => 'Bengaluru', 'state' => 'KA', 'gmv' => '₹24.8L', 'pct' => 50.7, 'venues' => 14, 'growth' => '+32% MoM', 'lead' => true],
-            ['city' => 'Mumbai', 'state' => 'MH', 'gmv' => '₹11.2L', 'pct' => 22.9, 'venues' => 6, 'growth' => '+28% MoM', 'lead' => false],
-            ['city' => 'Hyderabad', 'state' => 'TS', 'gmv' => '₹6.4L', 'pct' => 13.1, 'venues' => 4, 'growth' => '+41% MoM', 'lead' => false],
-            ['city' => 'Delhi NCR', 'state' => 'DL', 'gmv' => '₹4.2L', 'pct' => 8.6, 'venues' => 3, 'growth' => '+18% MoM', 'lead' => false],
-            ['city' => 'Chennai', 'state' => 'TN', 'gmv' => '₹2.3L', 'pct' => 4.7, 'venues' => 2, 'growth' => '+15% MoM', 'lead' => false],
-        ];
-    }
-
-    private function buildAiInsights(): array
-    {
-        return [
-            [
-                'key' => 'surge_pricing',
-                'type' => 'Revenue Opportunity',
-                'badge' => 'High Impact',
-                'badge_color' => 'emerald',
-                'title' => 'Surge Pricing Optimization for Weekend Turfs',
-                'desc' => 'Weekend turf slot demand at Indiranagar & Koramangala is at 94% capacity. Dynamic +15% surge pricing between 6 PM - 10 PM is projected to yield ₹48,000 in additional net profit.',
-                'action_label' => 'Enable Dynamic Surge',
-                'metric' => '+₹48,000 / weekend',
-            ],
-            [
-                'key' => 'concert_inventory',
-                'type' => 'Inventory Velocity',
-                'badge' => 'Sellout Imminent',
-                'badge_color' => 'amber',
-                'title' => 'Bangalore Open Air Phase 1 Velocity Spike',
-                'desc' => 'Ticket purchase velocity increased by 42% in the last 4 hours. Current inventory of 84 passes will exhaust within 36 hours. Recommended: release Phase 2 tier (+₹200) automatically.',
-                'action_label' => 'Auto-Schedule Phase 2',
-                'metric' => '36h to Stockout',
-            ],
-            [
-                'key' => 'gateway_latency',
-                'type' => 'Infrastructure SLA',
-                'badge' => 'Performance Gain',
-                'badge_color' => 'indigo',
-                'title' => 'Razorpay Dual Webhook Latency Drop',
-                'desc' => 'Webhook processing latency decreased from 140ms to 24ms. Checkout abandonment has dropped to a record low 1.2% across mobile web and Android native apps.',
-                'action_label' => 'View Telemetry SLA',
-                'metric' => '99.98% Conversion',
-            ],
-        ];
-    }
-
-    private function buildFinancialLedger(float $gmv): array
-    {
-        $since = match ($this->range) {
-            'today' => now()->startOfDay(),
-            '7d' => now()->subDays(7),
-            '90d' => now()->subDays(90),
-            'all' => null,
-            default => now()->subDays(30),
-        };
-        $paid = fn () => Booking::query()->whereIn(DB::raw('lower(status)'), self::PAID)
-            ->when($since, fn ($q) => $q->where('created_at', '>=', $since));
-
-        $platform = $this->platformRevenue($since);
-        $gateway = (float) $paid()->sum('gateway_fee');
-        $tax = (float) $paid()->sum('tax_amount');
-
-        // Owed to partners, all time: what they earned (net of the platform's share) less what
-        // has been paid or is already in a payout batch — PartnerSettlement's arithmetic.
-        $allPaid = Booking::query()->whereIn(DB::raw('lower(status)'), self::PAID)
-            ->where(fn ($q) => $q->whereNotNull('event_id')->orWhereNotNull('venue_id'));
+        $allPaid = $this->paid()->where(fn ($q) => $q->whereNotNull('event_id')->orWhereNotNull('venue_id'));
         $earned = (float) (clone $allPaid)->sum('total_amount') - (float) (clone $allPaid)->sum('host_deduction');
         $settled = (float) Payout::query()->whereIn(DB::raw('lower(status)'), PartnerSettlement::SETTLED_PAYOUT)->sum('amount')
             + (float) PayoutBatch::query()->whereIn(DB::raw('lower(status)'), PayoutBatch::PAID)->sum('amount');
         $inFlight = (float) PayoutBatch::query()->whereIn(DB::raw('lower(status)'), ['processing', 'pending'])->sum('amount');
-        $settledToday = (float) PayoutBatch::query()
+        $paidToday = (float) PayoutBatch::query()
             ->whereIn(DB::raw('lower(status)'), PayoutBatch::PAID)
-            ->where('updated_at', '>=', now()->startOfDay())->sum('amount');
+            ->where('updated_at', '>=', BusinessClock::now()->startOfDay()->setTimezone(config('app.timezone')))
+            ->sum('amount');
 
         return [
-            'gross_collected' => '₹'.number_format($gmv),
-            'platform_commission' => '₹'.number_format($platform),
-            'take_rate' => $gmv > 0 ? round($platform / $gmv * 100, 1).'% of bookings' : 'No paid bookings',
-            'gateway_deductions' => '₹'.number_format($gateway),
-            'partner_payouts_due' => '₹'.number_format(max(0.0, $earned - $settled - $inFlight)),
-            'escrow_reserve' => '₹'.number_format($tax),
-            'net_settled_today' => '₹'.number_format($settledToday),
+            'owed' => $this->inr(max(0.0, $earned - $settled - $inFlight)),
+            'owedRaw' => max(0.0, $earned - $settled - $inFlight),
+            'inFlight' => $this->inr($inFlight),
+            'paidToday' => $this->inr($paidToday),
+            'url' => $this->resourceUrl(PayoutResource::class, 'control/finance/payouts'),
         ];
     }
 
-    private function buildSystemHealth(): array
+    // ---------------------------------------------------------------------
+    // Lines of business
+    // ---------------------------------------------------------------------
+
+    private function buildEvents(?Carbon $since): array
     {
+        $q = fn () => $this->inWindow($this->paid()->where(fn ($w) => $w->where('booking_type', 'event')->orWhereNotNull('event_id')), $since);
+
+        $upcoming = $this->upcomingEvents();
+
+        $next = (clone $upcoming)->orderBy('date')->orderBy('time')->first(['id', 'title', 'date', 'time', 'total_slots', 'available_slots']);
+        $nextSold = null;
+        if ($next && (int) $next->total_slots > 0) {
+            $nextSold = max(0, (int) $next->total_slots - (int) $next->available_slots);
+        }
+
         return [
-            ['name' => 'Razorpay Gateway', 'status' => 'Operational', 'metric' => '99.99% SLA', 'ping' => '24ms', 'ok' => true],
-            ['name' => 'WhatsApp Cloud API', 'status' => 'Optimal', 'metric' => '99.94% Delivery', 'ping' => '142ms', 'ok' => true],
-            ['name' => 'Reverb WebSockets', 'status' => 'Real-Time Active', 'metric' => '0 Drops / 2.4k peers', 'ping' => '4ms', 'ok' => true],
-            ['name' => 'PostgreSQL Engine', 'status' => 'Normal Load', 'metric' => 'Query avg 3.8ms', 'ping' => '3.8ms', 'ok' => true],
-            ['name' => 'Redis Cache Tier', 'status' => '98.4% Hit Ratio', 'metric' => 'Memory 142MB', 'ping' => '1.2ms', 'ok' => true],
+            'gmv' => $this->inr((float) $q()->sum('total_amount')),
+            'tickets' => (int) $q()->sum('quantity'),
+            'orders' => (int) $q()->count(),
+            'upcoming' => (clone $upcoming)->count(),
+            'next' => $next ? [
+                'title' => $next->title,
+                'when' => $next->date ? Carbon::parse($next->date)->format('D j M') : '',
+                'sold' => $nextSold,
+                'total' => (int) $next->total_slots,
+                'url' => $this->resourceUrl(EventResource::class, 'control/events/events', 'edit', $next),
+            ] : null,
+            'url' => $this->resourceUrl(EventResource::class, 'control/events/events'),
         ];
     }
 
-    private function buildActivityTimeline(): array
+    /** Upcoming events a customer can see: not drafts, not cancelled. */
+    private function upcomingEvents()
     {
+        return Event::query()
+            ->whereDate('date', '>=', BusinessClock::todayDate())
+            ->where(fn ($w) => $w->whereNull('status')->orWhereNotIn(DB::raw('lower(status)'), ['draft', 'cancelled', 'canceled']));
+    }
+
+    /**
+     * Venue takings plus today's court-hours by clock hour across every venue. The strip on the
+     * page is drawn from `hours`: each cell is how many courts are booked in that hour.
+     */
+    private function buildVenues(?Carbon $since): array
+    {
+        $q = fn () => $this->inWindow($this->paid()->where(fn ($w) => $w->where('booking_type', 'venue')->orWhereNotNull('venue_id')), $since);
+
+        $courts = Schema::hasTable('venue_courts')
+            ? (int) DB::table('venue_courts')->where('is_active', true)->count()
+            : 0;
+
+        $hours = array_fill_keys(range(self::COURT_DAY_START, self::COURT_DAY_END - 1), 0);
+        $rows = Booking::query()
+            ->whereNotNull('venue_id')
+            ->whereDate('slot_date', BusinessClock::today())
+            ->whereNotIn(DB::raw('lower(status)'), ['cancelled', 'canceled', 'refunded', 'failed', 'expired'])
+            ->get(['start_time', 'end_time']);
+
+        $bookedHours = 0;
+        foreach ($rows as $row) {
+            $start = $this->hourOf($row->start_time);
+            $end = $this->hourOf($row->end_time, true);
+            if ($start === null) {
+                continue;
+            }
+            $end = $end !== null && $end > $start ? $end : $start + 1;
+            for ($h = $start; $h < $end; $h++) {
+                if (array_key_exists($h, $hours)) {
+                    $hours[$h]++;
+                    $bookedHours++;
+                }
+            }
+        }
+
+        $nowHour = BusinessClock::now()->hour;
+
+        return [
+            'gmv' => $this->inr((float) $q()->sum('total_amount')),
+            'bookings' => (int) $q()->count(),
+            'venues' => (int) Venue::query()->where('is_active', true)->count(),
+            'courts' => $courts,
+            'hours' => $hours,
+            'bookedHours' => $bookedHours,
+            'openHours' => max(0, $courts * count($hours) - $bookedHours),
+            'nowHour' => $nowHour,
+            'url' => $this->resourceUrl(VenueResource::class, 'control/game-hub/venues'),
+        ];
+    }
+
+    private function hourOf(?string $time, bool $roundUp = false): ?int
+    {
+        if (! $time || ! preg_match('/^(\d{1,2}):(\d{2})/', $time, $m)) {
+            return null;
+        }
+        $h = (int) $m[1];
+
+        return $roundUp && (int) $m[2] > 0 ? $h + 1 : $h;
+    }
+
+    /** Active paid memberships by plan, and what members paid in the window. */
+    private function buildMembers(?Carbon $since): array
+    {
+        if (! Schema::hasTable('member_subscriptions') || ! Schema::hasTable('member_plans')) {
+            return ['plans' => [], 'active' => 0, 'revenue' => $this->inr(0), 'url' => null];
+        }
+
+        $plans = DB::table('member_plans')
+            ->leftJoin('member_subscriptions', function ($j) {
+                $j->on('member_subscriptions.plan_id', '=', 'member_plans.id')
+                    ->where('member_subscriptions.status', 'active');
+            })
+            ->where('member_plans.is_active', true)
+            ->groupBy('member_plans.id', 'member_plans.name', 'member_plans.rank', 'member_plans.is_default')
+            ->orderBy('member_plans.rank')
+            ->get([
+                'member_plans.name',
+                'member_plans.rank',
+                'member_plans.is_default',
+                DB::raw('count(member_subscriptions.id) as active'),
+            ])
+            ->reject(fn ($p) => (bool) $p->is_default)
+            ->map(fn ($p) => ['name' => $p->name, 'active' => (int) $p->active])
+            ->values()
+            ->all();
+
+        $revenue = 0.0;
+        if (Schema::hasTable('member_payments')) {
+            $pay = DB::table('member_payments')->where('status', 'captured');
+            if ($since) {
+                $pay->where(fn ($w) => $w->where('paid_at', '>=', $since)->orWhere(fn ($x) => $x->whereNull('paid_at')->where('created_at', '>=', $since)));
+            }
+            $revenue = (int) $pay->sum('amount_paise') / 100;
+        }
+
+        return [
+            'plans' => array_slice($plans, 0, 3),
+            'active' => array_sum(array_column($plans, 'active')),
+            'revenue' => $this->inr($revenue),
+            'url' => $this->resourceUrl(MemberSubscriptionResource::class, 'control/finance/member-subscriptions'),
+        ];
+    }
+
+    /** GMV by city: an event's city, else the venue's city. Top six. */
+    private function buildCities(?Carbon $since): array
+    {
+        $q = DB::table('bookings')
+            ->leftJoin('events', 'events.id', '=', 'bookings.event_id')
+            ->leftJoin('venues', 'venues.id', '=', 'bookings.venue_id')
+            ->whereIn(DB::raw('lower(bookings.status)'), self::PAID)
+            ->when($since, fn ($w) => $w->where('bookings.created_at', '>=', $since))
+            ->selectRaw("coalesce(nullif(trim(events.city), ''), nullif(trim(venues.city), ''), 'Unknown') as city_name, sum(bookings.total_amount) as gmv, count(*) as orders")
+            ->groupBy('city_name')
+            ->orderByDesc('gmv')
+            ->limit(6);
+
+        $rows = $q->get();
+        $top = (float) ($rows->max('gmv') ?: 0);
+
+        return $rows->map(fn ($r) => [
+            'city' => ucwords(strtolower((string) $r->city_name)),
+            'gmv' => $this->inr((float) $r->gmv),
+            'orders' => (int) $r->orders,
+            'share' => $top > 0 ? round((float) $r->gmv / $top * 100) : 0,
+        ])->all();
+    }
+
+    // ---------------------------------------------------------------------
+    // Needs a person
+    // ---------------------------------------------------------------------
+
+    /** @return array<int,array<string,mixed>> */
+    private function buildRadar(): array
+    {
+        $items = [];
+
+        $nearSoldOut = $this->upcomingEvents()
+            ->whereNotNull('total_slots')->where('total_slots', '>', 0)
+            ->whereColumn('available_slots', '<=', DB::raw('total_slots * 0.15'))
+            ->where('available_slots', '>', 0)
+            ->count();
+        $items[] = $this->r('Almost sold out', $nearSoldOut, 'Upcoming events with 15% or fewer seats left', 'heroicon-o-fire', $this->resourceUrl(EventResource::class, 'control/events/events'));
+
+        $paidEventIds = $this->paid()->whereNotNull('event_id')->distinct()->pluck('event_id');
+        $zeroSales = $this->upcomingEvents()->whereNotIn('id', $paidEventIds)->count();
+        $items[] = $this->r('No sales yet', $zeroSales, 'Upcoming events nobody has booked', 'heroicon-o-megaphone', $this->resourceUrl(EventResource::class, 'control/events/events'));
+
+        $pendingPayouts = (int) Payout::whereRaw('lower(status) = ?', ['pending'])->count();
+        $items[] = $this->r('Payouts to send', $pendingPayouts, 'Partners waiting on a settlement', 'heroicon-o-banknotes', $this->resourceUrl(PayoutResource::class, 'control/finance/payouts'));
+
+        $openSupport = (int) SupportThread::query()->where('status', '!=', 'closed')->count();
+        $items[] = $this->r('Support waiting', $openSupport, 'Conversations that need a reply', 'heroicon-o-chat-bubble-left-right', $this->resourceUrl(SupportThreadResource::class, 'control/support-threads'));
+
+        $failed = (int) Booking::query()->whereRaw('lower(status) = ?', ['failed'])
+            ->where('created_at', '>=', now()->subDays(7))->count();
+        $items[] = $this->r('Failed payments', $failed, 'Declined in the last 7 days', 'heroicon-o-exclamation-triangle', $this->resourceUrl(BookingResource::class, 'control/events/bookings'));
+
+        return $items;
+    }
+
+    /** @return array<string,mixed> */
+    private function r(string $title, int $count, string $sub, string $icon, string $url): array
+    {
+        return compact('title', 'count', 'sub', 'icon', 'url');
+    }
+
+    /** The eight most recent bookings, any status. */
+    private function buildFeed(): array
+    {
+        $zone = BusinessClock::zone();
+
+        return Booking::query()
+            ->with(['user:id,name', 'event:id,title', 'venue:id,name', 'venueCourt:id,name'])
+            ->latest('id')
+            ->limit(8)
+            ->get()
+            ->map(function (Booking $b) use ($zone): array {
+                $isVenue = $b->venue_id !== null || $b->booking_type === 'venue';
+                $what = $isVenue
+                    ? trim(($b->venue?->name ?? 'Venue').($b->venueCourt?->name ? ' · '.$b->venueCourt->name : ''))
+                    : ($b->event?->title ?? 'Event');
+                $detail = $isVenue
+                    ? trim(($b->slot_date ? Carbon::parse($b->slot_date)->format('D j M') : '').($b->start_time ? ', '.$this->clock($b->start_time) : ''), ', ')
+                    : ((int) $b->quantity).' '.((int) $b->quantity === 1 ? 'ticket' : 'tickets');
+
+                return [
+                    'who' => $b->user?->name ?: ($b->guest_name ?: ($b->attendee_name ?: 'Walk-in')),
+                    'what' => $what,
+                    'detail' => $detail,
+                    'kind' => $isVenue ? 'venue' : 'event',
+                    'amount' => $this->inr((float) $b->total_amount),
+                    'status' => $this->statusTone((string) $b->status),
+                    'statusLabel' => ucwords(str_replace('_', ' ', strtolower((string) $b->status))),
+                    'ago' => $b->created_at?->diffForHumans(short: true) ?? '',
+                    'at' => $b->created_at?->copy()->setTimezone($zone)->format('j M, g:i A') ?? '',
+                    'url' => $this->resourceUrl(BookingResource::class, 'control/events/bookings', 'edit', $b),
+                ];
+            })
+            ->all();
+    }
+
+    private function clock(string $time): string
+    {
+        try {
+            return Carbon::createFromFormat('H:i', substr($time, 0, 5))->format('g:i A');
+        } catch (\Throwable) {
+            return $time;
+        }
+    }
+
+    private function statusTone(string $status): string
+    {
+        $s = strtolower($status);
+
+        return match (true) {
+            in_array($s, self::PAID, true) => 'ok',
+            in_array($s, ['pending', 'reserved', 'hold', 'on_hold'], true) => 'warn',
+            in_array($s, ['failed', 'refunded'], true) => 'down',
+            default => 'idle',
+        };
+    }
+
+    // ---------------------------------------------------------------------
+    // Systems & audit
+    // ---------------------------------------------------------------------
+
+    /**
+     * Checks this request can actually make. Nothing here is a vendor SLA or a made-up
+     * latency: database and cache are timed now, the queue is counted, keys are checked
+     * for presence only.
+     */
+    private function buildSystems(): array
+    {
+        $out = [];
+
+        $t = microtime(true);
+        try {
+            DB::select('select 1');
+            $out[] = ['name' => 'Database', 'ok' => true, 'detail' => $this->ms($t)];
+        } catch (\Throwable) {
+            $out[] = ['name' => 'Database', 'ok' => false, 'detail' => 'Not answering'];
+        }
+
+        $t = microtime(true);
+        try {
+            Cache::put('cc:ping', 1, 10);
+            $ok = Cache::get('cc:ping') === 1;
+            $out[] = ['name' => 'Cache', 'ok' => $ok, 'detail' => $ok ? $this->ms($t) : 'Read-back failed'];
+        } catch (\Throwable) {
+            $out[] = ['name' => 'Cache', 'ok' => false, 'detail' => 'Not answering'];
+        }
+
+        if (Schema::hasTable('jobs')) {
+            $waiting = (int) DB::table('jobs')->count();
+            $failed = Schema::hasTable('failed_jobs')
+                ? (int) DB::table('failed_jobs')->where('failed_at', '>=', now()->subDay())->count()
+                : 0;
+            $out[] = [
+                'name' => 'Queue',
+                'ok' => $failed === 0 && $waiting < 100,
+                'detail' => $waiting.' waiting'.($failed > 0 ? ', '.$failed.' failed today' : ''),
+            ];
+        }
+
+        $out[] = [
+            'name' => 'Razorpay keys',
+            'ok' => filled(config('services.razorpay.key')) && filled(config('services.razorpay.secret')),
+            'detail' => filled(config('services.razorpay.key')) ? (str_starts_with((string) config('services.razorpay.key'), 'rzp_live') ? 'Live' : 'Test mode') : 'Missing',
+        ];
+
+        $broadcast = (string) config('broadcasting.default');
+        $out[] = [
+            'name' => 'Live updates',
+            'ok' => $broadcast === 'reverb' || $broadcast === 'pusher',
+            'detail' => $broadcast === 'reverb' || $broadcast === 'pusher' ? ucfirst($broadcast) : 'Off (page refreshes every 30s)',
+        ];
+
+        return $out;
+    }
+
+    private function ms(float $startedAt): string
+    {
+        $ms = (microtime(true) - $startedAt) * 1000;
+
+        return $ms < 1 ? 'under 1 ms' : round($ms, 1).' ms';
+    }
+
+    private function buildAudit(): array
+    {
+        $zone = BusinessClock::zone();
+
         return AdminAction::query()
-            ->with('user:id,name,role')
+            ->with('user:id,name')
             ->latest('id')
             ->limit(6)
             ->get()
             ->map(fn (AdminAction $a): array => [
-                'time' => $a->created_at?->timezone('Asia/Kolkata')->format('H:i') ?? '',
-                'title' => str_replace(['_', '.'], [' ', ' · '], $a->action)
-                    .($a->subject_type ? " — {$a->subject_type} #{$a->subject_id}" : ''),
-                'role' => $a->user?->name ?? 'System',
-                'type' => explode('.', $a->action)[0],
+                'time' => $a->created_at?->copy()->setTimezone($zone)->format('g:i A') ?? '',
+                'day' => $a->created_at?->copy()->setTimezone($zone)->isSameDay(BusinessClock::now()) ? 'Today' : ($a->created_at?->copy()->setTimezone($zone)->format('j M') ?? ''),
+                'what' => ucfirst(str_replace(['_', '.'], [' ', ' '], (string) $a->action)),
+                'subject' => $a->subject_type ? class_basename((string) $a->subject_type).' #'.$a->subject_id : null,
+                'who' => $a->user?->name ?? 'System',
             ])
             ->all();
     }
 
     // ---------------------------------------------------------------------
-    // Backward Compatibility Helpers (Preserved for tests & baseline)
+    // Search (⌘K)
     // ---------------------------------------------------------------------
 
-    /** @return array<string,mixed> */
-    private function buildMoney(?Carbon $since, ?Carbon $prevSince): array
+    private function filterSearch(): void
     {
-        $paidQ = fn () => Booking::query()->whereIn(DB::raw('lower(status)'), self::PAID);
+        $q = trim($this->searchQuery);
+        if (mb_strlen($q) < 2) {
+            $this->searchResults = [];
 
-        $scope = function ($q) use ($since) {
-            return $since ? $q->where('created_at', '>=', $since) : $q;
-        };
-
-        $gmv = (float) $scope($paidQ())->sum('total_amount');
-        $discounts = (float) $scope($paidQ())->sum('discount');
-        $refunds = (float) $scope(Booking::query()->whereRaw('lower(status) = ?', ['refunded']))->sum('total_amount');
-        $net = $gmv - $refunds;
-        $paidCount = (int) $scope($paidQ())->count();
-        $avg = $paidCount > 0 ? $gmv / $paidCount : 0.0;
-
-        // Prior window for the GMV trend arrow.
-        $prevGmv = ($since && $prevSince)
-            ? (float) $paidQ()->whereBetween('created_at', [$prevSince, $since])->sum('total_amount')
-            : 0.0;
-
-        // Payouts (partner settlements) — reuse the Finance status convention.
-        $pendingPayouts = (float) Payout::whereRaw('lower(status) = ?', ['pending'])->sum('amount');
-        $pendingPayoutCt = (int) Payout::whereRaw('lower(status) = ?', ['pending'])->count();
-        $settled = (float) Payout::whereRaw('lower(status) = ?', ['processed'])->sum('amount');
-
-        return [
-            'hero' => [
-                'gmv' => $gmv,
-                'net' => $net,
-                'trend' => $this->trend($gmv, $prevGmv),
-                'paidCount' => $paidCount,
-                'rangeLabel' => $this->rangeLabel(),
-            ],
-            'cards' => [
-                $this->m('Net revenue', $net, 'after ₹'.$this->money0($refunds).' refunds', 'heroicon-o-banknotes', 'ok'),
-                $this->m('Discounts given', $discounts, 'coupons + offers', 'heroicon-o-tag', $discounts > 0 ? 'warn' : 'idle'),
-                $this->m('Refunds', $refunds, 'returned to customers', 'heroicon-o-arrow-uturn-left', $refunds > 0 ? 'warn' : 'ok'),
-                $this->m('Avg order', $avg, $paidCount.' paid bookings', 'heroicon-o-shopping-bag', 'ok'),
-                $this->m('Payouts owed', $pendingPayouts, $pendingPayoutCt.' partners awaiting', 'heroicon-o-clock', $pendingPayoutCt > 0 ? 'warn' : 'ok'),
-                $this->m('Settled to partners', $settled, 'processed', 'heroicon-o-check-badge', 'ok'),
-            ],
-        ];
-    }
-
-    /** @return array<int,array<string,mixed>> */
-    private function buildHealth(?Carbon $since): array
-    {
-        $base = Booking::query();
-        if ($since) {
-            $base->where('created_at', '>=', $since);
+            return;
         }
-        $rows = (clone $base)
-            ->selectRaw('lower(status) as s, count(*) as c')
-            ->groupBy('s')
-            ->pluck('c', 's');
 
-        $sum = fn (array $keys) => (int) collect($keys)->sum(fn ($k) => (int) ($rows[$k] ?? 0));
+        $like = '%'.str_replace(['%', '_'], ['\%', '\_'], $q).'%';
+        $out = [];
 
-        $paid = $sum(self::PAID);
-        $refunded = (int) ($rows['refunded'] ?? 0);
-        $failed = (int) ($rows['failed'] ?? 0);
-        $pending = (int) ($rows['pending'] ?? 0) + (int) ($rows['reserved'] ?? 0);
-        $cancelled = (int) ($rows['cancelled'] ?? 0) + (int) ($rows['canceled'] ?? 0);
-        $total = (int) $rows->sum();
-
-        $successRate = $total > 0 ? round($paid / $total * 100) : 98;
-        $refundRate = $paid > 0 ? round($refunded / max(1, $paid) * 100, 1) : 0.4;
-
-        return [
-            $this->h('Success rate', $successRate.'%', ($paid ?: 17890).' of '.($total ?: 18200).' orders paid', 'heroicon-o-check-circle', $successRate >= 70 ? 'ok' : ($successRate >= 40 ? 'warn' : 'down'), (int) $successRate),
-            $this->h('Refund rate', $refundRate.'%', ($refunded ?: 12).' refunded', 'heroicon-o-arrow-uturn-left', $refundRate <= 5 ? 'ok' : ($refundRate <= 15 ? 'warn' : 'down'), (int) min(100, $refundRate)),
-            $this->h('Failed payments', (string) $failed, 'gateway declines / errors', 'heroicon-o-x-circle', $failed === 0 ? 'ok' : ($failed <= 5 ? 'warn' : 'down'), null),
-            $this->h('Pending / holds', (string) $pending, 'awaiting payment', 'heroicon-o-clock', $pending === 0 ? 'ok' : 'warn', null),
-            $this->h('Cancelled', (string) $cancelled, 'by user or admin', 'heroicon-o-no-symbol', 'idle', null),
-        ];
-    }
-
-    /** @return array<int,array<string,mixed>> "Needs attention" actionable items. */
-    private function buildRadar(): array
-    {
-        $items = [];
-        $today = now()->startOfDay();
-
-        // Near sold-out upcoming events (>=85% of slots gone, still some left).
-        $nearSoldOut = Event::query()
-            ->whereDate('date', '>=', $today)
-            ->whereNotNull('total_slots')->where('total_slots', '>', 0)
-            ->whereColumn('available_slots', '<=', DB::raw('total_slots * 0.15'))
-            ->where('available_slots', '>', 0)
-            ->count();
-        $items[] = $this->r('Near sold-out', $nearSoldOut, 'upcoming events ≥85% gone — raise price / add slots', 'heroicon-o-fire', $nearSoldOut > 0 ? 'warn' : 'ok', 'control/events/events');
-
-        // Upcoming events with zero paid bookings.
-        $paidEventIds = Booking::query()->whereIn(DB::raw('lower(status)'), self::PAID)
-            ->whereNotNull('event_id')->distinct()->pluck('event_id');
-        $zeroSales = Event::query()->whereDate('date', '>=', $today)
-            ->whereNotIn('id', $paidEventIds)->count();
-        $items[] = $this->r('Zero sales', $zeroSales, 'upcoming events with no bookings — needs a boost', 'heroicon-o-megaphone', $zeroSales > 0 ? 'warn' : 'ok', 'control/events/events');
-
-        // Pending payouts.
-        $pendingPayoutCt = (int) Payout::whereRaw('lower(status) = ?', ['pending'])->count();
-        $items[] = $this->r('Pending payouts', $pendingPayoutCt, 'partners awaiting settlement', 'heroicon-o-banknotes', $pendingPayoutCt > 0 ? 'warn' : 'ok', 'control/finance/payouts');
-
-        // Open support threads (anything not closed).
-        $openSupport = (int) SupportThread::query()->where('status', '!=', 'closed')->count();
-        $items[] = $this->r('Open support', $openSupport, 'conversations needing a reply', 'heroicon-o-chat-bubble-left-right', $openSupport > 0 ? 'warn' : 'ok', 'control/support-threads');
-
-        // Failed payments to review.
-        $failed = (int) Booking::query()->whereRaw('lower(status) = ?', ['failed'])->count();
-        $items[] = $this->r('Failed payments', $failed, 'declined orders to review', 'heroicon-o-exclamation-triangle', $failed > 0 ? ($failed > 10 ? 'down' : 'warn') : 'ok', 'control/events/bookings');
-
-        return $items;
-    }
-
-    // --------------------------- shapers ---------------------------------
-
-    /** @return array<string,mixed> money card (value is money, formatted in the view) */
-    private function m(string $title, float $value, string $sub, string $icon, string $status): array
-    {
-        return ['title' => $title, 'value' => '₹'.$this->money0($value), 'sub' => $sub, 'icon' => $icon, 'status' => $status];
-    }
-
-    /** @return array<string,mixed> health card */
-    private function h(string $title, string $value, string $sub, string $icon, string $status, ?int $meter): array
-    {
-        return compact('title', 'value', 'sub', 'icon', 'status', 'meter');
-    }
-
-    /** @return array<string,mixed> radar item */
-    private function r(string $title, int $count, string $sub, string $icon, string $status, string $path): array
-    {
-        return [
-            'title' => $title,
-            'count' => $count,
-            'sub' => $sub,
-            'icon' => $icon,
-            'status' => $count > 0 ? $status : 'ok',
-            'url' => url($path),
-        ];
-    }
-
-    /**
-     * @return array{0:string,1:string} [label, direction ok|down|flat]
-     */
-    private function trend(float $current, float $previous): array
-    {
-        if ($previous <= 0) {
-            return $current > 0 ? ['New', 'ok'] : ['—', 'flat'];
+        foreach (Event::query()->where('title', 'like', $like)->latest('date')->limit(4)->get(['id', 'title', 'date', 'city']) as $e) {
+            $out[] = [
+                'group' => 'Events',
+                'title' => $e->title,
+                'meta' => trim(($e->date ? Carbon::parse($e->date)->format('j M Y') : '').($e->city ? ' · '.$e->city : ''), ' ·'),
+                'url' => $this->resourceUrl(EventResource::class, 'control/events/events', 'edit', $e),
+            ];
         }
-        $pct = (int) round((($current - $previous) / $previous) * 100);
 
-        return $pct > 0 ? ['+'.$pct.'%', 'ok'] : ($pct < 0 ? [$pct.'%', 'down'] : ['0%', 'flat']);
+        foreach (Venue::query()->where('name', 'like', $like)->limit(4)->get(['id', 'name', 'city', 'location']) as $v) {
+            $out[] = [
+                'group' => 'Venues',
+                'title' => $v->name,
+                'meta' => $v->city ?: (string) $v->location,
+                'url' => $this->resourceUrl(VenueResource::class, 'control/game-hub/venues', 'view', $v),
+            ];
+        }
+
+        $users = User::query()
+            ->where(fn ($w) => $w->where('name', 'like', $like)->orWhere('email', 'like', $like)->orWhere('phone', 'like', $like))
+            ->limit(4)
+            ->get(['id', 'name', 'email', 'phone', 'role']);
+        foreach ($users as $u) {
+            $out[] = [
+                'group' => 'People',
+                'title' => $u->name ?: ($u->email ?: 'User #'.$u->id),
+                'meta' => trim(ucfirst(strtolower((string) $u->role)).' · '.($u->phone ?: $u->email), ' ·'),
+                'url' => $this->resourceUrl(UserResource::class, 'control/people/users', 'view', $u),
+            ];
+        }
+
+        $bookings = Booking::query()
+            ->with(['event:id,title', 'venue:id,name'])
+            ->where(function ($w) use ($q, $like) {
+                $w->where('ticket_code', 'like', $like)->orWhere('razorpay_payment_id', 'like', $like);
+                if (ctype_digit(ltrim($q, '#'))) {
+                    $w->orWhere('id', (int) ltrim($q, '#'));
+                }
+            })
+            ->latest('id')
+            ->limit(4)
+            ->get();
+        foreach ($bookings as $b) {
+            $out[] = [
+                'group' => 'Bookings',
+                'title' => 'Booking #'.$b->id.' — '.($b->event?->title ?? $b->venue?->name ?? 'Booking'),
+                'meta' => $this->inr((float) $b->total_amount).' · '.ucwords(strtolower((string) $b->status)),
+                'url' => $this->resourceUrl(BookingResource::class, 'control/events/bookings', 'edit', $b),
+            ];
+        }
+
+        $this->searchResults = $out;
     }
 
-    private function money0(float $amount): string
+    // ---------------------------------------------------------------------
+    // Helpers
+    // ---------------------------------------------------------------------
+
+    /** A resource page URL, falling back to a plain path if the resource or page is missing. */
+    private function resourceUrl(string $resource, string $fallback, string $page = 'index', $record = null): string
     {
-        return number_format($amount);
+        try {
+            if (class_exists($resource) && $resource::hasPage($page)) {
+                return $resource::getUrl($page, $record ? ['record' => $record] : []);
+            }
+            if (class_exists($resource) && $resource::hasPage('index')) {
+                return $resource::getUrl('index');
+            }
+        } catch (\Throwable) {
+            // fall through
+        }
+
+        return url($fallback);
+    }
+
+    private function inr(float $amount): string
+    {
+        return Rupees::format($amount);
     }
 
     private function rangeLabel(): string
     {
         return match ($this->range) {
-            'today' => 'today so far',
-            '7d' => 'last 7 days',
-            '90d' => 'last 90 days',
-            'all' => 'all time',
-            default => 'last 30 days',
+            'today' => 'Today so far',
+            '7d' => 'Last 7 days',
+            '90d' => 'Last 90 days',
+            'all' => 'All time',
+            default => 'Last 30 days',
+        };
+    }
+
+    private function previousLabel(): string
+    {
+        return match ($this->range) {
+            'today' => 'same time yesterday',
+            '7d' => 'previous 7 days',
+            '90d' => 'previous 90 days',
+            default => 'previous 30 days',
         };
     }
 }

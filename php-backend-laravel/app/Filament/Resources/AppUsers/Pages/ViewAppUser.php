@@ -75,7 +75,7 @@ class ViewAppUser extends ViewRecord
             EditAction::make(),
 
             Action::make('recalculateKpis')
-                ->label('Refresh telemetry')
+                ->label('Refresh')
                 ->icon('heroicon-m-arrow-path')
                 ->color('gray')
                 ->action(function (): void {
@@ -84,7 +84,7 @@ class ViewAppUser extends ViewRecord
                     $record->recalculateKpiMetrics();
 
                     Notification::make()
-                        ->title('Telemetry refreshed')
+                        ->title('Refreshed')
                         ->body('Lifetime spend, bookings, and activity metrics have been synchronized.')
                         ->success()
                         ->send();

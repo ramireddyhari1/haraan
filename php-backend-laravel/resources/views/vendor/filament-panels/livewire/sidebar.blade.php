@@ -39,7 +39,7 @@
                         class="hrn-ws-card hrn-ws-identity-trigger"
                         x-bind:aria-expanded="switcherOpen"
                         x-bind:class="{ 'hrn-ws-card-active hrn-ws-active': switcherOpen }"
-                        title="Switch workspace (Haraan — Enterprise Control Center)"
+                        title="Switch workspace (Haraan — admin console)"
                     >
                         {{-- Top Row: Living Branded Tile + Typography + Far Right Switch Chevron --}}
                         <div class="hrn-ws-top-row">
@@ -64,7 +64,7 @@
                             {{-- Workspace Meta (Visible when expanded) --}}
                             <div class="hrn-ws-body" x-show="$store.sidebar.isOpen" x-transition:enter="hrn-fade-enter">
                                 <span class="hrn-ws-name">Haraan</span>
-                                <span class="hrn-ws-sub">Enterprise Control Center</span>
+                                <span class="hrn-ws-sub">Admin console</span>
                             </div>
 
                             {{-- Far Right Workspace Switch Chevron --}}
@@ -78,7 +78,7 @@
                         {{-- Beneath That Row: Small Environment Line with "Production" Badge & Subtle Live Status Dot --}}
                         <div class="hrn-ws-env-line" x-show="$store.sidebar.isOpen" x-transition:enter="hrn-fade-enter">
                             <span class="hrn-ws-status-dot" aria-hidden="true"></span>
-                            <span class="hrn-ws-env-badge">Production</span>
+                            <span class="hrn-ws-env-badge">{{ app()->environment('production') ? 'Production' : ucfirst(app()->environment()) }}</span>
                         </div>
                     </button>
 
@@ -113,7 +113,7 @@
                             </div>
                             <div class="hrn-ws-pop-org-meta">
                                 <span class="hrn-ws-pop-org-title">Haraan Entertainment</span>
-                                <span class="hrn-ws-pop-org-sub">Enterprise Tier</span>
+                                <span class="hrn-ws-pop-org-sub">Admin console</span>
                             </div>
                             <span class="hrn-ws-pop-chip">Live</span>
                         </div>
@@ -122,7 +122,7 @@
 
                         <div class="hrn-ws-pop-section-label">Workspaces & Consoles</div>
 
-                        {{-- Enterprise Control Center (Current) --}}
+                        {{-- Admin console (current) --}}
                         <a href="{{ url('/control') }}" class="hrn-ws-pop-item hrn-ws-pop-item-active">
                             <div class="hrn-ws-pop-icon hrn-ws-pop-icon-control">
                                 <svg viewBox="0 0 20 20" fill="currentColor" class="w-4 h-4">
@@ -131,7 +131,7 @@
                             </div>
                             <div class="hrn-ws-pop-text">
                                 <div class="flex items-center gap-1.5">
-                                    <span class="hrn-ws-pop-item-title font-semibold">Enterprise Control Center</span>
+                                    <span class="hrn-ws-pop-item-title font-semibold">Admin console</span>
                                     <span class="hrn-ws-pop-current-pill">Current</span>
                                 </div>
                                 <span class="hrn-ws-pop-item-desc">Super Admin & Telemetry</span>

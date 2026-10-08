@@ -24,8 +24,8 @@
     wire:loading.class.delay="hrn-is-loading"
     href="{{ filament()->getHomeUrl() ?? url('/control') }}"
     class="hrn-brand-anchor"
-    aria-label="Haraan Enterprise Control Center — Home"
-    title="Haraan Enterprise Control Center"
+    aria-label="Haraan admin console — Home"
+    title="Haraan admin console"
 >
     {{-- Inline Purified SVG from haraan.svg (Single Source of Truth) --}}
     <div class="hrn-brand-anchor-mark" aria-hidden="true">
@@ -67,7 +67,7 @@
         {{-- Workspace Context & Environment Metadata --}}
         <div class="hrn-anchor-context">
             <span class="hrn-anchor-workspace">{{ filament()->getId() === 'control' ? 'Control' : ucfirst(filament()->getId()) }}</span>
-            <span class="hrn-anchor-env" :class="{ 'hrn-env-syncing': isLoading }" title="Production Cluster — Operational">
+            <span class="hrn-anchor-env" :class="{ 'hrn-env-syncing': isLoading }" title="{{ app()->environment('production') ? 'Production' : ucfirst(app()->environment()) }}">
                 <span class="hrn-anchor-env-dot" aria-hidden="true"></span>
                 <span x-text="isLoading ? 'Sync' : 'Live'">Live</span>
             </span>

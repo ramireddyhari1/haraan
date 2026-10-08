@@ -322,7 +322,7 @@ class UserPerformanceAndScaleTest extends TestCase
             ->test(ViewAppUser::class, ['record' => $customer->id])
             ->assertSuccessful()
             ->callAction('recalculateKpis')
-            ->assertNotified('Telemetry refreshed');
+            ->assertNotified('Refreshed');
 
         $customer->refresh();
         $this->assertEquals(1500.00, (float) $customer->lifetime_spend);

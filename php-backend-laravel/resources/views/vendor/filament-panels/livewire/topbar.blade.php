@@ -246,12 +246,13 @@
 
             <div class="hrn-header-cluster">
                 {{-- Realtime WebSocket Indicator — an operator's diagnostic, not a partner's. --}}
-                @if (filament()->getId() !== 'partner')
-                <div class="hrn-ws-badge" title="Reverb WebSocket Engine: Connected & Active">
+                {{-- Only when live push is actually configured; the badge used to claim "Connected" unconditionally. --}}
+                @if (filament()->getId() !== 'partner' && in_array(config('broadcasting.default'), ['reverb', 'pusher'], true))
+                <div class="hrn-ws-badge" title="Live updates are on: pages refresh when data changes">
                     <span class="hrn-ws-dot">
                         <span class="hrn-ws-dot-ping"></span>
                     </span>
-                    <span class="hrn-ws-label">Reverb</span>
+                    <span class="hrn-ws-label">Live</span>
                 </div>
                 @endif
 

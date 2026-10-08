@@ -97,53 +97,111 @@ class EventHistory extends Page implements HasTable
         }, 'event-history-' . now()->format('Y-m-d') . '.csv', ['Content-Type' => 'text/csv']);
     }
 
-    public function getHistoricalExecutiveSummary(): array
+    /** Events whose date has passed, scoped like the table (a partner sees only their own). */
+    private function pastEvents(): Builder
     {
-        $pastQuery = fn () => EventResource::getEloquentQuery()
+        return EventResource::getEloquentQuery()
             ->whereNotNull('date')
-            ->whereDate('date', '<', now()->toDateString());
+            ->whereDate('date', '<', \App\Support\BusinessClock::todayDate());
+    }
 
-        $pastEventsCount = $pastQuery()->count();
-        $totalCapacity = (int) $pastQuery()->sum('total_slots');
-        $soldSlots = (int) $pastQuery()->selectRaw('coalesce(sum(total_slots - available_slots), 0) as s')->value('s');
-        $fillRate = $totalCapacity > 0 ? round(($soldSlots / $totalCapacity) * 100, 1) : 89.2;
+    /** Paid bookings on past events, joined to the event for its date and city. */
+    private function pastPaid()
+    {
+        return Booking::query()
+            ->join('events', 'events.id', '=', 'bookings.event_id')
+            ->whereIn('bookings.event_id', $this->pastEvents()->select('events.id'))
+            ->whereIn(DB::raw('lower(bookings.status)'), self::PAID);
+    }
 
-        $pastEventIds = $pastQuery()->select('id');
-        $dbRevenue = (float) Booking::query()
-            ->whereIn('event_id', $pastEventIds)
-            ->whereIn(DB::raw('lower(status)'), self::PAID)
-            ->sum('total_amount');
-
-        $revenue = $dbRevenue > 0 ? $dbRevenue : 14200000.00;
+    /** @return array<string,mixed> */
+    public function getHistorySummary(): array
+    {
+        $count = $this->pastEvents()->count();
+        $capacity = (int) $this->pastEvents()->sum('total_slots');
+        $sold = (int) $this->pastEvents()->selectRaw('coalesce(sum(total_slots - available_slots), 0) as s')->value('s');
+        $revenue = (float) $this->pastPaid()->sum('bookings.total_amount');
+        $tickets = (int) $this->pastPaid()->sum('bookings.quantity');
+        $scanned = (int) $this->pastPaid()->sum('bookings.checked_in_count');
 
         return [
-            'lifetime_gmv' => '₹' . number_format($revenue),
-            'lifetime_gmv_sub' => '+44.8% YoY Expansion',
-            'past_attendees' => number_format($soldSlots > 0 ? $soldSlots : 38400),
-            'capacity_achieved' => ($fillRate > 0 ? $fillRate : 89.2) . '%',
-            'past_events' => number_format($pastEventsCount > 0 ? $pastEventsCount : 89),
+            'events' => $count,
+            'revenue' => \App\Support\Rupees::format($revenue),
+            'tickets' => $tickets,
+            'fill' => $capacity > 0 ? (int) round($sold / $capacity * 100).'%' : '—',
+            'fillNote' => $capacity > 0 ? number_format($sold).' of '.number_format($capacity).' seats' : 'No seat limits set',
+            'showUp' => $tickets > 0 ? (int) round(min($scanned, $tickets) / $tickets * 100).'%' : '—',
+            'showUpNote' => $tickets > 0 ? number_format($scanned).' scanned at the gate' : 'No tickets sold yet',
         ];
     }
 
-    public function getQuarterlyRevenueTrends(): array
+    /**
+     * Takings per quarter of the event date, last six quarters, oldest first.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function getQuarterlyTakings(): array
     {
-        return [
-            ['quarter' => 'Q1 2025', 'revenue' => '₹22.4L', 'pct' => 45],
-            ['quarter' => 'Q2 2025', 'revenue' => '₹28.1L', 'pct' => 58],
-            ['quarter' => 'Q3 2025', 'revenue' => '₹34.5L', 'pct' => 71],
-            ['quarter' => 'Q4 2025', 'revenue' => '₹41.2L', 'pct' => 85],
-            ['quarter' => 'Q1 2026', 'revenue' => '₹48.9L', 'pct' => 100],
-        ];
+        $now = \App\Support\BusinessClock::now();
+        $quarters = [];
+        for ($i = 5; $i >= 0; $i--) {
+            $q = $now->copy()->firstOfQuarter()->subQuarters($i);
+            $quarters[$q->format('Y').'-Q'.$q->quarter] = ['label' => 'Q'.$q->quarter.' '.$q->format('y'), 'value' => 0.0, 'events' => []];
+        }
+
+        $rows = $this->pastPaid()
+            ->where('events.date', '>=', $now->copy()->firstOfQuarter()->subQuarters(5)->toDateString())
+            ->get(['events.date as event_date', 'bookings.total_amount', 'bookings.event_id']);
+
+        foreach ($rows as $r) {
+            $d = \Illuminate\Support\Carbon::parse($r->event_date);
+            $key = $d->format('Y').'-Q'.$d->quarter;
+            if (isset($quarters[$key])) {
+                $quarters[$key]['value'] += (float) $r->total_amount;
+                $quarters[$key]['events'][$r->event_id] = true;
+            }
+        }
+
+        $max = max(array_column($quarters, 'value') ?: [0]);
+
+        return array_values(array_map(fn (array $q): array => [
+            'label' => $q['label'],
+            'value' => \App\Support\Rupees::format($q['value']),
+            'short' => \App\Support\Rupees::short($q['value']),
+            'events' => count($q['events']),
+            'pct' => $max > 0 ? (int) round($q['value'] / $max * 100) : 0,
+        ], $quarters));
     }
 
-    public function getCityComparisons(): array
+    /**
+     * Past events by city: takings, how many events, and how full they got.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    public function getCityHistory(): array
     {
-        return [
-            ['city' => 'Bengaluru', 'gmv' => '₹74.2L', 'events' => 42, 'fill' => '92.4%', 'yoy' => '+38%'],
-            ['city' => 'Mumbai', 'gmv' => '₹38.6L', 'events' => 24, 'fill' => '88.1%', 'yoy' => '+31%'],
-            ['city' => 'Hyderabad', 'gmv' => '₹18.4L', 'events' => 14, 'fill' => '86.5%', 'yoy' => '+45%'],
-            ['city' => 'Delhi NCR', 'gmv' => '₹10.8L', 'events' => 9, 'fill' => '82.0%', 'yoy' => '+22%'],
-        ];
+        $cityExpr = "coalesce(nullif(trim(city), ''), 'Unknown')";
+
+        $events = $this->pastEvents()
+            ->selectRaw("{$cityExpr} as c, count(*) as n, coalesce(sum(total_slots), 0) as cap, coalesce(sum(total_slots - available_slots), 0) as sold")
+            ->groupBy('c')
+            ->toBase()
+            ->get()
+            ->keyBy('c');
+
+        $money = $this->pastPaid()
+            ->selectRaw("coalesce(nullif(trim(events.city), ''), 'Unknown') as c, sum(bookings.total_amount) as v")
+            ->groupBy('c')
+            ->toBase()
+            ->pluck('v', 'c');
+
+        return $events->map(fn ($e, $c): array => [
+            'city' => (string) $c,
+            'raw' => (float) ($money[$c] ?? 0),
+            'revenue' => \App\Support\Rupees::format((float) ($money[$c] ?? 0)),
+            'events' => (int) $e->n,
+            'fill' => (int) $e->cap > 0 ? (int) round((int) $e->sold / (int) $e->cap * 100) : null,
+        ])->sortByDesc('raw')->take(6)->values()->all();
     }
 
     public function table(Table $table): Table

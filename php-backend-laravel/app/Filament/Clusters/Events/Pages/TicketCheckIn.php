@@ -63,19 +63,41 @@ class TicketCheckIn extends Page
     /** The locked event's title, once validated as the host's own. */
     public ?string $lockedTitle = null;
 
-    public function getExecutiveGateTelemetry(): array
+    /**
+     * The gate strip: this session's own tally plus how many of today's ticket holders are
+     * already inside (or the locked event's, when one is set). Nothing here is estimated.
+     *
+     * @return array{admitted:int, repeats:int, rejected:int, inside:int, expected:int, scope:string}
+     */
+    public function getGateFigures(): array
     {
-        $admitted = max($this->admitted, 142);
-        $totalScans = $admitted + $this->repeats + $this->rejected;
-        $qrSuccess = $totalScans > 0 ? round(($admitted / $totalScans) * 100, 1) : 99.4;
+        $q = \App\Models\Booking::query()
+            ->whereNotNull('bookings.event_id')
+            ->whereIn(\Illuminate\Support\Facades\DB::raw('lower(bookings.status)'), ['confirmed', 'paid', 'completed', 'checked_in']);
+
+        if ($this->event !== null) {
+            $q->where('bookings.event_id', $this->event);
+            $scope = 'this event';
+        } else {
+            $q->join('events', 'events.id', '=', 'bookings.event_id')
+                ->whereDate('events.date', \App\Support\BusinessClock::today());
+            $user = auth()->user();
+            if ($user && ! $user->isSuperAdmin()) {
+                $q->where('events.partner_id', $user->effectivePartnerId());
+            }
+            $scope = "today's events";
+        }
+
+        $expected = (int) (clone $q)->sum('bookings.quantity');
+        $inside = (int) (clone $q)->sum('bookings.checked_in_count');
 
         return [
-            'velocity' => '142 / hr',
-            'qr_success' => $qrSuccess . '%',
-            'no_show_risk' => '12.4%',
-            'no_show_desc' => 'Low risk · 380 expected arrivals',
-            'fraud_alerts' => $this->repeats + $this->rejected,
-            'fraud_status' => ($this->rejected > 0 || $this->repeats > 0) ? 'Suspicious attempts flagged' : 'Zero breaches',
+            'admitted' => $this->admitted,
+            'repeats' => $this->repeats,
+            'rejected' => $this->rejected,
+            'inside' => min($inside, $expected),
+            'expected' => $expected,
+            'scope' => $scope,
         ];
     }
 

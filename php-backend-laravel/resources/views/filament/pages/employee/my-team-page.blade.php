@@ -349,7 +349,7 @@
                 <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-slate-100">
                     <div>
                         <div class="flex items-center gap-2">
-                            <h2 class="text-base font-black text-slate-900">Live Team Operations Telemetry</h2>
+                            <h2 class="text-base font-black text-slate-900">Team activity today</h2>
                             <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200/80">
                                 <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 motion-reduce:animate-none animate-ping"></span>
                                 Live Sync (15s)

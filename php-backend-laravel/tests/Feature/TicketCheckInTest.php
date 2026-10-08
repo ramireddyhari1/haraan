@@ -55,7 +55,7 @@ class TicketCheckInTest extends TestCase
 
         Livewire::test(TicketCheckIn::class)
             ->assertOk()
-            ->assertSee('Haraan Gate Console')
+            ->assertSee('Gate scanner')
             ->assertSee('Start camera')
             ->assertSee('Manual Code Entry')
             ->assertSee('Outdoor Mode');
