@@ -155,6 +155,33 @@ fun FlightReplayOverlay(
     /** Closes itself this long after it has played, for a phone nobody is holding. */
     autoCloseAfterMs: Long? = null,
 ) {
+    /*
+     * The replay is a picture with a few labels on it, not a page of text. A phone set to a
+     * large system font blew the readout up until it covered the pitch in front of the
+     * stumps and broke "Top" over three lines; the labels follow the setting only a little.
+     */
+    val base = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(
+            base.density,
+            minOf(base.fontScale, REPLAY_MAX_FONT_SCALE),
+        ),
+    ) {
+        FlightReplayContent(flight, onClose, modifier, holdAt, startView, autoCloseAfterMs)
+    }
+}
+
+private const val REPLAY_MAX_FONT_SCALE = 1.1f
+
+@Composable
+private fun FlightReplayContent(
+    flight: Flight3d,
+    onClose: () -> Unit,
+    modifier: Modifier,
+    holdAt: Float?,
+    startView: ReplayView?,
+    autoCloseAfterMs: Long?,
+) {
     var view by remember { mutableStateOf(startView ?: ReplayView.AUTO) }
     var previous by remember { mutableStateOf(startView ?: ReplayView.AUTO) }
     val glide = remember { Animatable(1f) }
@@ -274,9 +301,12 @@ fun FlightReplayOverlay(
                 }
                 Spacer(Modifier.height(5.dp))
                 Text(
-                    "Fitted from the pitch corners · an estimate",
+                    // Fitted from tapped corners or from the stumps; either way one camera's estimate.
+                    "One-camera estimate",
                     color = Color.White.copy(alpha = 0.5f),
                     fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
             }
             Box(
@@ -325,7 +355,7 @@ fun FlightReplayOverlay(
                 pitched = pitched,
                 arrived = arrived,
             )
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Row(
                     Modifier
@@ -339,7 +369,8 @@ fun FlightReplayOverlay(
                         Text(
                             option.label,
                             color = if (selected) Color.White else Color.White.copy(alpha = 0.6f),
-                            fontSize = 12.5.sp,
+                            fontSize = 12.sp,
+                            maxLines = 1,
                             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(999.dp))
@@ -351,7 +382,7 @@ fun FlightReplayOverlay(
                                         view = option
                                     }
                                 }
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                .padding(horizontal = 11.dp, vertical = 7.dp),
                         )
                     }
                 }
@@ -392,7 +423,7 @@ private fun ReplayGlyph() {
  */
 @Composable
 private fun Readout(flight: Flight3d, progress: () -> Float, pitched: Boolean, arrived: Boolean) {
-    val shape = RoundedCornerShape(20.dp)
+    val shape = RoundedCornerShape(14.dp)
     val pitchIn = remember { Animatable(0f) }
     val speedIn = remember { Animatable(0f) }
     // The speed is known at release, so it counts up as the ball leaves the hand.
@@ -418,8 +449,10 @@ private fun Readout(flight: Flight3d, progress: () -> Float, pitched: Boolean, a
             drawRect(Color.White.copy(alpha = 0.06f))
             drawRect(RampLight, size = Size(size.width * progress().coerceIn(0f, 1f), size.height))
         }
+        // One slim strip: the pitch in front of the stumps — where the ball lands — must
+        // stay in view. It used to be a tall card with a 44 sp number that covered it.
         Row(
-            Modifier.padding(start = 18.dp, end = 16.dp, top = 12.dp, bottom = 14.dp),
+            Modifier.padding(start = 14.dp, end = 12.dp, top = 7.dp, bottom = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column {
@@ -428,60 +461,63 @@ private fun Readout(flight: Flight3d, progress: () -> Float, pitched: Boolean, a
                     Text(
                         "%.0f".format(flight.speedKmh * speedIn.value),
                         color = Color.White,
-                        fontSize = 44.sp,
-                        lineHeight = 44.sp,
+                        fontSize = 24.sp,
+                        lineHeight = 24.sp,
                         fontFamily = ArchivoDisplay,
-                        letterSpacing = (-1).sp,
+                        letterSpacing = (-0.5).sp,
                     )
-                    Spacer(Modifier.width(5.dp))
+                    Spacer(Modifier.width(3.dp))
                     Text(
                         "km/h",
                         color = Color.White.copy(alpha = 0.6f),
-                        fontSize = 13.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(bottom = 7.dp),
+                        modifier = Modifier.padding(bottom = 3.dp),
                     )
                 }
             }
-            Spacer(Modifier.weight(1f))
-            Box(Modifier.width(1.dp).height(46.dp).background(Color.White.copy(alpha = 0.10f)))
-            Spacer(Modifier.width(16.dp))
-            Column(Modifier.widthIn(min = 130.dp)) {
-                Column(Modifier.graphicsLayer { alpha = 0.25f + 0.75f * pitchIn.value }) {
-                    MicroCaps("PITCHED")
-                    Text(
-                        if (pitched) {
-                            "%.1f m · %s".format(flight.bounceY, BounceLength.of(flight.bounceY).spoken)
-                        } else {
-                            "—"
-                        },
-                        color = Color.White,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-                Spacer(Modifier.height(8.dp))
-                val (word, tone) = when (hits) {
-                    true -> "HITTING" to Hit
-                    false -> "MISSING" to Miss
-                    null -> "NOT JUDGED" to Color(0xFF475569)
-                }
+            Spacer(Modifier.width(12.dp))
+            Box(Modifier.width(1.dp).height(28.dp).background(Color.White.copy(alpha = 0.10f)))
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f).graphicsLayer { alpha = 0.25f + 0.75f * pitchIn.value }) {
+                MicroCaps("PITCHED")
                 Text(
-                    word,
+                    if (pitched) {
+                        "%.1f m · %s".format(flight.bounceY, BounceLength.of(flight.bounceY).spoken)
+                    } else {
+                        "—"
+                    },
                     color = Color.White,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    letterSpacing = 1.4.sp,
-                    modifier = Modifier
-                        .graphicsLayer {
-                            alpha = verdictIn.value
-                            translationX = (1f - verdictIn.value) * -8.dp.toPx()
-                        }
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(tone)
-                        .padding(horizontal = 9.dp, vertical = 4.dp),
+                    fontSize = 12.5.sp,
+                    lineHeight = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    // "back of a length" is the longest; two short lines beat a cut word.
+                    maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 )
             }
+            Spacer(Modifier.width(8.dp))
+            val (word, tone) = when (hits) {
+                true -> "HITTING" to Hit
+                false -> "MISSING" to Miss
+                null -> "NOT JUDGED" to Color(0xFF475569)
+            }
+            Text(
+                word,
+                color = Color.White,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.ExtraBold,
+                letterSpacing = 1.2.sp,
+                maxLines = 1,
+                modifier = Modifier
+                    .graphicsLayer {
+                        alpha = verdictIn.value
+                        translationX = (1f - verdictIn.value) * -8.dp.toPx()
+                    }
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(tone)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            )
         }
     }
 }
