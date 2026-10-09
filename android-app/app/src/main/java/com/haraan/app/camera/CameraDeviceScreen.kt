@@ -1889,6 +1889,11 @@ private fun CameraMode(
          * replay it; only a fresh lock does.
          */
         val guideReveal = remember { androidx.compose.animation.core.Animatable(0f) }
+        // The app's display face (Archivo Black) for the names painted on the pitch.
+        val guideFontContext = LocalContext.current
+        val guideTypeface = remember {
+            runCatching { androidx.core.content.res.ResourcesCompat.getFont(guideFontContext, R.font.archivo_black) }.getOrNull()
+        }
         LaunchedEffect(guideReady) {
             if (guideReady) {
                 guideReveal.snapTo(0f)
@@ -1924,6 +1929,7 @@ private fun CameraMode(
                     guideReveal = guideReveal.value,
                     // Clear of the shutter row and the hint line above it.
                     safeBottomY = size.height * GUIDE_SAFE_BOTTOM,
+                    guideTypeface = guideTypeface,
                 )
             }
         }
@@ -3271,18 +3277,21 @@ private fun metricCards(metrics: com.haraan.app.vision.FlightMetrics?): List<Met
 }
 
 /**
- * THE DELIVERY'S NUMBERS, stacked down the left edge like a broadcast graphic.
+ * THE DELIVERY'S NUMBERS, as one slim readout down the left edge.
  *
- * Built to feel like a readout that LANDS rather than text that changes:
- *  - a new ball's numbers count up from nothing, card after card, 90 ms apart;
- *  - each card pops on a spring as its number arrives, and its edge flashes brand blue;
- *  - while the next ball is being filmed, the old numbers dim instead of vanishing, so the
- *    stack never jumps and the operator can still read the last ball;
- *  - a press dips the card under the finger with a tick, and opens it to say how the number
- *    was measured — or, for a dash, what it needs.
+ * It used to be four separate cards, each up to 190 dp wide, stacked with gaps — a third of
+ * the picture's height on the side of the frame the operator aims with. One glass panel with
+ * four rows does the same job in about a third of the area: the picture is the product, the
+ * numbers are a caption to it.
  *
- * A dash is a dash. The cards never print a zero or a placeholder figure for something the
- * phone did not see.
+ * Still built to feel like a readout that LANDS:
+ *  - a new ball's numbers count up, row after row, 90 ms apart, each row popping on a spring
+ *    with a brief blue flash;
+ *  - while the next ball is filmed the old numbers dim instead of vanishing;
+ *  - a press dips the row under the finger with a tick and widens the panel to say how the
+ *    number was measured — or, for a dash, what it needs.
+ *
+ * A dash is a dash: nothing here prints a figure for something the phone did not see.
  */
 @Composable
 private fun DeliveryMetricsStack(
@@ -3298,19 +3307,95 @@ private fun DeliveryMetricsStack(
     /** Null until the delivery's clip is finished and kept. */
     onWatchClip: (() -> Unit)? = null,
 ) {
+    /*
+     * A camera readout sits ON the picture, so it does not grow with the system font size
+     * the way the rest of the app does: at 1.3× (as on the phone this was checked on) the
+     * panel covered half the frame's height. Capped at 1.1× — still larger for anyone who
+     * asked for larger, never a wall over the viewfinder.
+     */
+    val baseDensity = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(
+            baseDensity.density,
+            minOf(baseDensity.fontScale, HUD_MAX_FONT_SCALE),
+        ),
+    ) {
+        DeliveryReadout(metrics, stale, modifier, showLine, hand, onToggleHand, onOpenReplay, onWatchClip)
+    }
+}
+
+@Composable
+private fun DeliveryReadout(
+    metrics: com.haraan.app.vision.FlightMetrics?,
+    stale: Boolean,
+    modifier: Modifier,
+    showLine: Boolean,
+    hand: com.haraan.app.vision.BatterHand,
+    onToggleHand: () -> Unit,
+    onOpenReplay: (() -> Unit)?,
+    onWatchClip: (() -> Unit)?,
+) {
     val cards = metricCards(metrics)
-    Column(modifier.width(IntrinsicSize.Max), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        cards.forEachIndexed { index, card ->
-            MetricCard(card = card, stale = stale, delayMs = index * 90L, generation = metrics)
-        }
-        if (showLine) {
-            LineCard(
-                line = metrics?.let { com.haraan.app.vision.DeliveryLines.of(it, hand) },
-                hand = hand,
-                stale = stale,
-                generation = metrics,
-                onToggleHand = onToggleHand,
-            )
+    // Which row is open, if any: one at a time, so the panel only ever widens for one note.
+    var openRow by remember { mutableStateOf<Int?>(null) }
+    val panelWidth by androidx.compose.animation.core.animateDpAsState(
+        when {
+            openRow != null -> 196.dp
+            metrics == null -> 122.dp
+            else -> 96.dp
+        },
+        spring(dampingRatio = 0.82f, stiffness = 520f),
+        label = "panelWidth",
+    )
+    val shape = RoundedCornerShape(16.dp)
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(
+            Modifier
+                .width(panelWidth)
+                .clip(shape)
+                .background(Color(0x9E070B14))
+                .border(1.dp, Color.White.copy(alpha = 0.09f), shape)
+                .animateContentSize(spring(dampingRatio = 0.78f, stiffness = 420f))
+                .padding(vertical = 3.dp),
+        ) {
+            /*
+             * NOTHING MEASURED YET: one line, not four rows of dashes. The readout springs
+             * open into its rows the moment a ball gives it something to say.
+             */
+            if (metrics == null) {
+                Row(
+                    Modifier.padding(start = 10.dp, end = 8.dp, top = 5.dp, bottom = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(Modifier.weight(1f)) { RowLabel("LAST BALL") }
+                    Spacer(Modifier.width(6.dp))
+                    if (showLine) HandChip(hand, onToggleHand) else Text("—", color = Color.White.copy(alpha = 0.3f), fontSize = 12.sp)
+                }
+                return@Column
+            }
+            cards.forEachIndexed { index, card ->
+                if (index > 0) MetricDivider()
+                MetricRow(
+                    card = card,
+                    stale = stale,
+                    delayMs = index * 90L,
+                    generation = metrics,
+                    open = openRow == index,
+                    onToggle = { openRow = if (openRow == index) null else index },
+                )
+            }
+            if (showLine) {
+                MetricDivider()
+                LineRow(
+                    line = metrics?.let { com.haraan.app.vision.DeliveryLines.of(it, hand) },
+                    hand = hand,
+                    stale = stale,
+                    generation = metrics,
+                    open = openRow == cards.size,
+                    onToggle = { openRow = if (openRow == cards.size) null else cards.size },
+                    onToggleHand = onToggleHand,
+                )
+            }
         }
         if (!stale && (onWatchClip != null || onOpenReplay != null)) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -3319,6 +3404,17 @@ private fun DeliveryMetricsStack(
             }
         }
     }
+}
+
+@Composable
+private fun MetricDivider() {
+    Box(
+        Modifier
+            .padding(horizontal = 10.dp)
+            .fillMaxWidth()
+            .height(1.dp)
+            .background(Color.White.copy(alpha = 0.07f)),
+    )
 }
 
 /** Reopens one of the last ball's replays. Brand blue, like every action on this screen. */
@@ -3333,10 +3429,10 @@ private fun ReplayPill(label: String, onClick: () -> Unit) {
                 view.performHapticFeedback(Feel.SELECT)
                 onClick()
             }
-            .padding(start = 11.dp, end = 13.dp, top = 7.dp, bottom = 7.dp),
+            .padding(start = 10.dp, end = 12.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Canvas(Modifier.size(9.dp)) {
+        Canvas(Modifier.size(8.dp)) {
             val path = androidx.compose.ui.graphics.Path().apply {
                 moveTo(size.width * 0.15f, 0f)
                 lineTo(size.width, size.height / 2f)
@@ -3345,202 +3441,90 @@ private fun ReplayPill(label: String, onClick: () -> Unit) {
             }
             drawPath(path, Color.White)
         }
-        Spacer(Modifier.width(7.dp))
-        Text(label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(6.dp))
+        Text(label, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
     }
 }
 
 /**
- * THE LINE, as a word and a picture of the stumps.
- *
- * The word is the broadcast's — "Outside off", "Leg stump" — in the batter's terms. The
- * picture is drawn the way this phone sees it, from behind the bowler: three stumps, the
- * crossing point as a dot that slides in from middle, the projection's error as a faint
- * bar either side of it, and where the ball pitched as a ring when the pitch is calibrated.
- *
- * Off and leg depend on the striker, and this phone is a guest that is never told who is
- * batting, so the RHB/LHB chip is the operator's to set. It flips the words and the side
- * labels; the dot stays where the ball actually went.
+ * The press and the landing, shared by every row: dips under the finger, pops when its
+ * number arrives, and flashes brand blue behind it for a moment.
  */
 @Composable
-private fun LineCard(
-    line: com.haraan.app.vision.DeliveryLine?,
-    hand: com.haraan.app.vision.BatterHand,
-    stale: Boolean,
-    generation: Any?,
-    onToggleHand: () -> Unit,
-) {
+private fun Modifier.landingRow(
+    press: MutableInteractionSource,
+    pop: Float,
+    flash: Float,
+    onClick: () -> Unit,
+): Modifier {
     val view = LocalView.current
-    var open by remember { mutableStateOf(false) }
-    val dim by animateFloatAsState(if (stale) 0.4f else 1f, tween(260), label = "lineStale")
-    val shape = RoundedCornerShape(14.dp)
-    val blue = Color(0xFF8DB0FF)
-    val right = hand == com.haraan.app.vision.BatterHand.RIGHT
-
-    // Back to the picture's own left/right for drawing: the dot goes where the ball went.
-    fun pictureRight(offTowardsOff: Double) = if (right) -offTowardsOff else offTowardsOff
-    val dotTarget = line?.atStumpsOffM?.let { pictureRight(it) }
-    val slide = remember { Animatable(0f) }
-    val pop = remember { Animatable(1f) }
-    LaunchedEffect(generation, dotTarget) {
-        if (dotTarget == null) {
-            slide.snapTo(0f)
-            return@LaunchedEffect
+    val pressed by press.collectIsPressedAsState()
+    val pressScale by animateFloatAsState(
+        if (pressed) 0.93f else 1f,
+        spring(dampingRatio = 0.5f, stiffness = 800f),
+        label = "rowPress",
+    )
+    return this
+        .fillMaxWidth()
+        .graphicsLayer {
+            val s = pressScale * pop
+            scaleX = s
+            scaleY = s
+            transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f)
         }
-        delay(3 * 90L)
-        slide.snapTo(0f)
-        launch {
-            pop.snapTo(0.92f)
-            pop.animateTo(1f, spring(dampingRatio = 0.42f, stiffness = 520f))
+        .background(Color(0xFF3B82F6).copy(alpha = 0.22f * flash))
+        .clickable(interactionSource = press, indication = null) {
+            view.performHapticFeedback(Feel.SELECT)
+            onClick()
         }
-        slide.animateTo(dotTarget.toFloat(), tween(650, easing = FastOutSlowInEasing))
-    }
-
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .widthIn(min = 108.dp, max = 190.dp)
-            .graphicsLayer {
-                scaleX = pop.value
-                scaleY = pop.value
-                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f)
-            }
-            .clip(shape)
-            .background(Color(0xA8070B14))
-            .border(1.dp, Color.White.copy(alpha = 0.10f), shape)
-            .clickable {
-                view.performHapticFeedback(Feel.SELECT)
-                open = !open
-            }
-            .animateContentSize(spring(dampingRatio = 0.8f, stiffness = 500f))
-            .padding(start = 12.dp, end = 10.dp, top = 9.dp, bottom = 10.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "LINE",
-                color = Color.White.copy(alpha = 0.58f),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.1.sp,
-            )
-            Spacer(Modifier.weight(1f))
-            Spacer(Modifier.width(10.dp))
-            // The striker's hand: one tap, and it stays for the session.
-            Text(
-                if (right) "RHB" else "LHB",
-                color = Color.White,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 0.8.sp,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(999.dp))
-                    .background(Color(0xFF2F5BEA))
-                    .clickable {
-                        view.performHapticFeedback(Feel.SELECT)
-                        onToggleHand()
-                    }
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
-            )
-        }
-        Spacer(Modifier.height(3.dp))
-        Column(Modifier.graphicsLayer { alpha = dim }) {
-            Text(
-                line?.atStumps?.spoken ?: "—",
-                color = if (line?.atStumps == null) Color.White.copy(alpha = 0.32f) else Color.White,
-                fontSize = if (line?.atStumps == null) 24.sp else 19.sp,
-                fontFamily = ArchivoDisplay,
-                letterSpacing = (-0.2).sp,
-                maxLines = 1,
-            )
-            Spacer(Modifier.height(6.dp))
-            Row {
-                Text(if (right) "OFF" else "LEG", color = Color.White.copy(alpha = 0.4f), fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.weight(1f))
-                Text(if (right) "LEG" else "OFF", color = Color.White.copy(alpha = 0.4f), fontSize = 8.5.sp, fontWeight = FontWeight.Bold)
-            }
-            val pitchedAt = line?.pitchedOffM?.let { pictureRight(it) }
-            val band = line?.uncertaintyM
-            Canvas(
-                Modifier
-                    .fillMaxWidth()
-                    .height(30.dp),
-            ) {
-                val cx = size.width / 2f
-                val pxPerM = (size.width / 2f) / LINE_VIEW_HALF_M
-                fun x(m: Double) = (cx + m * pxPerM).toFloat().coerceIn(0f, size.width)
-                val ground = size.height - 3.dp.toPx()
-
-                // The crease, faint, edge to edge.
-                drawLine(Color.White.copy(alpha = 0.18f), Offset(0f, ground), Offset(size.width, ground), 1.dp.toPx())
-                // Three stumps.
-                for (m in listOf(-STUMP_CENTRE_M, 0.0, STUMP_CENTRE_M)) {
-                    drawLine(
-                        Color.White.copy(alpha = 0.85f),
-                        Offset(x(m), ground),
-                        Offset(x(m), ground - 17.dp.toPx()),
-                        2.dp.toPx(),
-                        StrokeCap.Round,
-                    )
-                }
-                // Where it pitched, when the pitch is calibrated.
-                if (pitchedAt != null) {
-                    drawCircle(
-                        Color.White.copy(alpha = 0.55f),
-                        radius = 4.dp.toPx(),
-                        center = Offset(x(pitchedAt), ground),
-                        style = Stroke(1.4.dp.toPx()),
-                    )
-                }
-                if (dotTarget != null) {
-                    val at = slide.value.toDouble()
-                    val dotY = ground - 9.dp.toPx()
-                    if (band != null) {
-                        drawLine(
-                            blue.copy(alpha = 0.28f),
-                            Offset(x(at - band), dotY),
-                            Offset(x(at + band), dotY),
-                            7.dp.toPx(),
-                            StrokeCap.Round,
-                        )
-                    }
-                    drawCircle(blue, radius = 4.5.dp.toPx(), center = Offset(x(at), dotY))
-                }
-            }
-        }
-        if (open) {
-            Spacer(Modifier.height(6.dp))
-            val note = buildString {
-                val off = line?.atStumpsOffM
-                if (off != null) {
-                    append("At the stumps: %.0f cm %s of middle".format(kotlin.math.abs(off) * 100, if (off >= 0) "off side" else "leg side"))
-                    line.uncertaintyM?.let { append(", ±%.0f cm".format(it * 100)) }
-                    append(".")
-                } else {
-                    append("Needs ${(line?.reason ?: "the next ball").removePrefix("needs ")}.")
-                }
-                line?.pitched?.let { append(" Pitched ${it.spoken.lowercase()} (rough sideways).") }
-                    ?: append(" Calibrate the pitch to see where it pitched.")
-            }
-            Text(note, color = Color.White.copy(alpha = 0.6f), fontSize = 11.sp, lineHeight = 15.sp)
-        }
-    }
+        .animateContentSize(spring(dampingRatio = 0.8f, stiffness = 500f))
+        .padding(start = 10.dp, end = 9.dp, top = 4.dp, bottom = 4.dp)
 }
 
-/** How far either side of middle the line picture shows, in metres. */
-private const val LINE_VIEW_HALF_M = 0.6
-
-/** Outer stump centres from middle: half the wicket less half a stump. */
-private const val STUMP_CENTRE_M = com.haraan.app.vision.PitchGeometry.STUMP_SET_WIDTH_M / 2.0 - 0.0175
+/** The striker's hand: one tap, and it stays for the session. */
+@Composable
+private fun HandChip(hand: com.haraan.app.vision.BatterHand, onToggleHand: () -> Unit) {
+    val view = LocalView.current
+    Text(
+        if (hand == com.haraan.app.vision.BatterHand.RIGHT) "RHB" else "LHB",
+        color = Color.White,
+        fontSize = 8.5.sp,
+        fontWeight = FontWeight.ExtraBold,
+        letterSpacing = 0.6.sp,
+        maxLines = 1,
+        softWrap = false,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Color(0xFF2F5BEA))
+            .clickable {
+                view.performHapticFeedback(Feel.SELECT)
+                onToggleHand()
+            }
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    )
+}
 
 @Composable
-private fun MetricCard(
+private fun RowLabel(text: String) {
+    Text(
+        text,
+        color = Color.White.copy(alpha = 0.5f),
+        fontSize = 8.5.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.1.sp,
+        maxLines = 1,
+    )
+}
+
+@Composable
+private fun MetricRow(
     card: MetricCardData,
     stale: Boolean,
     delayMs: Long,
     generation: Any?,
+    open: Boolean,
+    onToggle: () -> Unit,
 ) {
-    val view = LocalView.current
-    var open by remember { mutableStateOf(false) }
     val shown = remember { Animatable(0f) }
     val pop = remember { Animatable(1f) }
     val flash = remember { Animatable(0f) }
@@ -3557,104 +3541,194 @@ private fun MetricCard(
         shown.snapTo(0f)
         launch { flash.snapTo(1f); flash.animateTo(0f, tween(900)) }
         launch {
-            pop.snapTo(0.92f)
+            pop.snapTo(0.9f)
             pop.animateTo(1f, spring(dampingRatio = 0.42f, stiffness = 520f))
         }
         shown.animateTo(target.toFloat(), tween(650, easing = FastOutSlowInEasing))
     }
-
-    val press = remember { MutableInteractionSource() }
-    val pressed by press.collectIsPressedAsState()
-    val pressScale by animateFloatAsState(
-        if (pressed) 0.94f else 1f,
-        spring(dampingRatio = 0.5f, stiffness = 800f),
-        label = "cardPress",
-    )
     val dim by animateFloatAsState(if (stale) 0.4f else 1f, tween(260), label = "stale")
-    val shape = RoundedCornerShape(14.dp)
+    val press = remember { MutableInteractionSource() }
 
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .widthIn(min = 108.dp, max = 190.dp)
-            .graphicsLayer {
-                val s = pressScale * pop.value
-                scaleX = s
-                scaleY = s
-                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0.5f)
-            }
-            .clip(shape)
-            .background(Color(0xA8070B14))
-            .border(
-                1.dp,
-                lerp(Color.White.copy(alpha = 0.10f), Color(0xFF8DB0FF), flash.value),
-                shape,
-            )
-            .clickable(interactionSource = press, indication = null) {
-                view.performHapticFeedback(Feel.SELECT)
-                open = !open
-            }
-            .animateContentSize(spring(dampingRatio = 0.8f, stiffness = 500f))
-            .padding(start = 12.dp, end = 12.dp, top = 9.dp, bottom = 10.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                card.label.uppercase(),
-                color = Color.White.copy(alpha = 0.58f),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.1.sp,
-            )
-            Spacer(Modifier.weight(1f))
-            Spacer(Modifier.width(10.dp))
-            // A small chevron that turns as the card opens: it says the card has more.
-            val turn by animateFloatAsState(if (open) 180f else 0f, spring(stiffness = 600f), label = "chev")
-            Canvas(Modifier.size(9.dp).graphicsLayer { rotationZ = turn }) {
-                val c = Color.White.copy(alpha = 0.45f)
-                val s = 1.4.dp.toPx()
-                drawLine(c, Offset(size.width * 0.15f, size.height * 0.35f), Offset(size.width * 0.5f, size.height * 0.7f), s, StrokeCap.Round)
-                drawLine(c, Offset(size.width * 0.5f, size.height * 0.7f), Offset(size.width * 0.85f, size.height * 0.35f), s, StrokeCap.Round)
-            }
-        }
-        Spacer(Modifier.height(3.dp))
+    Column(Modifier.landingRow(press, pop.value, flash.value, onToggle)) {
+        RowLabel(card.label.uppercase())
         Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.graphicsLayer { alpha = dim }) {
             if (card.value == null) {
-                Text(
-                    "—",
-                    color = Color.White.copy(alpha = 0.32f),
-                    fontSize = 24.sp,
-                    fontFamily = ArchivoDisplay,
-                )
+                Text("—", color = Color.White.copy(alpha = 0.3f), fontSize = 17.sp, fontFamily = ArchivoDisplay)
             } else {
                 Text(
                     "%.${card.decimals}f".format(shown.value),
                     color = Color.White,
-                    fontSize = 24.sp,
+                    fontSize = 18.sp,
                     fontFamily = ArchivoDisplay,
-                    letterSpacing = (-0.4).sp,
+                    letterSpacing = (-0.3).sp,
+                    maxLines = 1,
                     style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
                 )
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(3.dp))
                 Text(
                     card.unit,
-                    color = Color.White.copy(alpha = 0.62f),
-                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.6f),
+                    fontSize = 9.5.sp,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(bottom = 4.dp),
+                    maxLines = 1,
+                    modifier = Modifier.padding(bottom = 3.dp),
                 )
             }
         }
         if (open) {
-            Spacer(Modifier.height(6.dp))
-            Text(
-                card.note,
-                color = Color.White.copy(alpha = 0.6f),
-                fontSize = 11.sp,
-                lineHeight = 15.sp,
-            )
+            Spacer(Modifier.height(4.dp))
+            Text(card.note, color = Color.White.copy(alpha = 0.62f), fontSize = 10.5.sp, lineHeight = 14.sp)
         }
     }
 }
+
+/**
+ * THE LINE, as a word and a picture of the stumps, in one slim row.
+ *
+ * The word is the broadcast's — "Outside off", "Leg stump" — in the batter's terms. The
+ * picture is drawn the way this phone sees it, from behind the bowler: three stumps, the
+ * crossing point as a dot that slides in from middle, the projection's error as a faint bar
+ * either side of it, and where the ball pitched as a ring when the pitch is calibrated.
+ *
+ * Off and leg depend on the striker, and this phone is a guest that is never told who is
+ * batting, so the RHB/LHB chip is the operator's to set. It flips the words and the side
+ * labels; the dot stays where the ball actually went.
+ */
+@Composable
+private fun LineRow(
+    line: com.haraan.app.vision.DeliveryLine?,
+    hand: com.haraan.app.vision.BatterHand,
+    stale: Boolean,
+    generation: Any?,
+    open: Boolean,
+    onToggle: () -> Unit,
+    onToggleHand: () -> Unit,
+) {
+    val view = LocalView.current
+    val dim by animateFloatAsState(if (stale) 0.4f else 1f, tween(260), label = "lineStale")
+    val blue = Color(0xFF8DB0FF)
+    val right = hand == com.haraan.app.vision.BatterHand.RIGHT
+
+    // Back to the picture's own left/right for drawing: the dot goes where the ball went.
+    fun pictureRight(offTowardsOff: Double) = if (right) -offTowardsOff else offTowardsOff
+    val dotTarget = line?.atStumpsOffM?.let { pictureRight(it) }
+    val slide = remember { Animatable(0f) }
+    val pop = remember { Animatable(1f) }
+    val flash = remember { Animatable(0f) }
+    LaunchedEffect(generation, dotTarget) {
+        if (dotTarget == null) {
+            slide.snapTo(0f)
+            return@LaunchedEffect
+        }
+        delay(3 * 90L)
+        slide.snapTo(0f)
+        launch { flash.snapTo(1f); flash.animateTo(0f, tween(900)) }
+        launch {
+            pop.snapTo(0.9f)
+            pop.animateTo(1f, spring(dampingRatio = 0.42f, stiffness = 520f))
+        }
+        slide.animateTo(dotTarget.toFloat(), tween(650, easing = FastOutSlowInEasing))
+    }
+    val press = remember { MutableInteractionSource() }
+
+    Column(Modifier.landingRow(press, pop.value, flash.value, onToggle)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RowLabel("LINE")
+            Spacer(Modifier.weight(1f))
+            HandChip(hand, onToggleHand)
+        }
+        Column(Modifier.graphicsLayer { alpha = dim }) {
+            Text(
+                line?.atStumps?.spoken ?: "—",
+                color = if (line?.atStumps == null) Color.White.copy(alpha = 0.3f) else Color.White,
+                fontSize = if (line?.atStumps == null) 17.sp else 12.5.sp,
+                fontFamily = ArchivoDisplay,
+                letterSpacing = (-0.1).sp,
+                maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+            )
+            val pitchedAt = line?.pitchedOffM?.let { pictureRight(it) }
+            val band = line?.uncertaintyM
+            Canvas(
+                Modifier
+                    .padding(top = 3.dp)
+                    .fillMaxWidth()
+                    .height(18.dp),
+            ) {
+                val cx = size.width / 2f
+                val pxPerM = (size.width / 2f) / LINE_VIEW_HALF_M
+                fun x(m: Double) = (cx + m * pxPerM).toFloat().coerceIn(0f, size.width)
+                val ground = size.height - 2.dp.toPx()
+
+                // The crease, faint, edge to edge, with OFF and LEG as ticks at its ends.
+                drawLine(Color.White.copy(alpha = 0.18f), Offset(0f, ground), Offset(size.width, ground), 1.dp.toPx())
+                // Three stumps.
+                for (m in listOf(-STUMP_CENTRE_M, 0.0, STUMP_CENTRE_M)) {
+                    drawLine(
+                        Color.White.copy(alpha = 0.85f),
+                        Offset(x(m), ground),
+                        Offset(x(m), ground - 11.dp.toPx()),
+                        1.6.dp.toPx(),
+                        StrokeCap.Round,
+                    )
+                }
+                // Where it pitched, when the pitch is calibrated.
+                if (pitchedAt != null) {
+                    drawCircle(
+                        Color.White.copy(alpha = 0.55f),
+                        radius = 3.dp.toPx(),
+                        center = Offset(x(pitchedAt), ground),
+                        style = Stroke(1.2.dp.toPx()),
+                    )
+                }
+                if (dotTarget != null) {
+                    val at = slide.value.toDouble()
+                    val dotY = ground - 6.dp.toPx()
+                    if (band != null) {
+                        drawLine(
+                            blue.copy(alpha = 0.28f),
+                            Offset(x(at - band), dotY),
+                            Offset(x(at + band), dotY),
+                            5.dp.toPx(),
+                            StrokeCap.Round,
+                        )
+                    }
+                    drawCircle(blue, radius = 3.5.dp.toPx(), center = Offset(x(at), dotY))
+                }
+            }
+            Row {
+                Text(if (right) "OFF" else "LEG", color = Color.White.copy(alpha = 0.38f), fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.weight(1f))
+                Text(if (right) "LEG" else "OFF", color = Color.White.copy(alpha = 0.38f), fontSize = 7.5.sp, fontWeight = FontWeight.Bold)
+            }
+        }
+        if (open) {
+            Spacer(Modifier.height(4.dp))
+            val note = buildString {
+                val off = line?.atStumpsOffM
+                if (off != null) {
+                    append("At the stumps: %.0f cm %s of middle".format(kotlin.math.abs(off) * 100, if (off >= 0) "off side" else "leg side"))
+                    line.uncertaintyM?.let { append(", ±%.0f cm".format(it * 100)) }
+                    append(".")
+                } else {
+                    append("Needs ${(line?.reason ?: "the next ball").removePrefix("needs ")}.")
+                }
+                line?.pitched?.let { append(" Pitched ${it.spoken.lowercase()} (rough sideways).") }
+                    ?: append(" Calibrate the pitch to see where it pitched.")
+            }
+            Text(note, color = Color.White.copy(alpha = 0.62f), fontSize = 10.5.sp, lineHeight = 14.sp)
+        }
+    }
+}
+
+/** Largest system font scale the on-picture readout follows. */
+private const val HUD_MAX_FONT_SCALE = 1.1f
+
+/** How far either side of middle the line picture shows, in metres. */
+private const val LINE_VIEW_HALF_M = 0.6
+
+/** Outer stump centres from middle: half the wicket less half a stump. */
+private const val STUMP_CENTRE_M = com.haraan.app.vision.PitchGeometry.STUMP_SET_WIDTH_M / 2.0 - 0.0175
 
 /**
  * The red edge that says "filming".

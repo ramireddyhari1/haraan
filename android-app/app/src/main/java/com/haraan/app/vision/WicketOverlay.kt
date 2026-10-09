@@ -117,6 +117,8 @@ fun DrawScope.drawWicketLock(
     guideReveal: Float = 1f,
     /** Nothing of the guide is drawn below this y, in view pixels (the controls live there). */
     safeBottomY: Float = Float.MAX_VALUE,
+    /** The face the band names are painted in; the app's display face when given. */
+    guideTypeface: Typeface? = null,
 ) {
     if (box.width <= 0f) return
 
@@ -178,7 +180,7 @@ fun DrawScope.drawWicketLock(
     if ((lock.state == WicketTrackState.CONFIRMED || lock.state == WicketTrackState.REACQUIRE) &&
         camera != null && framePx != null && guideReveal > 0f
     ) {
-        drawLengthGuide(lock, box, density, camera, framePx, guideReveal, alpha, safeBottomY)
+        drawLengthGuide(lock, box, density, camera, framePx, guideReveal, alpha, safeBottomY, guideTypeface)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -866,8 +868,8 @@ fun LbwProjectionPanel(projection: LbwProjection, modifier: Modifier = Modifier)
 /** The app's own length bands (see [BounceLength]), from the striker's stumps, metres. */
 private class LengthBand(val label: String, val fromM: Double, val toM: Double, val colour: Color)
 
-/** Labels sit this far right of the middle, between the stumps line and the pitch edge. */
-private const val LABEL_ACROSS_M = 0.72
+/** Band names are stretched this many times along the pitch, road-marking style. */
+private const val LABEL_STRETCH = 3.0
 
 private val LENGTH_BANDS = listOf(
     LengthBand("YORKER", 0.0, 1.0, Color(0xFFF43F5E)),
@@ -902,6 +904,7 @@ private fun DrawScope.drawLengthGuide(
     reveal: Float,
     alpha: Float,
     safeBottomY: Float,
+    typeface: Typeface?,
 ) {
     val (fw, fh) = framePx
     val ground = PitchGround.fromWicket(lock, camera, fw, fh) ?: return
@@ -920,123 +923,160 @@ private fun DrawScope.drawLengthGuide(
     val laid = visible * reveal.coerceIn(0f, 1f)
 
     val halfW = PitchGeometry.RETURN_CREASE_HALF_WIDTH_M
-    val shadow = Color.Black.copy(alpha = 0.28f * alpha)
+    val stumpHalf = PitchGeometry.STUMP_SET_WIDTH_M / 2.0
+    val hairline = with(density) { 0.6.dp.toPx() }
 
-    // Pixels per metre across the pitch at a distance: for line thickness and label size.
-    fun pxPerM(alongM: Double): Float {
-        val a = at(alongM, -0.5) ?: return 0f
-        val b = at(alongM, 0.5) ?: return 0f
-        return hypot(b.x - a.x, b.y - a.y)
-    }
-
-    fun quad(a0: Double, a1: Double, w: Double): Path? {
-        val p1 = at(a0, -w) ?: return null
-        val p2 = at(a0, w) ?: return null
-        val p3 = at(a1, w) ?: return null
-        val p4 = at(a1, -w) ?: return null
+    /** A patch of ground, as a path in view pixels; null if any corner is behind the camera. */
+    fun patch(a0: Double, a1: Double, w0: Double, w1: Double): Path? {
+        val p1 = at(a0, w0) ?: return null
+        val p2 = at(a0, w1) ?: return null
+        val p3 = at(a1, w1) ?: return null
+        val p4 = at(a1, w0) ?: return null
         return Path().apply {
             moveTo(p1.x, p1.y); lineTo(p2.x, p2.y); lineTo(p3.x, p3.y); lineTo(p4.x, p4.y); close()
         }
     }
 
-    fun paintedLine(alongM: Double, fromW: Double, toW: Double, colour: Color, widthM: Double, minDp: Float) {
-        val a = at(alongM, fromW) ?: return
-        val b = at(alongM, toW) ?: return
-        val stroke = maxOf((widthM * pxPerM(alongM)).toFloat(), with(density) { minDp.dp.toPx() })
-        val drop = with(density) { 1.dp.toPx() }
-        drawLine(shadow, a + Offset(0f, drop), b + Offset(0f, drop), stroke, StrokeCap.Round)
-        drawLine(colour, a, b, stroke, StrokeCap.Round)
+    /**
+     * Paint ACROSS the pitch: a strip [widthM] deep on the ground, so it is thick near the
+     * camera and thin far away, exactly as paint is. A dark under-edge a hairline wider keeps
+     * it legible on a pale floor; a floor of about a pixel keeps a far line from vanishing.
+     */
+    fun paintAcross(alongM: Double, w0: Double, w1: Double, widthM: Double, colour: Color) {
+        val near = at(alongM + widthM / 2, 0.0) ?: return
+        val far = at(alongM - widthM / 2, 0.0) ?: return
+        val depthPx = near.y - far.y
+        val grow = if (depthPx < 1.2f) (1.2f - depthPx) / 2f else 0f
+        val a = at(alongM, w0) ?: return
+        val b = at(alongM, w1) ?: return
+        val under = depthPx + grow * 2 + hairline * 2
+        drawLine(Color.Black.copy(alpha = 0.30f * alpha), a, b, under, StrokeCap.Butt)
+        patch(alongM - widthM / 2, alongM + widthM / 2, w0, w1)?.let {
+            if (grow > 0f) drawLine(colour, a, b, depthPx + grow * 2, StrokeCap.Butt) else drawPath(it, colour)
+        }
     }
 
-    // The strip itself: a faint mat the bands sit on.
-    quad(0.0, laid, halfW + 0.2)?.let { drawPath(it, Color.White.copy(alpha = 0.06f * alpha)) }
+    /** Paint ALONG the pitch at a fixed distance across, [widthM] wide, tapering with depth. */
+    fun paintAlong(acrossM: Double, a0: Double, a1: Double, widthM: Double, colour: Color) {
+        patch(a0, a1, acrossM - widthM / 2, acrossM + widthM / 2 + 0.0)?.let { path ->
+            val a = at(a0, acrossM) ?: return
+            val b = at(a1, acrossM) ?: return
+            drawLine(Color.Black.copy(alpha = 0.22f * alpha), a, b, hairline * 2.2f, StrokeCap.Butt)
+            drawPath(path, colour)
+            // Far end thinner than a pixel still reads as a line.
+            drawLine(colour.copy(alpha = colour.alpha * 0.6f), a, b, hairline, StrokeCap.Butt)
+        }
+    }
 
-    // The bands: wash, then the painted leading edge where each band begins.
+    // ── The bands: a glow off each band's leading edge, fading across it ──────────────
+    // A flat tint over a busy floor (tiles, worn grass) mixes into mud; light that falls
+    // off from the edge reads as a lit surface and leaves the ground itself visible.
     for (band in LENGTH_BANDS) {
         if (band.fromM >= laid) break
         val to = minOf(band.toM, laid)
-        quad(band.fromM, to, halfW)?.let { drawPath(it, band.colour.copy(alpha = 0.20f * alpha)) }
-        if (band.fromM > 0.0) {
-            paintedLine(band.fromM, -halfW, halfW, band.colour.copy(alpha = 0.85f * alpha), 0.035, 1.6f)
+        val path = patch(band.fromM, to, -halfW, halfW) ?: continue
+        val from = at(band.fromM, 0.0) ?: continue
+        val end = at(to, 0.0) ?: continue
+        drawPath(
+            path,
+            Brush.linearGradient(
+                colorStops = arrayOf(
+                    0.00f to band.colour.copy(alpha = 0.30f * alpha),
+                    0.45f to band.colour.copy(alpha = 0.10f * alpha),
+                    1.00f to band.colour.copy(alpha = 0.03f * alpha),
+                ),
+                start = from,
+                end = end,
+            ),
+        )
+        if (band.fromM > 0.0) paintAcross(band.fromM, -halfW, halfW, 0.04, band.colour.copy(alpha = 0.95f * alpha))
+    }
+
+    // ── The pitch's edges ───────────────────────────────────────────────────────────
+    for (side in listOf(-halfW, halfW)) paintAlong(side, 0.0, laid, 0.03, Color.White.copy(alpha = 0.55f * alpha))
+
+    // ── The stumps line: the wicket's width, straight down the pitch ─────────────────
+    // What an LBW is judged against, so it is the one thing drawn over everything else.
+    patch(0.0, laid, -stumpHalf, stumpHalf)?.let { path ->
+        val from = at(0.0, 0.0)
+        val end = at(laid, 0.0)
+        if (from != null && end != null) {
+            drawPath(
+                path,
+                Brush.linearGradient(
+                    colorStops = arrayOf(
+                        0f to Color(0xFF7DD3FC).copy(alpha = 0.34f * alpha),
+                        1f to Color(0xFF7DD3FC).copy(alpha = 0.16f * alpha),
+                    ),
+                    start = from,
+                    end = end,
+                ),
+            )
         }
     }
-    // The pitch's edges, softly.
-    for (side in listOf(-halfW, halfW)) {
-        val a = at(0.0, side) ?: continue
-        val b = at(laid, side) ?: continue
-        drawLine(Color.White.copy(alpha = 0.35f * alpha), a, b, with(density) { 1.dp.toPx() }, StrokeCap.Round)
-    }
+    for (side in listOf(-stumpHalf, stumpHalf)) paintAlong(side, 0.0, laid, 0.025, Color(0xFFE0F2FE).copy(alpha = 0.95f * alpha))
 
-    /*
-     * THE STUMPS LINE: the wicket's own width, run straight down the pitch.
-     *
-     * The band an LBW is judged against — "pitching in line", "hitting in line" — and the
-     * one line on the ground a batter and a bowler both read. Real width (outside of off
-     * stump to outside of leg, 22.86 cm), so it narrows with distance exactly as the
-     * stumps do, and drawn over the length bands because it is the more important of the
-     * two: a crisp edge either side, a cool wash between, a soft shadow so it sits on the
-     * surface.
-     */
-    val stumpHalf = PitchGeometry.STUMP_SET_WIDTH_M / 2.0
-    quad(0.0, laid, stumpHalf)?.let { drawPath(it, Color(0xFF7DD3FC).copy(alpha = 0.30f * alpha)) }
-    for (side in listOf(-stumpHalf, stumpHalf)) {
-        val a = at(0.0, side) ?: continue
-        val b = at(laid, side) ?: continue
-        val stroke = with(density) { 1.6.dp.toPx() }
-        val drop = with(density) { 1.dp.toPx() }
-        drawLine(shadow, a + Offset(0f, drop), b + Offset(0f, drop), stroke, StrokeCap.Round)
-        drawLine(Color(0xFFE0F2FE).copy(alpha = 0.95f * alpha), a, b, stroke, StrokeCap.Round)
-    }
-
-    // The creases at their real widths: bowling crease through the stumps, popping crease
-    // 1.22 m out, return creases joining them.
-    val chalk = Color.White.copy(alpha = 0.92f * alpha)
-    paintedLine(0.0, -halfW, halfW, chalk, 0.05, 2f)
+    // ── The creases, at the Laws' widths ──────────────────────────────────────────────
+    val chalk = Color.White.copy(alpha = 0.95f * alpha)
+    paintAcross(0.0, -halfW, halfW, 0.05, chalk)
     if (laid >= PitchGeometry.POPPING_CREASE_AHEAD_M) {
-        paintedLine(PitchGeometry.POPPING_CREASE_AHEAD_M, -1.83, 1.83, chalk, 0.05, 2f)
+        paintAcross(PitchGeometry.POPPING_CREASE_AHEAD_M, -1.83, 1.83, 0.05, chalk)
         for (side in listOf(-halfW, halfW)) {
-            val a = at(0.0, side) ?: continue
-            val b = at(PitchGeometry.POPPING_CREASE_AHEAD_M, side) ?: continue
-            drawLine(chalk.copy(alpha = 0.7f * alpha), a, b, with(density) { 1.4.dp.toPx() }, StrokeCap.Round)
+            paintAlong(side, 0.0, PitchGeometry.POPPING_CREASE_AHEAD_M, 0.05, chalk)
         }
     }
 
-    // One label per band, upright, in the band's right half (the left edge of the screen carries the metric cards) — clear of the stumps line, which
-    // matters more — sized to the band and left out when it won't fit.
+    // ── The names, painted on the pitch ───────────────────────────────────────────────
+    /*
+     * Lying on the ground in perspective, not floating over it: the word's rectangle is
+     * mapped onto a patch of pitch with a perspective transform, so it foreshortens with the
+     * band it names, the way paint on a pitch or a road does. Stretched three times along
+     * the pitch — road-marking style — so it still reads from a camera at chest height.
+     * In the band's right half: the stumps line stays clear, and the left edge of the screen
+     * carries the metric cards.
+     */
     val canvas = drawContext.canvas.nativeCanvas
+    val textPaint = Paint().apply {
+        isAntiAlias = true
+        isSubpixelText = true
+        this.typeface = typeface ?: Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        textSize = 120f
+        letterSpacing = 0.04f
+        color = android.graphics.Color.argb((235 * alpha).toInt(), 255, 255, 255)
+        setShadowLayer(6f, 0f, 3f, android.graphics.Color.argb((140 * alpha).toInt(), 0, 0, 0))
+    }
+    val metrics = textPaint.fontMetrics
+    val textH = metrics.descent - metrics.ascent
+    val left = stumpHalf + 0.16
+    val right = halfW - 0.10
+    val roomAcross = right - left
     for (band in LENGTH_BANDS) {
         if (band.toM > laid + 0.01) break
-        val mid = (band.fromM + band.toM) / 2.0
-        val top = at(band.fromM, 0.0) ?: continue
-        val bottom = at(band.toM, 0.0) ?: continue
-        val centre = at(mid, LABEL_ACROSS_M) ?: continue
-        val bandPx = bottom.y - top.y
-        if (bandPx < with(density) { 13.dp.toPx() }) continue
-        val textPx = (bandPx * 0.42f).coerceIn(with(density) { 9.sp.toPx() }, with(density) { 13.sp.toPx() })
-        val paint = Paint().apply {
-            color = android.graphics.Color.argb((240 * alpha).toInt(), 255, 255, 255)
-            textSize = textPx
-            isAntiAlias = true
-            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            letterSpacing = 0.08f
-            textAlign = Paint.Align.CENTER
-        }
-        val textW = paint.measureText(band.label)
-        // The room between the pitch's edge and the stumps line.
-        val bandWidthPx = pxPerM(mid) * (halfW - PitchGeometry.STUMP_SET_WIDTH_M / 2.0).toFloat()
-        if (textW + textPx > bandWidthPx) continue
-        val padX = textPx * 0.55f
-        val padY = textPx * 0.32f
-        val pill = Paint().apply {
-            color = android.graphics.Color.argb((120 * alpha).toInt(), 0, 0, 0)
-            isAntiAlias = true
-        }
-        val baseline = centre.y + textPx * 0.36f
-        canvas.drawRoundRect(
-            centre.x - textW / 2 - padX, baseline - textPx - padY + textPx * 0.15f,
-            centre.x + textW / 2 + padX, baseline + padY,
-            textPx, textPx, pill,
+        val textW = textPaint.measureText(band.label)
+        val aspect = textW / textH
+        val across = minOf(roomAcross, 1.0)
+        val depth = minOf((across / aspect) * LABEL_STRETCH, (band.toM - band.fromM) * 0.62)
+        val mid = (band.fromM + band.toM) / 2
+        val a0 = mid - depth / 2
+        val a1 = mid + depth / 2
+        val w0 = left + (roomAcross - across) / 2
+        val w1 = w0 + across
+        val tl = at(a0, w0) ?: continue
+        val tr = at(a0, w1) ?: continue
+        val br = at(a1, w1) ?: continue
+        val bl = at(a1, w0) ?: continue
+        // Too small to read, or past the controls: leave it out rather than smudge it.
+        if (bl.y - tl.y < with(density) { 8.dp.toPx() } || bl.y > safeBottomY) continue
+        val m = android.graphics.Matrix()
+        val ok = m.setPolyToPoly(
+            floatArrayOf(0f, 0f, textW, 0f, textW, textH, 0f, textH), 0,
+            floatArrayOf(tl.x, tl.y, tr.x, tr.y, br.x, br.y, bl.x, bl.y), 0,
+            4,
         )
-        canvas.drawText(band.label, centre.x, baseline, paint)
+        if (!ok) continue
+        canvas.save()
+        canvas.concat(m)
+        canvas.drawText(band.label, 0f, -metrics.ascent, textPaint)
+        canvas.restore()
     }
 }
