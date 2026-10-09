@@ -1627,6 +1627,12 @@ private fun CameraMode(
             }
         }
         val found = stumpQuad ?: tappedQuad ?: pitchQuad?.copy(cameraEnd = cameraEnd)
+        // READY: the wicket is locked and the length guide is laid on the real ground.
+        val guideReady by remember {
+            androidx.compose.runtime.derivedStateOf {
+                wicketLock?.let { it.state != com.haraan.app.vision.WicketTrackState.TENTATIVE } == true
+            }
+        }
         if (showGuide && granted && found != null) {
             /*
              * FOUND. The guide is now the pitch, not a picture of one: drawn from the
@@ -1675,7 +1681,10 @@ private fun CameraMode(
                     }
                 }
             }
-        } else if (showGuide && granted) {
+        } else if (showGuide && granted && !guideReady) {
+            // A fixed aiming funnel, for before anything is found. Once the wicket locks, the
+            // length guide is drawn on the real ground and this generic shape — which knows
+            // nothing about where the pitch is — would only contradict it.
             Canvas(Modifier.fillMaxSize()) {
                 val guide = Color.White.copy(alpha = 0.34f)
                 val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
@@ -1854,9 +1863,38 @@ private fun CameraMode(
                 )
             }
         }
+        /*
+         * THE LENGTH GUIDE IS LAID DOWN, NOT SWITCHED ON.
+         *
+         * When the wicket locks, the bands sweep out from the stumps towards the camera over
+         * most of a second, with a light tick in the hand as each one lands — the guide
+         * arrives the way paint goes down a pitch, and the operator feels it happen while
+         * looking at the stumps rather than the phone. Coasting behind the striker does not
+         * replay it; only a fresh lock does.
+         */
+        val guideReveal = remember { androidx.compose.animation.core.Animatable(0f) }
+        LaunchedEffect(guideReady) {
+            if (guideReady) {
+                guideReveal.snapTo(0f)
+                var landed = 0
+                guideReveal.animateTo(
+                    1f,
+                    androidx.compose.animation.core.tween(900, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+                ) {
+                    val band = (value * GUIDE_REVEAL_TICKS).toInt()
+                    if (band > landed) {
+                        landed = band
+                        view.performHapticFeedback(Feel.TICK)
+                    }
+                }
+            } else {
+                guideReveal.snapTo(0f)
+            }
+        }
         if (granted) {
             Canvas(Modifier.fillMaxSize()) {
                 val lock = wicketLock ?: return@Canvas
+                val frameW = uprightWidthPx
                 drawWicketLock(
                     lock = lock,
                     box = com.haraan.app.vision.FrameBox.letterbox(
@@ -1865,6 +1903,11 @@ private fun CameraMode(
                         uprightAspect,
                     ),
                     density = this,
+                    camera = cameraIntrinsics,
+                    framePx = if (frameW > 0 && uprightAspect > 0f) frameW to (frameW / uprightAspect).toInt() else null,
+                    guideReveal = guideReveal.value,
+                    // Clear of the shutter row and the hint line above it.
+                    safeBottomY = size.height * GUIDE_SAFE_BOTTOM,
                 )
             }
         }
@@ -4252,6 +4295,12 @@ private const val CAMERA_TRAIL_POINTS = 30
  * settling gets every frame, short enough that the saving starts almost at once.
  */
 private const val ANALYSIS_TAG = "HaraanCameraAnalysis"
+
+/** Haptic ticks while the length guide is laid down: about one per band. */
+private const val GUIDE_REVEAL_TICKS = 4
+
+/** The length guide stops at this share of the screen's height, above the controls. */
+private const val GUIDE_SAFE_BOTTOM = 0.72f
 
 private const val STEADY_LOCK_FRAMES = 20
 private const val STEADY_CHECK_EVERY = 3

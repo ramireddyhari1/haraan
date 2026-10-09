@@ -105,7 +105,19 @@ data class FrameBox(
  * a tentative one is drawn thin, and a hand-placed one is drawn with its own end marks —
  * three different pictures for three different claims.
  */
-fun DrawScope.drawWicketLock(lock: WicketLock, box: FrameBox, density: Density) {
+fun DrawScope.drawWicketLock(
+    lock: WicketLock,
+    box: FrameBox,
+    density: Density,
+    /** The lens, for laying the length guide on the ground; no guide without it. */
+    camera: CameraIntrinsics? = null,
+    /** The upright analysis frame in pixels: width to height. */
+    framePx: Pair<Int, Int>? = null,
+    /** 0..1 — how far down the pitch the guide has been laid, for the reveal. */
+    guideReveal: Float = 1f,
+    /** Nothing of the guide is drawn below this y, in view pixels (the controls live there). */
+    safeBottomY: Float = Float.MAX_VALUE,
+) {
     if (box.width <= 0f) return
 
     val live = lock.ageFrames == 0 ||
@@ -161,203 +173,12 @@ fun DrawScope.drawWicketLock(lock: WicketLock, box: FrameBox, density: Density) 
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // 1. THE LENGTH GUIDE, LAID ON THE REAL GROUND
     // ─────────────────────────────────────────────────────────────────────────
-    // 1. BROADCAST PITCH CORRIDOR WITH HAWK-EYE LENGTH ZONES
-    // ─────────────────────────────────────────────────────────────────────────
-    if (lock.state == WicketTrackState.CONFIRMED || lock.state == WicketTrackState.REACQUIRE) {
-        // Pitch extends along the floor FROM the stumps base TOWARDS the camera / bowler (downwards in frame)
-        val pitchDirX = -upX
-        val pitchDirY = -upY
-
-        // Maximum available distance to the bottom of the letterbox frame
-        val maxAvailableLen = if (pitchDirY > 0.05f) {
-            ((box.originY + box.height - mid.y) * 0.88f) / pitchDirY
-        } else {
-            stumpHeight * 4.5f
-        }
-        val corridorLen = (stumpHeight * 3.8f).coerceIn(
-            with(density) { 80.dp.toPx() },
-            maxAvailableLen.coerceAtLeast(with(density) { 80.dp.toPx() }),
-        )
-
-        // Stumps base width (far end of pitch in 3D world, near stumps)
-        val stumpHalfW = span * 0.65f
-        val stumpP1 = Offset(mid.x - perpX * stumpHalfW, mid.y - perpY * stumpHalfW)
-        val stumpP2 = Offset(mid.x + perpX * stumpHalfW, mid.y + perpY * stumpHalfW)
-
-        // Bowler's end (closer to camera in 3D world -> perspective widening)
-        val bowlerCenter = Offset(mid.x + pitchDirX * corridorLen, mid.y + pitchDirY * corridorLen)
-        val perspectiveRatio = 1.0f + 0.42f * (corridorLen / stumpHeight).coerceIn(0.5f, 3.2f)
-        val bowlerHalfW = stumpHalfW * perspectiveRatio
-        val bowlerP1 = Offset(bowlerCenter.x - perpX * bowlerHalfW, bowlerCenter.y - perpY * bowlerHalfW)
-        val bowlerP2 = Offset(bowlerCenter.x + perpX * bowlerHalfW, bowlerCenter.y + perpY * bowlerHalfW)
-
-        // Helper to get corridor points at any fractional distance along the pitch
-        fun pitchPoint(frac: Float): Triple<Offset, Offset, Offset> {
-            val center = Offset(mid.x + pitchDirX * corridorLen * frac, mid.y + pitchDirY * corridorLen * frac)
-            val halfW = stumpHalfW * (1.0f + (perspectiveRatio - 1.0f) * frac)
-            val p1 = Offset(center.x - perpX * halfW, center.y - perpY * halfW)
-            val p2 = Offset(center.x + perpX * halfW, center.y + perpY * halfW)
-            return Triple(center, p1, p2)
-        }
-
-        // Key tactical pitch fractions
-        val poppingFrac = ((stumpHeight * 0.85f) / corridorLen).coerceIn(0.20f, 0.35f)
-        val fullFrac = (poppingFrac + 0.28f).coerceAtMost(0.60f)
-        val goodFrac = (fullFrac + 0.26f).coerceAtMost(0.85f)
-
-        val (poppingCenter, poppingP1, poppingP2) = pitchPoint(poppingFrac)
-        val (fullCenter, fullP1, fullP2) = pitchPoint(fullFrac)
-        val (goodCenter, goodP1, goodP2) = pitchPoint(goodFrac)
-
-        // Helper to draw a quad zone
-        fun drawZone(p1: Offset, p2: Offset, p3: Offset, p4: Offset, color: Color, fillAlpha: Float) {
-            val path = Path().apply {
-                moveTo(p1.x, p1.y)
-                lineTo(p2.x, p2.y)
-                lineTo(p3.x, p3.y)
-                lineTo(p4.x, p4.y)
-                close()
-            }
-            drawPath(path, color.copy(alpha = fillAlpha * alpha))
-        }
-
-        // ── 1. HAWK-EYE BROADCAST LENGTH ZONES (Subtle Translucent Turf Shading) ──
-        // Extremely subtle matte translucent fill so real floor marble/turf stays 95% visible
-        val zoneAColor = Color(0xFFF1F5F9) // Yorker (neutral chalk tone)
-        val zoneBColor = Color(0xFFE2E8F0) // Full length
-        val zoneCColor = Color(0xFFCBD5E1) // Good length
-        val zoneDColor = Color(0xFF94A3B8) // Short length
-
-        drawZone(stumpP1, poppingP1, poppingP2, stumpP2, zoneAColor, 0.05f)
-        drawZone(poppingP1, fullP1, fullP2, poppingP2, zoneBColor, 0.06f)
-        drawZone(fullP1, goodP1, goodP2, fullP2, zoneCColor, 0.08f)
-        drawZone(goodP1, bowlerP1, bowlerP2, goodP2, zoneDColor, 0.05f)
-
-        // ── 2. BROADCAST HAIRLINE BOUNDARIES & ZONE DIVIDERS ──
-        val tramlineColor = Color.White.copy(alpha = 0.55f * alpha)
-        val tramlineStroke = with(density) { 1.2.dp.toPx() }
-        drawLine(tramlineColor, stumpP1, bowlerP1, tramlineStroke, StrokeCap.Square)
-        drawLine(tramlineColor, stumpP2, bowlerP2, tramlineStroke, StrokeCap.Square)
-
-        // Hairline zone dividers
-        val dividerStroke = with(density) { 1.0.dp.toPx() }
-        drawLine(Color.White.copy(alpha = 0.45f * alpha), fullP1, fullP2, dividerStroke, StrokeCap.Square)
-        drawLine(Color.White.copy(alpha = 0.45f * alpha), goodP1, goodP2, dividerStroke, StrokeCap.Square)
-
-        // ── 3. SURVEYOR CENTERLINE WITH MILLIMETER TICK MARKS ──
-        val centerlineStroke = with(density) { 1.0.dp.toPx() }
-        drawLine(
-            color = Color.White.copy(alpha = 0.65f * alpha),
-            start = mid,
-            end = bowlerCenter,
-            strokeWidth = centerlineStroke,
-            cap = StrokeCap.Round,
-        )
-
-        // Precision surveyor tick marks (every 5% of pitch length)
-        val tickHalfW = with(density) { 3.dp.toPx() }
-        for (i in 1..19) {
-            val f = i / 20f
-            val pt = Offset(mid.x + pitchDirX * corridorLen * f, mid.y + pitchDirY * corridorLen * f)
-            val isMajor = i % 4 == 0
-            val tW = if (isMajor) tickHalfW * 1.8f else tickHalfW
-            val tColor = if (isMajor) Color.White.copy(alpha = 0.80f * alpha) else Color.White.copy(alpha = 0.40f * alpha)
-            drawLine(
-                color = tColor,
-                start = Offset(pt.x - perpX * tW, pt.y - perpY * tW),
-                end = Offset(pt.x + perpX * tW, pt.y + perpY * tW),
-                strokeWidth = with(density) { if (isMajor) 1.2.dp.toPx() else 0.8.dp.toPx() },
-                cap = StrokeCap.Round,
-            )
-        }
-
-        // Distance telemetry pips at the main creases
-        listOf(poppingCenter, fullCenter, goodCenter).forEach { pt ->
-            drawCircle(
-                color = Color.White.copy(alpha = 0.90f * alpha),
-                radius = with(density) { 1.8.dp.toPx() },
-                center = pt,
-            )
-        }
-
-        // ── 4. OFFICIAL MCC PAINTED WHITE CREASE MARKINGS ──
-        // Bowling Crease (across stump bases, 2.64m / 8ft 8in)
-        val creaseOverhang = span * 0.70f
-        val creaseStart = Offset(left.x - perpX * creaseOverhang, left.y - perpY * creaseOverhang)
-        val creaseEnd = Offset(right.x + perpX * creaseOverhang, right.y + perpY * creaseOverhang)
-        drawLine(
-            Color.White.copy(alpha = 0.90f * alpha),
-            creaseStart,
-            creaseEnd,
-            strokeWidth = with(density) { 2.0.dp.toPx() },
-            cap = StrokeCap.Square,
-        )
-
-        // Popping Crease (4 ft / 1.22m forward of bowling crease)
-        val popOverhang = span * 0.50f
-        val popStart = Offset(poppingP1.x - perpX * popOverhang, poppingP1.y - perpY * popOverhang)
-        val popEnd = Offset(poppingP2.x + perpX * popOverhang, poppingP2.y + perpY * popOverhang)
-        drawLine(
-            Color.White.copy(alpha = 0.90f * alpha),
-            popStart,
-            popEnd,
-            strokeWidth = with(density) { 2.0.dp.toPx() },
-            cap = StrokeCap.Square,
-        )
-
-        // Return Creases connecting popping crease to bowling crease
-        drawLine(
-            Color.White.copy(alpha = 0.55f * alpha),
-            stumpP1,
-            poppingP1,
-            strokeWidth = with(density) { 1.4.dp.toPx() },
-            cap = StrokeCap.Square,
-        )
-        drawLine(
-            Color.White.copy(alpha = 0.55f * alpha),
-            stumpP2,
-            poppingP2,
-            strokeWidth = with(density) { 1.4.dp.toPx() },
-            cap = StrokeCap.Square,
-        )
-
-        // ── 5. PERIMETER BROADCAST LABELS (YORKER, FULL, GOOD LENGTH, SHORT) ──
-        val labelPaint = Paint().apply {
-            color = android.graphics.Color.argb((170 * alpha).toInt(), 255, 255, 255)
-            textSize = with(density) { 8.5.sp.toPx() }
-            isAntiAlias = true
-            typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-            letterSpacing = 0.12f
-        }
-
-        val angleDeg = Math.toDegrees(kotlin.math.atan2(pitchDirY.toDouble(), pitchDirX.toDouble())).toFloat() - 90f
-
-        val labels = listOf(
-            Triple("YORKER", (0f + poppingFrac) / 2f, with(density) { 10.dp.toPx() }),
-            Triple("FULL", (poppingFrac + fullFrac) / 2f, with(density) { 10.dp.toPx() }),
-            Triple("GOOD LENGTH", (fullFrac + goodFrac) / 2f, with(density) { 10.dp.toPx() }),
-            Triple("SHORT", (goodFrac + 1.0f) / 2f, with(density) { 10.dp.toPx() }),
-        )
-
-        val canvas = drawContext.canvas.nativeCanvas
-        labels.forEach { (text, frac, offsetPx) ->
-            val (_, lp, rp) = pitchPoint(frac)
-
-            // Left margin label
-            canvas.save()
-            canvas.translate(lp.x - perpX * offsetPx, lp.y - perpY * offsetPx)
-            canvas.rotate(angleDeg)
-            canvas.drawText(text, 0f, 0f, labelPaint)
-            canvas.restore()
-
-            // Right margin label
-            canvas.save()
-            canvas.translate(rp.x + perpX * (offsetPx + 4f), rp.y + perpY * (offsetPx + 4f))
-            canvas.rotate(angleDeg)
-            canvas.drawText(text, 0f, 0f, labelPaint)
-            canvas.restore()
-        }
+    if ((lock.state == WicketTrackState.CONFIRMED || lock.state == WicketTrackState.REACQUIRE) &&
+        camera != null && framePx != null && guideReveal > 0f
+    ) {
+        drawLengthGuide(lock, box, density, camera, framePx, guideReveal, alpha, safeBottomY)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1038,5 +859,184 @@ fun LbwProjectionPanel(projection: LbwProjection, modifier: Modifier = Modifier)
                 }
             }
         }
+    }
+}
+
+
+/** The app's own length bands (see [BounceLength]), from the striker's stumps, metres. */
+private class LengthBand(val label: String, val fromM: Double, val toM: Double, val colour: Color)
+
+/** Labels sit this far right of the middle, between the stumps line and the pitch edge. */
+private const val LABEL_ACROSS_M = 0.72
+
+private val LENGTH_BANDS = listOf(
+    LengthBand("YORKER", 0.0, 1.0, Color(0xFFF43F5E)),
+    LengthBand("FULL", 1.0, 3.0, Color(0xFFF59E0B)),
+    LengthBand("GOOD LENGTH", 3.0, 6.0, Color(0xFF22C55E)),
+    LengthBand("BACK OF LENGTH", 6.0, 9.0, Color(0xFF0EA5E9)),
+    LengthBand("SHORT", 9.0, 14.0, Color(0xFF8B5CF6)),
+)
+
+/**
+ * The length guide, in metres, on the ground.
+ *
+ * WHAT WAS WRONG. It was a fixed multiple of the stump height on screen with zone lines at
+ * arbitrary fractions of it — no metre anywhere in it — so it never lay on the floor; every
+ * label was drawn twice, left and right, and overlapped itself ("YORKERYORKER"); and every
+ * line was the same thin near-white, so the zones did not read as zones.
+ *
+ * WHAT IT IS NOW. [PitchGround] projects real pitch metres through this camera, so the bands
+ * converge and widen exactly as the floor does, and use the app's own length bands, so the
+ * guide agrees with what the app calls a ball. Each band is a translucent wash with a crisp
+ * painted leading edge and a soft shadow under it — paint on a surface, not a line in the
+ * air. Creases are drawn at their real widths, thickness following perspective. One label
+ * per band, sized to the band and left out when it would not fit. Nothing is drawn below
+ * [safeBottomY], where the controls are.
+ */
+private fun DrawScope.drawLengthGuide(
+    lock: WicketLock,
+    box: FrameBox,
+    density: Density,
+    camera: CameraIntrinsics,
+    framePx: Pair<Int, Int>,
+    reveal: Float,
+    alpha: Float,
+    safeBottomY: Float,
+) {
+    val (fw, fh) = framePx
+    val ground = PitchGround.fromWicket(lock, camera, fw, fh) ?: return
+
+    fun toView(p: Pair<Double, Double>) = Offset(
+        box.originX + (p.first / fw).toFloat() * box.width,
+        box.originY + (p.second / fh).toFloat() * box.height,
+    )
+    fun at(alongM: Double, acrossM: Double): Offset? = ground.project(alongM, acrossM)?.let(::toView)
+
+    // How far down the pitch is on screen and clear of the controls, then how much of that
+    // the reveal has laid so far.
+    val limitFrameY = ((minOf(safeBottomY, box.originY + box.height) - box.originY) / box.height * fh).toDouble()
+    val visible = minOf(ground.visibleTo(limitFrameY, 14.0), ground.stumpsDistanceM - 1.0)
+    if (visible <= 0.3) return
+    val laid = visible * reveal.coerceIn(0f, 1f)
+
+    val halfW = PitchGeometry.RETURN_CREASE_HALF_WIDTH_M
+    val shadow = Color.Black.copy(alpha = 0.28f * alpha)
+
+    // Pixels per metre across the pitch at a distance: for line thickness and label size.
+    fun pxPerM(alongM: Double): Float {
+        val a = at(alongM, -0.5) ?: return 0f
+        val b = at(alongM, 0.5) ?: return 0f
+        return hypot(b.x - a.x, b.y - a.y)
+    }
+
+    fun quad(a0: Double, a1: Double, w: Double): Path? {
+        val p1 = at(a0, -w) ?: return null
+        val p2 = at(a0, w) ?: return null
+        val p3 = at(a1, w) ?: return null
+        val p4 = at(a1, -w) ?: return null
+        return Path().apply {
+            moveTo(p1.x, p1.y); lineTo(p2.x, p2.y); lineTo(p3.x, p3.y); lineTo(p4.x, p4.y); close()
+        }
+    }
+
+    fun paintedLine(alongM: Double, fromW: Double, toW: Double, colour: Color, widthM: Double, minDp: Float) {
+        val a = at(alongM, fromW) ?: return
+        val b = at(alongM, toW) ?: return
+        val stroke = maxOf((widthM * pxPerM(alongM)).toFloat(), with(density) { minDp.dp.toPx() })
+        val drop = with(density) { 1.dp.toPx() }
+        drawLine(shadow, a + Offset(0f, drop), b + Offset(0f, drop), stroke, StrokeCap.Round)
+        drawLine(colour, a, b, stroke, StrokeCap.Round)
+    }
+
+    // The strip itself: a faint mat the bands sit on.
+    quad(0.0, laid, halfW + 0.2)?.let { drawPath(it, Color.White.copy(alpha = 0.06f * alpha)) }
+
+    // The bands: wash, then the painted leading edge where each band begins.
+    for (band in LENGTH_BANDS) {
+        if (band.fromM >= laid) break
+        val to = minOf(band.toM, laid)
+        quad(band.fromM, to, halfW)?.let { drawPath(it, band.colour.copy(alpha = 0.20f * alpha)) }
+        if (band.fromM > 0.0) {
+            paintedLine(band.fromM, -halfW, halfW, band.colour.copy(alpha = 0.85f * alpha), 0.035, 1.6f)
+        }
+    }
+    // The pitch's edges, softly.
+    for (side in listOf(-halfW, halfW)) {
+        val a = at(0.0, side) ?: continue
+        val b = at(laid, side) ?: continue
+        drawLine(Color.White.copy(alpha = 0.35f * alpha), a, b, with(density) { 1.dp.toPx() }, StrokeCap.Round)
+    }
+
+    /*
+     * THE STUMPS LINE: the wicket's own width, run straight down the pitch.
+     *
+     * The band an LBW is judged against — "pitching in line", "hitting in line" — and the
+     * one line on the ground a batter and a bowler both read. Real width (outside of off
+     * stump to outside of leg, 22.86 cm), so it narrows with distance exactly as the
+     * stumps do, and drawn over the length bands because it is the more important of the
+     * two: a crisp edge either side, a cool wash between, a soft shadow so it sits on the
+     * surface.
+     */
+    val stumpHalf = PitchGeometry.STUMP_SET_WIDTH_M / 2.0
+    quad(0.0, laid, stumpHalf)?.let { drawPath(it, Color(0xFF7DD3FC).copy(alpha = 0.30f * alpha)) }
+    for (side in listOf(-stumpHalf, stumpHalf)) {
+        val a = at(0.0, side) ?: continue
+        val b = at(laid, side) ?: continue
+        val stroke = with(density) { 1.6.dp.toPx() }
+        val drop = with(density) { 1.dp.toPx() }
+        drawLine(shadow, a + Offset(0f, drop), b + Offset(0f, drop), stroke, StrokeCap.Round)
+        drawLine(Color(0xFFE0F2FE).copy(alpha = 0.95f * alpha), a, b, stroke, StrokeCap.Round)
+    }
+
+    // The creases at their real widths: bowling crease through the stumps, popping crease
+    // 1.22 m out, return creases joining them.
+    val chalk = Color.White.copy(alpha = 0.92f * alpha)
+    paintedLine(0.0, -halfW, halfW, chalk, 0.05, 2f)
+    if (laid >= PitchGeometry.POPPING_CREASE_AHEAD_M) {
+        paintedLine(PitchGeometry.POPPING_CREASE_AHEAD_M, -1.83, 1.83, chalk, 0.05, 2f)
+        for (side in listOf(-halfW, halfW)) {
+            val a = at(0.0, side) ?: continue
+            val b = at(PitchGeometry.POPPING_CREASE_AHEAD_M, side) ?: continue
+            drawLine(chalk.copy(alpha = 0.7f * alpha), a, b, with(density) { 1.4.dp.toPx() }, StrokeCap.Round)
+        }
+    }
+
+    // One label per band, upright, in the band's right half (the left edge of the screen carries the metric cards) — clear of the stumps line, which
+    // matters more — sized to the band and left out when it won't fit.
+    val canvas = drawContext.canvas.nativeCanvas
+    for (band in LENGTH_BANDS) {
+        if (band.toM > laid + 0.01) break
+        val mid = (band.fromM + band.toM) / 2.0
+        val top = at(band.fromM, 0.0) ?: continue
+        val bottom = at(band.toM, 0.0) ?: continue
+        val centre = at(mid, LABEL_ACROSS_M) ?: continue
+        val bandPx = bottom.y - top.y
+        if (bandPx < with(density) { 13.dp.toPx() }) continue
+        val textPx = (bandPx * 0.42f).coerceIn(with(density) { 9.sp.toPx() }, with(density) { 13.sp.toPx() })
+        val paint = Paint().apply {
+            color = android.graphics.Color.argb((240 * alpha).toInt(), 255, 255, 255)
+            textSize = textPx
+            isAntiAlias = true
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            letterSpacing = 0.08f
+            textAlign = Paint.Align.CENTER
+        }
+        val textW = paint.measureText(band.label)
+        // The room between the pitch's edge and the stumps line.
+        val bandWidthPx = pxPerM(mid) * (halfW - PitchGeometry.STUMP_SET_WIDTH_M / 2.0).toFloat()
+        if (textW + textPx > bandWidthPx) continue
+        val padX = textPx * 0.55f
+        val padY = textPx * 0.32f
+        val pill = Paint().apply {
+            color = android.graphics.Color.argb((120 * alpha).toInt(), 0, 0, 0)
+            isAntiAlias = true
+        }
+        val baseline = centre.y + textPx * 0.36f
+        canvas.drawRoundRect(
+            centre.x - textW / 2 - padX, baseline - textPx - padY + textPx * 0.15f,
+            centre.x + textW / 2 + padX, baseline + padY,
+            textPx, textPx, pill,
+        )
+        canvas.drawText(band.label, centre.x, baseline, paint)
     }
 }
