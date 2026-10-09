@@ -6,13 +6,10 @@ use App\Models\AdminAction;
 use App\Models\VenueSlot;
 use App\Support\SlotGenerator;
 use Filament\Actions\Action;
-use Filament\Actions\AssociateAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
-use Filament\Actions\DissociateAction;
-use Filament\Actions\DissociateBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Radio;
@@ -98,6 +95,14 @@ class SlotsRelationManager extends RelationManager
                         ->minValue(0)
                         ->placeholder('₹'.number_format((float) ($c->price ?? $this->getOwnerRecord()->price ?? 0)).' court rate'))
                     ->all(),
+                // The column existed (and the table showed it) but nothing in /control could set it.
+                Select::make('sports')
+                    ->label('Runs for')
+                    ->multiple()
+                    ->native(false)
+                    ->options(fn (): array => $this->sportOptions())
+                    ->placeholder('All sports')
+                    ->helperText('Leave empty to sell every court at this time. Pick sports to sell only courts that host them — e.g. football evenings only.'),
                 Toggle::make('is_available')
                     ->label('Open for booking')
                     ->default(true),
@@ -148,25 +153,45 @@ class SlotsRelationManager extends RelationManager
                     ->label('Open')
                     ->boolean(),
             ])
+            ->description('Start times shared by every court. To see or set what each court charges at these times, use the Courts & slots tab.')
             ->filters([
-                //
+                \Filament\Tables\Filters\SelectFilter::make('day')
+                    ->options(array_combine(
+                        [VenueSlot::EVERY_DAY, ...VenueSlot::WEEKDAYS],
+                        [VenueSlot::EVERY_DAY, ...VenueSlot::WEEKDAYS],
+                    )),
             ])
+            // Slots belong to this venue. Associate/Dissociate used to sit here: dissociating
+            // left a slot with no venue, and associating could pull another venue's slot in.
             ->headerActions([
                 $this->generateAction(),
-                CreateAction::make(),
-                AssociateAction::make(),
+                CreateAction::make()->label('Add slot'),
             ])
             ->recordActions([
                 EditAction::make(),
-                DissociateAction::make(),
                 DeleteAction::make(),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DissociateBulkAction::make(),
                     DeleteBulkAction::make(),
                 ]),
-            ]);
+            ])
+            ->emptyStateHeading('No slots yet')
+            ->emptyStateDescription('Nothing can be booked until the venue has start times. Use Generate slots to make a full day in one go.');
+    }
+
+    /** Sports a slot can be limited to: the venue's own plus every sport its courts host. */
+    private function sportOptions(): array
+    {
+        $venue = $this->getOwnerRecord();
+        $list = is_array($venue->sports) ? $venue->sports : [];
+        foreach ($venue->courts()->get() as $c) {
+            $list = [...$list, ...$c->sportsList()];
+        }
+        $list = array_values(array_unique(array_filter(array_map('trim', $list))));
+        sort($list);
+
+        return array_combine($list, $list) ?: [];
     }
 
     /**

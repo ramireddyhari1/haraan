@@ -36,7 +36,7 @@
         return match (true) {
             str_contains($s, 'cricket') => 'cricket',
             str_contains($s, 'football'), str_contains($s, 'soccer') => 'football',
-            str_contains($s, 'badminton'), str_contains($s, 'tennis') => 'racket',
+            str_contains($s, 'badminton'), str_contains($s, 'tennis'), str_contains($s, 'pickle') => 'racket',
             str_contains($s, 'volley') => 'volleyball',
             default => 'basketball',
         };

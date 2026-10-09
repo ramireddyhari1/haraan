@@ -6,12 +6,14 @@ use App\Filament\Forms\OrganizationSelect;
 use App\Models\User;
 use App\Models\Venue;
 use App\Support\Membership\MembershipSettings;
+use App\Support\VenueSetupSteps;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Repeater;
+use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TagsInput;
 use Filament\Forms\Components\TextInput;
@@ -37,6 +39,7 @@ class VenueForm
         'Cricket' => 'Cricket',
         'Football' => 'Football',
         'Badminton' => 'Badminton',
+        'Pickleball' => 'Pickleball',
         'Basketball' => 'Basketball',
         'Tennis' => 'Tennis',
         'Volleyball' => 'Volleyball',
@@ -82,81 +85,39 @@ class VenueForm
     {
         return $schema
             ->components([
-                // On create, courts + slots (relation-manager tabs) don't exist yet — tell the
-                // admin where they'll go so they don't finish thinking the venue is fully set up.
-                Placeholder::make('setup_hint')
+                // The setup journey: every step with a drawn icon and its real done/missing state
+                // (VenueSetupSteps mirrors Venue::readinessErrors), tap to jump. Replaces the
+                // red/amber/green banner and the create-page hint.
+                Placeholder::make('setup_journey')
                     ->hiddenLabel()
-                    ->visibleOn('create')
-                    ->content(new HtmlString(
-                        '<div style="padding:12px 14px;border-radius:10px;background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;font-size:13px;line-height:1.5">'
-                        .'<strong>2-step setup (Draft by default).</strong> Fill this form and press <strong>Create</strong>. '
-                        .'The new venue will be saved as <strong>Draft</strong> (hidden from users). '
-                        .'You will be taken to the edit screen where you can add <strong>Courts</strong> and <strong>Time slots</strong>, add a photo, then set <strong>Status</strong> to <strong>Live</strong>.'
-                        .'</div>'
-                    ))
-                    ->columnSpanFull(),
-
-                Placeholder::make('lifecycle_banner')
-                    ->hiddenLabel()
-                    ->visibleOn('edit')
-                    ->content(function (?Venue $record): ?HtmlString {
-                        if (! $record) {
-                            return null;
-                        }
-                        $status = $record->lifecycleStatus();
-                        if ($status === 'published') {
-                            return new HtmlString(
-                                '<div style="padding:12px 16px;border-radius:10px;background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;font-size:13px;line-height:1.5;display:flex;align-items:center;gap:8px;">'
-                                .'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#10b981;"></span>'
-                                .($record->is_bookable
-                                    ? '<strong>Status: Live.</strong> Visible to customers and taking bookings.'
-                                    : '<strong>Status: Live — bookings paused.</strong> Visible to customers, but no new bookings until Status is set back to Live.')
-                                .'</div>'
-                            );
-                        }
-                        if ($status === 'ready') {
-                            return new HtmlString(
-                                '<div style="padding:12px 16px;border-radius:10px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;font-size:13px;line-height:1.5;display:flex;align-items:center;gap:8px;">'
-                                .'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f59e0b;"></span>'
-                                .'<strong>Status: Ready to Publish.</strong> Everything a customer needs is set up. Set <strong>Status</strong> (under Visibility &amp; ownership) to <strong>Live</strong> and save.'
-                                .'</div>'
-                            );
-                        }
-                        $errors = $record->readinessErrors();
-                        $list = implode('', array_map(fn ($e) => '<li style="margin-left:18px;">' . htmlspecialchars($e) . '</li>', $errors));
-                        return new HtmlString(
-                            '<div style="padding:12px 16px;border-radius:10px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;font-size:13px;line-height:1.5;">'
-                            .'<div style="font-weight:bold;margin-bottom:4px;display:flex;align-items:center;gap:6px;">'
-                            .'<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#ef4444;"></span>'
-                            .'Setup Incomplete (Draft) — Cannot Go Live Yet'
-                            .'</div>'
-                            .'<div style="font-size:12px;color:#7f1d1d;">Complete these remaining items before publishing:</div>'
-                            .'<ul style="margin:6px 0 0 0;padding:0;font-size:12px;">' . $list . '</ul>'
-                            .'</div>'
-                        );
-                    })
+                    ->content(fn (?Venue $record): HtmlString => new HtmlString(view('filament.venue.setup-journey', [
+                        'steps' => self::steps($record),
+                        'venue' => $record,
+                    ])->render()))
                     ->columnSpanFull(),
 
                 Section::make('Basics')
-                    ->description('Name and the sports played here.')
+                    ->heading(VenueSetupSteps::heading('basics'))
+                    ->icon(VenueSetupSteps::icon('basics'))
+                    ->aside()
+                    ->columnSpanFull()
+                    ->extraAttributes(fn (?Venue $record): array => self::stepAttributes('basics', $record))
+                    ->description('What players see first: the name, the main sport and a one-line pitch.')
                     ->columns(2)
                     ->schema([
                         TextInput::make('name')
                             ->required()
                             ->columnSpanFull(),
-                        Select::make('category')
-                            ->label('Primary sport')
-                            ->options(self::SPORTS)
-                            ->required()
-                            ->native(false)
+                        Hidden::make('category')
                             ->default('Badminton')
-                            ->helperText('The main sport — shown as the card badge and used by the sport filter.'),
-                        Select::make('sports')
-                            ->label('All sports offered')
-                            ->multiple()
-                            ->options(self::SPORTS)
-                            ->native(false)
-                            ->helperText('Every game playable here. The primary sport is always included. Shown as icons on the card (first two + a count).'),
+                            ->required(),
+                        ViewField::make('sports')
+                            ->label('Sports played here')
+                            ->view('filament.venue.sport-picker')
+                            ->viewData(['sports' => array_values(self::SPORTS)])
+                            ->default(['Badminton'])
+                            ->helperText('Tap every game this venue hosts. The main sport is the card badge and leads the sport filter — use "Make main" to switch it.')
+                            ->columnSpanFull(),
                         TextInput::make('tagline')
                             ->placeholder('6 wooden indoor courts')
                             ->helperText('Short one-liner under the venue name on the browse card.'),
@@ -167,6 +128,11 @@ class VenueForm
                     ]),
 
                 Section::make('Location')
+                    ->heading(VenueSetupSteps::heading('location'))
+                    ->icon(VenueSetupSteps::icon('location'))
+                    ->aside()
+                    ->columnSpanFull()
+                    ->extraAttributes(fn (?Venue $record): array => self::stepAttributes('location', $record))
                     ->description('Where it is — coordinates power the live "X km away" distance.')
                     ->columns(2)
                     ->schema([
@@ -224,8 +190,19 @@ class VenueForm
                     ]),
 
                 Section::make('Operating hours')
+                    ->heading(VenueSetupSteps::heading('hours', 'Hours & slots'))
+                    ->icon(VenueSetupSteps::icon('hours'))
+                    ->aside()
+                    ->columnSpanFull()
+                    ->extraAttributes(fn (?Venue $record): array => self::stepAttributes('hours', $record))
                     ->description('Add a row per open day. Days you don\'t list are treated as closed. Bookable start-times are generated from these hours. Open past midnight? Set the real closing time (e.g. Mon 6:00 PM → 1:00 AM): the hours after 12 AM are sold on the next day\'s date, so a customer books Monday night\'s last hour as Tuesday 12 AM.')
                     ->schema([
+                        Placeholder::make('hours_week')
+                            ->hiddenLabel()
+                            ->content(fn ($get): HtmlString => new HtmlString(view('filament.venue.hours-week', [
+                                'rows' => (array) ($get('hours_rows') ?? []),
+                                'slotMinutes' => (int) ($get('slot_minutes') ?: 60),
+                            ])->render())),
                         Repeater::make('hours_rows')
                             ->hiddenLabel()
                             ->schema([
@@ -244,7 +221,6 @@ class VenueForm
                                     ->label('Closes')
                                     ->seconds(false)->format('H:i')->displayFormat('h:i A')
                                     ->required()
-                                    ->helperText('Earlier than “Opens” = closes after midnight.')
                                     // Equal times used to save and then silently produce no slots.
                                     ->rules([
                                         fn ($get): \Closure => function (string $attribute, $value, \Closure $fail) use ($get): void {
@@ -255,18 +231,28 @@ class VenueForm
                                     ]),
                             ])
                             ->columns(3)
+                            ->table([
+                                TableColumn::make('Day'),
+                                TableColumn::make('Opens'),
+                                TableColumn::make('Closes'),
+                            ])
                             ->addActionLabel('Add a day')
+                            ->live(debounce: 600)
                             ->reorderable(false)
                             ->defaultItems(0),
                         Select::make('slot_minutes')
                             ->label('Slot length')
                             ->options([30 => '30 minutes', 60 => '1 hour', 90 => '1.5 hours', 120 => '2 hours'])
                             ->default(60)
+                            ->live()
                             ->native(false)
                             ->helperText('Start-times are generated every this-many minutes between open and close.'),
                     ]),
 
                 Section::make('Cancellation policy')
+                    ->aside()
+                    ->columnSpanFull()
+                    ->extraAttributes(fn (?Venue $record): array => self::stepAttributes('hours', $record, false))
                     ->description('Shown in the app\'s "Good to know". Leave blank if you don\'t offer refunds.')
                     ->columns(2)
                     ->schema([
@@ -284,6 +270,11 @@ class VenueForm
                     ]),
 
                 Section::make('Pricing')
+                    ->heading(VenueSetupSteps::heading('pricing', 'Pricing & fees'))
+                    ->icon(VenueSetupSteps::icon('pricing'))
+                    ->aside()
+                    ->columnSpanFull()
+                    ->extraAttributes(fn (?Venue $record): array => self::stepAttributes('pricing', $record))
                     ->description('The base "from" price. Actual booking price comes from each court.')
                     ->columns(2)
                     ->schema([
@@ -294,7 +285,8 @@ class VenueForm
                             ->minValue(0)
                             ->default(0)
                             ->prefix('₹')
-                            ->helperText('The "from" price on the card. Individual courts can set their own rate in the Courts tab.'),
+                            ->live(onBlur: true)
+                            ->helperText('The "from" price on the card. Individual courts can set their own rate in the Courts & slots tab.'),
                         TextInput::make('price_note')
                             ->label('Pricing note')
                             ->placeholder('Pricing is subject to change and is controlled by the venue')
@@ -332,6 +324,7 @@ class VenueForm
                             ->prefix(fn ($get): ?string => $get('convenience_fee_type') === 'flat' ? '₹' : null)
                             ->suffix(fn ($get): ?string => $get('convenience_fee_type') === 'percent' ? '%' : null)
                             ->default(0)
+                            ->live(onBlur: true)
                             ->required(fn ($get): bool => in_array($get('convenience_fee_type'), ['flat', 'percent'], true))
                             ->visible(fn ($get): bool => ! self::isPartnerPanel()
                                 && in_array($get('convenience_fee_type'), ['flat', 'percent'], true)),
@@ -352,7 +345,13 @@ class VenueForm
                         Repeater::make('fees')
                             ->label('Other fees')
                             ->visible(fn (): bool => ! self::isPartnerPanel())
+                            ->table([
+                                TableColumn::make('Fee name (shown to customers)'),
+                                TableColumn::make('Charged as'),
+                                TableColumn::make('Amount'),
+                            ])
                             ->addActionLabel('Add a fee')
+                            ->live(debounce: 600)
                             ->defaultItems(0)
                             ->reorderable()
                             ->collapsible()
@@ -385,9 +384,24 @@ class VenueForm
                             ])
                             ->columns(3)
                             ->columnSpanFull(),
+                        Placeholder::make('bill_preview')
+                            ->hiddenLabel()
+                            ->content(fn ($get, ?Venue $record): HtmlString => new HtmlString(view('filament.venue.bill-preview', [
+                                // Court-rate venues keep the base at 0: price the bill at the cheapest court then.
+                                'base' => (float) ($get('price') ?: 0) > 0 ? (float) $get('price')
+                                    : (float) ($record?->courts()->where('is_active', true)->where('price', '>', 0)->min('price') ?? 0),
+                                'line' => (float) ($get('price') ?: 0) > 0 ? 'Court, 1 hour' : 'Cheapest court, 1 hour',
+                                'rules' => self::previewFeeRules($get, $record),
+                            ])->render()))
+                            ->columnSpanFull(),
                     ]),
 
                 Section::make('Photos')
+                    ->heading(VenueSetupSteps::heading('photos'))
+                    ->icon(VenueSetupSteps::icon('photos'))
+                    ->aside()
+                    ->columnSpanFull()
+                    ->extraAttributes(fn (?Venue $record): array => self::stepAttributes('photos', $record))
                     ->description('The first image is the hero; users swipe through the rest.')
                     ->schema([
                         FileUpload::make('images')
@@ -411,11 +425,21 @@ class VenueForm
                     ]),
 
                 Section::make('Amenities')
+                    ->heading(VenueSetupSteps::heading('extras', 'Amenities & rules'))
+                    ->icon(VenueSetupSteps::icon('extras'))
+                    ->aside()
+                    ->columnSpanFull()
+                    ->extraAttributes(fn (?Venue $record): array => self::stepAttributes('extras', $record))
                     ->description('Tick what this venue has — each gets its own icon on the venue page.')
                     ->schema([
                         CheckboxList::make('amenities_known')
                             ->hiddenLabel()
-                            ->options(array_combine(array_keys(self::AMENITIES), array_keys(self::AMENITIES)))
+                            ->extraAttributes(['class' => 'vf-tiles'])
+                            ->options(array_combine(
+                                array_keys(self::AMENITIES),
+                                array_map(fn (string $a): string => VenueSetupSteps::amenityLabel($a), array_keys(self::AMENITIES)),
+                            ))
+                            ->allowHtml()
                             ->columns(3)
                             ->gridDirection('row')
                             ->bulkToggleable(),
@@ -427,10 +451,14 @@ class VenueForm
                     ]),
 
                 Section::make('Good to know')
+                    ->aside()
+                    ->columnSpanFull()
+                    ->extraAttributes(fn (?Venue $record): array => self::stepAttributes('extras', $record, false))
                     ->description('House rules & policies — each becomes a bullet on the venue page.')
                     ->schema([
                         CheckboxList::make('rules_known')
                             ->hiddenLabel()
+                            ->extraAttributes(['class' => 'vf-tiles'])
                             ->options(array_combine(self::RULE_PRESETS, self::RULE_PRESETS))
                             ->columns(2)
                             ->gridDirection('row')
@@ -447,6 +475,11 @@ class VenueForm
                 // are genuinely operational: whether the listing is live, and whether it
                 // is currently taking bookings. See VenueResource::canCreate().
                 Section::make('Visibility & ownership')
+                    ->heading(VenueSetupSteps::heading('live', 'Go live'))
+                    ->icon(VenueSetupSteps::icon('live'))
+                    ->aside()
+                    ->columnSpanFull()
+                    ->extraAttributes(fn (?Venue $record): array => self::stepAttributes('live', $record))
                     ->columns(2)
                     ->schema([
                         // One status instead of three switches (status / is_active / is_bookable)
@@ -510,6 +543,9 @@ class VenueForm
                 // (Venue::refreshRating()). It used to be typed in here, which is how a venue
                 // with no reviews showed 4.2 ★ from 120 ratings.
                 Section::make('Ratings & Reviews')
+                    ->aside()
+                    ->columnSpanFull()
+                    ->extraAttributes(fn (?Venue $record): array => self::stepAttributes('live', $record, false))
                     ->visibleOn('edit')
                     ->schema([
                         Placeholder::make('rating_summary')
@@ -521,6 +557,60 @@ class VenueForm
                                 : 'No reviews yet — customers see no rating until the first review arrives.'),
                     ]),
             ]);
+    }
+
+    /** @var array<string, list<array<string, mixed>>> one step read per venue per request */
+    private static array $stepCache = [];
+
+    /** @return list<array<string, mixed>> */
+    private static function steps(?Venue $record): array
+    {
+        $key = $record?->getKey() ? 'v'.$record->getKey().'-'.$record->updated_at?->timestamp : 'new';
+
+        return self::$stepCache[$key] ??= VenueSetupSteps::forVenue($record);
+    }
+
+    /** Anchor id + done/missing class for a step section, so the journey can jump to it. */
+    private static function stepAttributes(string $key, ?Venue $record, bool $numbered = true): array
+    {
+        if (! $numbered) {
+            return ['class' => 'vf-step vf-sub'];
+        }
+        $step = collect(self::steps($record))->firstWhere('key', $key);
+        $state = $record === null ? '' : ($step['done'] ? ' is-done' : ($step['required'] ? ' is-missing' : ''));
+
+        return ['data-step' => VenueSetupSteps::STEPS[$key][1] ?? 'vf-'.$key, 'class' => 'vf-step'.$state];
+    }
+
+    /**
+     * The fees the bill preview adds, from the form as it is being edited — the same rules
+     * Venue::feeRules() applies at checkout. In the partner console the fee fields are not on
+     * the form, so it reads what Haraan saved on the venue instead.
+     *
+     * @return list<array{label: string, type: string, value: float}>
+     */
+    private static function previewFeeRules($get, ?Venue $record): array
+    {
+        if (self::isPartnerPanel()) {
+            return $record?->feeRules() ?? [];
+        }
+        $rules = [];
+        // Forms without the convenience-fee inputs still charge the saved fee at checkout.
+        $type = $get('convenience_fee_type') ?? $record?->convenience_fee_type;
+        $value = (float) ($get('convenience_fee_value') ?? $record?->convenience_fee_value ?? 0);
+        if (in_array($type, ['flat', 'percent'], true) && $value > 0) {
+            $rules[] = ['label' => 'Convenience fee', 'type' => $type, 'value' => $value];
+        }
+        foreach ((array) ($get('fees') ?? []) as $fee) {
+            $t = $fee['type'] ?? null;
+            $v = (float) ($fee['value'] ?? 0);
+            $l = trim((string) ($fee['label'] ?? ''));
+            if (in_array($t, ['flat', 'percent'], true) && $v > 0 && $l !== '') {
+                $rules[] = ['label' => mb_substr($l, 0, 40), 'type' => $t, 'value' => $v];
+            }
+        }
+
+        return $rules;
     }
 
     /**

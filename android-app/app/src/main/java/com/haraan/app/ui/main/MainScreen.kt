@@ -3269,7 +3269,7 @@ private fun venueSportIcon(sport: String): androidx.compose.ui.graphics.vector.I
 private fun sportGlyphKey(sport: String): String = when {
   sport.contains("Cricket", true) -> "cricket"
   sport.contains("Football", true) || sport.contains("Soccer", true) -> "football"
-  sport.contains("Badminton", true) || sport.contains("Tennis", true) -> "racket"
+  sport.contains("Badminton", true) || sport.contains("Tennis", true) || sport.contains("Pickle", true) -> "racket"
   sport.contains("Volley", true) -> "volleyball"
   else -> "basketball"
 }
