@@ -68,6 +68,22 @@ class OpenCvBallTracker(
     private var framesSeen = 0
     private var framesWithCandidate = 0
     private var rejectedGlobalMotion = 0
+
+    /*
+     * THE EMPTY SCENE, learned.
+     *
+     * Frame differencing marks two places for every moving ball: where it is now, and where
+     * it was a frame ago — the "ghost". Ghosts line up into a perfectly ball-like path one
+     * frame behind the real one, and on a real throw (Realme RMX3933, 2026-10-09) the tracker
+     * promoted that ghost path the moment the real one missed a frame, and reported where the
+     * ball HAD been. A running model of the still background answers the one question the
+     * difference cannot: is something actually there NOW? It is learned only from pixels
+     * that are not moving, so a passing ball is never absorbed into it.
+     */
+    private var background: Mat? = null
+    private var background8: Mat? = null
+    private var backgroundFrames = 0
+    private var rejectedGhost = 0
     private var rejectedSize = 0
     private var rejectedShape = 0
     private var rejectedTrajectory = 0
@@ -107,6 +123,7 @@ class OpenCvBallTracker(
             if (previousRotation != null && previousRotation != turn) {
                 previous?.release()
                 previous = null
+                forgetBackground()
                 resetTrackingState()
                 sightings.clear()
             }
@@ -119,6 +136,7 @@ class OpenCvBallTracker(
             }
 
             val sighting = detect(prev, gray, timestampMs)
+            learnBackground(gray)
             prev.release()
             previous = gray
 
@@ -259,6 +277,7 @@ class OpenCvBallTracker(
             // smooth, convincing, entirely fictional path.
             mask.release()
             rejectedGlobalMotion++
+            forgetBackground()
             handleMissOnGlobalMotion()
             return null
         }
@@ -291,13 +310,33 @@ class OpenCvBallTracker(
 
         for (contour in contours) {
             val area = Imgproc.contourArea(contour)
-            if (area < MIN_AREA_PX || area > MAX_AREA_PX) {
+            /*
+             * A BALL NEAR THE CAMERA IS BIG. Filmed from behind the bowler's arm, the first
+             * metres of every delivery are close to the lens: on a real throw (Realme
+             * RMX3933, 480-wide analysis) the ball was 430-670 px², perfectly round, and every
+             * frame of it was thrown out against a 180 px² ceiling that only fits a ball 3 to
+             * 12 m away. Bigger is allowed now — but only when it is unmistakably a ball:
+             * round and square-boxed. Arms, legs and bodies on the same clip measured 0.1-0.5
+             * round; the ball 0.81-0.90.
+             */
+            val nearBall = area > MAX_AREA_PX && area <= MAX_NEAR_BALL_AREA_PX
+            if (area < MIN_AREA_PX || (area > MAX_AREA_PX && !nearBall)) {
                 rejectedSize++
                 contour.release()
                 continue
             }
 
             val bRect = Imgproc.boundingRect(contour)
+            if (nearBall) {
+                val per = Imgproc.arcLength(MatOfPoint2f(*contour.toArray()), true)
+                val round = if (per > 0.0) (4.0 * PI * area) / (per * per) else 0.0
+                val box = max(bRect.width.toDouble() / max(1, bRect.height), bRect.height.toDouble() / max(1, bRect.width))
+                if (round < NEAR_BALL_MIN_CIRCULARITY || box > NEAR_BALL_MAX_ASPECT) {
+                    rejectedSize++
+                    contour.release()
+                    continue
+                }
+            }
 
             // Reject candidates deeply embedded inside a large moving body cluster (e.g. torso/shoulder)
             var inBody = false
@@ -344,8 +383,22 @@ class OpenCvBallTracker(
                 contour.release()
                 continue
             }
-            val cx = (moments.m10 / moments.m00 / imgCols).toFloat().coerceIn(0f, 1f)
-            val cy = (moments.m01 / moments.m00 / imgRows).toFloat().coerceIn(0f, 1f)
+            var cx = (moments.m10 / moments.m00 / imgCols).toFloat().coerceIn(0f, 1f)
+            var cy = (moments.m01 / moments.m00 / imgRows).toFloat().coerceIn(0f, 1f)
+
+            // Against the learned empty scene: a ghost (the ball has left this spot) is
+            // dropped, and a real ball's centre is taken from what is there NOW rather than
+            // from the smear of now-and-a-frame-ago the difference gives.
+            val present = presence(cur, bRect)
+            if (present != null) {
+                if (present.fraction < GHOST_MAX_PRESENCE) {
+                    rejectedGhost++
+                    contour.release()
+                    continue
+                }
+                cx = (present.cx / imgCols).toFloat().coerceIn(0f, 1f)
+                cy = (present.cy / imgRows).toFloat().coerceIn(0f, 1f)
+            }
 
             // Ignore extreme image boundaries (decoding/scaling edge artifacts)
             if (cx < 0.025f || cx > 0.975f || cy < 0.025f || cy > 0.975f) {
@@ -724,7 +777,79 @@ class OpenCvBallTracker(
         trackingState = trackingState.name,
     )
 
+    private class Presence(val fraction: Double, val cx: Double, val cy: Double)
+
+    /**
+     * How much of [box] differs from the learned background in [cur], and the centre of what
+     * does — or null while the background is still being learned (then nothing is judged).
+     */
+    private fun presence(cur: Mat, box: Rect): Presence? {
+        val bg = background8 ?: return null
+        if (backgroundFrames < BACKGROUND_WARMUP_FRAMES) return null
+        val pad = 2
+        val x0 = (box.x - pad).coerceAtLeast(0)
+        val y0 = (box.y - pad).coerceAtLeast(0)
+        val x1 = (box.x + box.width + pad).coerceAtMost(cur.cols())
+        val y1 = (box.y + box.height + pad).coerceAtMost(cur.rows())
+        if (x1 <= x0 || y1 <= y0) return null
+        val roi = Rect(x0, y0, x1 - x0, y1 - y0)
+        val diff = Mat()
+        val fg = Mat()
+        val curRoi = Mat(cur, roi)
+        val bgRoi = Mat(bg, roi)
+        try {
+            Core.absdiff(curRoi, bgRoi, diff)
+            Imgproc.threshold(diff, fg, MIN_MOTION_DIFF, 255.0, Imgproc.THRESH_BINARY)
+            val on = Core.countNonZero(fg)
+            // Fraction of the ORIGINAL box (not the padded one) that is occupied now.
+            val fraction = on.toDouble() / max(1, box.width * box.height)
+            if (on == 0) return Presence(0.0, 0.0, 0.0)
+            val m = Imgproc.moments(fg, true)
+            return Presence(fraction, x0 + m.m10 / m.m00, y0 + m.m01 / m.m00)
+        } finally {
+            diff.release(); fg.release(); curRoi.release(); bgRoi.release()
+        }
+    }
+
+    /**
+     * Fold this frame into the empty-scene model: quickly where nothing is moving, not at all
+     * where something is — so a ball crossing the frame is never learned as background.
+     */
+    private fun learnBackground(gray: Mat) {
+        val bg = background
+        if (bg == null || bg.rows() != gray.rows() || bg.cols() != gray.cols()) {
+            forgetBackground()
+            background = Mat().also { gray.convertTo(it, CvType.CV_32F) }
+            background8 = gray.clone()
+            backgroundFrames = 1
+            return
+        }
+        val bg8 = background8!!
+        val diff = Mat()
+        val still = Mat()
+        try {
+            Core.absdiff(gray, bg8, diff)
+            Imgproc.threshold(diff, still, MIN_MOTION_DIFF, 255.0, Imgproc.THRESH_BINARY_INV)
+            val rate = if (backgroundFrames < BACKGROUND_WARMUP_FRAMES) 0.5 else BACKGROUND_LEARN_RATE
+            Imgproc.accumulateWeighted(gray, bg, rate, still)
+            bg.convertTo(bg8, CvType.CV_8U)
+            backgroundFrames++
+        } finally {
+            diff.release(); still.release()
+        }
+    }
+
+    private fun forgetBackground() {
+        background?.release()
+        background = null
+        background8?.release()
+        background8 = null
+        backgroundFrames = 0
+    }
+
     override fun reset() {
+        forgetBackground()
+        rejectedGhost = 0
         previous?.release()
         previous = null
         previousRotation = null
@@ -744,6 +869,7 @@ class OpenCvBallTracker(
 
     override fun release() {
         released = true
+        forgetBackground()
         previous?.release()
         previous = null
         previousRotation = null
@@ -795,6 +921,20 @@ class OpenCvBallTracker(
         /** Below this a candidate is sensor noise; above it, it is a person or a shadow. */
         const val MIN_AREA_PX = 14.0
         const val MAX_AREA_PX = 180.0
+
+        /** Frames before the empty-scene model is trusted to call a ghost. */
+        const val BACKGROUND_WARMUP_FRAMES = 6
+
+        /** How fast still pixels are learned into the empty scene, per frame. */
+        const val BACKGROUND_LEARN_RATE = 0.08
+
+        /** Below this share of its box actually occupied NOW, a moving blob is a ghost. */
+        const val GHOST_MAX_PRESENCE = 0.18
+
+        /** A ball close to the lens, allowed only when round: see the size gate in [detect]. */
+        const val MAX_NEAR_BALL_AREA_PX = 1100.0
+        const val NEAR_BALL_MIN_CIRCULARITY = 0.78
+        const val NEAR_BALL_MAX_ASPECT = 1.5
 
         /** 1.0 is a perfect circle. Motion blur stretches a ball, so this cannot be strict. */
         const val MIN_CIRCULARITY = 0.45
