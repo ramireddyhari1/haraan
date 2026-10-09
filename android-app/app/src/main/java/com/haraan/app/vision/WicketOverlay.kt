@@ -680,6 +680,8 @@ fun WicketDiagnosticsPanel(
     uprightWidthPx: Int = 0,
     /** From the screen opening the camera to the first analysed frame, wall clock. */
     cameraToFirstFrameMs: Long? = null,
+    /** The last exception frame analysis hit, or null. Shown in red: it is why nothing works. */
+    analysisError: String? = null,
 ) {
     Column(
         modifier
@@ -717,6 +719,17 @@ fun WicketDiagnosticsPanel(
                     letterSpacing = 1.2.sp,
                 )
             }
+        }
+
+        analysisError?.let {
+            Spacer(Modifier.height(5.dp))
+            Text(
+                "analysis error: $it",
+                color = VisionPalette.BAD,
+                fontSize = 10.5.sp,
+                lineHeight = 13.sp,
+                fontFamily = FontFamily.Monospace,
+            )
         }
 
         Spacer(Modifier.height(7.dp))

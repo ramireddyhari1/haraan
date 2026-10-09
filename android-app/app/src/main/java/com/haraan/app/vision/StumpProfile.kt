@@ -129,6 +129,14 @@ object StumpProfile {
      */
     const val MIN_HALF_SPAN_PX = 2.0
 
+    /**
+     * Correlation × saturating SNR, at least. Grass blades make three-peaked patterns at the
+     * smallest span the comb accepts, with middling correlation and a few grey levels of
+     * contrast: quality 0.3-0.5 on the synthetic field, and they reached READY. Real stumps,
+     * near or far, in sun or under cloud, saturate the SNR term and score 0.8 and up.
+     */
+    const val MIN_QUALITY = 0.6
+
     /** Bar contrast over the ground's own column-to-column spread, at least. */
     const val MIN_CONTRAST_OVER_CLUTTER = 6.0
 
@@ -140,6 +148,9 @@ object StumpProfile {
     const val MAX_HEIGHT_TO_SPAN = 4.7
 
     const val DEFAULT_MAX_SHEAR = 0.13
+
+    /** Shears that get the full comb search, besides level - the sharpest ones. */
+    private const val SHEARS_SEARCHED = 2
     private const val SHEAR_STEP = 0.0325
 
     /**
@@ -172,10 +183,35 @@ object StumpProfile {
         val refY = (r0 + r1) / 2.0
 
         // --- pass 1: which shear, which comb, coarse --------------------------------------
+        /*
+         * SHEAR BY SHARPNESS FIRST, COMB SECOND.
+         *
+         * Searching every spacing and position at all nine shears was the phone's whole
+         * budget: on a Realme RMX3933 the search ran at 350-550 ms a frame, under two frames a
+         * second, and the tracker never saw two sightings close enough to confirm. A column
+         * profile taken at the camera's true roll is the SHARPEST one - vertical bars stay
+         * vertical - and sharpness costs one pass over the window. So every shear is scored
+         * that way and only the sharpest two, and level, get the full comb search.
+         */
         var best: Coarse? = null
         val shears = shearsUpTo(probe.maxShear)
         val profile = DoubleArray(roi.width)
-        for (k in shears) {
+        val lo = floor(probe.centreMin - WINDOW_HALF_SPANS * gMax).toInt().coerceIn(0, roi.width - 1)
+        val hi = ceil(probe.centreMax + WINDOW_HALF_SPANS * gMax).toInt().coerceIn(0, roi.width - 1)
+        val sharpness = DoubleArray(shears.size)
+        for (i in shears.indices) {
+            columnProfile(roi, r0, r1, refY, shears[i], profile)
+            var e = 0.0
+            for (x in lo until hi) {
+                val d = profile[x + 1] - profile[x]
+                e += d * d
+            }
+            sharpness[i] = e
+        }
+        val chosen = shears.indices.sortedByDescending { sharpness[it] }.take(SHEARS_SEARCHED).toMutableSet()
+        chosen.add(shears.size / 2)
+        for (i in chosen) {
+            val k = shears[i]
             columnProfile(roi, r0, r1, refY, k, profile)
             val c = coarseSearch(profile, probe.centreMin, probe.centreMax, gMin, gMax) ?: continue
             if (best == null || abs(c.ncc) > abs(best.ncc)) best = Coarse(k, c.centre, c.halfSpan, c.ncc)
@@ -202,7 +238,9 @@ object StumpProfile {
             var dg = g * 0.04
             while (dg >= g * 0.004) {
                 for (cand in doubleArrayOf(g - dg, g + dg)) {
-                    if (cand < gMin * 0.95 || cand > gMax * 1.05) continue
+                    // Never below the floor: refinement nudging a 2 px comb to 1.9 px is how
+                    // grass got through as a 3.8 px "wicket".
+                    if (cand < max(gMin * 0.95, MIN_HALF_SPAN_PX) || cand > gMax * 1.05) continue
                     val v = ncc(profile, c, cand)
                     if (abs(v) > abs(ncc)) { ncc = v; g = cand }
                 }
@@ -236,6 +274,7 @@ object StumpProfile {
          * if either is nearly as bright as a bar, this is a fence, a gate, or a net.
          */
         val flank = flankRatio(profile, c, g, amp)
+        if (flank.isInfinite()) return reject("at the edge: open ground beside it unverifiable")
         if (flank > MAX_FLANK_RATIO) return reject("fence: flank %.2f".format(flank))
 
         /*
@@ -269,6 +308,9 @@ object StumpProfile {
         val ratio = (base - top) / (2.0 * g)
         if (ratio < MIN_HEIGHT_TO_SPAN || ratio > MAX_HEIGHT_TO_SPAN) {
             return reject("proportions: height/span %.1f".format(ratio))
+        }
+        if ((abs(ncc) * min(1.0, snr / FULL_SNR)) < MIN_QUALITY) {
+            return reject("weak: quality %.2f".format(abs(ncc) * min(1.0, snr / FULL_SNR)))
         }
         lastVerdict = "fit"
 
@@ -309,7 +351,9 @@ object StumpProfile {
         var best: Hit? = null
         var g = gMin
         while (g <= gMax * 1.0001) {
-            val cStep = min(0.5, g / 4.0)
+            // Half a pixel for a narrow comb, a whole one for a wide one: refinement then
+            // takes the centre to a few hundredths either way.
+            val cStep = if (g < 4.0) 0.5 else 1.0
             var c = cMin
             while (c <= cMax) {
                 val v = ncc(profile, c, g)
@@ -324,14 +368,27 @@ object StumpProfile {
     /**
      * How much of profile pixel [x] (covering [x, x+1)) the three bars cover.
      */
-    internal fun template(x: Int, c: Double, g: Double): Double {
-        val half = max(BAR_WIDTH_RATIO * g, MIN_BAR_PX) / 2.0
+    internal fun template(x: Int, c: Double, g: Double): Double =
+        coverage(x, c, g, max(BAR_WIDTH_RATIO * g, MIN_BAR_PX) / 2.0)
+
+    /**
+     * [template] with the bar half-width worked out once - the hot path, evaluated millions
+     * of times a frame. No arrays: the old loop over doubleArrayOf(...) allocated on every
+     * pixel, which a desktop JIT optimises away and a phone does not.
+     */
+    private fun coverage(x: Int, c: Double, g: Double, half: Double): Double {
+        val lo = x.toDouble()
+        val hi = x + 1.0
         var cover = 0.0
-        for (centre in doubleArrayOf(c - g, c, c + g)) {
-            val lo = max(x.toDouble(), centre - half)
-            val hi = min(x + 1.0, centre + half)
-            if (hi > lo) cover += hi - lo
-        }
+        var a = max(lo, c - g - half)
+        var b = min(hi, c - g + half)
+        if (b > a) cover += b - a
+        a = max(lo, c - half)
+        b = min(hi, c + half)
+        if (b > a) cover += b - a
+        a = max(lo, c + g - half)
+        b = min(hi, c + g + half)
+        if (b > a) cover += b - a
         return min(cover, 1.0)
     }
 
@@ -347,17 +404,19 @@ object StumpProfile {
         val n = window.last - window.first + 1
         // A window clipped hard by the ROI edge has lost the flanks the fence test needs.
         if (n < max(5.0, 2.0 * WINDOW_HALF_SPANS * g * 0.8)) return 0.0
-        var sp = 0.0; var st = 0.0
-        for (x in window) { sp += profile[x]; st += template(x, c, g) }
-        val mp = sp / n; val mt = st / n
-        var num = 0.0; var dp = 0.0; var dt = 0.0
+        // One pass: the template is evaluated once per pixel, not twice.
+        val half = max(BAR_WIDTH_RATIO * g, MIN_BAR_PX) / 2.0
+        var sp = 0.0; var st = 0.0; var spt = 0.0; var spp = 0.0; var stt = 0.0
         for (x in window) {
-            val p = profile[x] - mp
-            val t = template(x, c, g) - mt
-            num += p * t; dp += p * p; dt += t * t
+            val p = profile[x]
+            val t = coverage(x, c, g, half)
+            sp += p; st += t; spt += p * t; spp += p * p; stt += t * t
         }
-        if (dp <= 1e-9 || dt <= 1e-9) return 0.0
-        return num / sqrt(dp * dt)
+        val cov = n * spt - sp * st
+        val vp = n * spp - sp * sp
+        val vt = n * stt - st * st
+        if (vp <= 1e-9 || vt <= 1e-9) return 0.0
+        return cov / sqrt(vp * vt)
     }
 
     /**
@@ -376,12 +435,14 @@ object StumpProfile {
             return sum / (b - a + 1)
         }
         // The ground level: the two gaps between the stumps.
-        val gapL = meanOver(c - g / 2 - half / 2, c - g / 2 + half / 2) ?: return 0.0
-        val gapR = meanOver(c + g / 2 - half / 2, c + g / 2 + half / 2) ?: return 0.0
+        // Unmeasurable is NOT "open ground": at the edge of the picture a clutter fit used to
+        // pass this test by default, and on a real phone held a false lock at the frame's edge.
+        val gapL = meanOver(c - g / 2 - half / 2, c - g / 2 + half / 2) ?: return Double.POSITIVE_INFINITY
+        val gapR = meanOver(c + g / 2 - half / 2, c + g / 2 + half / 2) ?: return Double.POSITIVE_INFINITY
         val ground = (gapL + gapR) / 2
         var worst = 0.0
         for (side in doubleArrayOf(-2.0, 2.0)) {
-            val at = meanOver(c + side * g - half, c + side * g + half) ?: continue
+            val at = meanOver(c + side * g - half, c + side * g + half) ?: return Double.POSITIVE_INFINITY
             worst = max(worst, (at - ground) / amp)
         }
         return worst

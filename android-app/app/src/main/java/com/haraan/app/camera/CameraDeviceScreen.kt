@@ -882,12 +882,16 @@ private fun CameraMode(
      *   aligned bars could be a bat, a pad and a boot, and the tracker is what makes them
      *   prove otherwise before a scale is taken from them.
      */
-    val stumpDetector = remember { com.haraan.app.vision.OpenCvStumpDetector() }
+    // Brightness AND colour: yellow plastic stumps vanish in brightness against a pink wall.
+    // See [com.haraan.app.vision.ColourStumpDetector].
+    val stumpDetector = remember { com.haraan.app.vision.ColourStumpDetector() }
     val cameraMotion = remember { com.haraan.app.vision.OpenCvCameraMotion() }
     val wicketTracker = remember { com.haraan.app.vision.WicketTracker() }
     var wicketLock by remember { mutableStateOf<com.haraan.app.vision.WicketLock?>(null) }
     var wicketDiagnostics by remember { mutableStateOf(wicketTracker.diagnostics()) }
     var stumpReport by remember { mutableStateOf<com.haraan.app.vision.StumpDetectorReport?>(null) }
+    // The last exception the analyser caught, for the developer readout. Null when healthy.
+    var analysisError by remember { mutableStateOf<String?>(null) }
     /*
      * STARTUP AND RANGE, FOR THE DEVELOPER READOUT.
      *
@@ -1004,6 +1008,11 @@ private fun CameraMode(
      * frame after the recorder reports it has started: right to within a frame.
      */
     val pendingClipStart = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    // Developer: write the next analysed frame's raw planes to disk, for desk replay.
+    val dumpNextFrame = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    var lastDumpPath by remember { mutableStateOf<String?>(null) }
+    val dumpContext = LocalContext.current
+    val dumpDir = remember { File(dumpContext.getExternalFilesDir(null), "frames") }
     var clipStartSensorMs by remember { mutableStateOf<Double?>(null) }
 
     // The striker's hand, for the line card. Set by the operator; this phone is never told.
@@ -1084,15 +1093,22 @@ private fun CameraMode(
          * one while the analyzer quietly kept the first.
          */
         var lumaScratch: ByteArray? = null
+        /** The U (blue-difference) plane, for the colour pass. Same one-buffer rule. */
+        var chromaScratch: ByteArray? = null
 
         /** The turn the previous frame arrived at, so a rotation can be told from a pan. */
         var lastTurn: Int? = null
         /** Camera-clock ms of the last frame on which the detector saw anything at all. */
         var lastSightingMs = 0L
+        var lastAnalysisErrorLogMs = 0L
+        var lastGateLogMs = 0L
         var idleAnalysisFrame = 0
 
         ImageAnalysis.Analyzer { image ->
             try {
+                if (dumpNextFrame.compareAndSet(true, false)) {
+                    lastDumpPath = runCatching { dumpFrame(image, dumpDir) }.getOrElse { "dump failed: ${it.message}" }
+                }
                 val plane = image.planes.getOrNull(0)
                 if (plane != null) {
                     // A quarter turn swaps the picture's width and height. Both engines
@@ -1166,6 +1182,19 @@ private fun CameraMode(
                      * twelve-frame hold this replaced, wearing better clothes.
                      */
                     val lookingForWicket = !trackingNow && stumpDetector.available
+                    // Once a second: which gates are open. The first thing to read when the
+                    // readout says the detector has seen no frames at all.
+                    val gateNow = android.os.SystemClock.elapsedRealtime()
+                    if (gateNow - lastGateLogMs > 1_000L) {
+                        lastGateLogMs = gateNow
+                        android.util.Log.i(
+                            ANALYSIS_TAG,
+                            "gates tracking=$trackingNow thermal=$thermalThrottled opencv=${stumpDetector.available} " +
+                                "pitch=$lookingForPitch wicket=$lookingForWicket auto=$autoSegment " +
+                                "frame=${image.width}x${image.height}@${image.imageInfo.rotationDegrees} " +
+                                "trackerFrames=${wicketTracker.diagnostics().framesSeen}",
+                        )
+                    }
                     if (thermalThrottled || (!trackingNow && !lookingForPitch && !lookingForWicket)) {
                         return@Analyzer
                     }
@@ -1176,6 +1205,15 @@ private fun CameraMode(
                     val bytes = lumaScratch?.takeIf { it.size == needed }
                         ?: ByteArray(needed).also { lumaScratch = it }
                     buffer.get(bytes)
+                    val uPlane = image.planes.getOrNull(1)
+                    val chroma = uPlane?.let { up ->
+                        val ub = up.buffer
+                        ub.rewind()
+                        val n = ub.remaining()
+                        val out = chromaScratch?.takeIf { it.size == n } ?: ByteArray(n).also { chromaScratch = it }
+                        ub.get(out)
+                        out
+                    }
 
                     /*
                      * One frame, one job.
@@ -1237,11 +1275,14 @@ private fun CameraMode(
                         val ballQuiet = latestBall?.let { frameMs - it.timestampMs > 1_500 } ?: true
                         if (autoSegment && ballQuiet && idleAnalysisFrame % 4 == 0 && stumpDetector.available) {
                             val sightings = stumpDetector.detectCandidates(
-                                luma = bytes,
+                                y = bytes,
                                 width = image.width,
                                 height = image.height,
-                                rowStride = plane.rowStride,
+                                yRowStride = plane.rowStride,
                                 rotationDegrees = image.imageInfo.rotationDegrees,
+                                u = chroma,
+                                uRowStride = uPlane?.rowStride ?: 0,
+                                uPixelStride = uPlane?.pixelStride ?: 1,
                                 creases = pitchDetector.creases(),
                                 lookForStones = wicketLock?.kind != com.haraan.app.vision.WicketKind.STUMPS,
                                 focus = wicketTracker.focus(),
@@ -1328,11 +1369,14 @@ private fun CameraMode(
                                     else -> false
                                 }
                                 val sightings = stumpDetector.detectCandidates(
-                                    luma = bytes,
+                                    y = bytes,
                                     width = image.width,
                                     height = image.height,
-                                    rowStride = plane.rowStride,
+                                    yRowStride = plane.rowStride,
                                     rotationDegrees = image.imageInfo.rotationDegrees,
+                                    u = chroma,
+                                    uRowStride = uPlane?.rowStride ?: 0,
+                                    uPixelStride = uPlane?.pixelStride ?: 1,
                                     creases = pitchDetector.creases(),
                                     // A stumps lock is never served by a stone; skipping that
                                     // search is most of this stage's per-frame cost.
@@ -1373,8 +1417,19 @@ private fun CameraMode(
                         }
                     }
                 }
-            } catch (_: Throwable) {
-                // Never let analysis break the camera.
+            } catch (t: Throwable) {
+                /*
+                 * Never let analysis break the camera — but never hide why it stopped, either.
+                 * This used to swallow everything silently, so a detector that failed on every
+                 * frame looked exactly like one that simply had not found the stumps. Logged
+                 * at most every two seconds, and shown in the developer readout.
+                 */
+                val nowMs = android.os.SystemClock.elapsedRealtime()
+                if (nowMs - lastAnalysisErrorLogMs > 2_000L) {
+                    lastAnalysisErrorLogMs = nowMs
+                    android.util.Log.w(ANALYSIS_TAG, "frame analysis failed", t)
+                    analysisError = "${t.javaClass.simpleName}: ${t.message ?: ""}".take(160)
+                }
             } finally {
                 image.close()
             }
@@ -2247,12 +2302,27 @@ private fun CameraMode(
                         camera = cameraIntrinsics,
                         uprightWidthPx = uprightWidthPx,
                         cameraToFirstFrameMs = cameraToFirstFrameMs,
+                        detectorAvailable = stumpDetector.available,
+                        analysisError = analysisError,
                         modifier = Modifier
                             .widthIn(max = 300.dp)
                             .clip(RoundedCornerShape(14.dp))
                             .background(Color.Black.copy(alpha = 0.82f))
                             .padding(12.dp),
                     )
+                    Spacer(Modifier.height(8.dp))
+                    Row(
+                        Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF2563EB))
+                            .clickable { dumpNextFrame.set(true) }
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                    ) {
+                        Text("Dump frame", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    lastDumpPath?.let {
+                        Text(it, color = Color.White.copy(alpha = 0.6f), fontSize = 9.5.sp, fontFamily = FontFamily.Monospace)
+                    }
                     Spacer(Modifier.height(8.dp))
                     val validationContext = LocalContext.current
                     com.haraan.app.vision.WicketValidationPanel(
@@ -4181,6 +4251,8 @@ private const val CAMERA_TRAIL_POINTS = 30
  * in [STEADY_CHECK_EVERY]. About two thirds of a second: long enough that a lock still
  * settling gets every frame, short enough that the saving starts almost at once.
  */
+private const val ANALYSIS_TAG = "HaraanCameraAnalysis"
+
 private const val STEADY_LOCK_FRAMES = 20
 private const val STEADY_CHECK_EVERY = 3
 
@@ -4238,6 +4310,34 @@ private fun readBackLens(context: Context): BackLens? = runCatching {
     }
     BackLens(focal.toDouble(), sensor.width.toDouble(), calibrated)
 }.getOrNull()
+
+/**
+ * The raw YUV planes of one analysis frame, for replaying a real scene through the detector
+ * at a desk. Format: "HYUV", then big-endian ints width, height, rotation, and for each of
+ * the three planes rowStride, pixelStride, byte count, bytes.
+ */
+private fun dumpFrame(image: androidx.camera.core.ImageProxy, dir: File): String {
+    dir.mkdirs()
+    val file = File(dir, "frame-${System.currentTimeMillis()}.hyuv")
+    java.io.DataOutputStream(java.io.BufferedOutputStream(java.io.FileOutputStream(file))).use { out ->
+        out.writeBytes("HYUV")
+        out.writeInt(image.width)
+        out.writeInt(image.height)
+        out.writeInt(image.imageInfo.rotationDegrees)
+        for (plane in image.planes) {
+            val buf = plane.buffer
+            buf.rewind()
+            val bytes = ByteArray(buf.remaining())
+            buf.get(bytes)
+            buf.rewind()
+            out.writeInt(plane.rowStride)
+            out.writeInt(plane.pixelStride)
+            out.writeInt(bytes.size)
+            out.write(bytes)
+        }
+    }
+    return file.absolutePath
+}
 
 /** Write the validation log to the app's external files; returns the path for `adb pull`. */
 private fun saveValidationCsv(context: Context, log: com.haraan.app.vision.WicketValidation, cameraSource: String?): String =
