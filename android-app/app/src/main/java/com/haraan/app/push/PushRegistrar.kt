@@ -31,8 +31,10 @@ object PushRegistrar {
         if (!TokenStore.isSignedIn(authToken)) return
 
         FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            // task.result throws on failure (e.g. offline SERVICE_NOT_AVAILABLE) — check first.
+            if (!task.isSuccessful) return@addOnCompleteListener
             val fcmToken = task.result
-            if (!task.isSuccessful || fcmToken.isNullOrBlank()) return@addOnCompleteListener
+            if (fcmToken.isNullOrBlank()) return@addOnCompleteListener
             register(authToken!!, fcmToken)
         }
     }
