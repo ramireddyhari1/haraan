@@ -497,6 +497,8 @@ fun WicketDiagnosticsPanel(
     report: StumpDetectorReport? = null,
     /** How far off level the phone is, from gravity; magnitude only. */
     deviceRollDeg: Float? = null,
+    /** Further label/value rows from the camera screen: ground, shutter, ball resolution. */
+    extraRows: List<Pair<String, String>> = emptyList(),
     /** The lens, for a distance estimate; null when the device reported nothing usable. */
     camera: CameraIntrinsics? = null,
     /** The upright analysis frame's width in pixels, for the span in pixels. */
@@ -623,6 +625,7 @@ fun WicketDiagnosticsPanel(
                 deviceRollDeg?.let { append(" · phone %.1f°".format(kotlin.math.abs(it))) }
             },
         )
+        extraRows.forEach { (label, value) -> DiagnosticRow(label, value) }
 
         report?.let { r ->
             Spacer(Modifier.height(5.dp))
@@ -907,7 +910,7 @@ private fun DrawScope.drawLengthGuide(
     typeface: Typeface?,
 ) {
     val (fw, fh) = framePx
-    val ground = PitchGround.fromWicket(lock, camera, fw, fh) ?: return
+    val ground = PitchGround.best(lock, camera, fw, fh) ?: return
 
     fun toView(p: Pair<Double, Double>) = Offset(
         box.originX + (p.first / fw).toFloat() * box.width,

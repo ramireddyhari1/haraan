@@ -50,6 +50,28 @@ class OpenCvBallTracker(
 ) : CricketVisionEngine {
 
     private var previous: Mat? = null
+
+    /*
+     * HOW FINELY TO LOOK.
+     *
+     * At 480 wide (detail 1) a ball near the far stumps is two or three pixels after the
+     * blur, and much past 12 m it is gone. 1.5 analyses 720 wide: the same ball is half as
+     * big again across and more than twice the pixels, at 2.25 times the work. A phone that
+     * can afford it is given it by the camera screen; one that cannot is stepped back.
+     */
+    @Volatile private var detail = 1.0
+    @Volatile private var pendingDetail: Double? = null
+    private var areaScale = 1.0
+    private var bodyMargin = 4
+
+    /** The analysis resolution as a multiple of the 480-wide baseline. Takes effect next frame. */
+    fun setDetail(factor: Double) {
+        val f = factor.coerceIn(1.0, MAX_DETAIL)
+        if (f != detail) pendingDetail = f
+    }
+
+    /** The detail in use now. */
+    fun detail(): Double = detail
     private var scratchLuma: Mat? = null
     private var scratchPacked: ByteArray? = null
 
@@ -114,6 +136,18 @@ class OpenCvBallTracker(
         val startedAt = System.currentTimeMillis()
         try {
             val turn = ((rotationDegrees % 360) + 360) % 360
+            pendingDetail?.let { next ->
+                // A new resolution is a new picture: start the difference and the empty
+                // scene again. The sightings so far are in frame units and stay valid.
+                pendingDetail = null
+                detail = next
+                previous?.release()
+                previous = null
+                forgetBackground()
+                resetTrackingState()
+            }
+            areaScale = detail * detail
+            bodyMargin = (4 * detail).toInt()
             val gray = toGray(luma, width, height, rowStride, turn) ?: return null
             framesSeen++
 
@@ -204,7 +238,7 @@ class OpenCvBallTracker(
         }
         scratchLuma!!.put(0, 0, packed)
 
-        val scale = analysisWidth.toDouble() / width
+        val scale = analysisWidth * detail / width
         if (scale >= 1.0) {
             // Already small enough; blur in place on a copy.
             val out = Mat()
@@ -216,7 +250,7 @@ class OpenCvBallTracker(
         Imgproc.resize(
             scratchLuma!!,
             small,
-            Size(analysisWidth.toDouble(), (height * scale)),
+            Size(width * scale, (height * scale)),
             0.0,
             0.0,
             Imgproc.INTER_AREA,
@@ -297,7 +331,7 @@ class OpenCvBallTracker(
         // 1. Identify large body clusters (human bodies, torso/legs)
         val bodyBoxes = ArrayList<Rect>()
         for (contour in contours) {
-            val area = Imgproc.contourArea(contour)
+            val area = Imgproc.contourArea(contour) / areaScale
             if (area >= BODY_CLUSTER_MIN_AREA) {
                 bodyBoxes.add(Imgproc.boundingRect(contour))
             }
@@ -309,7 +343,14 @@ class OpenCvBallTracker(
         val imgRows = cur.rows().toDouble()
 
         for (contour in contours) {
-            val area = Imgproc.contourArea(contour)
+            /*
+             * Two units. [rawArea] is processed pixels, and the smallest blob worth judging is
+             * a matter of pixels — below it a shape is noise, at any resolution. Everything
+             * else ([area]) is a physical size, kept in the units of the 480-wide analysis the
+             * limits were measured in, so they mean the same ball at any [detail].
+             */
+            val rawArea = Imgproc.contourArea(contour)
+            val area = rawArea / areaScale
             /*
              * A BALL NEAR THE CAMERA IS BIG. Filmed from behind the bowler's arm, the first
              * metres of every delivery are close to the lens: on a real throw (Realme
@@ -320,7 +361,9 @@ class OpenCvBallTracker(
              * round; the ball 0.81-0.90.
              */
             val nearBall = area > MAX_AREA_PX && area <= MAX_NEAR_BALL_AREA_PX
-            if (area < MIN_AREA_PX || (area > MAX_AREA_PX && !nearBall)) {
+            // The floor rises with the detail, but only linearly: finer analysis is for
+            // smaller balls, yet a few-pixel speck of sensor noise is still a speck.
+            if (rawArea < MIN_AREA_PX * detail || (area > MAX_AREA_PX && !nearBall)) {
                 rejectedSize++
                 contour.release()
                 continue
@@ -329,7 +372,7 @@ class OpenCvBallTracker(
             val bRect = Imgproc.boundingRect(contour)
             if (nearBall) {
                 val per = Imgproc.arcLength(MatOfPoint2f(*contour.toArray()), true)
-                val round = if (per > 0.0) (4.0 * PI * area) / (per * per) else 0.0
+                val round = if (per > 0.0) (4.0 * PI * rawArea) / (per * per) else 0.0
                 val box = max(bRect.width.toDouble() / max(1, bRect.height), bRect.height.toDouble() / max(1, bRect.width))
                 if (round < NEAR_BALL_MIN_CIRCULARITY || box > NEAR_BALL_MAX_ASPECT) {
                     rejectedSize++
@@ -341,8 +384,8 @@ class OpenCvBallTracker(
             // Reject candidates deeply embedded inside a large moving body cluster (e.g. torso/shoulder)
             var inBody = false
             for (bb in bodyBoxes) {
-                if (bRect.x >= bb.x + 4 && (bRect.x + bRect.width) <= (bb.x + bb.width - 4) &&
-                    bRect.y >= bb.y + 4 && (bRect.y + bRect.height) <= (bb.y + bb.height - 4)
+                if (bRect.x >= bb.x + bodyMargin && (bRect.x + bRect.width) <= (bb.x + bb.width - bodyMargin) &&
+                    bRect.y >= bb.y + bodyMargin && (bRect.y + bRect.height) <= (bb.y + bb.height - bodyMargin)
                 ) {
                     inBody = true
                     break
@@ -360,7 +403,7 @@ class OpenCvBallTracker(
                 contour.release()
                 continue
             }
-            val circularity = (4.0 * PI * area) / (perimeter * perimeter)
+            val circularity = (4.0 * PI * rawArea) / (perimeter * perimeter)
             if (circularity < MIN_CIRCULARITY) {
                 rejectedShape++
                 contour.release()
@@ -472,7 +515,24 @@ class OpenCvBallTracker(
                     val pdx = cand.x - predX
                     val pdy = cand.y - predY
                     val distPred = sqrt((pdx * pdx + pdy * pdy).toDouble()).toFloat()
-                    if (distPred > gate) {
+                    /*
+                     * THE BOUNCE IS WHERE A STRAIGHT-LINE PREDICTION IS MOST WRONG. Off the
+                     * pitch the ball's vertical motion in the picture reverses, so the first
+                     * sighting after it lands up to twice that motion away from where the
+                     * track was heading. Seen on a phone: every sighting past the bounce was
+                     * refused here, the track died, a new one began after it, and the trail
+                     * showed half a delivery. A candidate still moving the same way across
+                     * and reversed up-down — the bounce test below — is given that much
+                     * more room. Anything else keeps the tight gate.
+                     */
+                    val reversesY = confirmed.velocityY * dy < 0f &&
+                        (confirmed.velocityX * dx >= 0f || abs(confirmed.velocityX) < BOUNCE_STILL_ACROSS)
+                    val bounceSlack = if (reversesY && confirmed.points.size >= MIN_POINTS_FOR_CONFIRMATION) {
+                        2f * abs(confirmed.velocityY) * dt
+                    } else {
+                        0f
+                    }
+                    if (distPred > gate + bounceSlack) {
                         rejectedTrajectory++
                         continue
                     }
@@ -920,6 +980,9 @@ class OpenCvBallTracker(
 
         /** Below this a candidate is sensor noise; above it, it is a person or a shadow. */
         const val MIN_AREA_PX = 14.0
+
+        /** The finest [setDetail] allowed: 720 wide off a 1280 frame is 1.5. */
+        const val MAX_DETAIL = 2.0
         const val MAX_AREA_PX = 180.0
 
         /** Frames before the empty-scene model is trusted to call a ghost. */
@@ -964,8 +1027,16 @@ class OpenCvBallTracker(
         const val GATE_RADIUS_BASE = 0.05f
         const val MAX_COAST_FRAMES = 2
         const val MAX_COAST_GAP_MS = 160L
-        const val MAX_TENTATIVE_GAP_MS = 55L
+        /*
+         * One dropped frame allowed while a ball is being picked up: at 30 fps that is a
+         * 67 ms gap, and the analyser drops frames by design when it falls behind
+         * (KEEP_ONLY_LATEST). At 55 ms a single drop at release threw the start away.
+         */
+        const val MAX_TENTATIVE_GAP_MS = 75L
         const val MIN_POINTS_FOR_CONFIRMATION = 3
+
+        /** Across-the-frame speed (frame widths per ms) below which a ball counts as going straight. */
+        const val BOUNCE_STILL_ACROSS = 0.00005f
         const val MIN_CONFIRMATION_DISPLACEMENT = 0.045f
         const val SEED_MIN_CIRCULARITY = 0.70
         const val MAX_TENTATIVE_TRACKS = 5

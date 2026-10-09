@@ -46,7 +46,15 @@ class PitchGround private constructor(
     private val towardY: Double,
     /** Horizontal distance from the camera's foot to the stumps, metres. */
     val stumpsDistanceM: Double,
+    /**
+     * True when the camera height was MEASURED (gravity gave the tilt, the stumps' span the
+     * height); false when it is the [DEFAULT_CAMERA_HEIGHT_M] assumption.
+     */
+    val heightMeasured: Boolean = false,
 ) {
+    /** How high the lens is above the ground, metres — measured or assumed, see [heightMeasured]. */
+    val heightM: Double get() = cameraHeightM
+
     /**
      * Where a point on the ground lands in the upright frame, in PIXELS, or null when it is
      * behind the camera.
@@ -73,6 +81,39 @@ class PitchGround private constructor(
         val cr = cos(rollRad)
         val sr = sin(rollRad)
         return Pair(cx + ux * cr - uy * sr, cy + ux * sr + uy * cr)
+    }
+
+    /**
+     * This camera as a [PitchCamera] in PITCH coordinates — x across (picture-right), y up the
+     * pitch from the striker's stumps towards the camera, z up — so the 3D flight fit and the
+     * replay can run on a ground with no pitch corners at all.
+     */
+    fun pitchCamera(widthPx: Int, heightPx: Int): PitchCamera {
+        val s = sin(pitchRad)
+        val c = cos(pitchRad)
+        val cr = cos(rollRad)
+        val sr = sin(rollRad)
+        // The camera's axes in this model's world (camera foot at the origin, z up).
+        val right = doubleArrayOf(1.0, 0.0, 0.0)
+        val down = doubleArrayOf(0.0, -s, -c)
+        val fwd = doubleArrayOf(0.0, c, -s)
+        val row0 = DoubleArray(3) { right[it] * cr - down[it] * sr }
+        val row1 = DoubleArray(3) { right[it] * sr + down[it] * cr }
+        // Into pitch axes: across = (-ty, tx), up the pitch = (tx, ty), up = z.
+        fun toPitch(v: DoubleArray) = doubleArrayOf(
+            v[0] * -towardY + v[1] * towardX,
+            v[0] * towardX + v[1] * towardY,
+            v[2],
+        )
+        val rows = arrayOf(toPitch(row0), toPitch(row1), toPitch(fwd))
+        val camX = -stumpsX
+        val camY = -stumpsY
+        val centre = doubleArrayOf(
+            camX * -towardY + camY * towardX,
+            camX * towardX + camY * towardY,
+            cameraHeightM,
+        )
+        return PitchCamera.of(fPx / heightPx, rows, centre, widthPx.toDouble() / heightPx, heightMeasured)
     }
 
     /**
@@ -144,6 +185,79 @@ class PitchGround private constructor(
                 stumpsDistanceM = dist,
             )
         }
+
+        /** Heights a phone filming a pitch can be at; a solve outside them is a bad reading. */
+        private const val MIN_MEASURED_HEIGHT_M = 0.3
+        private const val MAX_MEASURED_HEIGHT_M = 3.0
+
+        /**
+         * The ground from the wicket AND the phone's attitude: nothing assumed.
+         *
+         * With the tilt and roll known (from gravity, [DeviceTilt]), each stump foot's ray is
+         * a fixed direction in the world. Dropped onto a ground one metre below the lens the
+         * two feet land some distance apart; the real feet are the Laws' span apart, and
+         * since everything scales with the height, the height is the ratio. The stumps'
+         * position follows at the same scale.
+         *
+         * Null for a stone, a ray that never reaches the ground, or a height no stand or hand
+         * could be at (a reading taken mid-shake, a mis-detected foot).
+         */
+        fun fromWicketAndTilt(
+            lock: WicketLock,
+            camera: CameraIntrinsics,
+            widthPx: Int,
+            heightPx: Int,
+            tilt: DeviceTilt.Reading,
+        ): PitchGround? {
+            if (lock.kind != WicketKind.STUMPS || widthPx <= 0 || heightPx <= 0) return null
+            val f = camera.focalFw * widthPx
+            val cx = widthPx / 2.0
+            val cy = heightPx / 2.0
+            val cr = cos(-tilt.rollRad)
+            val sr = sin(-tilt.rollRad)
+            val cp = cos(tilt.pitchRad)
+            val sp = sin(tilt.pitchRad)
+            /** A foot's pixel, roll taken out, dropped onto the ground 1 m below the lens. */
+            fun ground(p: Point2): DoubleArray? {
+                val x = p.x * widthPx - cx
+                val y = p.y * heightPx - cy
+                val xN = (x * cr - y * sr) / f
+                val yN = (x * sr + y * cr) / f
+                val dz = -(yN * cp + sp)
+                if (dz >= -1e-6) return null
+                val t = 1.0 / -dz
+                return doubleArrayOf(t * xN, t * (cp - yN * sp))
+            }
+            val a = ground(lock.anchor.baseLeft) ?: return null
+            val b = ground(lock.anchor.baseRight) ?: return null
+            val apart = hypot(b[0] - a[0], b[1] - a[1])
+            if (apart < 1e-6) return null
+            val h = PitchGeometry.STUMP_CENTRES_SPAN_M / apart
+            if (h < MIN_MEASURED_HEIGHT_M || h > MAX_MEASURED_HEIGHT_M) return null
+            val sX = h * (a[0] + b[0]) / 2.0
+            val sY = h * (a[1] + b[1]) / 2.0
+            val dist = hypot(sX, sY)
+            if (dist < 0.3) return null
+            return PitchGround(
+                fPx = f, cx = cx, cy = cy, cameraHeightM = h, pitchRad = tilt.pitchRad, rollRad = tilt.rollRad,
+                stumpsX = sX, stumpsY = sY, towardX = -sX / dist, towardY = -sY / dist,
+                stumpsDistanceM = dist, heightMeasured = true,
+            )
+        }
+
+        /**
+         * The best ground there is: measured from gravity when the phone is held still,
+         * otherwise the stumps alone at the assumed height.
+         */
+        fun best(
+            lock: WicketLock,
+            camera: CameraIntrinsics,
+            widthPx: Int,
+            heightPx: Int,
+            tilt: DeviceTilt.Reading? = DeviceTilt.steady(),
+        ): PitchGround? =
+            tilt?.let { fromWicketAndTilt(lock, camera, widthPx, heightPx, it) }
+                ?: fromWicket(lock, camera, widthPx, heightPx)
 
         private class Solved(val pitch: Double, val sX: Double, val sY: Double, val perspectiveSlope: Double)
 

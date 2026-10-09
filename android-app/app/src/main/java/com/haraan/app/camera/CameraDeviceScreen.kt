@@ -747,7 +747,7 @@ private fun CameraMode(
      * native allocation is the expensive part.
      */
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
-    val vision = remember { OpenCvBallTracker() }
+    val vision = remember { OpenCvBallTracker().also { it.setDetail(BALL_DETAIL) } }
 
     /*
      * HOW HOT THE PHONE IS.
@@ -918,6 +918,9 @@ private fun CameraMode(
     // How far off level the phone is held, from gravity, for the developer readout only.
     // See [rememberDeviceRoll].
     val deviceRoll by rememberDeviceRoll(enabled = showAdminPanel)
+    /** Holds the shutter fast while filming; see [ShutterControl]. */
+    val shutter = remember { ShutterControl() }
+    rememberDeviceTiltFeed()
 
     /** The wicket placed by hand, two taps at the base of the outer stumps. */
     var wicketTapping by remember { mutableStateOf(false) }
@@ -1095,6 +1098,7 @@ private fun CameraMode(
          * one while the analyzer quietly kept the first.
          */
         var lumaScratch: ByteArray? = null
+        var lumaFrame = 0
         /** The U (blue-difference) plane, for the colour pass. Same one-buffer rule. */
         var chromaScratch: ByteArray? = null
 
@@ -1195,7 +1199,9 @@ private fun CameraMode(
                             "gates tracking=$trackingNow thermal=$thermalThrottled opencv=${stumpDetector.available} " +
                                 "pitch=$lookingForPitch wicket=$lookingForWicket auto=$autoSegment " +
                                 "frame=${image.width}x${image.height}@${image.imageInfo.rotationDegrees} " +
-                                "trackerFrames=${wicketTracker.diagnostics().framesSeen}",
+                                "trackerFrames=${wicketTracker.diagnostics().framesSeen} " +
+                                "ground=${groundSummary(wicketLock, cameraIntrinsics, uprightWidthPx, uprightAspect)} " +
+                                "shutter=${shutter.status} ballDetail=${vision.detail()}",
                         )
                         // While filming: what the ball tracker is doing, as it does it.
                         if (trackingNow) {
@@ -1209,6 +1215,20 @@ private fun CameraMode(
                                     "traj=${b.rejectedTrajectory} still=${b.rejectedStationary} cluster=${b.rejectedCluster} " +
                                     "called=${calledFlight != null}",
                             )
+                            /*
+                             * Finer ball analysis only while the phone keeps up. A frame the
+                             * tracker is still chewing on is a frame KEEP_ONLY_LATEST drops, and
+                             * a missed frame costs more than a sharper one gains.
+                             */
+                            if ((vision.detail() > 1.0 && b.framesSeen >= 45 && b.averageProcessingMs > BALL_BUDGET_MS) ||
+                                (vision.detail() > 1.0 && thermalThrottled)
+                            ) {
+                                vision.setDetail(1.0)
+                                android.util.Log.i(
+                                    ANALYSIS_TAG,
+                                    "ball detail stepped down to 1.0 (avg %.1f ms, thermal=$thermalThrottled)".format(b.averageProcessingMs),
+                                )
+                            }
                         }
                     }
                     if (thermalThrottled || (!trackingNow && !lookingForPitch && !lookingForWicket)) {
@@ -1221,6 +1241,8 @@ private fun CameraMode(
                     val bytes = lumaScratch?.takeIf { it.size == needed }
                         ?: ByteArray(needed).also { lumaScratch = it }
                     buffer.get(bytes)
+                    lumaFrame++
+                    if (lumaFrame % LUMA_SAMPLE_EVERY == 0) shutter.onLuma(sampledMean(bytes), System.currentTimeMillis())
                     val uPlane = image.planes.getOrNull(1)
                     val chroma = uPlane?.let { up ->
                         val ub = up.buffer
@@ -1271,9 +1293,16 @@ private fun CameraMode(
                          */
                         wicketLock = wicketTracker.carry(cameraMove, uprightAspect)
 
-                        // The ball has already been called done: the rest of the clip is
-                        // for the scorer, not for measuring.
-                        if (calledFlight != null) return@Analyzer
+                        /*
+                         * A CALL IS NOT THE END OF LOOKING.
+                         *
+                         * Once a flight was called the tracker used to stop for the rest of
+                         * the clip. On a real phone a person walking past the stumps made a
+                         * five-point "ball" of a swinging hand, it was called, and a real ball
+                         * thrown a moment later could never be tracked. The tracker keeps
+                         * running; a LATER, separate flight that is at least as long replaces
+                         * the call below — the same flight running on past its bounce does not.
+                         */
 
                         // The camera's own monotonic clock, never the UI clock: ball
                         // motion timing has to come from when the sensor saw it.
@@ -1320,13 +1349,35 @@ private fun CameraMode(
                         if (sighting != null) {
                             trackedPoints = vision.track().size
                             latestBall = sighting
-                            ballTrail = vision.track().takeLast(CAMERA_TRAIL_POINTS)
+                            /*
+                             * A delivery is over in a quarter of a second. Once one is called,
+                             * its trail stays on screen; a stray few points afterwards (an arm,
+                             * a bird, the ball rolling back) must not wipe it. A new track takes
+                             * the screen once it is long enough to be a delivery itself.
+                             */
+                            val live = vision.track()
+                            val held = calledFlight
+                            if (held == null || held.isEmpty() || live.isEmpty() ||
+                                (live.first().timestampMs > held.last().timestampMs && live.size >= SUPERSEDE_MIN_POINTS)
+                            ) {
+                                ballTrail = live.takeLast(CAMERA_TRAIL_POINTS)
+                            }
                             trackQuality = vision.quality()
                         }
                         // Asked on every frame, sighting or not: going quiet IS the signal.
                         val flight = vision.track()
                         if (com.haraan.app.vision.FlightEnd.check(flight, frameMs, uprightAspect, wicketLock) != null) {
-                            calledFlight = flight
+                            val called = calledFlight
+                            if (called == null) {
+                                calledFlight = flight
+                            } else if (
+                                flight.isNotEmpty() && called.isNotEmpty() &&
+                                flight.first().timestampMs > called.last().timestampMs &&
+                                flight.size >= maxOf(called.size, SUPERSEDE_MIN_POINTS)
+                            ) {
+                                calledFlight = flight
+                            }
+                            calledFlight?.let { ballTrail = it.takeLast(CAMERA_TRAIL_POINTS) }
                         }
                     } else {
                         // Pitch detector is throttled to once every 4 frames so the Hough
@@ -1603,6 +1654,7 @@ private fun CameraMode(
                     analysisExecutor,
                     analyzer,
                     videoQuality,
+                    shutter,
                 ) { capture, analysis, fps ->
                     videoCapture = capture
                     analysisUseCase = analysis
@@ -2364,6 +2416,11 @@ private fun CameraMode(
                         lock = wicketLock,
                         report = stumpReport,
                         deviceRollDeg = deviceRoll,
+                        extraRows = listOf(
+                            "ground" to groundSummary(wicketLock, cameraIntrinsics, uprightWidthPx, uprightAspect),
+                            "shutter" to shutter.status,
+                            "ball res" to "×%.1f".format(vision.detail()),
+                        ),
                         camera = cameraIntrinsics,
                         uprightWidthPx = uprightWidthPx,
                         cameraToFirstFrameMs = cameraToFirstFrameMs,
@@ -2647,17 +2704,24 @@ private fun CameraMode(
          * measured from.
          */
         val showFlight: (List<com.haraan.app.vision.BallSighting>) -> Unit = { flight ->
-            lastMetrics = com.haraan.app.vision.FlightMetrics.of(
-                track = flight,
-                frameAspect = uprightAspect,
-                quad = found,
-                wicket = wicketLock,
-            ).also { metrics ->
+            /*
+             * NO PITCH CORNERS? THE STUMPS ARE ENOUGH FOR A 3D FLIGHT.
+             *
+             * The 3D fit — and with it the path on the picture and the stadium replay — used
+             * to need four marked crease corners, so on a ground with no paint (a backyard, a
+             * worn gully pitch) a ball was tracked and then nothing followed it. The locked
+             * stumps already give the camera: the lens, the Laws' stump size, and a camera
+             * height assumed at chest level. Used only when there are no corners, and its
+             * numbers are labelled as rough wherever they appear.
+             */
+            val (quadFor3d, groundCamera) = flightCameras(found, wicketLock, cameraIntrinsics, uprightWidthPx, uprightAspect)
+            lastMetrics = com.haraan.app.vision.FlightMetrics.of(flight, uprightAspect, quadFor3d, wicketLock, groundCamera).also { metrics ->
                 // From the fitted flight when there is one — either end of the pitch.
                 lastBounce = metrics.bounce
                 // The path on the real picture first; the 3D replay follows it.
                 val path = metrics.flight3d?.let { f3 ->
-                    found?.let { quad -> com.haraan.app.vision.ArPath.fromFlight(f3, quad, uprightAspect) }
+                    quadFor3d?.let { quad -> com.haraan.app.vision.ArPath.fromFlight(f3, quad, uprightAspect) }
+                        ?: groundCamera?.let { cam -> com.haraan.app.vision.ArPath.fromFlight(f3, cam) }
                 } ?: com.haraan.app.vision.ArPath.fromTrack(flight, uprightAspect, wicketLock, metrics.lbw)
                 arPath = path
                 if (!path.isEmpty) {
@@ -2677,7 +2741,9 @@ private fun CameraMode(
                  * ball bowled down it counts — a throw from the covers or a fielder walking
                  * past does not. A false alarm is let go and the segment keeps watching.
                  */
-                val calibrated = found
+                // Only a pitch a PERSON marked can judge that: a detected one on a tiled or
+                // lined floor threw real deliveries away as false alarms.
+                val calibrated = found?.takeIf { it.source == com.haraan.app.vision.QuadSource.TAPPED }
                 if (calibrated != null) {
                     val trial = com.haraan.app.vision.FlightMetrics.of(flight, uprightAspect, calibrated, wicketLock)
                     if (trial.flight3d == null) {
@@ -4384,7 +4450,7 @@ private const val CAMERA_TRAIL_POINTS = 30
  * in [STEADY_CHECK_EVERY]. About two thirds of a second: long enough that a lock still
  * settling gets every frame, short enough that the saving starts almost at once.
  */
-private const val ANALYSIS_TAG = "HaraanCameraAnalysis"
+internal const val ANALYSIS_TAG = "HaraanCameraAnalysis"
 
 /** Consecutive frames one tap of the developer dump writes. */
 private const val DUMP_BURST = 8
@@ -4394,6 +4460,9 @@ private const val GUIDE_REVEAL_TICKS = 4
 
 /** The length guide stops at this share of the screen's height, above the controls. */
 private const val GUIDE_SAFE_BOTTOM = 0.72f
+
+/** Sightings a later flight needs before it replaces one already called in the same clip. */
+private const val SUPERSEDE_MIN_POINTS = 5
 
 private const val STEADY_LOCK_FRAMES = 20
 private const val STEADY_CHECK_EVERY = 3
@@ -4666,6 +4735,144 @@ internal fun Rect.normalise(point: Offset) =
 
 // ─────────────────────────────────────────────────────── CameraX plumbing ─────
 
+/*
+ * A FIXED 30 FPS, ON EVERY STREAM.
+ *
+ * Asking only the video stream for 30 was not enough: CameraX bound "30" and a Realme
+ * RMX3933 still ran the session at a fixed 20 (the repeating request carried [20, 20]) —
+ * a third fewer ball sightings per delivery. The exposure frame-rate range is set directly
+ * on the preview and analysis requests too. Fixed rather than [x, 30], so the camera never
+ * slows itself down for exposure mid-delivery; in poor light the picture is darker instead,
+ * which the tracker copes with far better than missing frames.
+ */
+@androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
+private fun <T> lockFrameRate(builder: androidx.camera.core.ExtendableBuilder<T>) {
+    androidx.camera.camera2.interop.Camera2Interop.Extender(builder).setCaptureRequestOption(
+        android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
+        android.util.Range(TARGET_FPS, TARGET_FPS),
+    )
+}
+
+private const val TARGET_FPS = 30
+
+/**
+ * WHICH CAMERA THE 3D FLIGHT IS FITTED THROUGH.
+ *
+ * Corners a person tapped (or the stump calibration placed) are the best there is. Corners the
+ * pitch DETECTOR found are not, wherever there are stumps to measure from instead: on a tiled
+ * backyard floor it found "creases" in the tile lines, and a 25 km/h throw came out as
+ * 117 km/h pitching 11 m behind the stumps. The stumps with the phone's measured tilt
+ * ([com.haraan.app.vision.PitchGround.best]) are the stronger camera there.
+ *
+ * Returns the quad to fit through (null for none) and the stumps' camera (null when a quad is
+ * used, or there are no stumps).
+ */
+private fun flightCameras(
+    found: com.haraan.app.vision.PitchQuad?,
+    lock: com.haraan.app.vision.WicketLock?,
+    camera: com.haraan.app.vision.CameraIntrinsics?,
+    uprightWidthPx: Int,
+    uprightAspect: Float,
+): Pair<com.haraan.app.vision.PitchQuad?, com.haraan.app.vision.PitchCamera?> {
+    val ground = lock?.let { l ->
+        val cam = camera ?: return@let null
+        if (uprightWidthPx <= 0 || uprightAspect <= 0f) return@let null
+        val h = (uprightWidthPx / uprightAspect).toInt()
+        com.haraan.app.vision.PitchGround.best(l, cam, uprightWidthPx, h)?.pitchCamera(uprightWidthPx, h)
+    }
+    val quad = found?.takeIf { it.source != com.haraan.app.vision.QuadSource.DETECTED || ground == null }
+    return quad to (if (quad != null) null else ground)
+}
+
+/** The finer ball analysis asked for at start; see [OpenCvBallTracker.setDetail]. */
+private const val BALL_DETAIL = 1.5
+
+/**
+ * Average ball-tracker milliseconds per frame above which the detail steps back to 1. A
+ * Realme RMX3933 ran 1.5 at 15 ms and still analysed 27-28 of 30 frames a second; past
+ * ~20 ms the other engines' share of the 33 ms frame starts to cost whole frames.
+ */
+private const val BALL_BUDGET_MS = 20.0
+
+/**
+ * How the ground under the stumps is known, for the admin readout and the log: the phone's
+ * height measured from its tilt, or the assumption and why.
+ */
+internal fun groundSummary(
+    lock: com.haraan.app.vision.WicketLock?,
+    camera: com.haraan.app.vision.CameraIntrinsics?,
+    uprightWidthPx: Int,
+    uprightAspect: Float,
+): String {
+    val tilt = com.haraan.app.vision.DeviceTilt.steady()
+    val tiltText = tilt?.let {
+        "down %.1f° roll %+.1f°".format(Math.toDegrees(it.pitchRad), Math.toDegrees(it.rollRad))
+    } ?: "phone moving"
+    if (lock == null || camera == null || uprightWidthPx <= 0 || uprightAspect <= 0f) return "no stumps · $tiltText"
+    val h = (uprightWidthPx / uprightAspect).toInt()
+    val g = com.haraan.app.vision.PitchGround.best(lock, camera, uprightWidthPx, h, tilt) ?: return "unsolved · $tiltText"
+    return if (g.heightMeasured) {
+        "phone %.2f m up, stumps %.1f m · $tiltText".format(g.heightM, g.stumpsDistanceM)
+    } else {
+        "assumed %.1f m up, stumps %.1f m · $tiltText".format(g.heightM, g.stumpsDistanceM)
+    }
+}
+
+/** Lets [ShutterControl] read what auto-exposure chose, frame by frame. */
+@androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
+private fun <T> watchExposure(builder: androidx.camera.core.ExtendableBuilder<T>, shutter: ShutterControl) {
+    androidx.camera.camera2.interop.Camera2Interop.Extender(builder).setSessionCaptureCallback(shutter.callback)
+}
+
+/** Mean of a luma plane from a sparse sample: brightness, not detail, is the question. */
+private fun sampledMean(bytes: ByteArray): Double {
+    if (bytes.isEmpty()) return 0.0
+    var sum = 0L
+    var n = 0
+    var i = 0
+    while (i < bytes.size) {
+        sum += bytes[i].toInt() and 0xFF
+        n++
+        i += LUMA_SAMPLE_STRIDE
+    }
+    return sum.toDouble() / n
+}
+
+/** Every fifth frame is plenty to hold exposure; a prime stride avoids sampling one column. */
+private const val LUMA_SAMPLE_EVERY = 5
+private const val LUMA_SAMPLE_STRIDE = 97
+
+/**
+ * Feeds gravity to [com.haraan.app.vision.DeviceTilt] while the camera screen is up, so the
+ * ground under the stumps is solved from the phone's real tilt rather than an assumed height.
+ * TYPE_GRAVITY is the fused, low-pass sensor: cheap enough for a whole match.
+ */
+@Composable
+private fun rememberDeviceTiltFeed() {
+    val context = LocalContext.current
+    androidx.compose.runtime.DisposableEffect(context) {
+        val manager = context.getSystemService(android.content.Context.SENSOR_SERVICE) as? android.hardware.SensorManager
+        val sensor = manager?.getDefaultSensor(android.hardware.Sensor.TYPE_GRAVITY)
+            ?: manager?.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER)
+        val listener = object : android.hardware.SensorEventListener {
+            override fun onSensorChanged(event: android.hardware.SensorEvent) {
+                com.haraan.app.vision.DeviceTilt.onGravity(
+                    event.values[0], event.values[1], event.values[2], System.currentTimeMillis(),
+                )
+            }
+
+            override fun onAccuracyChanged(sensor: android.hardware.Sensor?, accuracy: Int) = Unit
+        }
+        if (manager != null && sensor != null) {
+            manager.registerListener(listener, sensor, android.hardware.SensorManager.SENSOR_DELAY_GAME)
+        }
+        onDispose {
+            manager?.unregisterListener(listener)
+            com.haraan.app.vision.DeviceTilt.clear()
+        }
+    }
+}
+
 private fun bindCamera(
     context: Context,
     view: PreviewView,
@@ -4673,6 +4880,7 @@ private fun bindCamera(
     analysisExecutor: java.util.concurrent.Executor,
     onFrame: ImageAnalysis.Analyzer,
     videoQuality: String,
+    shutter: ShutterControl,
     onReady: (VideoCapture<Recorder>, ImageAnalysis, Int) -> Unit,
 ) {
     val future = ProcessCameraProvider.getInstance(context)
@@ -4725,6 +4933,7 @@ private fun bindCamera(
 
         val preview = Preview.Builder()
             .setResolutionSelector(sizedFor(android.util.Size(1280, 720)))
+            .also { lockFrameRate(it) }
             .build()
             .also { it.setSurfaceProvider(view.surfaceProvider) }
 
@@ -4745,6 +4954,8 @@ private fun bindCamera(
             .setResolutionSelector(sizedFor(android.util.Size(1280, 720)))
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
+            .also { lockFrameRate(it) }
+            .also { watchExposure(it, shutter) }
             .build()
             .also { it.setAnalyzer(analysisExecutor, onFrame) }
         /*
@@ -4790,12 +5001,41 @@ private fun bindCamera(
             )
         }.getOrNull()
 
+        fun supports(b: Pair<VideoCapture<Recorder>, androidx.camera.core.Camera>?, fps: Int) =
+            b?.second?.cameraInfo?.supportedFrameRateRanges?.any { it.lower <= fps && it.upper >= fps } == true
+
+        /*
+         * 60 if the phone can, then a FIXED 30, and only then whatever the camera picks.
+         *
+         * The fallback used to go straight from 60 to "no preference", and a Realme RMX3933
+         * (which offers 30 but not 60) then ran the whole session at a fixed 20 fps, in
+         * bright sun — a third of every delivery's ball sightings gone, bigger jumps between
+         * the rest, and a REC chip that said 30 regardless. A fixed 30 is asked for by name.
+         */
         val high = if (wantFps > 30) bindWith(wantFps) else null
-        val supportsHigh = high?.second?.cameraInfo?.supportedFrameRateRanges
-            ?.any { it.lower <= wantFps && it.upper >= wantFps } == true
-        val bound = if (high != null && supportsHigh) high else bindWith(null)
+        val bound: Pair<VideoCapture<Recorder>, androidx.camera.core.Camera>?
+        val gotFps: Int
+        if (high != null && supports(high, wantFps)) {
+            bound = high
+            gotFps = wantFps
+        } else {
+            val thirty = bindWith(30)
+            if (thirty != null && supports(thirty, 30)) {
+                bound = thirty
+                gotFps = 30
+            } else {
+                bound = bindWith(null)
+                gotFps = 30
+            }
+        }
         if (bound != null) {
-            onReady(bound.first, analysis, if (bound === high) wantFps else 30)
+            android.util.Log.i(
+                ANALYSIS_TAG,
+                "camera bound: asked $wantFps, got $gotFps, supported " +
+                    bound.second.cameraInfo.supportedFrameRateRanges.joinToString(),
+            )
+            shutter.attach(bound.second)
+            onReady(bound.first, analysis, gotFps)
         }
     }, ContextCompat.getMainExecutor(context))
 }

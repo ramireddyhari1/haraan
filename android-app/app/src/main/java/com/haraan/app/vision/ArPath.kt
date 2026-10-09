@@ -41,6 +41,11 @@ data class ArPath(
          */
         fun fromFlight(flight: Flight3d, quad: PitchQuad, frameAspect: Float): ArPath? {
             val camera = PitchCamera.from(quad, frameAspect) ?: return null
+            return fromFlight(flight, camera)
+        }
+
+        /** The fitted flight through a camera given directly (the stumps-only model). */
+        fun fromFlight(flight: Flight3d, camera: PitchCamera): ArPath? {
             val start = flight.releaseMs
             val end = flight.stumpsMs?.takeIf { it > start } ?: flight.lastSeenMs
             val points = (0..SAMPLES).mapNotNull { i ->

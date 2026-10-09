@@ -21,7 +21,7 @@ import kotlin.math.sqrt
  * Image coordinates here are the package's usual normalised upright ones; internally they
  * are centred and put in frame-height units so x and y are the same unit.
  */
-internal class PitchCamera private constructor(
+class PitchCamera private constructor(
     /** Focal length in frame heights. */
     val focal: Double,
     /** World axes in camera coordinates, as the columns of R: x across, y up the pitch, z. */
@@ -31,6 +31,11 @@ internal class PitchCamera private constructor(
     /** +1 when world z points up out of the pitch, -1 when the solve came out mirrored. */
     val up: Double,
     private val aspect: Double,
+    /**
+     * For a camera given outright ([of]): whether its height was measured or assumed. A
+     * camera solved from pitch corners always measured it.
+     */
+    val heightMeasured: Boolean = true,
 ) {
     /** How high the lens is above the pitch, in metres. */
     val heightM: Double get() = up * centre[2]
@@ -64,6 +69,19 @@ internal class PitchCamera private constructor(
         private const val MAX_FOCAL = 8.0
         private const val MIN_HEIGHT_M = 0.3
         private const val MAX_HEIGHT_M = 30.0
+
+        /**
+         * A camera given outright rather than solved from corners — the stumps-only model in
+         * [PitchGround.pitchCamera]. [rows] are the camera's axes in pitch metres, [centre]
+         * the lens in pitch metres, [focalHeights] the focal length in frame heights.
+         */
+        internal fun of(
+            focalHeights: Double,
+            rows: Array<DoubleArray>,
+            centre: DoubleArray,
+            aspect: Double,
+            heightMeasured: Boolean = false,
+        ): PitchCamera = PitchCamera(focalHeights, rows, centre, 1.0, aspect, heightMeasured)
 
         fun from(quad: PitchQuad, frameAspect: Float): PitchCamera? {
             val aspect = if (frameAspect > 0f) frameAspect.toDouble() else return null
@@ -165,8 +183,19 @@ object QuadSpeed {
     const val MAX_LOOKBACK_MS = 900L
 
     /** Outside this the fit has found something that is not a cricket delivery. */
-    const val MIN_KMH = 25.0
+    /*
+     * The slowest thing fitted as a ball. 25 refused a real backyard throw at 24 km/h — a
+     * gentle practice lob, a child's delivery — and with it every replay. People walking
+     * past are ~5 km/h, so 15 still keeps them out.
+     */
+    const val MIN_KMH = 15.0
     const val MAX_KMH = 175.0
+
+    /** A bounce fitted just behind the stump line is a full toss fitted low; metres behind is not a ball. */
+    const val MIN_BOUNCE_ALONG_M = -0.5
+
+    /** The bowler's popping crease is 20.12 m from the stumps' line plus 1.22 m; a little past it. */
+    const val MAX_BOUNCE_ALONG_M = 21.5
 
     /**
      * The delivery in three dimensions, or why not. [estimate] is this, read for one number;
@@ -185,6 +214,19 @@ object QuadSpeed {
     ): FitResult {
         val camera = PitchCamera.from(quad, frameAspect)
             ?: return FitResult.Refused("the pitch corners do not describe a camera — re-mark them")
+        return fit(run, camera, bounce, frameAspect)
+    }
+
+    /**
+     * The same fit through a camera given directly — the stumps-only model when no pitch
+     * corners exist, as in a backyard with no painted creases.
+     */
+    fun fit(
+        run: List<BallSighting>,
+        camera: PitchCamera,
+        bounce: Bounce?,
+        frameAspect: Float,
+    ): FitResult {
         if (run.size < MIN_PRE_BOUNCE + 2) {
             return FitResult.Refused("needs ${MIN_PRE_BOUNCE + 2} sightings in one flight, have ${run.size}")
         }
@@ -242,6 +284,17 @@ object QuadSpeed {
         val kmh = hypot(v[2], v[3]) * 3.6
         if (kmh < MIN_KMH || kmh > MAX_KMH || kmh.isNaN()) {
             return FitResult.Refused("the fit gave %.0f km/h, which is not a delivery".format(kmh))
+        }
+        /*
+         * WHERE IT PITCHED MUST BE ON THE PITCH. A wrong camera — corners "found" in the
+         * lines of a tiled floor — fits a confident flight that lands metres behind the
+         * stumps. Nothing bowled does that; refuse it rather than draw it.
+         */
+        if (v[1] < MIN_BOUNCE_ALONG_M) {
+            return FitResult.Refused("the fit pitched the ball %.1f m behind the stumps — the camera model is wrong".format(-v[1]))
+        }
+        if (v[1] > MAX_BOUNCE_ALONG_M) {
+            return FitResult.Refused("the fit pitched the ball %.1f m up, past the bowler's crease — the camera model is wrong".format(v[1]))
         }
         val hasAfter = v.size == 8 && v[6] < 0
         return FitResult.Ok(

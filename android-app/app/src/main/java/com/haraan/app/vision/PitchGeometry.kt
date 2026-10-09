@@ -347,4 +347,11 @@ enum class QuadSource {
 
     /** Placed by a person tapping the four corners. Trusted above a detection. */
     TAPPED,
+
+    /**
+     * No corners at all: the camera worked out from the locked stumps alone (lens focal
+     * length, the Laws' stump size, an assumed camera height). See [PitchGround]. The
+     * weakest of the three — an estimate, and labelled as one wherever it is used.
+     */
+    WICKET,
 }

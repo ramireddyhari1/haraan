@@ -79,7 +79,16 @@ class BallReplayTest {
     }
 
     @Test
-    fun `the tracker on the real frames, and with a ball rolled down the pitch`() {
+    fun `the tracker on the real frames, and with a ball rolled down the pitch`() = rolled(1.0)
+
+    /**
+     * The same at the finer analysis the camera screen asks for: the noise of a still scene
+     * must still never pass for motion, and the ball must still be followed.
+     */
+    @Test
+    fun `at the finer 720-wide analysis too`() = rolled(OpenCvBallTrackerDetail.FINE)
+
+    private fun rolled(detail: Double) {
         OpenCvJvm.require()
         // The scene is still, so the stored burst is cycled for a longer run (keeps the
         // repository small): eight steps, 50 ms apart, each on a real frame's real noise.
@@ -87,7 +96,7 @@ class BallReplayTest {
         val frames = (0 until 8).map { i -> (i * 50L) to stored[i % stored.size].second }
         val t0 = 0L
         for (withBall in listOf(false, true)) {
-            val tracker = OpenCvBallTracker()
+            val tracker = OpenCvBallTracker().also { it.setDetail(detail) }
             var seen = 0
             frames.forEachIndexed { i, (ts, f) ->
                 // Rolling towards the camera from just in front of the stumps.
@@ -112,4 +121,41 @@ class BallReplayTest {
             }
         }
     }
+
+    /**
+     * THE TRAIL MUST NOT END AT THE BOUNCE. Seen on the phone: the red line followed the
+     * ball down towards the pitch and stopped there. At the bounce the ball turns sharply in
+     * the picture — down towards the pitch, then flatter and slower on to the stumps — and
+     * the next sighting lands well off a straight-line prediction. Every sighting after it
+     * was thrown away and the track died with half the delivery missing.
+     */
+    @Test
+    fun `the track carries on through the bounce`() {
+        OpenCvJvm.require()
+        val stored = burst()
+        for (detail in listOf(1.0, OpenCvBallTrackerDetail.FINE)) {
+            val tracker = OpenCvBallTracker().also { it.setDetail(detail) }
+            // Warm the empty scene, then 7 frames falling to the pitch and 6 after it.
+            var ux = 250.0
+            var uy = 380.0
+            val path = ArrayList<Pair<Double, Double>>()
+            repeat(4) { path.add(Double.NaN to Double.NaN) }
+            repeat(7) { path.add(ux to uy); ux += 8.0; uy += 60.0 }
+            repeat(6) { path.add(ux to uy); ux += 12.0; uy -= 22.0 }
+            var after = 0
+            path.forEachIndexed { i, (x, y) ->
+                val f = stored[i % stored.size].second
+                val luma = if (x.isNaN()) f.y else withBall(f, x, y, 8.0, 235)
+                val s = tracker.onFrame(luma, f.width, f.height, f.yRowStride, f.rotation, i * 33L)
+                if (s != null && i >= 4 + 7) after++
+            }
+            val d = tracker.diagnostics()
+            println("detail=$detail points=${tracker.track().size} afterBounce=$after traj=${d.rejectedTrajectory} still=${d.rejectedStationary} size=${d.rejectedSize} shape=${d.rejectedShape} cluster=${d.rejectedCluster} state=${d.trackingState}")
+            org.junit.Assert.assertTrue("detail $detail: sightings after the bounce $after", after >= 4)
+        }
+    }
+}
+
+private object OpenCvBallTrackerDetail {
+    const val FINE = 1.5
 }

@@ -182,6 +182,12 @@ data class FlightMetrics(
             frameAspect: Float,
             quad: PitchQuad? = null,
             wicket: WicketLock? = null,
+            /**
+             * The camera from the locked stumps alone, used only when there is no [quad]:
+             * on a ground with no creases to mark it is what makes a 3D flight — and the
+             * replay — possible at all. See [PitchGround.pitchCamera].
+             */
+            ground: PitchCamera? = null,
         ): FlightMetrics {
             // The current flight only. Sightings from before the ball was lost belong to a
             // different delivery and averaging across the gap would describe neither.
@@ -195,9 +201,21 @@ data class FlightMetrics(
              * readouts can disagree. [BouncePoint] only gives the fit a head start.
              */
             val roughBounce = quad?.let { locateBounce(run, it) }
-            val fit = quad?.let { QuadSpeed.fit(run, it, roughBounce, frameAspect) }
+            val fromGround = quad == null && ground != null
+            val fit = when {
+                quad != null -> QuadSpeed.fit(run, quad, roughBounce, frameAspect)
+                ground != null -> QuadSpeed.fit(run, ground, null, frameAspect)
+                else -> null
+            }
             val flight3d = (fit as? QuadSpeed.FitResult.Ok)?.flight
-            val bounce = flight3d?.let { f -> bounceOf(f, quad, frameAspect, run.size) } ?: roughBounce
+            val camera = quad?.let { PitchCamera.from(it, frameAspect) } ?: ground
+            val bounce = flight3d?.let { f ->
+                bounceOf(
+                    f, camera, frameAspect, run.size,
+                    source = if (fromGround) QuadSource.WICKET else quad!!.source,
+                    end = quad?.cameraEnd ?: CameraEnd.BOWLER,
+                )
+            } ?: roughBounce
             val scale = wicket?.takeIf { it.isMeasurable }?.metresPerUnitAcross()
 
             /*
@@ -217,7 +235,7 @@ data class FlightMetrics(
             return FlightMetrics(
                 imageSpeed = imageSpeed(run, aspect),
                 groundSpeed = groundSpeed(run, frameAspect, wicket).let { fromWicket ->
-                    if (fromWicket is MetricValue.Measured) fromWicket else cornerSpeed(quad, fit, fromWicket)
+                    if (fromWicket is MetricValue.Measured) fromWicket else cornerSpeed(quad, fit, fromWicket, fromGround, ground?.heightMeasured == true)
                 },
                 curve = deviation(run, aspect, "whole flight", scale),
                 swing = when {
@@ -390,17 +408,27 @@ data class FlightMetrics(
             quad: PitchQuad?,
             fit: QuadSpeed.FitResult?,
             fromWicket: MetricValue,
+            fromGround: Boolean = false,
+            heightMeasured: Boolean = false,
         ): MetricValue {
             val why = (fromWicket as? MetricValue.Unavailable)?.reason ?: "no wicket speed"
-            if (quad == null) {
+            if (quad == null && !fromGround) {
                 return MetricValue.Unavailable("$why; or calibrate the pitch from either end")
             }
             return when (fit) {
                 is QuadSpeed.FitResult.Ok -> MetricValue.Estimated(
                     fit.flight.speedKmh,
                     "km/h",
-                    "average before the bounce, from the pitch calibration (camera %.1f m up) — a little under release speed"
-                        .format(fit.flight.cameraHeightM),
+                    if (fromGround && heightMeasured) {
+                        "average before the bounce, from the stumps and the phone's tilt (camera %.2f m up)"
+                            .format(fit.flight.cameraHeightM)
+                    } else if (fromGround) {
+                        "average before the bounce, from the stumps alone (camera assumed %.1f m up) — rough"
+                            .format(fit.flight.cameraHeightM)
+                    } else {
+                        "average before the bounce, from the pitch calibration (camera %.1f m up) — a little under release speed"
+                            .format(fit.flight.cameraHeightM)
+                    },
                 )
                 is QuadSpeed.FitResult.Refused -> MetricValue.Unavailable(fit.reason)
                 null -> MetricValue.Unavailable(why)
@@ -408,16 +436,21 @@ data class FlightMetrics(
         }
 
         /** The fitted bounce as a [Bounce], placed back in the picture for drawing. */
-        private fun bounceOf(flight: Flight3d, quad: PitchQuad?, frameAspect: Float, sightings: Int): Bounce? {
-            val q = quad ?: return null
-            val image = PitchCamera.from(q, frameAspect)?.project(Point3(flight.bounceX, flight.bounceY, 0.0))
-                ?: return null
+        private fun bounceOf(
+            flight: Flight3d,
+            camera: PitchCamera?,
+            frameAspect: Float,
+            sightings: Int,
+            source: QuadSource,
+            end: CameraEnd,
+        ): Bounce? {
+            val image = camera?.project(Point3(flight.bounceX, flight.bounceY, 0.0)) ?: return null
             return Bounce(
                 image = image,
                 pitch = Point2(flight.bounceX, flight.bounceY),
                 sightingsUsed = sightings,
-                quadSource = q.source,
-                cameraEnd = q.cameraEnd,
+                quadSource = source,
+                cameraEnd = end,
                 atMs = flight.bounceMs,
             )
         }

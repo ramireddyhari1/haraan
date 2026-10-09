@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -53,6 +54,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
@@ -281,10 +283,14 @@ internal data class ReplayClip(val file: File, val startSensorMs: Double?, val p
 /**
  * STEP TWO: the clip itself, in slow motion, with the path growing in step with the ball.
  *
- * Plays only the delivery — a beat before the release to a beat after the stumps — and
- * stops there, rather than ten seconds of a bowler walking back. The line is synced from
- * the moment the recording started on the camera's clock; when that is not known the whole
- * path is shown from the first frame instead of guessing a sync.
+ * The WHOLE clip, start to end — run-up, release, delivery, what happened after. It used to
+ * play only a window around the tracked ball, so when tracking picked the ball up late (at
+ * the bounce, say) the run-up and the release were simply missing from the replay. Now the
+ * clip runs at normal speed up to a beat before the ball, slows to the chosen speed through
+ * the delivery, and returns to normal speed after it. A bar along the bottom shows where the
+ * delivery is in the clip and seeks on a tap. The line is synced from the moment the
+ * recording started on the camera's clock; when that is not known the whole clip plays at
+ * the chosen speed and the whole path is shown from the first frame.
  */
 @Composable
 internal fun VideoReplayOverlay(
@@ -305,6 +311,11 @@ internal fun VideoReplayOverlay(
     val start = clip.startSensorMs
     val windowStart = if (start != null) (clip.path.startMs - start - 700).coerceAtLeast(0.0) else 0.0
     val windowEnd = if (start != null) clip.path.endMs - start + 900 else Double.MAX_VALUE
+    var durationMs by remember { mutableDoubleStateOf(0.0) }
+    /** Where to start the next play from: the clip's beginning, or where the bar was tapped. */
+    var playFromMs by remember { mutableDoubleStateOf(0.0) }
+    /** The speed actually applied now: slow inside the delivery's window, normal outside it. */
+    var appliedSpeed by remember { mutableFloatStateOf(-1f) }
 
     LaunchedEffect(clip.file) {
         // Rotation-corrected shape, so the picture and the line agree on where things are.
@@ -325,8 +336,8 @@ internal fun VideoReplayOverlay(
         onDispose { runCatching { player.release() } }
     }
 
-    fun seekToWindow() {
-        val to = windowStart.toLong()
+    fun seekTo(ms: Double) {
+        val to = ms.toLong()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             player.seekTo(to, MediaPlayer.SEEK_CLOSEST)
         } else {
@@ -334,26 +345,36 @@ internal fun VideoReplayOverlay(
         }
     }
 
-    fun applySpeed() {
-        runCatching { player.playbackParams = PlaybackParams().setSpeed(speed) }
+    /** The chosen slow speed inside the delivery's window, normal speed outside it. */
+    fun speedAt(ms: Double): Float = if (ms in windowStart..windowEnd) speed else 1f
+
+    fun applySpeed(ms: Double) {
+        val want = speedAt(ms)
+        if (want == appliedSpeed) return
+        runCatching { player.playbackParams = PlaybackParams().setSpeed(want) }
+        appliedSpeed = want
     }
 
-    // Play the window, then stop at its end.
+    // Play the whole clip from [playFromMs], slowing through the delivery, to its end.
     LaunchedEffect(prepared, generation) {
         if (!prepared) return@LaunchedEffect
-        seekToWindow()
-        applySpeed()
+        durationMs = player.duration.toDouble().coerceAtLeast(0.0)
+        seekTo(playFromMs)
+        appliedSpeed = -1f
+        applySpeed(playFromMs)
         player.start()
         playing = true
         while (isActive) {
             withFrameMillis { }
             positionMs = player.currentPosition.toDouble()
-            if (positionMs >= windowEnd || !player.isPlaying) {
-                if (player.isPlaying) player.pause()
+            applySpeed(positionMs)
+            if (!player.isPlaying) {
                 playing = false
                 break
             }
         }
+        // Next press of play starts from the beginning again.
+        playFromMs = 0.0
     }
 
     Box(Modifier.fillMaxSize().background(Color.Black).clickable(enabled = false) {}) {
@@ -435,6 +456,50 @@ internal fun VideoReplayOverlay(
             }
         }
 
+        // ── Where we are in the clip; the delivery is the bright stretch. Tap to seek. ──
+        if (durationMs > 0.0) {
+            val total = durationMs
+            Box(
+                Modifier
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(start = 24.dp, end = 24.dp, bottom = 84.dp)
+                    .fillMaxWidth()
+                    .height(28.dp)
+                    .pointerInput(total) {
+                        detectTapGestures { tap ->
+                            val ms = (tap.x / size.width * total).coerceIn(0.0, total)
+                            hostView.performHapticFeedback(Feel.SELECT)
+                            if (playing) {
+                                seekTo(ms)
+                                positionMs = ms
+                            } else {
+                                playFromMs = ms
+                                generation++
+                            }
+                        }
+                    },
+            ) {
+                Canvas(Modifier.fillMaxSize()) {
+                    val y = size.height / 2f
+                    val h = 4.dp.toPx()
+                    fun xOf(ms: Double) = (ms / total).coerceIn(0.0, 1.0).toFloat() * size.width
+                    drawLine(Color.White.copy(alpha = 0.22f), Offset(0f, y), Offset(size.width, y), h, StrokeCap.Round)
+                    if (start != null) {
+                        drawLine(
+                            Color(0xFFFF4D4D).copy(alpha = 0.75f),
+                            Offset(xOf(windowStart), y),
+                            Offset(xOf(windowEnd.coerceAtMost(total)), y),
+                            h,
+                            StrokeCap.Round,
+                        )
+                    }
+                    drawLine(Color.White, Offset(0f, y), Offset(xOf(positionMs), y), h * 0.6f, StrokeCap.Round)
+                    drawCircle(Color.White, 6.dp.toPx(), Offset(xOf(positionMs), y))
+                }
+            }
+        }
+
         // ── Speed and play again ──
         Row(
             Modifier
@@ -463,7 +528,10 @@ internal fun VideoReplayOverlay(
                             .clickable {
                                 hostView.performHapticFeedback(Feel.SELECT)
                                 speed = value
-                                if (playing) applySpeed()
+                                if (playing) {
+                                    appliedSpeed = -1f
+                                    applySpeed(positionMs)
+                                }
                             }
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                     )
