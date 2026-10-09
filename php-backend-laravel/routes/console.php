@@ -23,6 +23,21 @@ Artisan::command('actionboard:expire-verifications', function () {
 
 Schedule::command('actionboard:expire-verifications')->hourly();
 
+// Matches started and then left: still "Live" with nothing scored for the admin-set hours.
+// Marked Abandoned (not finished), so they leave the Live tab without counting as results.
+Artisan::command('matches:close-stale {--dry-run : List what would close, change nothing}', function (\App\Services\StaleMatchCloser $closer) {
+    if (! \App\Services\StaleMatchCloser::enabled()) {
+        $this->info('Auto-close is switched off in /control.');
+
+        return;
+    }
+    $ids = $closer->close((bool) $this->option('dry-run'));
+    $verb = $this->option('dry-run') ? 'Would abandon' : 'Abandoned';
+    $this->info("{$verb} ".count($ids).' idle live match(es)'.($ids ? ': '.implode(', ', $ids) : '.'));
+})->purpose('Abandon live matches with no scoring for the configured hours');
+
+Schedule::command('matches:close-stale')->hourly()->withoutOverlapping();
+
 // Release expired ticket locks (abandoned checkouts) so the seat returns to the
 // pool for the next buyer, without waiting for someone to next book that event.
 Artisan::command('bookings:release-expired', function (BookingService $bookings) {
