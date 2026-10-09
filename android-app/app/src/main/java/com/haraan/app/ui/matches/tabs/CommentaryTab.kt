@@ -1,5 +1,6 @@
 package com.haraan.app.ui.matches.tabs
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -26,6 +27,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.runtime.remember
 import coil.compose.AsyncImage
 import com.haraan.app.data.ApiConfig
@@ -50,18 +58,19 @@ import com.haraan.app.ui.theme.premiumCardShadow
 private val SixGreen = HaraanColors.Success
 private val FourBlue = HaraanColors.EventsBlue
 
-// ── Broadcast lower-third palette ──────────────────────────────────────────────
-// The wicket card is INK with one lit red edge, not a red fill. A saturated two-stop
-// gradient slab is the loudest "generated UI" tell there is, and filling the whole card
-// red made every dismissal shout at the same volume as everything else on the screen.
-private val InkTop    = Color(0xFF1A202C)
-private val InkBottom = Color(0xFF0C1017)
+// The wicket card is WHITE with one red edge and a drawn scene, not a dark or red slab —
+// a filled slab is the loudest "generated UI" tell there is, and it read as cheap.
 private val WicketRed = Color(0xFFE5484D)
-// The well a face sits in on the ink card. Opaque on purpose — the ring disc is directly
-// beneath it, so a translucent fill composites over RED and turns the whole face pink.
-private val InkFaceWell = Color(0xFF232B3A)
 // One amber for every extra (wd/nb/b/lb) instead of a pair of raw hex literals.
 private val ExtraAmber = Color(0xFFB45309)
+
+/**
+ * A dp that grows with the phone's font-size setting, the way sp text already does — so a
+ * ball chip or a face never ends up smaller than the text beside it on a phone set to large
+ * text. Capped so the biggest accessibility scales don't blow the feed apart.
+ */
+@Composable
+private fun Dp.fontScaled(): Dp = this * LocalDensity.current.fontScale.coerceIn(1f, 1.5f)
 
 @Composable
 fun BallCircle(ball: String) {
@@ -407,105 +416,184 @@ private fun WicketBanner(line: CommentaryLine, state: MatchUiState) {
         .ifBlank { "out" }
     val scoreAtFall = fow?.let { "${it.score}-${it.wicketNo}" }
 
+    val faceSize = 62.dp.fontScaled()
+    val shape = RoundedCornerShape(18.dp)
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .premiumCardShadow(radius = 16.dp, ambient = 14.dp, contact = 3.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Brush.verticalGradient(listOf(InkTop, InkBottom)))
-            .drawBehind {
-                // The light the red edge throws across the panel, then the lit edge itself,
-                // then a hairline of top light — so the card reads as a lit surface with a
-                // source, not as a flat rectangle someone filled in.
-                drawRect(
-                    brush = Brush.horizontalGradient(
-                        0f to WicketRed.copy(alpha = 0.13f),
-                        1f to Color.Transparent
-                    ),
-                    size = Size(40.dp.toPx(), size.height)
-                )
-                drawRect(color = WicketRed, size = Size(3.dp.toPx(), size.height))
-                drawLine(
-                    color = Color.White.copy(alpha = 0.07f),
-                    start = Offset(0f, 0f),
-                    end = Offset(size.width, 0f),
-                    strokeWidth = 1.dp.toPx()
-                )
-            }
-            .padding(start = 13.dp, end = 13.dp, top = 9.dp, bottom = 9.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .premiumCardShadow(radius = 18.dp, ambient = 10.dp, contact = 2.dp)
+            .clip(shape)
+            .background(CrexColors.Surface)
+            .border(1.dp, WicketRed.copy(alpha = 0.22f), shape)
+            // One red edge on a white card — the colour marks the moment, the card stays
+            // in the same family as every other row in the feed.
+            .drawBehind { drawRect(WicketRed, size = Size(4.dp.toPx(), size.height)) }
+            .padding(start = 16.dp, end = 12.dp, top = 14.dp, bottom = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // The player is the subject of a dismissal, not the ball — so their face leads
-        // and the W rides it as a badge, notched out of the photo by an ink-coloured
-        // collar so the two never smudge into each other.
+        // and the W rides it as a badge, cut out of the photo by a white collar.
         Box(contentAlignment = Alignment.BottomEnd) {
             PlayerFace(
                 photoUrl = line.photoUrl,
                 name = batterName ?: line.battingName,
-                size = 40.dp,
+                size = faceSize,
                 ring = WicketRed,
-                ringWidth = 2.dp,
-                faceBg = InkFaceWell,
-                initialColor = Color.White.copy(alpha = 0.80f)
+                ringWidth = 2.5.dp,
+                faceBg = WicketTint,
+                initialColor = WicketRed
             )
             Box(
                 modifier = Modifier
-                    .offset(x = 3.dp, y = 2.dp)
-                    .size(19.dp).clip(CircleShape).background(InkBottom),
+                    .offset(x = 4.dp, y = 3.dp)
+                    .size(24.dp.fontScaled()).clip(CircleShape).background(CrexColors.Surface),
                 contentAlignment = Alignment.Center
             ) {
                 Box(
-                    modifier = Modifier.size(15.dp).clip(CircleShape).background(WicketRed),
+                    modifier = Modifier.size(19.dp.fontScaled()).clip(CircleShape).background(WicketRed),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        "W", color = Color.White, fontSize = 8.sp, fontWeight = FontWeight.Bold,
+                        "W", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold,
                         style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
                     )
                 }
             }
         }
-        Spacer(Modifier.width(13.dp))
+        Spacer(Modifier.width(14.dp))
         Column(Modifier.weight(1f)) {
-            // "WICKET" alone. The white OUT pill next to it said the same word twice,
-            // and the dismissal line below says it a third time.
-            Text("WICKET", color = WicketRed, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.4.sp)
-            Spacer(Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    batterName ?: line.battingName.ifBlank { "Batter" },
-                    color = Color.White, fontSize = 15.sp,
-                    fontFamily = com.haraan.app.theme.ArchivoDisplay,
-                    maxLines = 1
-                )
-                if (figures != null) {
-                    Spacer(Modifier.width(7.dp))
-                    Text(
-                        figures,
-                        color = Color.White.copy(alpha = 0.62f), fontSize = 13.sp,
-                        fontFamily = com.haraan.app.theme.ArchivoDisplay,
-                        style = TextStyle(fontFeatureSettings = "tnum"),
-                        modifier = Modifier.padding(bottom = 1.dp)
-                    )
-                }
-            }
+            // "WICKET" alone. The dismissal line below already says how.
+            Text("WICKET", color = WicketRed, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.5.sp)
             Spacer(Modifier.height(2.dp))
-            Text(dismissal, color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp, maxLines = 2)
+            Text(
+                batterName ?: line.battingName.ifBlank { "Batter" },
+                color = CrexColors.TextPrimary, fontSize = 18.sp, lineHeight = 22.sp,
+                fontFamily = com.haraan.app.theme.ArchivoDisplay,
+                maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+            if (figures != null) {
+                Text(
+                    figures,
+                    color = CrexColors.TextSecondary, fontSize = 15.sp,
+                    fontFamily = com.haraan.app.theme.ArchivoDisplay,
+                    style = TextStyle(fontFeatureSettings = "tnum")
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                dismissal, color = CrexColors.TextSecondary,
+                fontSize = 13.5.sp, lineHeight = 18.sp, maxLines = 3,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
         }
         Spacer(Modifier.width(10.dp))
-        Column(horizontalAlignment = Alignment.End) {
+        // The picture of the wicket, then what it cost — stacked, so neither sits on the other.
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Canvas(Modifier.size(width = 70.dp.fontScaled(), height = 58.dp.fontScaled())) { drawBowledScene() }
             if (scoreAtFall != null) {
                 Text(
-                    scoreAtFall, color = Color.White, fontSize = 16.sp,
+                    scoreAtFall, color = CrexColors.TextPrimary, fontSize = 20.sp,
                     fontFamily = com.haraan.app.theme.ArchivoDisplay,
                     style = TextStyle(fontFeatureSettings = "tnum")
                 )
             }
             if (line.over.isNotBlank()) {
-                if (scoreAtFall != null) Spacer(Modifier.height(1.dp))
-                Text("${line.over} ov", color = Color.White.copy(alpha = 0.5f), fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                Text("${line.over} ov", color = CrexColors.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
             }
+        }
+    }
+}
+
+// Illustration palette for the bowled scene — real wood and real leather, not brand flat.
+private val WicketTint = Color(0xFFFDECEC)
+private val WoodFill = Color(0xFFE6C79A)
+private val WoodLine = Color(0xFF9A7240)
+private val WoodLight = Color(0xFFF6E3C4)
+private val SceneLeather = Color(0xFFC62828)
+private val SceneLeatherDark = Color(0xFF8E1B1B)
+
+/**
+ * A hand-drawn "bowled" moment: a crease and ground shadow, leg and middle stumps standing,
+ * the off stump knocked back, both bails flying, and the ball with its seam coming through
+ * on a short motion trail. Outlined wood with a highlight stripe so it reads as an
+ * illustration with a hand behind it, not a flat icon.
+ */
+private fun DrawScope.drawBowledScene() {
+    val w = size.width
+    val h = size.height
+    val baseY = h * 0.90f
+    val stumpH = h * 0.62f
+    val stumpW = w * 0.075f
+    val gap = w * 0.15f
+    val midX = w * 0.50f
+    val outline = 1.2.dp.toPx()
+
+    // Pale red disc behind the scene — the card's one patch of colour.
+    drawCircle(WicketRed.copy(alpha = 0.08f), radius = h * 0.48f, center = Offset(midX, h * 0.52f))
+    // Ground shadow + crease.
+    drawOval(Color.Black.copy(alpha = 0.07f), topLeft = Offset(midX - gap * 1.9f, baseY - h * 0.035f), size = Size(gap * 3.8f, h * 0.07f))
+    drawLine(WicketRed.copy(alpha = 0.35f), Offset(w * 0.08f, baseY), Offset(w * 0.92f, baseY), strokeWidth = 1.5.dp.toPx(), cap = StrokeCap.Round)
+
+    fun stump(x: Float) {
+        val tl = Offset(x - stumpW / 2, baseY - stumpH)
+        val sz = Size(stumpW, stumpH)
+        drawRoundRect(WoodFill, tl, sz, CornerRadius(stumpW / 2))
+        drawRoundRect(WoodLight, Offset(tl.x + stumpW * 0.22f, tl.y + stumpW * 0.6f), Size(stumpW * 0.22f, stumpH * 0.7f), CornerRadius(stumpW))
+        drawRoundRect(WoodLine, tl, sz, CornerRadius(stumpW / 2), style = Stroke(outline))
+    }
+    stump(midX - gap)   // leg
+    stump(midX)         // middle
+    rotate(degrees = 24f, pivot = Offset(midX + gap, baseY)) { stump(midX + gap) }  // off, knocked back
+
+    // Bails mid-flight, each with its own spin.
+    val bailW = w * 0.17f
+    val bailH = h * 0.065f
+    fun bail(c: Offset, deg: Float) = rotate(deg, pivot = c) {
+        val tl = Offset(c.x - bailW / 2, c.y - bailH / 2)
+        drawRoundRect(WoodFill, tl, Size(bailW, bailH), CornerRadius(bailH / 2))
+        drawRoundRect(WoodLine, tl, Size(bailW, bailH), CornerRadius(bailH / 2), style = Stroke(outline))
+    }
+    bail(Offset(midX - gap * 0.9f, baseY - stumpH - h * 0.16f), -32f)
+    bail(Offset(midX + gap * 1.7f, baseY - stumpH - h * 0.06f), 40f)
+
+    // The ball, through the gate, with a short trail behind it.
+    val r = h * 0.11f
+    val ball = Offset(midX + gap * 2.25f, baseY - stumpH * 0.42f)
+    val trail = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round)
+    for ((i, dy) in listOf(-0.45f, 0f, 0.45f).withIndex()) {
+        val len = r * (2.6f - i % 2 * 0.8f)
+        drawLine(
+            SceneLeather.copy(alpha = 0.30f),
+            Offset(ball.x - r * 1.5f - len, ball.y + r * dy),
+            Offset(ball.x - r * 1.5f, ball.y + r * dy),
+            strokeWidth = trail.width, cap = StrokeCap.Round
+        )
+    }
+    drawCircle(SceneLeather, radius = r, center = ball)
+    drawCircle(SceneLeatherDark, radius = r, center = ball, style = Stroke(outline))
+    rotate(-35f, pivot = ball) {
+        drawLine(Color.White.copy(alpha = 0.9f), Offset(ball.x, ball.y - r * 0.85f), Offset(ball.x, ball.y + r * 0.85f), strokeWidth = r * 0.22f, cap = StrokeCap.Round)
+    }
+    drawCircle(Color.White.copy(alpha = 0.35f), radius = r * 0.28f, center = Offset(ball.x - r * 0.38f, ball.y - r * 0.38f))
+}
+
+/** A small leather ball with its stitched seam — the dot-ball mark. */
+private fun DrawScope.drawCricketBall(color: Color) {
+    val r = size.minDimension / 2
+    val c = center
+    drawCircle(color.copy(alpha = 0.55f), radius = r, center = c)
+    // The seam: two parallel arcs across the ball, slightly tilted, in the chip's light.
+    val seam = Stroke(width = r * 0.16f, cap = StrokeCap.Round)
+    rotate(-30f, pivot = c) {
+        for (dx in listOf(-r * 0.16f, r * 0.16f)) {
+            val path = Path().apply {
+                moveTo(c.x + dx - r * 0.12f, c.y - r * 0.92f)
+                quadraticBezierTo(c.x + dx + r * 0.32f, c.y, c.x + dx - r * 0.12f, c.y + r * 0.92f)
+            }
+            drawPath(path, Color.White.copy(alpha = 0.9f), style = seam)
         }
     }
 }
@@ -694,33 +782,34 @@ private fun NewBatterRow(line: CommentaryLine) {
             .fillMaxWidth()
             .background(CrexColors.Surface)
             .drawBehind { drawLine(color = CrexColors.Border, start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) }
-            .padding(horizontal = 16.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             line.over,
-            color = CrexColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.width(34.dp)
+            color = CrexColors.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            style = TextStyle(fontFeatureSettings = "tnum"),
+            modifier = Modifier.width(38.dp.fontScaled())
         )
-        // The face takes the ball column's slot and size, so the column stays a column.
+        // A walk-in is about the person — the face is bigger than a ball chip on purpose.
         PlayerFace(
             photoUrl = line.photoUrl,
             name = name,
-            size = 28.dp,
-            ring = CrexColors.AccentBlue.copy(alpha = 0.45f),
-            ringWidth = 1.dp,
+            size = 44.dp.fontScaled(),
+            ring = CrexColors.AccentBlue.copy(alpha = 0.55f),
+            ringWidth = 1.5.dp,
             faceBg = CrexColors.Background,
             initialColor = CrexColors.TextSecondary
         )
         Spacer(Modifier.width(12.dp))
-        Text(
-            buildAnnotatedString {
-                withStyle(SpanStyle(color = CrexColors.TextPrimary, fontWeight = FontWeight.SemiBold)) { append(name) }
-                withStyle(SpanStyle(color = CrexColors.TextSecondary)) { append(" walks in · $note") }
-            },
-            fontSize = 13.sp,
-            modifier = Modifier.weight(1f)
-        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                name, color = CrexColors.TextPrimary, fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold, maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+            )
+            Text("walks in · $note", color = CrexColors.TextSecondary, fontSize = 13.sp)
+        }
     }
 }
 
@@ -738,30 +827,38 @@ private fun CommentaryRow(line: CommentaryLine) {
             .fillMaxWidth()
             .background(CrexColors.Surface)
             .drawBehind { drawLine(color = CrexColors.Border, start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             line.over,
-            color = CrexColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold,
-            modifier = Modifier.width(34.dp)
+            color = CrexColors.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+            style = TextStyle(fontFeatureSettings = "tnum"),
+            modifier = Modifier.width(38.dp.fontScaled())
         )
+        val chip = 34.dp.fontScaled()
         Box(
-            modifier = Modifier.size(28.dp).clip(CircleShape).background(bg),
+            modifier = Modifier.size(chip).clip(CircleShape).background(bg),
             contentAlignment = Alignment.Center
         ) {
-            Text(
-                if (line.label == "0") "•" else line.label,
-                color = fg, fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center,
-                style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
-            )
+            if (line.label == "0") {
+                // A dot ball IS the ball coming back untouched — so draw the ball.
+                Canvas(Modifier.size(chip * 0.5f)) { drawCricketBall(CrexColors.TextMuted) }
+            } else {
+                Text(
+                    line.label,
+                    color = fg, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    style = TextStyle(platformStyle = PlatformTextStyle(includeFontPadding = false))
+                )
+            }
         }
-        Spacer(Modifier.width(12.dp))
+        Spacer(Modifier.width(14.dp))
         Text(
             line.text,
             color = if (line.wicket) CrexColors.AccentRed else CrexColors.TextPrimary,
-            fontSize = 13.sp,
+            fontSize = 15.sp,
+            lineHeight = 21.sp,
             fontWeight = if (line.wicket || line.boundary) FontWeight.Bold else FontWeight.Normal,
             modifier = Modifier.weight(1f)
         )
