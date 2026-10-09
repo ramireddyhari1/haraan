@@ -97,24 +97,20 @@ fun MatchTabs(
                                 if (index != selectedTabIndex) hapticTick(view)
                                 onTabSelected(index)
                             }
-                            .padding(vertical = 12.dp)
+                            .padding(top = 9.dp, bottom = 8.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (showLiveDot) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(6.dp)
-                                        .alpha(dotAlpha)
-                                        .clip(CircleShape)
-                                        .background(CrexColors.AccentRed)
-                                )
-                                Spacer(Modifier.width(5.dp))
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            // The Live glyph breathes with the pulse while the match is on.
+                            Box(Modifier.alpha(if (showLiveDot) 0.55f + 0.45f * dotAlpha else 1f)) {
+                                MatchTabIcon(index = index, selected = isSelected, live = showLiveDot)
                             }
+                            Spacer(Modifier.height(3.dp))
                             Text(
                                 text = title,
                                 color = textColor,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                                maxLines = 1
                             )
                         }
                     }
