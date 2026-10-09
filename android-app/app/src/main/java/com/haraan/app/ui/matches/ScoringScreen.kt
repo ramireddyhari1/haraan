@@ -279,6 +279,28 @@ fun ScoringScreen(
         seed = remember(matchId) { seedFrom(data) },
         matchId = matchId,
         onBack = onBack,
+        // The last ball of the chase: once it has been saved and the server has stamped the
+        // finish, take the scorer to their post-match rewards — the same moment the other
+        // sports get from their Finish button. Cricket never had one, so it never opened.
+        onMatchOver = {
+            scope.launch {
+                persistLock.withLock { }
+                val token = TokenStore.getSignedInToken(ctx) ?: return@launch
+                val rewards = com.haraan.app.data.rewards.RewardsRepository()
+                repeat(8) {
+                    kotlinx.coroutines.delay(1500)
+                    val outcome = runCatching { rewards.forMatch(token, matchId) }
+                    if (outcome.isSuccess) {
+                        com.haraan.app.data.rewards.RewardsNav.open(matchId)
+                        return@launch
+                    }
+                    val err = outcome.exceptionOrNull() as? com.haraan.app.data.rewards.RewardsException
+                    // Only "not finished yet" is worth waiting on. Not a player in this match
+                    // (404) or rewards off: stay on the scorer rather than open an error.
+                    if (err?.code != "match_not_finished") return@launch
+                }
+            }
+        },
         alreadyStarted = data.isLive,
         initialInnings = data.innings,
         initialFirstInningsTotal = initialFirstInningsTotal,
@@ -487,6 +509,8 @@ private fun ScorerLoaded(
     seed: ScorerState,
     matchId: String = "",
     onBack: () -> Unit,
+    /** The match ended while scoring here (2nd innings complete). */
+    onMatchOver: () -> Unit = {},
     alreadyStarted: Boolean = false,
     initialInnings: Int = 1,
     initialFirstInningsTotal: Int? = null,
@@ -579,6 +603,14 @@ private fun ScorerLoaded(
     val inningsOver = state.balls >= state.maxOvers * 6 || state.wickets >= allOutWickets || chaseWon
     // After the 1st innings closes (but not a won chase), the scorer rolls into the chase.
     val canStartSecondInnings = inningsOver && currentInnings < 2
+
+    // The match is over when the second innings is. Only a finish scored HERE hands off to
+    // the rewards — reopening an already-finished match must not replay it every time.
+    val matchOver = currentInnings >= 2 && inningsOver
+    val overWhenOpened = remember { matchOver }
+    LaunchedEffect(matchOver) {
+        if (matchOver && !overWhenOpened) onMatchOver()
+    }
 
     fun startSecondInnings() {
         firstInningsTotal = state.runs
