@@ -1,5 +1,7 @@
 package com.haraan.app.ui.matches.tabs
 
+import com.haraan.app.ui.membership.MemberTier
+import com.haraan.app.ui.membership.memberFrame
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -212,11 +214,14 @@ private fun TeamTabs(names: List<String>, selected: Int, onSelect: (Int) -> Unit
 private fun AvatarRow(squad: List<SquadMember>, selected: SquadMember?, onSelect: (SquadMember) -> Unit) {
     val scroll = rememberScrollState()
     Row(
-        Modifier.fillMaxWidth().horizontalScroll(scroll),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        // Padding inside the scroll so a member's frame (drawn just outside the face) isn't
+        // cut off by the scroll viewport at either end.
+        Modifier.fillMaxWidth().horizontalScroll(scroll).padding(horizontal = 10.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         squad.forEach { member ->
             val on = member.id == selected?.id
+            val tier = MemberTier.fromBadge(member.memberBadge)
             val ring by animateFloatAsState(if (on) 1f else 0f, tween(220), label = "ring")
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -224,6 +229,7 @@ private fun AvatarRow(squad: List<SquadMember>, selected: SquadMember?, onSelect
             ) {
                 Box(
                     Modifier
+                        .memberFrame(tier)
                         .size(60.dp)
                         .clip(CircleShape)
                         .background(
@@ -263,7 +269,8 @@ private fun AvatarRow(squad: List<SquadMember>, selected: SquadMember?, onSelect
                         }
                     }
                 }
-                Spacer(Modifier.height(5.dp))
+                // Room for the member medallion that hangs off the foot of the face.
+                Spacer(Modifier.height(if (tier.isMember) 14.dp else 5.dp))
                 Text(
                     member.name.trim().split(" ").first(),
                     color = if (on) CrexColors.TextPrimary else CrexColors.TextMuted,

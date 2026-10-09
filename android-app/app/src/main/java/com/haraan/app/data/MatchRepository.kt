@@ -836,6 +836,7 @@ class MatchRepository(
         name = name,
         avatar = avatar,
         isVerified = o.optBoolean("is_verified", false),
+        memberBadge = o.optString("member_badge").takeIf { it.isNotBlank() && it != "null" },
       )
     }
   }

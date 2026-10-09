@@ -1,5 +1,8 @@
 package com.haraan.app.ui.matches.tabs
 
+import com.haraan.app.ui.membership.MemberTierChip
+import com.haraan.app.ui.membership.memberFrame
+import com.haraan.app.ui.membership.memberTierOf
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
@@ -501,18 +504,26 @@ private fun MvpRow(state: MatchUiState, player: MvpPlayer, rank: Int, fraction: 
             style = TextStyle(fontFeatureSettings = "tnum"),
             modifier = Modifier.width(18.dp)
         )
-        PlayerFace(name = player.name, photoUrl = player.photoUrl, accent = accent, size = 40.dp)
-        Spacer(Modifier.width(11.dp))
+        val tier = memberTierOf(player.name, player.playerId)
+        PlayerFace(name = player.name, photoUrl = player.photoUrl, accent = accent, size = 46.dp, playerId = player.playerId)
+        Spacer(Modifier.width(if (tier.isMember) 18.dp else 11.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-            Text(
-                player.name,
-                color = CrexColors.TextPrimary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    player.name,
+                    color = CrexColors.TextPrimary,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (tier.isMember) {
+                    Spacer(Modifier.width(5.dp))
+                    MemberTierChip(tier, compact = true)
+                }
+            }
             Spacer(Modifier.height(3.dp))
             Text(
                 // Only the lanes they actually featured in.
@@ -698,6 +709,12 @@ private fun AwardPhotoPanel(
                 )
             }
         }
+
+        // Pro / Hero plate, top-left on the photo — the card's own version of the face ring.
+        com.haraan.app.ui.membership.MemberPlate(
+            memberTierOf(name),
+            modifier = Modifier.align(Alignment.TopStart).padding(10.dp)
+        )
 
         // The label needs to survive a bright photo AND a pale monogram panel, so it rides
         // its own gradient rather than trusting whatever is behind it.
@@ -934,9 +951,12 @@ private fun PlayerFace(
      * rather than a border, which is what lets the hero face carry the card at this size
      * without the flat pasted-in look a bare circle gets once it is large.
      */
-    halo: Boolean = false
+    halo: Boolean = false,
+    playerId: String = "",
 ) {
-    if (halo) {
+    val tier = memberTierOf(name, playerId)
+    // A member's frame is their halo — the soft ring would clip it.
+    if (halo && !tier.isMember) {
         Box(
             modifier = Modifier
                 .size(size + 10.dp)
@@ -951,10 +971,11 @@ private fun PlayerFace(
 
     Box(
         modifier = Modifier
+            .memberFrame(tier)
             .size(size)
             .clip(CircleShape)
             .background(if (photoUrl.isBlank()) accent.copy(alpha = 0.10f) else Color.White)
-            .border(1.5.dp, accent.copy(alpha = 0.30f), CircleShape),
+            .border(1.5.dp, accent.copy(alpha = if (tier.isMember) 0f else 0.30f), CircleShape),
         contentAlignment = Alignment.Center
     ) {
         if (photoUrl.isNotBlank()) {

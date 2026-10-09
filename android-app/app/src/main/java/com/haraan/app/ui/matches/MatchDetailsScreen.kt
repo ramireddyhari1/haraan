@@ -295,13 +295,16 @@ fun MatchDetailsScreen(
                             state = pagerState,
                             modifier = Modifier.fillMaxWidth().height(screenHeight - 64.dp) // 64dp approx for tabs
                         ) { page ->
-                            when (page) {
-                                0 -> InfoTab(state = state.data)
-                                1 -> CommentaryTab(state = state.data)
-                                2 -> LiveTab(state = state.data, ads = liveAds)
-                                3 -> ScorecardTab(state = state.data)
-                                4 -> MvpTab(state = state.data)
-                                5 -> InsightsTab(matchId = matchId, state = state.data)
+                            // Every face on every tab can ask who wears a Pro / Hero frame.
+                            com.haraan.app.ui.membership.ProvideMatchMemberTiers(state.data.homeSquad + state.data.awaySquad) {
+                                when (page) {
+                                    0 -> InfoTab(state = state.data)
+                                    1 -> CommentaryTab(state = state.data)
+                                    2 -> LiveTab(state = state.data, ads = liveAds)
+                                    3 -> ScorecardTab(state = state.data)
+                                    4 -> MvpTab(state = state.data)
+                                    5 -> InsightsTab(matchId = matchId, state = state.data)
+                                }
                             }
                         }
                     }

@@ -1006,20 +1006,29 @@ class LiveMatchController extends Controller
                 $ids[] = $id;
             }
         }
-        $verified = $ids === []
+        $users = $ids === []
             ? collect()
             : User::whereIn('player_id', $ids)
                 ->where('is_guest', false)
-                ->pluck('is_verified', 'player_id');
+                ->get()
+                ->keyBy('player_id');
 
-        return array_map(function ($member) use (&$cache, $verified) {
+        // Pro / Hero ring on the player's face — the same rule as the profile's
+        // member_badge: the plan code only while that plan includes the badge.
+        $entitlements = app(MemberEntitlements::class);
+        $badges = $users->map(fn (User $u) => $entitlements->allows($u, MemberFeature::PROFILE_MEMBER_BADGE)
+            ? $entitlements->for($u)->plan->code
+            : null);
+
+        return array_map(function ($member) use (&$cache, $users, $badges) {
             if (! is_array($member)) {
                 return $member;
             }
             $id = trim((string) ($member['id'] ?? ''));
             $real = $id !== '' && strtolower($id) !== 'null';
             $member['photo'] = $real ? (string) ($this->avatarFor($id, $cache) ?? '') : '';
-            $member['is_verified'] = $real && (bool) ($verified[$id] ?? false);
+            $member['is_verified'] = $real && (bool) ($users[$id]->is_verified ?? false);
+            $member['member_badge'] = $real ? ($badges[$id] ?? null) : null;
 
             return $member;
         }, $squad);

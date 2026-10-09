@@ -53,6 +53,9 @@ import com.haraan.app.ui.matches.MatchUiState
 import com.haraan.app.ui.matches.RecentOver
 import com.haraan.app.ui.theme.HaraanColors
 import com.haraan.app.ui.theme.premiumCardShadow
+import com.haraan.app.ui.membership.MemberTierChip
+import com.haraan.app.ui.membership.memberFrame
+import com.haraan.app.ui.membership.memberTierOf
 
 // SIX → green, FOUR → blue, WICKET → solid red. Dots/singles stay neutral grey.
 private val SixGreen = HaraanColors.Success
@@ -129,11 +132,15 @@ private fun PlayerFace(
     ringWidth: Dp,
     faceBg: Color,
     initialColor: Color,
+    playerId: String = "",
 ) {
     val url = remember(photoUrl) { ApiConfig.mediaUrl(photoUrl) }
     val inner = size - ringWidth * 2
+    val tier = memberTierOf(name, playerId)
     Box(
-        modifier = Modifier.size(size).clip(CircleShape).background(ring),
+        // A member's own frame replaces the plain ring — two rings would fight.
+        modifier = Modifier.memberFrame(tier).size(size).clip(CircleShape)
+            .background(if (tier.isMember) faceBg else ring),
         contentAlignment = Alignment.Center
     ) {
         Box(
@@ -264,6 +271,11 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
                     val clean = pName.trimEnd('*', ' ').trim()
                     return allSquad.firstOrNull { it.name.equals(clean, ignoreCase = true) }?.avatar.orEmpty()
                 }
+                // The real admin-granted blue tick from the squad — never assumed.
+                fun isVerified(pName: String): Boolean {
+                    val clean = pName.trimEnd('*', ' ').trim()
+                    return allSquad.firstOrNull { it.name.equals(clean, ignoreCase = true) }?.isVerified == true
+                }
 
                 if (state.striker.isNotEmpty()) {
                     val stats = state.strikerStats
@@ -330,7 +342,7 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
                     val econ = if (balls > 0) {
                         String.format("%.2f", (runs.toFloat() / balls) * 6)
                     } else "0.00"
-                    BowlerRow(name = state.bowler, figures = "$wickets-$runs", overs = oversDecimal, econ = econ, photoUrl = findPhoto(state.bowler))
+                    BowlerRow(name = state.bowler, figures = "$wickets-$runs", overs = oversDecimal, econ = econ, photoUrl = findPhoto(state.bowler), verified = isVerified(state.bowler))
                 }
             }
         }
@@ -437,6 +449,7 @@ private fun WicketBanner(line: CommentaryLine, state: MatchUiState) {
         // and the W rides it as a badge, cut out of the photo by a white collar.
         Box(contentAlignment = Alignment.BottomEnd) {
             PlayerFace(
+                playerId = line.playerId,
                 photoUrl = line.photoUrl,
                 name = batterName ?: line.battingName,
                 size = faceSize,
@@ -462,7 +475,7 @@ private fun WicketBanner(line: CommentaryLine, state: MatchUiState) {
                 }
             }
         }
-        Spacer(Modifier.width(14.dp))
+        Spacer(Modifier.width(if (memberTierOf(batterName ?: line.battingName, line.playerId).isMember) 20.dp else 14.dp))
         Column(Modifier.weight(1f)) {
             // "WICKET" alone. The dismissal line below already says how.
             Text("WICKET", color = WicketRed, fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.5.sp)
@@ -793,6 +806,7 @@ private fun NewBatterRow(line: CommentaryLine) {
         )
         // A walk-in is about the person — the face is bigger than a ball chip on purpose.
         PlayerFace(
+            playerId = line.playerId,
             photoUrl = line.photoUrl,
             name = name,
             size = 44.dp.fontScaled(),
@@ -801,7 +815,8 @@ private fun NewBatterRow(line: CommentaryLine) {
             faceBg = CrexColors.Background,
             initialColor = CrexColors.TextSecondary
         )
-        Spacer(Modifier.width(12.dp))
+        // A member's frame (and a Hero's laurels) hangs outside the face — give it room.
+        Spacer(Modifier.width(if (memberTierOf(name, line.playerId).isMember) 20.dp else 12.dp))
         Column(Modifier.weight(1f)) {
             Text(
                 name, color = CrexColors.TextPrimary, fontSize = 15.sp,
@@ -879,15 +894,17 @@ fun BatterRow(
         modifier = Modifier
             .fillMaxWidth()
             .drawBehind { drawLine(color = CrexColors.Border, start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 16.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        val tier = memberTierOf(name)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (tier.isMember) 18.dp else 12.dp)) {
             val url = remember(photoUrl) { if (photoUrl.isNotBlank()) ApiConfig.mediaUrl(photoUrl) else null }
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .memberFrame(tier)
+                    .size(46.dp.fontScaled())
                     .clip(CircleShape)
                     .background(CrexColors.Background),
                 contentAlignment = Alignment.Center
@@ -911,6 +928,7 @@ fun BatterRow(
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(name, color = CrexColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                    MemberTierChip(tier, compact = true)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("SR $sr", color = CrexColors.TextSecondary, fontSize = 10.sp, letterSpacing = 1.sp)
@@ -935,20 +953,23 @@ fun BowlerRow(
     overs: String,
     econ: String,
     photoUrl: String = "",
+    verified: Boolean = false,
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .drawBehind { drawLine(color = CrexColors.Border, start = Offset(0f, size.height), end = Offset(size.width, size.height), strokeWidth = 1.dp.toPx()) }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 16.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        val tier = memberTierOf(name)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (tier.isMember) 18.dp else 12.dp)) {
             val url = remember(photoUrl) { if (photoUrl.isNotBlank()) ApiConfig.mediaUrl(photoUrl) else null }
             Box(
                 modifier = Modifier
-                    .size(40.dp)
+                    .memberFrame(tier)
+                    .size(46.dp.fontScaled())
                     .clip(CircleShape)
                     .background(CrexColors.Background),
                 contentAlignment = Alignment.Center
@@ -972,12 +993,15 @@ fun BowlerRow(
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(name, color = CrexColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                    Icon(
-                        imageVector = Icons.Outlined.Verified,
-                        contentDescription = "Verified",
-                        tint = CrexColors.TextSecondary,
-                        modifier = Modifier.size(10.dp)
-                    )
+                    if (verified) {
+                        Icon(
+                            imageVector = Icons.Outlined.Verified,
+                            contentDescription = "Verified",
+                            tint = CrexColors.AccentBlue,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                    MemberTierChip(tier, compact = true)
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text("BOWLER", color = CrexColors.TextSecondary, fontSize = 10.sp, letterSpacing = 1.sp)

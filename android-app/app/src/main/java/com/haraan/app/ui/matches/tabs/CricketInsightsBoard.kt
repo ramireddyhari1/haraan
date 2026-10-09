@@ -1,5 +1,7 @@
 package com.haraan.app.ui.matches.tabs
 
+import com.haraan.app.ui.membership.memberFrame
+import com.haraan.app.ui.membership.memberTierOf
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateDpAsState
@@ -180,7 +182,7 @@ internal fun PillToggle(labels: List<String>, index: Int, onPick: (Int) -> Unit)
 @Composable
 internal fun PlayerDot(name: String, avatar: String?, tint: Color, size: Dp = 40.dp) {
     Box(
-        Modifier.size(size).clip(CircleShape).background(tint.copy(alpha = 0.14f)),
+        Modifier.memberFrame(memberTierOf(name)).size(size).clip(CircleShape).background(tint.copy(alpha = 0.14f)),
         contentAlignment = Alignment.Center,
     ) {
         Text(

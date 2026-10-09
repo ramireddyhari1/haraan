@@ -370,6 +370,7 @@ class MatchDetailsViewModel : ViewModel() {
                         name = name,
                         avatar = ov.optName("photo").ifBlank { ov.optName("avatar") },
                         isVerified = ov.optBoolean("is_verified", false),
+                        memberBadge = ov.optName("member_badge").ifBlank { null },
                         isGuest = id.isBlank(),
                     )
                 }

@@ -174,6 +174,8 @@ data class SquadMember(
   val avatar: String = "",
   /** Admin-granted blue tick. Shown beside the name wherever this player is named. */
   val isVerified: Boolean = false,
+  /** "pro" / "hero" while their plan includes the member badge; null otherwise. Server-decided. */
+  val memberBadge: String? = null,
   val isGuest: Boolean = false,
   val isCaptain: Boolean = false,
   val isViceCaptain: Boolean = false,
