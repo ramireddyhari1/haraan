@@ -1009,7 +1009,9 @@ private fun CameraMode(
      */
     val pendingClipStart = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     // Developer: write the next analysed frame's raw planes to disk, for desk replay.
-    val dumpNextFrame = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    // A burst of consecutive frames: the ball tracker works on frame DIFFERENCES, so one
+    // frame alone cannot replay it.
+    val dumpFramesLeft = remember { java.util.concurrent.atomic.AtomicInteger(0) }
     var lastDumpPath by remember { mutableStateOf<String?>(null) }
     val dumpContext = LocalContext.current
     val dumpDir = remember { File(dumpContext.getExternalFilesDir(null), "frames") }
@@ -1106,7 +1108,8 @@ private fun CameraMode(
 
         ImageAnalysis.Analyzer { image ->
             try {
-                if (dumpNextFrame.compareAndSet(true, false)) {
+                if (dumpFramesLeft.get() > 0) {
+                    dumpFramesLeft.decrementAndGet()
                     lastDumpPath = runCatching { dumpFrame(image, dumpDir) }.getOrElse { "dump failed: ${it.message}" }
                 }
                 val plane = image.planes.getOrNull(0)
@@ -1194,6 +1197,19 @@ private fun CameraMode(
                                 "frame=${image.width}x${image.height}@${image.imageInfo.rotationDegrees} " +
                                 "trackerFrames=${wicketTracker.diagnostics().framesSeen}",
                         )
+                        // While filming: what the ball tracker is doing, as it does it.
+                        if (trackingNow) {
+                            val b = vision.diagnostics()
+                            android.util.Log.i(
+                                ANALYSIS_TAG,
+                                "ball frames=${b.framesSeen} withCandidate=${b.framesWithCandidate} " +
+                                    "points=${vision.track().size} state=${b.trackingState} " +
+                                    "ms avg=%.1f max=${b.maxProcessingMs} ".format(b.averageProcessingMs) +
+                                    "rej motion=${b.rejectedGlobalMotion} size=${b.rejectedSize} shape=${b.rejectedShape} " +
+                                    "traj=${b.rejectedTrajectory} still=${b.rejectedStationary} cluster=${b.rejectedCluster} " +
+                                    "called=${calledFlight != null}",
+                            )
+                        }
                     }
                     if (thermalThrottled || (!trackingNow && !lookingForPitch && !lookingForWicket)) {
                         return@Analyzer
@@ -2358,10 +2374,10 @@ private fun CameraMode(
                         Modifier
                             .clip(RoundedCornerShape(10.dp))
                             .background(Color(0xFF2563EB))
-                            .clickable { dumpNextFrame.set(true) }
+                            .clickable { dumpFramesLeft.set(DUMP_BURST) }
                             .padding(horizontal = 12.dp, vertical = 8.dp),
                     ) {
-                        Text("Dump frame", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text("Dump $DUMP_BURST frames", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                     }
                     lastDumpPath?.let {
                         Text(it, color = Color.White.copy(alpha = 0.6f), fontSize = 9.5.sp, fontFamily = FontFamily.Monospace)
@@ -4295,6 +4311,9 @@ private const val CAMERA_TRAIL_POINTS = 30
  * settling gets every frame, short enough that the saving starts almost at once.
  */
 private const val ANALYSIS_TAG = "HaraanCameraAnalysis"
+
+/** Consecutive frames one tap of the developer dump writes. */
+private const val DUMP_BURST = 8
 
 /** Haptic ticks while the length guide is laid down: about one per band. */
 private const val GUIDE_REVEAL_TICKS = 4

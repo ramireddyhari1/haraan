@@ -235,7 +235,21 @@ class OpenCvBallTracker(
         val mask = Mat()
         // Otsu picks the threshold from this frame's own histogram, so the same code holds
         // in flat evening light and harsh midday sun. A fixed number does not travel.
-        Imgproc.threshold(diff, mask, 0.0, 255.0, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU)
+        val otsu = Imgproc.threshold(diff, mask, 0.0, 255.0, Imgproc.THRESH_BINARY + Imgproc.THRESH_OTSU)
+        /*
+         * ...BUT OTSU ALWAYS SPLITS, EVEN WHEN THERE IS NOTHING TO SPLIT.
+         *
+         * Found on a real phone standing still in front of the stumps: between two frames of
+         * a still scene the difference is sensor noise, at most a few grey levels, and Otsu
+         * put its threshold at ZERO — every pixel that changed by one level was "moving", a
+         * fifth of the frame, which is the camera-shake rule below. Every frame of every
+         * clip was thrown away as a panning camera, and no ball could ever be tracked.
+         * Real motion — a ball, a bat, a leg — differs by tens of grey levels, so a floor
+         * well above the noise and well below any ball is the right floor.
+         */
+        if (otsu < MIN_MOTION_DIFF) {
+            Imgproc.threshold(diff, mask, MIN_MOTION_DIFF, 255.0, Imgproc.THRESH_BINARY)
+        }
         diff.release()
 
         val totalPx = mask.rows() * mask.cols()
@@ -787,6 +801,12 @@ class OpenCvBallTracker(
 
         /** Above this share of moving pixels, the camera moved rather than the subject. */
         const val GLOBAL_MOTION_LIMIT = 0.12
+
+        /**
+         * Smallest frame difference, in grey levels after the 5×5 blur, that counts as
+         * motion. A still scene on a Realme RMX3933 differs by at most 7; a ball by tens.
+         */
+        const val MIN_MOTION_DIFF = 12.0
 
         /** Fraction of the frame a ball can cross between adjacent frames. */
         const val MAX_STEP_PER_FRAME = 0.30f
