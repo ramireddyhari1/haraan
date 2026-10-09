@@ -125,6 +125,9 @@ class LiveMatchController extends Controller
                 'venueBadge'  => $this->venueBadge($m),
                 'competition' => (string) ($m->competition ?? ''),
                 'isLive'      => strtolower((string) $m->status) === 'live',
+                // Ended = completed_at is stamped. Cricket writes its result into status
+                // ("X won by 3 wickets"), so the app can't tell finished from status alone.
+                'isFinished'  => $m->isFinished(),
                 'visibility'  => (string) ($m->visibility ?? LiveMatch::VIS_LOCAL),
                 'district'    => (string) ($m->district ?? ''),
                 'locality'    => (string) ($m->locality ?? ''),

@@ -92,6 +92,11 @@ data class LiveMatchRow(
   /** True when the signed-in viewer created this match (server-scoped) — tags "mine" in the feed. */
   val isMine: Boolean = false,
   /**
+   * The server's word that this match has ended (its completed_at is stamped). Null from an
+   * older server that doesn't send it — then [hasFinished] reads the status instead.
+   */
+  val isFinishedFlag: Boolean? = null,
+  /**
    * True when this match sits in the viewer's own district. Everyone sees every
    * public match, so this is a *grouping* hint only — never an access rule.
    * Always false for guests, collapsing their feed to Featured + All matches.
@@ -616,6 +621,7 @@ class MatchRepository(
           team1Emblem = o.optString("team1Emblem", ""),
           team2Emblem = o.optString("team2Emblem", ""),
           isMine = o.optBoolean("isMine", false),
+          isFinishedFlag = if (o.has("isFinished")) o.optBoolean("isFinished", false) else null,
           isLocalToViewer = o.optBoolean("isLocalToViewer", false),
           isFeatured = o.optBoolean("isFeatured", false),
           // optDouble yields NaN when absent — map that back to a real null so the
@@ -1506,3 +1512,18 @@ sealed interface CricketInsightsResult {
   data class Locked(val lock: com.haraan.app.data.membership.InsightsLock) : CricketInsightsResult
   data object Unavailable : CricketInsightsResult
 }
+
+/**
+ * Whether a feed row has ENDED. A cricket match writes its result into `status` ("babu won by 3
+ * wickets") rather than "Completed", so a status check alone sent every finished cricket match
+ * to the Live tab. Prefer the server's flag; without it, anything that is neither live nor
+ * still to start has finished.
+ */
+val LiveMatchRow.hasFinished: Boolean
+  get() = isFinishedFlag ?: (!isLive && status.trim().lowercase() !in NOT_STARTED_STATUSES)
+
+/** In play right now — the Live tab shows exactly these. */
+val LiveMatchRow.isInPlay: Boolean
+  get() = isLive && !hasFinished
+
+private val NOT_STARTED_STATUSES = setOf("", "scheduled", "upcoming", "not started", "pending", "draft")

@@ -236,6 +236,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.haraan.app.EventDetail
 import androidx.navigation3.runtime.NavKey
 import com.haraan.app.data.DefaultDataRepository
+import com.haraan.app.data.hasFinished
+import com.haraan.app.data.isInPlay
 import com.haraan.app.data.BookingRepository
 import com.haraan.app.data.BookingResult
 import com.haraan.app.data.TokenStore
@@ -1855,7 +1857,7 @@ private fun GameHubTabScreen(
       val token = com.haraan.app.data.TokenStore.getToken(gameHubCtx)
       liveMatches = runCatching { matchRepo.getLiveMatches(token) }
         .getOrDefault(emptyList())
-        .filter { it.isLive }
+        .filter { it.isInPlay }
     }
   }
   val loadLayout: suspend () -> Unit = remember {
@@ -4256,9 +4258,13 @@ private fun CrexMatchesScreen(
           // `when (selectedSport) { "Cricket" -> feed; else -> empty }`, which was only
           // ever right because the bottom bar defaulted to Cricket — the moment sport
           // became a filter with an "All" default, every match vanished.
+          // Only matches actually in play. The feed carries finished and not-yet-started
+          // matches too (Finished and Scheduled have their own tabs), and showing them here
+          // put "won by 3 wickets" results under a LIVE heading.
           val sportFeed = liveFeed?.let { rows ->
-            if (selectedSport == "All") rows
-            else rows.filter { it.sport.equals(selectedSport, ignoreCase = true) }
+            rows
+              .filter { it.isInPlay }
+              .filter { selectedSport == "All" || it.sport.equals(selectedSport, ignoreCase = true) }
           }
           // ONE list, already ranked by the server: starred → nearest → live →
           // freshest. The ⭐ on the card carries "an admin picked this" without
@@ -4282,7 +4288,7 @@ private fun CrexMatchesScreen(
           // show them.
           val finishedFeed = liveFeed?.let { rows ->
             rows
-              .filter { !it.isLive && it.status.lowercase() in setOf("completed", "finished") }
+              .filter { it.hasFinished }
               .filter { selectedSport == "All" || it.sport.equals(selectedSport, ignoreCase = true) }
           }
           when {
