@@ -14,6 +14,13 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** Which door the user came in by — the success pass prints it, so it must be the real one. */
+enum class SignInChannel { Email, Google, WhatsApp, Sms }
+
+/** The backend's stand-in when an account has no name; never greet anyone with it. */
+private fun realName(userName: String?): String =
+    userName?.trim()?.takeUnless { it.isBlank() || it.equals("Haraan user", ignoreCase = true) }.orEmpty()
+
 sealed interface LoginStage {
     /** Email + password entry — the only step. Sign-in and sign-up share it, as on the website. */
     data object EnterCredentials : LoginStage
@@ -45,6 +52,8 @@ data class LoginUiState(
     val phoneWaToken: String? = null,
     /** Non-zero while a resend is on cooldown (seconds remaining). */
     val phoneResendSeconds: Int = 0,
+    /** Set on success only; null until then. */
+    val signInChannel: SignInChannel? = null,
 ) {
     /** Deliberately loose — the server is the authority; this only gates the button. */
     val isEmailValid: Boolean
@@ -163,7 +172,9 @@ class LoginViewModel : ViewModel() {
                             isLoading = false,
                             token = result.token,
                             stage = LoginStage.Success,
-                            successMessage = result.message
+                            successMessage = result.message,
+                            name = realName(result.userName).ifBlank { it.name },
+                            signInChannel = SignInChannel.Email,
                         )
                     }
                     // Hold on the confirmation beat before handing control to the app.
@@ -202,7 +213,9 @@ class LoginViewModel : ViewModel() {
                             isLoading = false,
                             token = result.token,
                             stage = LoginStage.Success,
-                            successMessage = result.message
+                            successMessage = result.message,
+                            name = realName(result.userName),
+                            signInChannel = SignInChannel.Google,
                         )
                     }
                     // Same confirmation beat as the password path — both ways in should
@@ -350,6 +363,8 @@ class LoginViewModel : ViewModel() {
                         token = result.token,
                         stage = LoginStage.Success,
                         successMessage = result.message,
+                        name = realName(result.userName),
+                        signInChannel = if (it.phoneWaToken != null) SignInChannel.WhatsApp else SignInChannel.Sms,
                     )
                 }
                 delay(SUCCESS_BEAT_MS)

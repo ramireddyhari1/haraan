@@ -60,6 +60,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -476,7 +478,7 @@ fun LoginScreen(
                     // Authenticated: hold a short confirmation instead of cutting straight
                     // to the app. The VM delays its success callback by the same beat.
                     if (uiState.stage == LoginStage.Success) {
-                        LoginSuccessPanel(name = uiState.name)
+                        LoginSuccessPanel(state = uiState)
                         return@Column
                     }
 
@@ -987,166 +989,294 @@ private val BeatEasing = CubicBezierEasing(0.16f, 1f, 0.3f, 1f)
 
 /**
  * The confirmation beat shown between a successful sign-in and the app taking over.
- * Green, not blue: on this screen blue means "act", green means "committed" — the
- * user has nothing left to do here.
  *
- * The previous version popped a static tick into a tinted circle and printed two lines.
- * It was *correct* and it felt like nothing: one frame of movement, then a wait with no
- * shape to it. This is the same information given a sequence — the disc lands, a ring
- * closes around it, the tick is DRAWN rather than revealed, the copy rises after, and a
- * meter fills over exactly [SUCCESS_BEAT_MS] so the hold before hand-off reads as
- * progress instead of lag. One confirm haptic fires with the landing, so the moment is
- * felt as well as seen.
+ * An entry pass, because that is the one object this app already means: Haraan sells
+ * the tickets people show at a gate. The pass carries only things that are true right
+ * now — the name on the account, the exact door they came in by ("WhatsApp · +91 …",
+ * their email, Google), and the minute they walked in — so no generic login screen
+ * could have drawn it.
  *
- * Everything is time-boxed inside the beat the ViewModel holds for — nothing here can
- * delay entry to the app, and nothing gets cut off mid-stroke.
+ * The motion is physical rather than decorative, in three beats:
+ *   1. the pass rises and settles (spring, slight lean that straightens);
+ *   2. a rubber stamp comes DOWN on it — it accelerates in, the pass jolts on impact,
+ *      and that impact is the one confirm-weight haptic;
+ *   3. the stub tears off along the perforation and falls away under gravity, with a
+ *      light tick per tooth of the tear. The stub leaving IS the hand-off — it replaces
+ *      the old progress meter, so the wait still has a visible end.
+ *
+ * Deliberately absent (the things that read as "AI built" on this app before): no glow,
+ * no gradient, no confetti, no eyebrow label, no invented numbers. One ink colour —
+ * green, because on this screen green means "committed" and blue means "act".
+ *
+ * Everything is time-boxed inside [SUCCESS_BEAT_MS]: nothing here can delay entry to
+ * the app, and the tear finishes just as the ViewModel hands off.
  */
 @Composable
-private fun LoginSuccessPanel(name: String) {
+private fun LoginSuccessPanel(state: LoginUiState) {
     val view = LocalView.current
-    val disc = remember { Animatable(0f) }   // the badge lands
-    val halo = remember { Animatable(0f) }   // one ring pushes outward and fades
-    val ring = remember { Animatable(0f) }   // the outline closes around it
-    val tick = remember { Animatable(0f) }   // the check draws itself
-    val head = remember { Animatable(0f) }   // headline rises
-    val sub = remember { Animatable(0f) }    // sub-line follows
-    val meter = remember { Animatable(0f) }  // hand-off progress
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val density = LocalDensity.current
+
+    val rise = remember { Animatable(0f) }   // the pass arrives
+    val words = remember { Animatable(0f) }  // the printed lines settle
+    val stamp = remember { Animatable(0f) }  // the stamp travels down to the paper
+    val jolt = remember { Animatable(0f) }   // the pass gives under the stamp
+    val tick = remember { Animatable(0f) }   // the stamp's tick inks in
+    val tear = remember { Animatable(0f) }   // the stub comes away
+    val leave = remember { Animatable(0f) }  // "Taking you in…"
+
+    // Captured once: the pass is a record of the moment, it must not tick over mid-beat.
+    val timeIn = remember {
+        android.text.format.DateFormat.getTimeFormat(context).format(java.util.Date())
+    }
+    val firstName = state.name.trim().substringBefore(' ')
+    val via = when (state.signInChannel) {
+        SignInChannel.WhatsApp -> "WhatsApp · " + prettyPhone(state.phoneE164 ?: state.phone)
+        SignInChannel.Sms -> "SMS · " + prettyPhone(state.phoneE164 ?: state.phone)
+        SignInChannel.Email -> state.email
+        SignInChannel.Google -> "Google account"
+        null -> ""
+    }
 
     LaunchedEffect(Unit) {
-        // Fires with the landing, not on entry to the screen: this is the one moment on
-        // the whole flow that deserves a confirm-weight buzz.
-        view.performHapticFeedback(Feel.COMMIT)
-        launch { meter.animateTo(1f, tween(SUCCESS_BEAT_MS.toInt(), easing = LinearEasing)) }
-        launch { halo.animateTo(1f, tween(620, easing = FastOutSlowInEasing)) }
-        launch { disc.animateTo(1f, spring(dampingRatio = 0.58f, stiffness = 700f)) }
+        launch { rise.animateTo(1f, spring(dampingRatio = 0.72f, stiffness = 420f)) }
         launch {
-            delay(90)
-            ring.animateTo(1f, tween(400, easing = BeatEasing))
+            delay(170)
+            words.animateTo(1f, tween(280, easing = FastOutSlowInEasing))
         }
         launch {
-            delay(300)
-            tick.animateTo(1f, tween(360, easing = BeatEasing))
+            delay(380)
+            // Accelerating IN — a stamp is pressed, it doesn't float down.
+            stamp.animateTo(1f, tween(150, easing = androidx.compose.animation.core.FastOutLinearInEasing))
+            view.performHapticFeedback(Feel.COMMIT)
+            launch {
+                jolt.snapTo(1f)
+                jolt.animateTo(0f, spring(dampingRatio = 0.4f, stiffness = 900f))
+            }
+            tick.animateTo(1f, tween(260, easing = BeatEasing))
         }
         launch {
-            delay(390)
-            head.animateTo(1f, tween(300, easing = FastOutSlowInEasing))
+            delay(640)
+            leave.animateTo(1f, tween(260, easing = FastOutSlowInEasing))
         }
         launch {
-            delay(500)
-            sub.animateTo(1f, tween(300, easing = FastOutSlowInEasing))
+            delay(860)
+            // Gravity: slow off the line, then gone. Ends a few ms inside the beat.
+            launch { tear.animateTo(1f, tween(380, easing = androidx.compose.animation.core.FastOutLinearInEasing)) }
+            repeat(3) {
+                view.performHapticFeedback(Feel.TICK)
+                delay(60)
+            }
         }
     }
 
-    // Rebuilt per frame from the canvas size, but the objects themselves are kept —
-    // allocating a Path and a PathMeasure on every draw is how a 60fps beat starts
-    // dropping frames on a mid-range phone.
+    // Kept across frames — a fresh Path + PathMeasure per draw is how a 60fps beat
+    // starts dropping frames on a mid-range phone.
     val tickPath = remember { Path() }
     val tickMeasure = remember { PathMeasure() }
     val tickSegment = remember { Path() }
+
+    val passHeight = 104.dp
+    val stubWidth = 76.dp
+    val notch = 9.dp
+    val bodyShape = remember(density) { TicketShape(notch, notchOnRight = true) }
+    val stubShape = remember(density) { TicketShape(notch, notchOnRight = false) }
 
     Column(
         modifier = Modifier.fillMaxWidth().padding(vertical = GapL),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Canvas(modifier = Modifier.size(96.dp)) {
-            val centre = Offset(size.width / 2f, size.height / 2f)
-            val r = size.minDimension / 2f * 0.62f
-
-            // Halo: a single ring pushing out and fading. One pulse, not a loop — a
-            // repeating pulse would keep asking for attention after the moment passed.
-            if (halo.value > 0f && halo.value < 1f) {
-                drawCircle(
-                    color = Success.copy(alpha = 0.28f * (1f - halo.value)),
-                    radius = r * (1f + 0.5f * halo.value),
-                    center = centre,
-                    style = StrokeStyle(width = 2.dp.toPx())
-                )
-            }
-
-            drawCircle(color = SuccessTint, radius = r * disc.value, center = centre)
-
-            if (ring.value > 0f) {
-                drawArc(
-                    color = Success,
-                    startAngle = -90f,
-                    sweepAngle = 360f * ring.value,
-                    useCenter = false,
-                    topLeft = Offset(centre.x - r, centre.y - r),
-                    size = Size(r * 2f, r * 2f),
-                    style = StrokeStyle(width = 3.dp.toPx(), cap = StrokeCap.Round)
-                )
-            }
-
-            if (tick.value > 0f) {
-                tickPath.reset()
-                tickPath.moveTo(centre.x - r * 0.42f, centre.y + r * 0.02f)
-                tickPath.lineTo(centre.x - r * 0.12f, centre.y + r * 0.34f)
-                tickPath.lineTo(centre.x + r * 0.44f, centre.y - r * 0.32f)
-
-                tickMeasure.setPath(tickPath, false)
-                tickSegment.reset()
-                tickMeasure.getSegment(0f, tickMeasure.length * tick.value, tickSegment, true)
-
-                drawPath(
-                    path = tickSegment,
-                    color = Success,
-                    style = StrokeStyle(
-                        width = 4.dp.toPx(),
-                        cap = StrokeCap.Round,
-                        join = StrokeJoin.Round
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(passHeight)
+                .graphicsLayer {
+                    alpha = rise.value.coerceIn(0f, 1f)
+                    translationY = (1f - rise.value) * 48.dp.toPx() + jolt.value * 3.dp.toPx()
+                    rotationZ = (1f - rise.value) * -3f
+                    // The stamp pushes the paper down a hair; it springs back.
+                    scaleX = 1f - jolt.value * 0.012f
+                    scaleY = 1f - jolt.value * 0.012f
+                }
+        ) {
+            // ── The pass body: what stays with you ──
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .shadow(3.dp, bodyShape, ambientColor = Ink.copy(alpha = 0.10f), spotColor = Ink.copy(alpha = 0.14f))
+                    .background(Color.White, bodyShape)
+                    .border(1.dp, Stroke, bodyShape)
+                    .drawBehind {
+                        // Perforation on the body's side, so the line stays after the
+                        // stub has gone — that's what a torn ticket looks like.
+                        val x = size.width - 0.5.dp.toPx()
+                        drawLine(
+                            color = Stroke,
+                            start = Offset(x, notch.toPx() + 4.dp.toPx()),
+                            end = Offset(x, size.height - notch.toPx() - 4.dp.toPx()),
+                            strokeWidth = 1.5.dp.toPx(),
+                            cap = StrokeCap.Round,
+                            pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(
+                                floatArrayOf(3.dp.toPx(), 4.dp.toPx())
+                            )
+                        )
+                    }
+                    .padding(start = GapM, end = GapS, top = GapM, bottom = GapM)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(end = 52.dp) // the stamp's footprint
+                        .graphicsLayer {
+                            alpha = words.value
+                            translationY = (1f - words.value) * 8.dp.toPx()
+                        }
+                ) {
+                    Text(
+                        text = if (firstName.isNotBlank()) "You're in, $firstName" else "You're in",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Text1,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                )
+                    if (via.isNotBlank()) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = via,
+                            fontSize = CaptionSize,
+                            color = Text2,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                // The stamp. Ink only — no fill, no glow — at a hand-pressed angle.
+                Canvas(
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)
+                        .size(56.dp)
+                        .graphicsLayer {
+                            val p = stamp.value
+                            alpha = if (p <= 0f) 0f else 0.35f + 0.65f * p
+                            val s = 1.7f - 0.7f * p
+                            scaleX = s
+                            scaleY = s
+                            rotationZ = -12f
+                        }
+                ) {
+                    val centre = Offset(size.width / 2f, size.height / 2f)
+                    val r = size.minDimension / 2f - 2.dp.toPx()
+                    val ink = Success.copy(alpha = 0.9f)
+                    drawCircle(ink, radius = r, center = centre, style = StrokeStyle(width = 2.5.dp.toPx()))
+                    drawCircle(ink, radius = r - 4.dp.toPx(), center = centre, style = StrokeStyle(width = 1.dp.toPx()))
+
+                    if (tick.value > 0f) {
+                        val k = r * 0.62f
+                        tickPath.reset()
+                        tickPath.moveTo(centre.x - k * 0.48f, centre.y + k * 0.02f)
+                        tickPath.lineTo(centre.x - k * 0.12f, centre.y + k * 0.38f)
+                        tickPath.lineTo(centre.x + k * 0.5f, centre.y - k * 0.36f)
+                        tickMeasure.setPath(tickPath, false)
+                        tickSegment.reset()
+                        tickMeasure.getSegment(0f, tickMeasure.length * tick.value, tickSegment, true)
+                        drawPath(
+                            path = tickSegment,
+                            color = ink,
+                            style = StrokeStyle(width = 3.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                        )
+                    }
+                }
+            }
+
+            // ── The stub: what the gate keeps ──
+            Box(
+                modifier = Modifier
+                    .width(stubWidth)
+                    .fillMaxHeight()
+                    .graphicsLayer {
+                        val t = tear.value
+                        // Hinged at the top of the perforation, the way a stub actually
+                        // gives: it swings out, drops, and fades only at the very end.
+                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
+                        rotationZ = 24f * t
+                        translationX = 10.dp.toPx() * t
+                        translationY = 70.dp.toPx() * t * t
+                        alpha = 1f - (t * t)
+                    }
+                    .shadow(3.dp, stubShape, ambientColor = Ink.copy(alpha = 0.10f), spotColor = Ink.copy(alpha = 0.14f))
+                    .background(SuccessTint, stubShape)
+                    .border(1.dp, Success.copy(alpha = 0.22f), stubShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "IN",
+                        fontSize = BodySize,
+                        fontWeight = FontWeight.Bold,
+                        color = Success,
+                        letterSpacing = 1.sp
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = timeIn,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Success.copy(alpha = 0.8f),
+                        maxLines = 1
+                    )
+                }
             }
         }
 
         Spacer(Modifier.height(GapM))
-        Text(
-            // The name is only known when they just signed up; returning users get the
-            // neutral line rather than a greeting built from a guessed value.
-            text = if (name.isNotBlank()) "Welcome, ${name.trim()}" else "You're signed in",
-            fontSize = TitleSize,
-            fontWeight = FontWeight.Bold,
-            color = Text1,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.graphicsLayer {
-                alpha = head.value
-                translationY = (1f - head.value) * 16.dp.toPx()
-            }
-        )
-        Spacer(Modifier.height(GapS))
         Text(
             text = "Taking you in…",
             fontSize = CaptionSize,
-            fontWeight = FontWeight.Normal,
             color = Text2,
             textAlign = TextAlign.Center,
             modifier = Modifier.graphicsLayer {
-                alpha = sub.value
-                translationY = (1f - sub.value) * 12.dp.toPx()
+                alpha = leave.value
+                translationY = (1f - leave.value) * 8.dp.toPx()
             }
         )
+    }
+}
 
-        Spacer(Modifier.height(GapM))
-        // The wait made legible. Same device as the brand splash's meter: the hold has
-        // a visible end, so it reads as the app loading rather than the screen stalling.
-        Box(
-            modifier = Modifier
-                .width(132.dp)
-                .height(3.dp)
-                .clip(RoundedCornerShape(99.dp))
-                .background(Success.copy(alpha = 0.16f))
-        ) {
-            Box(
-                modifier = Modifier
-                    // fillMaxHeight BEFORE the fractional width — fillMaxSize() here
-                    // would re-set the width and the meter would read as complete from
-                    // frame one. Same trap as BrandSplash.
-                    .fillMaxHeight()
-                    .fillMaxWidth(meter.value)
-                    .clip(RoundedCornerShape(99.dp))
-                    .background(Success)
+/**
+ * One half of a paper ticket: rounded corners, with a half-circle bitten out of the top
+ * and bottom edge on the perforation side. Two halves with mirrored notches sit flush
+ * and read as one ticket until the stub tears away.
+ */
+private class TicketShape(
+    private val notch: androidx.compose.ui.unit.Dp,
+    private val notchOnRight: Boolean,
+) : androidx.compose.ui.graphics.Shape {
+    override fun createOutline(
+        size: Size,
+        layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+        density: androidx.compose.ui.unit.Density,
+    ): androidx.compose.ui.graphics.Outline {
+        val corner = with(density) { 14.dp.toPx() }
+        val n = with(density) { notch.toPx() }
+        val card = Path().apply {
+            addRoundRect(
+                androidx.compose.ui.geometry.RoundRect(
+                    0f, 0f, size.width, size.height,
+                    androidx.compose.ui.geometry.CornerRadius(corner)
+                )
             )
         }
+        val x = if (notchOnRight) size.width else 0f
+        val bites = Path().apply {
+            addOval(androidx.compose.ui.geometry.Rect(Offset(x, 0f), n))
+            addOval(androidx.compose.ui.geometry.Rect(Offset(x, size.height), n))
+        }
+        val result = Path()
+        result.op(card, bites, androidx.compose.ui.graphics.PathOperation.Difference)
+        return androidx.compose.ui.graphics.Outline.Generic(result)
     }
 }
 
@@ -1423,3 +1553,4 @@ private fun OtpCells(
         )
     }
 }
+
