@@ -228,7 +228,7 @@ final class PartnerUpdatesServiceProvider extends ServiceProvider
                 (int) $s->partner_id, 'plan.changed',
                 'Your Haraan plan: ' . ($plan?->name ?? 'updated'),
                 trim('Status: ' . str_replace('_', ' ', (string) $s->status)
-                    . ($s->current_period_end ? '. Renews ' . $s->current_period_end->format('d M Y') : '') . '.'),
+                    . ($s->current_period_end ? '. Renews ' . \Illuminate\Support\Carbon::parse($s->current_period_end)->format('d M Y') : '') . '.'),
                 'account', $s,
             );
         });
