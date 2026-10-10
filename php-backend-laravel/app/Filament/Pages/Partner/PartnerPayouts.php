@@ -148,13 +148,8 @@ class PartnerPayouts extends Page
             'upi_vpa' => $this->method === 'upi' ? strtolower(trim((string) $this->upi_vpa)) : null,
         ];
 
-        PartnerPayoutAccount::updateOrCreate(
-            ['partner_id' => $this->partnerId()],
-            $payload + [
-                // Editing the destination clears prior verification — admin re-checks.
-                'verified_at' => null,
-            ],
-        );
+        // Through the shared editor: clears verification and records who changed it.
+        app(\App\Support\PayoutAccountEditor::class)->save($this->partnerId(), $payload, auth()->user());
 
         $this->editing = false;
 

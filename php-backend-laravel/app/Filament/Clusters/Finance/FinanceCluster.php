@@ -30,8 +30,16 @@ class FinanceCluster extends Cluster
         return 'Finance';
     }
 
+    /**
+     * Finance staff, plus any Haraan employee assigned as a partner's manager — they
+     * reach Settlement accounts (scoped to their own partners) and nothing else here:
+     * every other page and resource in this cluster carries its own finance/admin gate.
+     */
     public static function canAccess(): bool
     {
-        return auth()->user()?->canManage('finance') ?? false;
+        $u = auth()->user();
+
+        return $u !== null && ($u->canManage('finance')
+            || \App\Models\PartnerManager::query()->where('manager_id', $u->id)->exists());
     }
 }

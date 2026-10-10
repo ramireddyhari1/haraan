@@ -10,4 +10,9 @@ use Filament\Resources\Pages\ListRecords;
 class ListPartnerPayoutAccounts extends ListRecords
 {
     protected static string $resource = PartnerPayoutAccountResource::class;
+
+    protected function getHeaderActions(): array
+    {
+        return [PartnerPayoutAccountResource::addAction()];
+    }
 }

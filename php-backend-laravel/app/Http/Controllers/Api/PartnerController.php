@@ -16,6 +16,7 @@ use App\Models\PackageRedemption;
 use App\Models\VenuePackage;
 use App\Models\PartnerManager;
 use App\Models\PartnerPayoutAccount;
+use App\Support\PayoutAccountEditor;
 use App\Models\PayoutBatch;
 use App\Models\User;
 use App\Models\Venue;
@@ -2339,8 +2340,15 @@ class PartnerController extends Controller
                 // to read back where the venue's money goes. Changing it requires
                 // re-entering it in full, same rule as the web page.
                 'masked'         => $this->maskDestination($account),
+                'ifsc'           => $account->method === 'bank' ? $account->ifsc_code : null,
                 'verified'       => $account->verified_at !== null,
+                'verified_on'    => $account->verified_at?->toIso8601String(),
+                'changed'        => PayoutAccountEditor::changeLine($account, $request->user()),
             ],
+            // Only the owner changes where money goes; desk staff with Reports can read it.
+            'can_edit' => $request->user()->parent_partner_id === null,
+            // Who else can see and change this, so a change by someone else is never a surprise.
+            'manager' => \App\Models\PartnerManager::query()->where('partner_id', $partnerId)->first()?->toCard(),
             'batches' => $batches,
         ]);
     }
@@ -2373,20 +2381,21 @@ class PartnerController extends Controller
             $request->validate(['upiVpa' => ['required', 'string', 'min:3', 'max:120']]);
         }
 
+        // Desk staff can read the destination but never redirect the owner's money.
+        if ($request->user()->parent_partner_id !== null) {
+            return response()->json(['message' => 'Only the venue owner can change the settlement account.'], 403);
+        }
+
         $partnerId = $request->user()->effectivePartnerId();
 
-        $account = PartnerPayoutAccount::updateOrCreate(
-            ['partner_id' => $partnerId],
-            [
-                'method'         => $data['method'],
-                'account_holder' => $data['accountHolder'],
-                'bank_name'      => $data['method'] === 'bank' ? ($data['bankName'] ?? null) : null,
-                'account_number' => $data['method'] === 'bank' ? $data['accountNumber'] : null,
-                'ifsc_code'      => $data['method'] === 'bank' ? strtoupper((string) $data['ifsc']) : null,
-                'upi_vpa'        => $data['method'] === 'upi' ? $data['upiVpa'] : null,
-                'verified_at'    => null,
-            ],
-        );
+        $account = app(PayoutAccountEditor::class)->save($partnerId, [
+            'method'         => $data['method'],
+            'account_holder' => $data['accountHolder'],
+            'bank_name'      => $data['bankName'] ?? null,
+            'account_number' => $data['accountNumber'] ?? null,
+            'ifsc_code'      => $data['ifsc'] ?? null,
+            'upi_vpa'        => $data['upiVpa'] ?? null,
+        ], $request->user());
 
         return response()->json([
             'status'  => 'ok',

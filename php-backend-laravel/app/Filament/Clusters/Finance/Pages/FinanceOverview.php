@@ -17,6 +17,12 @@ class FinanceOverview extends Page
 
     protected static ?string $navigationLabel = 'Overview';
 
+    /** Finance only. The cluster also admits partner managers, for Settlement accounts. */
+    public static function canAccess(): bool
+    {
+        return auth()->user()?->canManage('finance') ?? false;
+    }
+
     protected static ?int $navigationSort = -10;
 
     protected string $view = 'filament.clusters.finance.finance-overview';

@@ -17,6 +17,7 @@ final class PartnerPayoutAccount extends Model
     protected $fillable = [
         'partner_id', 'method', 'account_holder',
         'bank_name', 'account_number', 'ifsc_code', 'upi_vpa', 'verified_at',
+        'updated_by_id', 'updated_by_kind', 'verified_by_id',
     ];
 
     protected $casts = [
