@@ -109,7 +109,7 @@ fun PaymentsCard(
             .padding(18.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Received today", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Muted, modifier = Modifier.weight(1f))
+            Text(if (todays.isEmpty()) "Payments" else "Received today", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Muted, modifier = Modifier.weight(1f))
             Row(
                 Modifier.clip(RoundedCornerShape(99.dp)).clickable { Haptics.tick(view); onViewAll() }.padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -118,7 +118,18 @@ fun PaymentsCard(
                 Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = BrandInk, modifier = Modifier.size(16.dp))
             }
         }
-        Row(verticalAlignment = Alignment.Bottom) {
+        if (todays.isEmpty()) {
+            // A big ₹0 says nothing; say it in words, and point at the last money that did come in.
+            Spacer(Modifier.height(2.dp))
+            Text("Nothing received yet today", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink)
+            entries.firstOrNull { it.paid > 0 }?.let { last ->
+                Text(
+                    "Last: ₹" + formatInr(last.paid) + " from " + last.name.substringBefore(' ') + ", " + last.whenLabel.replaceFirstChar { it.lowercase() },
+                    fontSize = 13.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = TextStyle(fontFeatureSettings = "tnum"),
+                )
+            }
+        } else Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 "₹" + formatInr(kotlin.math.round(count.value.toDouble())),
                 fontSize = 32.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold, color = Ink,
@@ -126,7 +137,7 @@ fun PaymentsCard(
             )
             Spacer(Modifier.width(8.dp))
             Text(
-                when (todays.size) { 0 -> "no payments yet"; 1 -> "1 payment"; else -> "${todays.size} payments" },
+                if (todays.size == 1) "1 payment" else "${todays.size} payments",
                 fontSize = 13.sp, color = Muted, modifier = Modifier.padding(bottom = 6.dp),
             )
         }

@@ -39,6 +39,8 @@ class BookingWatchService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var loop: Job? = null
+    private var updatesJob: Job? = null
+    private var listening = false
     private lateinit var overlay: AlertOverlay
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -62,11 +64,24 @@ class BookingWatchService : Service() {
             startForeground(ID_DUTY, n)
         }
         if (loop?.isActive != true) loop = scope.launch { watch() }
+        // Updates from Haraan reach the partner here while the app is closed; when it's
+        // open, the console shows them itself (PartnerUpdatesBus.appVisible).
+        if (updatesJob?.isActive != true) updatesJob = scope.launch {
+            com.haraan.partner.updates.PartnerUpdatesBus.events.collect { u ->
+                val session = Session(this@BookingWatchService)
+                if (!com.haraan.partner.updates.PartnerUpdatesBus.appVisible && u.id > session.lastUpdateId) {
+                    session.lastUpdateId = u.id
+                    updateNotification(u)
+                }
+            }
+        }
         return START_STICKY
     }
 
     override fun onDestroy() {
         loop?.cancel()
+        updatesJob?.cancel()
+        com.haraan.partner.updates.PartnerRealtime.release("duty")
         overlay.hide()
         super.onDestroy()
     }
@@ -89,8 +104,38 @@ class BookingWatchService : Service() {
                     fresh.firstOrNull()?.let { announce(BookingAlert.from(it, more = fresh.size - 1)) }
                 }
             }
+            runCatching {
+                val page = withContext(Dispatchers.IO) { api.updates(token, after = session.lastUpdateId) }
+                if (session.lastUpdateId == 0L) {
+                    session.lastUpdateId = page.latestId
+                } else {
+                    page.items.sortedBy { it.id }.forEach { com.haraan.partner.updates.PartnerUpdatesBus.emit(it) }
+                }
+                if (!listening) page.realtime?.let { com.haraan.partner.updates.PartnerRealtime.acquire("duty", token, it); listening = true }
+            }
             delay(POLL_MS)
         }
+    }
+
+    private fun updateNotification(u: com.haraan.partner.PartnerUpdateItem) {
+        val nm = getSystemService(NotificationManager::class.java) ?: return
+        val n = NotificationCompat.Builder(this, CH_UPDATES)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle(u.title)
+            .setContentText(listOfNotNull(u.body, u.by?.let { "By $it" }).joinToString(" · "))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(listOfNotNull(u.body, u.by?.let { "By $it" }).joinToString("\n")))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setAutoCancel(true)
+            .setContentIntent(
+                PendingIntent.getActivity(
+                    this, 3,
+                    Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+                ),
+            )
+            .build()
+        runCatching { nm.notify(ID_UPDATE_BASE + (u.id % 1000).toInt(), n) }
     }
 
     private fun announce(alert: BookingAlert) {
@@ -149,6 +194,8 @@ class BookingWatchService : Service() {
         private const val POLL_MS = 15_000L
         private const val ID_DUTY = 4100
         private const val ID_BOOKING_BASE = 4200
+        private const val ID_UPDATE_BASE = 4300
+        private const val CH_UPDATES = "haraan_updates"
         private const val CH_DUTY = "duty"
         private const val CH_BOOKINGS = "bookings"
         private const val ACTION_STOP = "haraan.duty.stop"
@@ -167,6 +214,11 @@ class BookingWatchService : Service() {
             nm.createNotificationChannel(
                 NotificationChannel(CH_DUTY, "On duty", NotificationManager.IMPORTANCE_LOW).apply {
                     description = "Shown while Haraan is listening for new bookings."
+                },
+            )
+            nm.createNotificationChannel(
+                NotificationChannel(CH_UPDATES, "Updates from Haraan", NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = "Settlements, your settlement account, venue and plan changes made by Haraan."
                 },
             )
             nm.createNotificationChannel(

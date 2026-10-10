@@ -660,6 +660,65 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
         if (bookingBanner != null) { kotlinx.coroutines.delay(6_000); bookingBanner = null }
     }
 
+    // ── Updates from Haraan ────────────────────────────────────────────────────
+    // Whatever admin, finance or the partner's Haraan manager changes in /control
+    // (settlement account, settlements, venue, courts, slots, plan) arrives here: live
+    // over the private Reverb channel, with a 20s poll underneath so a dropped socket
+    // only delays it. Each one drops in as a banner, counts on the bell, and refreshes
+    // Home's figures.
+    var unseenUpdates by remember { mutableStateOf(0) }
+    var updates by remember { mutableStateOf<List<PartnerUpdateItem>>(emptyList()) }
+    var updateBanner by remember { mutableStateOf<PartnerUpdateItem?>(null) }
+    var showUpdates by remember { mutableStateOf(false) }
+    val takeUpdate: (PartnerUpdateItem) -> Unit = { u ->
+        if (u.id > session.lastUpdateId) {
+            session.lastUpdateId = u.id
+            updates = (listOf(u) + updates.filterNot { it.id == u.id }).take(40)
+            unseenUpdates += 1
+            updateBanner = u
+            moneyLanded++
+        }
+    }
+    LaunchedEffect(token) {
+        lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) {
+            com.haraan.partner.updates.PartnerUpdatesBus.appVisible = true
+            var listening = false
+            try {
+                runCatching {
+                    val page = api.updates(token)
+                    updates = page.items
+                    unseenUpdates = page.unread
+                    // Anything that came in while the app was closed: show the newest once.
+                    val missed = page.items.filter { it.id > session.lastUpdateId && !it.seen }
+                    if (session.lastUpdateId != 0L) missed.maxByOrNull { it.id }?.let { updateBanner = it }
+                    session.lastUpdateId = maxOf(session.lastUpdateId, page.latestId)
+                    page.realtime?.let { com.haraan.partner.updates.PartnerRealtime.acquire("app", token, it); listening = true }
+                }
+                launch { com.haraan.partner.updates.PartnerUpdatesBus.events.collect { takeUpdate(it) } }
+                while (true) {
+                    kotlinx.coroutines.delay(20_000)
+                    runCatching {
+                        val page = api.updates(token, after = session.lastUpdateId)
+                        // Through the bus, so an open sub-screen (Payouts) hears it too.
+                        page.items.sortedBy { it.id }.filter { it.id > session.lastUpdateId }.forEach { com.haraan.partner.updates.PartnerUpdatesBus.emit(it) }
+                        if (!listening) page.realtime?.let { com.haraan.partner.updates.PartnerRealtime.acquire("app", token, it); listening = true }
+                    }
+                }
+            } finally {
+                com.haraan.partner.updates.PartnerUpdatesBus.appVisible = false
+                com.haraan.partner.updates.PartnerRealtime.release("app")
+            }
+        }
+    }
+    val updatesScope = rememberCoroutineScope()
+    val markUpdatesSeen: () -> Unit = {
+        if (unseenUpdates > 0 || updates.any { !it.seen }) {
+            unseenUpdates = 0
+            updates = updates.map { it.copy(seen = true) }
+            updatesScope.launch { runCatching { api.markUpdatesSeen(token) } }
+        }
+    }
+
     // The phone's Back closes whichever console screen is open, in the same order
     // they take the screen below. There was no handler at all, so Back from
     // Payouts, Reports, the venue desk — any of them — closed the whole app.
@@ -706,7 +765,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
         return
     }
     if (showPayouts) {
-        PayoutsScreen(api, token, onBack = { showPayouts = false })
+        com.haraan.partner.ui.payouts.PayoutsScreen(api, token, onBack = { showPayouts = false })
         return
     }
     if (showReports) {
@@ -842,6 +901,26 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     val drawerScope = rememberCoroutineScope()
     fun closeDrawer() { drawerScope.launch { drawerState.close() } }
 
+    /** Opens the screen an update is about. */
+    fun openUpdate(u: PartnerUpdateItem) {
+        markUpdatesSeen()
+        when (u.screen) {
+            "payouts" -> if (session.can("reports")) showPayouts = true
+            "venues" -> tab = if (Tab.Venues in tabs) Tab.Venues else Tab.Home
+            "account" -> drawerScope.launch { drawerState.open() }
+            else -> tab = Tab.Home
+        }
+    }
+    if (showUpdates) {
+        com.haraan.partner.updates.UpdatesSheet(
+            items = updates,
+            newBookings = unseenBookings,
+            onBookings = { showUpdates = false; markUpdatesSeen(); tab = Tab.Sales; unseenBookings = 0 },
+            onOpen = { u -> showUpdates = false; openUpdate(u) },
+            onDismiss = { showUpdates = false; markUpdatesSeen() },
+        )
+    }
+
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
@@ -922,7 +1001,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                     }
                 },
                 actions = {
-                    BellIcon(unseenBookings) { tab = Tab.Sales; unseenBookings = 0 }
+                    BellIcon(unseenBookings + unseenUpdates) { showUpdates = true }
                     val focus = venues?.let { list -> list.firstOrNull { it.id == branchId } ?: list.firstOrNull() }
                     VenueAvatar(
                         photo = focus?.image,
@@ -963,6 +1042,17 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                     BookingBanner(msg) { bookingBanner = null; tab = Tab.Sales; unseenBookings = 0 }
                 }
             }
+            updateBanner?.let { u ->
+                LayoutBox(Modifier.fillMaxWidth().zIndex(11f).statusBarsPadding().padding(top = 8.dp)) {
+                    androidx.compose.runtime.key(u.id) {
+                        com.haraan.partner.updates.UpdateBanner(
+                            u,
+                            onOpen = { updateBanner = null; openUpdate(u) },
+                            onDismiss = { updateBanner = null },
+                        )
+                    }
+                }
+            }
             inAppAlert?.let { a ->
                 LayoutBox(Modifier.fillMaxWidth().zIndex(10f).statusBarsPadding().padding(top = 8.dp)) {
                     androidx.compose.runtime.key(a.id) {
@@ -985,7 +1075,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                     onToggleDuty = toggleDuty,
                     venues = venues,
                     reloadSignal = moneyLanded,
-                    unseen = unseenBookings,
+                    unseen = unseenBookings + unseenUpdates,
                     onBookings = { tab = Tab.Sales; unseenBookings = 0 },
                     onSetUpSlots = { id, name -> manageStartsInSlots = true; manageVenue = id to name },
                     onOpenDesk = { id, name -> manageStartsInSlots = false; manageVenue = id to name },
@@ -996,7 +1086,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                     onWhatsApp = if (!WHATSAPP_DESK_LOCKED && (lane == Lane.VENUE || lane == Lane.BOTH)) ({ showWhatsAppDesk = true }) else null,
                     onSettlement = if (session.can("reports")) ({ showPayouts = true }) else null,
                     onMenu = { drawerScope.launch { drawerState.open() } },
-                    onBell = { tab = Tab.Sales; unseenBookings = 0 },
+                    onBell = { showUpdates = true },
                     branchSwitcher = ctx?.takeIf { it.isMultiBranch }?.let { known ->
                         {
                             BranchSwitcher(known, branchId, onDark = false) { picked ->
@@ -1837,7 +1927,7 @@ private fun HomeTop(
             }
             Column(Modifier.weight(1f)) {
                 Text(
-                    name, fontSize = 18.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk,
+                    name, fontSize = 17.sp, fontWeight = FontWeight.Bold, color = AuthInk,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, letterSpacing = (-0.3).sp,
                 )
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1875,8 +1965,8 @@ private fun HomeTop(
                     ) { Text(if (unseen > 9) "9+" else "$unseen", fontSize = 8.5.sp, fontWeight = FontWeight.Bold, color = Color.White) }
                 }
             }
-            Spacer(Modifier.width(4.dp))
-            VenueAvatar(photo = photo, initial = initial, onClick = onMenu)
+            // No avatar here: it opened the same drawer as the menu, and its width was
+            // what cut the venue's name short.
         }
         Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 18.dp)) { content() }
     }
@@ -2196,6 +2286,12 @@ private fun TodayStatus(
         day.expected > 0 && over -> "₹" + formatInr(kotlin.math.round(money.shown)) + " earned · ₹" + formatInr(day.collected) + " collected"
         day.expected > 0 -> "₹" + formatInr(kotlin.math.round(money.shown)) + " expected · ₹" + formatInr(day.collected) + " in so far"
         over -> "No bookings came in."
+        // The rupees live here so the board below doesn't say the same thing again.
+        left > 0 && todayHours != null -> {
+            val worth = com.haraan.partner.ui.home.sellableAhead(todayHours, nowMin, slotMinutes)
+            (if (left == 1) "1 court-hour left" else "$left court-hours left") +
+                (if (worth > 0) " · ₹" + formatInr(kotlin.math.round(worth)) + (if (left == 1) " if it sells" else " if they sell") else "")
+        }
         left == 1 -> "1 court-hour still open."
         left > 0 -> "$left court-hours still open."
         else -> null
@@ -2482,7 +2578,7 @@ private fun DeskActions(
 /**
  * One door: a lit tile that presses in under the thumb (it sinks, its shadow goes),
  * the glyph, the word. A locked door looks reachable but asleep — greyed mark,
- * padlock, a "Coming soon" tag — and answers a tap with a short shake and a line
+ * padlock on its corner — and answers a tap with a short shake and a line
  * saying when, instead of opening.
  */
 @Composable
@@ -2523,20 +2619,11 @@ private fun DoorTile(door: DeskDoor, modifier: Modifier, onLocked: (String) -> U
                         scaleX = sc; scaleY = sc
                         translationY = 1.5.dp.toPx() * sink
                     }
-                    .shadow((5f * (1f - sink)).dp, RoundedCornerShape(18.dp), clip = false, spotColor = Color(0x402563EB))
                     .size(56.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        if (door.locked) Brush.verticalGradient(listOf(Color(0xFFF8FAFC), Color(0xFFEFF2F6)))
-                        else Brush.verticalGradient(listOf(Color.White, Color(0xFFEAF1FF)))
-                    )
-                    // Lit top edge, darker foot: a key, not a sticker.
-                    .border(
-                        1.dp,
-                        Brush.verticalGradient(listOf(Color(0x332563EB), Color(0x142563EB))),
-                        RoundedCornerShape(18.dp),
-                    )
-                    .pressShade(interaction, amount = 0.05f),
+                    .clip(RoundedCornerShape(16.dp))
+                    // Flat tint, no bevel or glow: the glyph is the thing to see.
+                    .background(if (door.locked) Color(0xFFF3F5F8) else Color(0xFFEEF3FE))
+                    .pressShade(interaction, amount = 0.06f),
                 contentAlignment = Alignment.Center,
             ) {
                 when {
@@ -2552,17 +2639,6 @@ private fun DoorTile(door: DeskDoor, modifier: Modifier, onLocked: (String) -> U
                         .border(1.dp, Color(0x1F0F172A), RoundedCornerShape(99.dp)),
                     contentAlignment = Alignment.Center,
                 ) { Icon(Icons.Filled.Lock, contentDescription = null, tint = Color(0xFF64748B), modifier = Modifier.size(11.dp)) }
-                // The tag rides the tile's top edge.
-                Text(
-                    "Coming soon",
-                    fontSize = 7.5.sp, lineHeight = 9.sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1, softWrap = false,
-                    letterSpacing = 0.2.sp,
-                    // Sits on the tile's top edge, half above it, clear of the mark.
-                    modifier = Modifier.align(Alignment.TopCenter).offset(y = (-7).dp)
-                        .clip(RoundedCornerShape(99.dp)).background(AuthInk)
-                        .border(1.5.dp, Color.White, RoundedCornerShape(99.dp))
-                        .padding(horizontal = 5.dp, vertical = 1.5.dp),
-                )
             } else if (door.badge > 0) {
                 LayoutBox(
                     Modifier.align(Alignment.TopEnd).offset(x = 5.dp, y = (-5).dp)
@@ -5790,301 +5866,6 @@ private fun ContactCustomerDialog(c: CustomerRow, onDismiss: () -> Unit) {
             Spacer(Modifier.height(4.dp))
             TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
                 Text("Close", color = AuthMuted, fontWeight = FontWeight.SemiBold)
-            }
-        }
-    }
-}
-
-/**
- * Payouts — the settlement home: what the venue is owed, where it's sent, and
- * what's already landed. Balance figures come from the same PartnerSettlement
- * service the web page and /control settle against, so the app can never show a
- * different "available" than the console.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun PayoutsScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
-    var reload by remember { mutableStateOf(0) }
-    var editing by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
-    val state by produceState<UiState<PayoutsPage>>(UiState.Loading, reload) {
-        value = runCatchingUi { api.payouts(token) }
-    }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White, scrolledContainerColor = Color.White),
-                title = { Text("Payouts", fontWeight = FontWeight.Bold, color = AuthInk, fontSize = 18.sp) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = AuthInk) }
-                },
-            )
-        },
-    ) { padding ->
-        LayoutBox(Modifier.fillMaxSize().background(AuthPageBg).padding(padding)) {
-            Loaded(state) { p ->
-                LazyColumn(
-                    Modifier.fillMaxSize().padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(top = 14.dp, bottom = 28.dp),
-                ) {
-                    item { PayoutBalanceHero(p) }
-                    item { PayoutAccountCard(p.account) { editing = true } }
-                    item {
-                        Text(
-                            "SETTLEMENT HISTORY",
-                            fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                            color = AuthMuted, letterSpacing = 1.4.sp,
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                    }
-                    if (p.batches.isEmpty()) {
-                        item {
-                            LayoutBox(Modifier.fillMaxWidth().premiumSurface().padding(20.dp)) {
-                                Text(
-                                    "No settlements yet. Money you collect shows as available until it's transferred.",
-                                    fontSize = 13.sp, color = AuthMuted, lineHeight = 18.sp,
-                                )
-                            }
-                        }
-                    } else {
-                        items(p.batches) { b -> PayoutBatchCard(b) }
-                    }
-                }
-            }
-        }
-    }
-
-    if (editing) {
-        PayoutAccountDialog(
-            onDismiss = { editing = false },
-            onSave = { method, holder, bank, acct, ifsc, vpa ->
-                editing = false
-                scope.launch {
-                    runCatching { api.savePayoutAccount(token, method, holder, bank, acct, ifsc, vpa) }
-                    reload++
-                }
-            },
-        )
-    }
-}
-
-@Composable
-private fun PayoutBalanceHero(p: PayoutsPage) {
-    LayoutBox(
-        Modifier.fillMaxWidth()
-            .shadow(18.dp, RoundedCornerShape(22.dp), clip = false, spotColor = AuthInkTop)
-            .clip(RoundedCornerShape(22.dp))
-            .background(Brush.linearGradient(listOf(AuthInkTop, AuthInkMid, AuthInkBot))),
-    ) {
-        LayoutBox(
-            Modifier.matchParentSize().background(
-                Brush.radialGradient(listOf(Color(0x553B82F6), Color(0x00000000)), center = Offset(120f, 40f), radius = 520f)
-            )
-        )
-        Column(Modifier.fillMaxWidth().padding(20.dp)) {
-            Text("AVAILABLE TO SETTLE", color = Color(0xB3CFE0FF), fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-            Spacer(Modifier.height(8.dp))
-            Text("₹" + formatInr(p.available), color = Color.White, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-1).sp)
-            if (p.inFlight > 0) {
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(Color(0x33F59E0B)).padding(horizontal = 10.dp, vertical = 5.dp),
-                ) {
-                    LayoutBox(Modifier.size(6.dp).clip(RoundedCornerShape(99.dp)).background(Color(0xFFFCD34D)))
-                    Spacer(Modifier.width(7.dp))
-                    Text("₹" + formatInr(p.inFlight) + " being transferred", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFFFCD34D))
-                }
-            }
-            Spacer(Modifier.height(18.dp))
-            Row(Modifier.fillMaxWidth()) {
-                PayoutStat(Modifier.weight(1f), "Collected", p.collected)
-                LayoutBox(Modifier.width(1.dp).height(34.dp).background(Color(0x33FFFFFF)))
-                PayoutStat(Modifier.weight(1f), "Settled", p.settled)
-            }
-        }
-    }
-}
-
-@Composable
-private fun PayoutStat(modifier: Modifier, label: String, value: Double) {
-    Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("₹" + formatInr(value), color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(2.dp))
-        Text(label, color = Color(0x99CFE0FF), fontSize = 11.sp)
-    }
-}
-
-@Composable
-private fun PayoutAccountCard(account: PayoutAccount?, onEdit: () -> Unit) {
-    PressableSurface(onClick = onEdit) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            LayoutBox(
-                Modifier.size(44.dp).clip(RoundedCornerShape(13.dp))
-                    .background(Brush.linearGradient(listOf(Color(0xFFEAF1FF), Color(0xFFDCE8FF)))),
-                contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Filled.Payments, contentDescription = null, tint = AuthAccent, modifier = Modifier.size(22.dp)) }
-            Spacer(Modifier.width(13.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    if (account == null) "Add settlement account" else "Money is sent to",
-                    fontSize = 12.sp, color = AuthMuted,
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    account?.masked ?: "No account yet — tap to add",
-                    fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = AuthInk, maxLines = 1,
-                )
-                if (account != null) {
-                    Spacer(Modifier.height(6.dp))
-                    val tone = if (account.verified) GREEN else Color(0xFFB45309)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(tone.copy(alpha = 0.12f)).padding(horizontal = 9.dp, vertical = 4.dp),
-                    ) {
-                        LayoutBox(Modifier.size(6.dp).clip(RoundedCornerShape(99.dp)).background(tone))
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            if (account.verified) "Verified" else "Pending verification",
-                            fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = tone,
-                        )
-                    }
-                }
-            }
-            Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = Color(0xFFB6C0D0), modifier = Modifier.size(20.dp))
-        }
-    }
-}
-
-@Composable
-private fun PayoutBatchCard(b: PayoutBatchRow) {
-    val tone = if (b.isPaid) GREEN else Color(0xFFB45309)
-    LayoutBox(Modifier.fillMaxWidth().premiumSurface()) {
-        Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("₹" + formatInr(b.amount), fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    listOfNotNull(b.date, b.period).joinToString(" · ").ifBlank { "—" },
-                    fontSize = 12.sp, color = AuthMuted,
-                )
-                if (!b.reference.isNullOrBlank()) {
-                    Spacer(Modifier.height(3.dp))
-                    Text("Ref ${b.reference}", fontSize = 11.sp, color = AuthMuted)
-                }
-            }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.clip(RoundedCornerShape(999.dp)).background(tone.copy(alpha = 0.12f)).padding(horizontal = 10.dp, vertical = 6.dp),
-            ) {
-                LayoutBox(Modifier.size(6.dp).clip(RoundedCornerShape(99.dp)).background(tone))
-                Spacer(Modifier.width(6.dp))
-                Text(b.status.replaceFirstChar { it.uppercase() }, fontSize = 11.5.sp, fontWeight = FontWeight.Bold, color = tone)
-            }
-        }
-    }
-}
-
-/** Enter where settlements are sent. Never prefilled — changing the destination
- *  means re-entering it, and saving clears verification. */
-@Composable
-private fun PayoutAccountDialog(
-    onDismiss: () -> Unit,
-    onSave: (method: String, holder: String, bank: String?, acct: String?, ifsc: String?, vpa: String?) -> Unit,
-) {
-    var method by remember { mutableStateOf("bank") }
-    var holder by remember { mutableStateOf("") }
-    var bank by remember { mutableStateOf("") }
-    var acct by remember { mutableStateOf("") }
-    var ifsc by remember { mutableStateOf("") }
-    var vpa by remember { mutableStateOf("") }
-    val view = LocalView.current
-
-    val colors = OutlinedTextFieldDefaults.colors(
-        focusedBorderColor = AuthAccent, focusedLabelColor = AuthAccent,
-        cursorColor = AuthAccent, unfocusedBorderColor = Color(0x1F0F172A),
-    )
-    val valid = holder.isNotBlank() && if (method == "bank") acct.length >= 6 && ifsc.length >= 6 else vpa.length >= 3
-
-    Dialog(onDismissRequest = onDismiss) {
-        Column(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(Color.White)
-                .verticalScroll(rememberScrollState()).padding(22.dp),
-        ) {
-            Text("Settlement account", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
-            Spacer(Modifier.height(3.dp))
-            Text("Where your collected money is transferred.", fontSize = 12.sp, color = AuthMuted)
-
-            Spacer(Modifier.height(16.dp))
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("bank" to "Bank account", "upi" to "UPI").forEach { (key, label) ->
-                    val on = method == key
-                    LayoutBox(
-                        Modifier.weight(1f).clip(RoundedCornerShape(12.dp))
-                            .background(if (on) Color(0x142F6BFF) else Color(0xFFF8FAFC))
-                            .border(if (on) 1.5.dp else 1.dp, if (on) AuthAccent else Color(0x1F0F172A), RoundedCornerShape(12.dp))
-                            .clickable { method = key; view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }
-                            .padding(vertical = 11.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(label, fontSize = 13.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.Medium, color = if (on) AuthAccentDeep else AuthInk)
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-            OutlinedTextField(
-                value = holder, onValueChange = { holder = it },
-                label = { Text("Account holder name") }, singleLine = true,
-                shape = RoundedCornerShape(12.dp), colors = colors, modifier = Modifier.fillMaxWidth(),
-            )
-
-            if (method == "bank") {
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = bank, onValueChange = { bank = it },
-                    label = { Text("Bank name") }, singleLine = true,
-                    shape = RoundedCornerShape(12.dp), colors = colors, modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = acct, onValueChange = { acct = it.filter { c -> c.isDigit() }.take(18) },
-                    label = { Text("Account number") }, singleLine = true,
-                    shape = RoundedCornerShape(12.dp), colors = colors,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = ifsc, onValueChange = { ifsc = it.uppercase().take(11) },
-                    label = { Text("IFSC code") }, singleLine = true,
-                    shape = RoundedCornerShape(12.dp), colors = colors, modifier = Modifier.fillMaxWidth(),
-                )
-            } else {
-                Spacer(Modifier.height(10.dp))
-                OutlinedTextField(
-                    value = vpa, onValueChange = { vpa = it },
-                    label = { Text("UPI ID") }, placeholder = { Text("name@bank") }, singleLine = true,
-                    shape = RoundedCornerShape(12.dp), colors = colors, modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
-            Spacer(Modifier.height(12.dp))
-            Text(
-                "Saving sends this for re-verification before the next settlement.",
-                fontSize = 11.5.sp, color = AuthMuted, lineHeight = 16.sp,
-            )
-
-            Spacer(Modifier.height(18.dp))
-            GradientCta(text = "Save account", enabled = valid, loading = false) {
-                view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                onSave(method, holder.trim(), bank.trim().ifBlank { null }, acct.trim().ifBlank { null }, ifsc.trim().ifBlank { null }, vpa.trim().ifBlank { null })
-            }
-            Spacer(Modifier.height(4.dp))
-            TextButton(onClick = onDismiss, modifier = Modifier.fillMaxWidth()) {
-                Text("Cancel", color = AuthMuted, fontWeight = FontWeight.SemiBold)
             }
         }
     }

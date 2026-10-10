@@ -82,6 +82,8 @@ dependencies {
 
   // Venue photos on the venue cards (same loader as the member app).
   implementation(libs.coil.compose)
+  // Live partner updates over Reverb (Pusher protocol WebSocket) — same version as the member app.
+  implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
   // "Continue with Google" via Credential Manager (same stack as the member app).
   implementation("androidx.credentials:credentials:1.3.0")

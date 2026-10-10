@@ -74,6 +74,11 @@ class Session(context: Context) {
         get() = prefs.getLong("last_notified_booking", 0L)
         set(value) = prefs.edit().putLong("last_notified_booking", value).apply()
 
+    /** Highest partner-update id already shown, so the socket and the poll never show one twice. */
+    var lastUpdateId: Long
+        get() = prefs.getLong("last_update_id", 0L)
+        set(value) = prefs.edit().putLong("last_update_id", value).apply()
+
     /** "On duty": new bookings reach the partner with the app closed (BookingWatchService). */
     var onDuty: Boolean
         get() = prefs.getBoolean("on_duty", false)
@@ -86,6 +91,7 @@ class Session(context: Context) {
         isDesk = false; permissionsCsv = null
         branchId = null
         lastNotifiedBookingId = 0L
+        lastUpdateId = 0L
         onDuty = false
     }
 }
@@ -761,7 +767,18 @@ data class PayoutAccount(
     val bankName: String?,
     val masked: String,
     val verified: Boolean,
+    val ifsc: String? = null,
+    /** ISO time Haraan finance verified it. */
+    val verifiedOn: String? = null,
+    /** Who last changed it: "You", the manager's name, or "Haraan finance". */
+    val changedBy: String? = null,
+    /** partner | manager | haraan */
+    val changedKind: String? = null,
+    val changedAt: String? = null,
 )
+
+/** The partner's Haraan manager, as Payouts names them next to the account. */
+data class PayoutManager(val name: String, val title: String, val photoUrl: String?, val phone: String?, val whatsapp: Boolean)
 
 /** One settlement transfer to the partner. */
 data class PayoutBatchRow(
@@ -782,6 +799,46 @@ data class PayoutsPage(
     val collected: Double,
     val account: PayoutAccount?,
     val batches: List<PayoutBatchRow>,
+    /** Only the owner changes the destination; desk staff read it. */
+    val canEdit: Boolean = true,
+    val manager: PayoutManager? = null,
+)
+
+/** One thing Haraan changed on the partner's account (settlement, venue, manager…). */
+data class PartnerUpdateItem(
+    val id: Long,
+    val kind: String,
+    val title: String,
+    val body: String?,
+    /** Where the app opens it: payouts | venues | home | account. */
+    val screen: String,
+    /** "Priya (your Haraan manager)", "Haraan finance", "Haraan". */
+    val by: String?,
+    val seen: Boolean,
+    val at: String?,
+) {
+    companion object {
+        fun from(o: JSONObject) = PartnerUpdateItem(
+            id = o.optLong("id"),
+            kind = o.optString("kind"),
+            title = o.optString("title"),
+            body = o.optString("body").takeIf { it.isNotBlank() && it != "null" },
+            screen = o.optString("screen", "home"),
+            by = o.optString("by").takeIf { it.isNotBlank() && it != "null" },
+            seen = o.optBoolean("seen", false),
+            at = o.optString("at").takeIf { it.isNotBlank() && it != "null" },
+        )
+    }
+}
+
+/** How to listen live: the partner's private Reverb channel. */
+data class PartnerRealtimeInfo(val key: String, val host: String, val port: Int, val scheme: String, val channel: String)
+
+data class PartnerUpdatesPage(
+    val items: List<PartnerUpdateItem>,
+    val unread: Int,
+    val latestId: Long,
+    val realtime: PartnerRealtimeInfo?,
 )
 
 /** A desk person under a partner owner. */
@@ -1833,6 +1890,36 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         )
     }
 
+    /** GET /api/partner/updates — what Haraan changed, newest first (only newer than [after] when given). */
+    suspend fun updates(token: String, after: Long = 0L): PartnerUpdatesPage = withContext(Dispatchers.IO) {
+        val o = JSONObject(get("/api/partner/updates" + if (after > 0) "?after=$after" else "", token))
+        val arr = o.optJSONArray("data")
+        val rt = o.optJSONObject("realtime")
+        PartnerUpdatesPage(
+            items = if (arr == null) emptyList() else (0 until arr.length()).map { PartnerUpdateItem.from(arr.getJSONObject(it)) },
+            unread = o.optInt("unread", 0),
+            latestId = o.optLong("latest_id", 0L),
+            realtime = rt?.takeIf { it.optBoolean("enabled", false) && !it.optString("key").isNullOrBlank() && it.optString("key") != "null" }?.let {
+                PartnerRealtimeInfo(
+                    key = it.optString("key"),
+                    host = it.optString("host"),
+                    port = it.optInt("port", 443),
+                    scheme = it.optString("scheme", "https"),
+                    channel = it.optString("channel"),
+                )
+            },
+        )
+    }
+
+    suspend fun markUpdatesSeen(token: String) = withContext(Dispatchers.IO) {
+        post("/api/partner/updates/seen", "{}", token); Unit
+    }
+
+    /** Signs the socket into the private channel (Pusher protocol): returns "key:signature". */
+    suspend fun realtimeAuth(token: String, socketId: String, channel: String): String = withContext(Dispatchers.IO) {
+        JSONObject(post("/api/partner/realtime/auth", JSONObject().put("socket_id", socketId).put("channel_name", channel).toString(), token)).optString("auth")
+    }
+
     /** GET /api/partner/payouts — balance, settlement account, batch history. */
     suspend fun payouts(token: String): PayoutsPage = withContext(Dispatchers.IO) {
         val o = JSONObject(get("/api/partner/payouts", token))
@@ -1851,6 +1938,21 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                     bankName = it.optStringOrNull("bank_name"),
                     masked = it.optString("masked"),
                     verified = it.optBoolean("verified", false),
+                    ifsc = it.optStringOrNull("ifsc"),
+                    verifiedOn = it.optStringOrNull("verified_on"),
+                    changedBy = it.optJSONObject("changed")?.optStringOrNull("name"),
+                    changedKind = it.optJSONObject("changed")?.optStringOrNull("kind"),
+                    changedAt = it.optJSONObject("changed")?.optStringOrNull("at"),
+                )
+            },
+            canEdit = o.optBoolean("can_edit", true),
+            manager = o.optJSONObject("manager")?.let { m ->
+                PayoutManager(
+                    name = m.optString("name"),
+                    title = m.optString("title", "Your Haraan manager"),
+                    photoUrl = m.optStringOrNull("photo_url"),
+                    phone = m.optStringOrNull("phone"),
+                    whatsapp = m.optBoolean("show_whatsapp", false),
                 )
             },
             batches = if (arr == null) emptyList() else (0 until arr.length()).map { i ->
