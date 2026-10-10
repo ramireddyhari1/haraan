@@ -935,6 +935,229 @@ h2, h3 {
     color: #1E3A8A !important;
 }
 
+/* --- Live slot board: status strip, drawn group heads, availability rail --- */
+.slots-live {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 18px;
+    padding: 9px 12px;
+    border: 1px solid #D1FAE5;
+    border-radius: 12px;
+    background: linear-gradient(90deg, #ECFDF5, #F8FAFC 70%);
+    font-size: 12px;
+    color: #475569;
+}
+.slots-live__dot {
+    position: relative;
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10B981;
+}
+.slots-live__dot::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    border: 2px solid #10B981;
+    opacity: 0;
+    animation: slots-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+.slots-live__label { font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; font-size: 11px; color: #047857; }
+.slots-live__ago { color: #64748B; font-variant-numeric: tabular-nums; }
+.slots-live__stat { margin-left: auto; white-space: nowrap; color: #64748B; }
+.slots-live__stat b { font-weight: 800; font-variant-numeric: tabular-nums; }
+.slots-live__stat b.is-open { color: #047857; }
+.slots-live__stat b.is-booked { color: #475569; }
+.slots-live.is-checking { border-color: #E2E8F0; background: #F8FAFC; }
+.slots-live.is-checking .slots-live__dot { background: #94A3B8; }
+.slots-live.is-checking .slots-live__dot::after { border-color: #94A3B8; }
+.slots-live.is-checking .slots-live__label { text-transform: none; letter-spacing: 0; font-weight: 600; color: #64748B; font-size: 12px; }
+.slots-live.is-offline { border-color: #FDE68A; background: #FFFBEB; }
+.slots-live.is-offline .slots-live__dot { background: #F59E0B; }
+.slots-live.is-offline .slots-live__dot::after { animation: none; }
+.slots-live.is-offline .slots-live__label { color: #B45309; }
+
+@keyframes slots-ping {
+    0% { transform: scale(0.6); opacity: 0.7; }
+    80%, 100% { transform: scale(1.6); opacity: 0; }
+}
+
+.slots-group__head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+.slots-group__head .slots-group__title { margin: 0; }
+.slots-group__art {
+    flex: none;
+    display: inline-flex;
+    width: 26px;
+    height: 26px;
+    color: #94A3B8;
+}
+.slots-group__art svg { width: 100%; height: 100%; }
+.slots-group__count {
+    margin-left: auto;
+    padding: 3px 8px;
+    border-radius: 99px;
+    background: #ECFDF5;
+    font-size: 11px;
+    font-weight: 700;
+    color: #047857;
+    white-space: nowrap;
+}
+.slots-group__count.is-full { background: #F1F5F9; color: #64748B; }
+
+/* One tick per slot, in order: green = open, grey = gone, blue = yours. */
+.slots-bar {
+    display: flex;
+    gap: 3px;
+    margin: 0 0 12px;
+}
+.slots-bar__seg {
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: #A7F3D0;
+    transition: background 0.25s ease, transform 0.25s ease;
+}
+.slots-bar__seg.is-booked { background: #CBD5E1; }
+.slots-bar__seg.is-closed { background: #E2E8F0; }
+.slots-bar__seg.is-picked { background: #2563EB; transform: scaleY(1.5); }
+
+.slot-item__time small {
+    margin-left: 2px;
+    font-size: 0.68em;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    opacity: 0.7;
+}
+.slot-item__price { display: inline-flex; align-items: center; justify-content: center; gap: 3px; }
+.slot-item__lock,
+.slot-item__flame { display: inline-flex; width: 11px; height: 11px; }
+.slot-item__lock svg,
+.slot-item__flame svg { width: 100%; height: 100%; }
+.slot-item__flame { color: #F59E0B; }
+.slot-item__tag {
+    position: absolute;
+    top: -8px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 1px 7px;
+    border-radius: 99px;
+    background: #0F172A;
+    font-size: 9.5px;
+    font-weight: 700;
+    line-height: 16px;
+    color: #fff;
+    white-space: nowrap;
+    z-index: 1;
+}
+
+/* Gone slots are hatched, so "taken" reads at a glance without a word. */
+.slot-item.is-booked {
+    background-image: repeating-linear-gradient(135deg, rgba(148, 163, 184, 0.14) 0 2px, transparent 2px 7px);
+}
+.slot-item.is-booked .slot-item__time { text-decoration: none; }
+.slot-item.is-closed { opacity: 0.7; }
+
+/* Motion: cards settle in, a pick springs, a flip flashes. */
+.slot-item.is-enter { animation: slot-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both; animation-delay: calc(var(--i, 0) * 18ms); }
+.slot-item.is-pop { animation: slot-pop 0.32s cubic-bezier(0.3, 1.6, 0.5, 1); }
+.slot-item.is-just-taken { animation: slot-taken 0.9s ease both; }
+.slot-item.is-just-freed { animation: slot-freed 1.4s ease both; }
+
+@keyframes slot-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.97); }
+    to { opacity: 1; transform: none; }
+}
+@keyframes slot-pop {
+    0% { transform: scale(0.92); }
+    60% { transform: scale(1.04); }
+    100% { transform: scale(1); }
+}
+@keyframes slot-taken {
+    0% { background-color: #FEE2E2; border-color: #FCA5A5; transform: none; }
+    15% { transform: translateX(-3px); }
+    30% { transform: translateX(3px); }
+    45% { transform: translateX(-2px); }
+    60% { transform: none; background-color: #FEE2E2; }
+    100% { background-color: #F8FAFC; }
+}
+@keyframes slot-freed {
+    0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.55); border-color: #10B981; }
+    70% { box-shadow: 0 0 0 8px rgba(16, 185, 129, 0); border-color: #10B981; }
+    100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+}
+
+/* First read in flight. */
+.slots-grid--skeleton { margin-top: 4px; }
+.slot-skel {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 58px;
+    border-radius: 12px;
+    background: #F1F5F9;
+    overflow: hidden;
+    position: relative;
+}
+.slot-skel i { display: block; height: 8px; border-radius: 4px; background: #E2E8F0; }
+.slot-skel i:first-child { width: 56%; height: 10px; }
+.slot-skel i:last-child { width: 32%; }
+.slot-skel::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.75), transparent);
+    animation: slot-shimmer 1.2s ease-in-out infinite;
+}
+@keyframes slot-shimmer { to { transform: translateX(100%); } }
+
+/* "Someone just booked 7 PM" — drops in at the top, clear of the pay bar. */
+.slot-toast {
+    position: fixed;
+    left: 50%;
+    top: calc(16px + env(safe-area-inset-top, 0px));
+    z-index: 10050;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: max-content;
+    max-width: min(calc(100vw - 32px), 420px);
+    padding: 10px 14px;
+    border-radius: 14px;
+    background: #0F172A;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.28);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: #fff;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate(-50%, -12px);
+    transition: opacity 0.22s ease, transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.slot-toast.is-on { opacity: 1; transform: translate(-50%, 0); }
+.slot-toast__dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: #F87171; }
+.slot-toast.is-freed .slot-toast__dot { background: #34D399; }
+
+@media (prefers-reduced-motion: reduce) {
+    .slots-live__dot::after,
+    .slot-skel::after,
+    .slot-item.is-enter,
+    .slot-item.is-pop,
+    .slot-item.is-just-taken,
+    .slot-item.is-just-freed { animation: none !important; }
+}
+
 /* Amenities Grid */
 .amenities-grid {
     display: grid;

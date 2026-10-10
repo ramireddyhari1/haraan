@@ -1874,21 +1874,100 @@
                 dayRefusal = body.message || 'This day is not open for booking yet.';
                 liveStates = {};
             } else if (res.ok && body.data && Array.isArray(body.data.slots)) {
+                const previous = liveStates;
                 liveStates = {};
                 body.data.slots.forEach(r => { liveStates[r.id] = r.state; });
+                // Only a background re-check of the same grid can "change" under the player.
+                slotFlips = quiet && previous ? diffStates(previous, liveStates) : {};
             } else {
+                if (!quiet && liveStates === null) { liveStates = {}; liveFailed = true; renderSlots(); }
                 return; // unreachable: keep the template fallback
             }
         } catch (e) {
+            if (!quiet && liveStates === null) { liveStates = {}; liveFailed = true; renderSlots(); }
             return;
         }
+        liveFailed = false;
+        liveCheckedAt = Date.now();
 
         // Drop picks that were taken while the player was deciding.
         const before = selectedSlots.length;
+        const lost = selectedSlots.filter(s => slotState(s.slotId) !== 'open');
         selectedSlots = selectedSlots.filter(s => slotState(s.slotId) === 'open');
         if (selectedSlots.length !== before) updatePriceBreakdown();
-        renderSlots();
+        const flips = slotFlips; // renderSlots spends them on the flash
+        renderSlots(!quiet);
+        announceFlips(lost, flips);
     }
+
+    // What moved between two live reads: { slotId: 'taken' | 'freed' }.
+    let slotFlips = {};
+    let liveCheckedAt = 0;
+    let liveFailed = false;
+    function diffStates(prev, next) {
+        const out = {};
+        Object.keys(next).forEach(id => {
+            if (!(id in prev) || prev[id] === next[id]) return;
+            if (prev[id] === 'open' && next[id] === 'booked') out[id] = 'taken';
+            else if (prev[id] !== 'open' && next[id] === 'open') out[id] = 'freed';
+        });
+        return out;
+    }
+
+    // Tell the player when the grid changed under them — the "someone else is booking" moment.
+    function announceFlips(lostPicks, flips) {
+        const label = (id) => {
+            const s = daySlots(selectedDate).find(x => String(x.id) === String(id));
+            return s ? s.time.split(' - ')[0] : 'A slot';
+        };
+        if (lostPicks.length) {
+            slotToast(`${lostPicks[0].time.split(' - ')[0]} was just booked by another player — removed from your picks.`, 'taken');
+            return;
+        }
+        const ids = Object.keys(flips);
+        if (!ids.length) return;
+        const taken = ids.filter(id => flips[id] === 'taken');
+        const freed = ids.filter(id => flips[id] === 'freed');
+        if (taken.length) {
+            slotToast(taken.length === 1 ? `${label(taken[0])} just got booked` : `${taken.length} slots just got booked`, 'taken');
+        } else if (freed.length) {
+            slotToast(freed.length === 1 ? `${label(freed[0])} just opened up` : `${freed.length} slots just opened up`, 'freed');
+        }
+    }
+
+    let slotToastTimer = 0;
+    function slotToast(text, kind) {
+        let el = document.getElementById('slot-live-toast');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'slot-live-toast';
+            el.className = 'slot-toast';
+            el.setAttribute('role', 'status');
+            el.setAttribute('aria-live', 'polite');
+            document.body.appendChild(el);
+        }
+        el.className = 'slot-toast is-' + kind;
+        el.innerHTML = `<span class="slot-toast__dot"></span><span>${text}</span>`;
+        // Restart the slide-in even when a toast is already up.
+        void el.offsetWidth;
+        el.classList.add('is-on');
+        clearTimeout(slotToastTimer);
+        slotToastTimer = setTimeout(() => el.classList.remove('is-on'), 3600);
+    }
+
+    // "Updated 12s ago" — keeps ticking between checks so the grid reads as watched, not frozen.
+    function liveAgoText() {
+        if (liveFailed) return 'Offline · showing last known';
+        if (!liveCheckedAt) return 'Checking now…';
+        const s = Math.round((Date.now() - liveCheckedAt) / 1000);
+        if (s < 5) return 'Updated just now';
+        if (s < 60) return `Updated ${s}s ago`;
+        return `Updated ${Math.floor(s / 60)}m ago`;
+    }
+    setInterval(() => {
+        const el = document.getElementById('slots-live-ago');
+        if (el) el.textContent = liveAgoText();
+    }, 1000);
 
     function slotState(slotId) {
         const slot = daySlots(selectedDate).find(s => s.id === slotId);
@@ -1908,7 +1987,16 @@
         );
     }
 
-    function renderSlots() {
+    // Drawn marks for the slot grid — hand-built strokes, not an icon font.
+    const SLOT_ART = {
+        Morning: '<svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M4 19h20" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M8.5 19a5.5 5.5 0 0 1 11 0" fill="#FDE68A" stroke="#F59E0B" stroke-width="1.8"/><path d="M14 7.5v2.6M7.2 10.3l1.8 1.8M20.8 10.3 19 12.1M3.8 15.2h2.4M21.8 15.2h2.4" stroke="#F59E0B" stroke-width="1.8" stroke-linecap="round"/><path d="M9 23h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" opacity=".35"/></svg>',
+        Afternoon: '<svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><circle cx="14" cy="14" r="5" fill="#FCD34D" stroke="#F59E0B" stroke-width="1.8"/><path d="M14 3.5v2.4M14 22.1v2.4M3.5 14h2.4M22.1 14h2.4M6.6 6.6l1.7 1.7M19.7 19.7l1.7 1.7M21.4 6.6l-1.7 1.7M8.3 19.7l-1.7 1.7" stroke="#F59E0B" stroke-width="1.8" stroke-linecap="round"/></svg>',
+        Evening: '<svg viewBox="0 0 28 28" fill="none" aria-hidden="true"><path d="M8 25V9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><rect x="4.5" y="4" width="7" height="5" rx="1.2" fill="#E0E7FF" stroke="#4F46E5" stroke-width="1.6"/><path d="M12.5 8.5 22 17M12 6.5l11 4" stroke="#A5B4FC" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="1 2.6"/><path d="M19.5 4.2a3.2 3.2 0 1 0 3.6 4.2 2.6 2.6 0 0 1-3.6-4.2Z" fill="#C7D2FE" stroke="#4F46E5" stroke-width="1.4" stroke-linejoin="round"/><path d="M4 25h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+        lock: '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.6" stroke="currentColor" stroke-width="1.5"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+        flame: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8.3 1.5c.4 2.2 3.7 3.6 3.7 7.3A4 4 0 0 1 4 9c0-1.6.8-2.7 1.7-3.4-.1 1.2.4 2 1.2 2.3C6.6 5.6 7.2 3.4 8.3 1.5Z" fill="currentColor"/></svg>',
+    };
+
+    function renderSlots(animate = false) {
         const container = document.getElementById('slots-grid-container');
         if (!container) return;
 
@@ -1939,11 +2027,50 @@
             return;
         }
 
+        // First read of this day/court still in flight: a shimmer, not yesterday's guesses.
+        if (liveStates === null) {
+            const n = Math.min(slots.length, 9);
+            container.innerHTML = `
+                <div class="slots-live is-checking">
+                    <span class="slots-live__dot"></span>
+                    <span class="slots-live__label">Checking live availability…</span>
+                </div>
+                <div class="slots-grid slots-grid--skeleton">
+                    ${'<div class="slot-skel"><i></i><i></i></div>'.repeat(n)}
+                </div>`;
+            return;
+        }
+
+        const states = slots.map(s => slotState(s.id));
+        const openCount = states.filter(s => s === 'open').length;
+        const bookedCount = states.filter(s => s === 'booked').length;
+
+        // Today only: how soon the first open slot starts — a real clock, not a sales line.
+        const now = new Date();
+        const nowMin = now.getHours() * 60 + now.getMinutes();
+        const nextUp = selectedDate === todayYmd ? slots.find(s => slotState(s.id) === 'open') : null;
+        const startsIn = (m) => m < 60 ? `in ${m} min` : `in ${Math.floor(m / 60)}h${m % 60 ? ' ' + (m % 60) + 'm' : ''}`;
+
+        let idx = 0;
         const renderGroup = (title, group) => {
             if (!group.length) return '';
+            const gOpen = group.filter(s => slotState(s.id) === 'open').length;
+            const gShut = group.every(s => slotState(s.id) === 'closed');
+            const bar = group.map(slot => {
+                const st = slotState(slot.id);
+                const key = `${selectedDate}_${selectedSport}_${selectedCourt}_${slot.id}`;
+                const picked = selectedSlots.some(s => s.key === key);
+                return `<i class="slots-bar__seg is-${st}${picked ? ' is-picked' : ''}" data-seg="${key}"></i>`;
+            }).join('');
+
             let groupHtml = `
                 <div class="slots-group">
-                    <h4 class="slots-group__title">${title}</h4>
+                    <div class="slots-group__head">
+                        <span class="slots-group__art">${SLOT_ART[title]}</span>
+                        <h4 class="slots-group__title">${title}</h4>
+                        <span class="slots-group__count ${gOpen ? '' : 'is-full'}">${gOpen ? gOpen + ' of ' + group.length + ' open' : (gShut ? 'Closed' : 'Full')}</span>
+                    </div>
+                    <div class="slots-bar" aria-hidden="true">${bar}</div>
                     <div class="slots-grid">
             `;
 
@@ -1954,16 +2081,28 @@
                 const isSelected = selectedSlots.some(s => s.key === slotKey);
                 const r = slotRate(slot.time);
                 const isPeak = r > rate;
+                const flip = slotFlips[slot.id];
 
-                const slotClass = isTaken ? 'is-booked' : (isSelected ? 'is-selected' : '');
+                const [clock, ampm] = slot.time.split(' - ')[0].split(' ');
+                const classes = ['slot-item',
+                    isTaken ? (state === 'closed' ? 'is-booked is-closed' : 'is-booked') : (isSelected ? 'is-selected' : 'is-open'),
+                    isPeak && !isTaken ? 'is-peak' : '',
+                    flip ? 'is-just-' + flip : '',
+                ].filter(Boolean).join(' ');
                 const onclickAttr = isTaken ? '' : `onclick="toggleSlot(this, ${slot.id}, ${r})"`;
-                const priceHtml = state === 'booked' ? 'Booked'
+                const priceHtml = state === 'booked' ? `<span class="slot-item__lock">${SLOT_ART.lock}</span>Booked`
                     : state === 'closed' ? 'Unavailable'
-                    : '₹' + r.toLocaleString() + (isPeak ? ' <span class="slot-item__peak">peak</span>' : '');
+                    : (isPeak ? `<span class="slot-item__flame">${SLOT_ART.flame}</span>` : '') + '₹' + r.toLocaleString();
+                const tag = nextUp && nextUp.id === slot.id && slot.start - nowMin <= 240
+                    ? `<span class="slot-item__tag">${startsIn(slot.start - nowMin)}</span>` : '';
+                const style = animate ? ` style="--i:${idx++}"` : '';
 
                 groupHtml += `
-                    <div ${onclickAttr} class="slot-item ${slotClass}" data-key="${slotKey}">
-                        <div class="slot-item__time">${slot.time.split(' - ')[0]}</div>
+                    <div ${onclickAttr} class="${classes}${animate ? ' is-enter' : ''}" data-key="${slotKey}"${style}
+                         role="button" aria-pressed="${isSelected}" aria-disabled="${isTaken}"
+                         aria-label="${slot.time}, ${state === 'open' ? '₹' + r + (isPeak ? ' peak' : '') : state}">
+                        ${tag}
+                        <div class="slot-item__time">${clock}<small>${ampm || ''}</small></div>
                         <div class="slot-item__price">${priceHtml}</div>
                     </div>
                 `;
@@ -1976,21 +2115,43 @@
             return groupHtml;
         };
 
-        container.innerHTML =
+        const live = `
+            <div class="slots-live${liveFailed ? ' is-offline' : ''}">
+                <span class="slots-live__dot"></span>
+                <span class="slots-live__label">Live</span>
+                <span class="slots-live__ago" id="slots-live-ago">${liveAgoText()}</span>
+                <span class="slots-live__stat">
+                    <b class="is-open">${openCount}</b> open${bookedCount ? ` · <b class="is-booked">${bookedCount}</b> booked` : ''}
+                </span>
+            </div>`;
+
+        container.innerHTML = live +
             renderGroup('Morning', slots.filter(s => s.start < 12 * 60)) +
             renderGroup('Afternoon', slots.filter(s => s.start >= 12 * 60 && s.start < 17 * 60)) +
             renderGroup('Evening', slots.filter(s => s.start >= 17 * 60));
+        // The flip flash plays once; the next render is calm again.
+        slotFlips = {};
     }
 
     function toggleSlot(element, slotId, rate) {
         const slot = daySlots(selectedDate).find(s => s.id === slotId);
         if (!slot) return;
         const slotKey = `${selectedDate}_${selectedSport}_${selectedCourt}_${slot.id}`;
+        const seg = document.querySelector(`[data-seg="${slotKey}"]`);
+        element.classList.remove('is-enter', 'is-pop');
         if (element.classList.contains('is-selected')) {
             element.classList.remove('is-selected');
+            element.classList.add('is-open');
+            element.setAttribute('aria-pressed', 'false');
+            if (seg) seg.classList.remove('is-picked');
             selectedSlots = selectedSlots.filter(s => s.key !== slotKey);
         } else {
+            element.classList.remove('is-open');
             element.classList.add('is-selected');
+            void element.offsetWidth;
+            element.classList.add('is-pop');
+            element.setAttribute('aria-pressed', 'true');
+            if (seg) seg.classList.add('is-picked');
             selectedSlots.push({
                 key: slotKey,
                 date: selectedDate,
@@ -2856,8 +3017,12 @@
     window.addEventListener('DOMContentLoaded', () => {
         renderDateStrip();
         selectSport(selectedSport);
-        // Other players book too: re-check every 30s while the page is on screen.
-        setInterval(() => { if (!document.hidden) loadAvailability(true); }, 30000);
+        // Other players book too: re-check every 15s while the page is on screen, and the
+        // moment the player comes back to the tab (a held phone wakes to a fresh grid).
+        setInterval(() => { if (!document.hidden) loadAvailability(true); }, 15000);
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && Date.now() - liveCheckedAt > 5000) loadAvailability(true);
+        });
     });
 </script>
 
@@ -2987,6 +3152,8 @@
         open([document.getElementById('booking-widget')], 'Book a slot', [document.querySelector('.sticky-booking-card')]);
         // Bring the picked day into view — the strip can be scrolled past it.
         if (typeof centerActiveDate === 'function') centerActiveDate();
+        // Opening the sheet is the moment to be sure: re-check unless we just did.
+        if (typeof loadAvailability === 'function' && Date.now() - liveCheckedAt > 5000) loadAvailability(true);
     }));
     root.querySelector('[data-mven-rate]')?.addEventListener('click', () => {
         open([document.querySelector('.review-form-card')], 'Rate this venue');

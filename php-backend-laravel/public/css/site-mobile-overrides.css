@@ -2894,6 +2894,50 @@
     .mven__modal-body .slot-item.is-booked .slot-item__time { color: #94A3B8; }
     .mven__modal-body .slot-item.is-booked .slot-item__price { font-size: 11px; color: #94A3B8; }
 
+    /* Live board on the phone: tactile cards with a real press, drawn heads. */
+    .mven__modal-body .slots-live { margin: 2px 0 18px; padding: 9px 12px; }
+    .mven__modal-body .slots-live__ago { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+    .mven__modal-body .slots-group { margin-bottom: 22px; }
+    .mven__modal-body .slots-group__head .slots-group__title {
+        font-size: 12px;
+        font-weight: 800;
+        letter-spacing: 0.06em;
+        color: #0F172A;
+    }
+    .mven__modal-body .slots-group__head .slots-group__title::after { content: none; }
+    .mven__modal-body .slots-group__art { width: 28px; height: 28px; padding: 3px; border-radius: 9px; background: #F8FAFC; }
+    .mven__modal-body .slots-grid { padding-top: 4px; gap: 9px; }
+    .mven__modal-body .slot-item {
+        min-height: 62px;
+        border-color: #E2E8F0;
+        box-shadow: 0 1px 0 #E2E8F0, 0 2px 6px rgba(15, 23, 42, 0.04);
+        cursor: pointer;
+    }
+    .mven__modal-body .slot-item__time { font-size: 15px; letter-spacing: -0.01em; }
+    .mven__modal-body .slot-item__price { margin-top: 3px; }
+    .mven__modal-body .slot-item.is-open:active {
+        transform: translateY(1px) scale(0.96);
+        box-shadow: 0 0 0 #E2E8F0, 0 1px 2px rgba(15, 23, 42, 0.06);
+        background: #F8FAFF;
+    }
+    .mven__modal-body .slot-item.is-peak { border-color: #FDE68A; background: linear-gradient(180deg, #FFFDF5, #FFFFFF); }
+    .mven__modal-body .slot-item.is-peak .slot-item__price { color: #B45309; }
+    .mven__modal-body .slot-item.is-selected {
+        background: linear-gradient(180deg, #3B82F6, #2563EB) !important;
+        box-shadow: 0 8px 18px rgba(37, 99, 235, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.22) !important;
+    }
+    .mven__modal-body .slot-item.is-selected .slot-item__flame { color: #FDE68A; }
+    .mven__modal-body .slot-item.is-selected::after { animation: slot-tick 0.3s cubic-bezier(0.3, 1.6, 0.5, 1) both; }
+    .mven__modal-body .slot-item.is-booked {
+        box-shadow: none;
+        cursor: not-allowed;
+        border-style: solid;
+        background-image: repeating-linear-gradient(135deg, rgba(148, 163, 184, 0.16) 0 2px, transparent 2px 7px);
+    }
+    .mven__modal-body .slot-item.is-just-taken { animation: slot-taken 0.9s ease both; }
+    .mven__modal-body .slot-skel { min-height: 62px; }
+    @keyframes slot-tick { from { transform: scale(0); } to { transform: scale(1); } }
+
     /* --- Docked summary: picked slots, the bill, and the pay button ------- */
     .mven__modal-foot .price-row,
     .mven__modal-foot .detail-divider,
