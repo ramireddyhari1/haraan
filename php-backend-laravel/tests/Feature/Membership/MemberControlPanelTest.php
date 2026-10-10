@@ -134,13 +134,13 @@ class MemberControlPanelTest extends TestCase
         $body = $this->razorpay->callsTo('/plans')[0]['body'];
         $this->assertSame('monthly', $body['period']);
         $this->assertSame(1, $body['interval']);
-        $this->assertSame(19900, $body['item']['amount']);
+        $this->assertSame(24900, $body['item']['amount']);
 
         try {
             $price->forceFill(['amount_paise' => 1000])->save();
             $this->fail('A linked price must not change amount');
         } catch (\LogicException) {
-            $this->assertSame(19900, $price->refresh()->amount_paise);
+            $this->assertSame(24900, $price->refresh()->amount_paise);
         }
 
         Livewire::test(PricesRelationManager::class, ['ownerRecord' => $hero, 'pageClass' => EditMemberPlan::class])

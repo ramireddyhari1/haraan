@@ -94,8 +94,9 @@ class MemberBookingPerksTest extends TestCase
         $prices = fn (string $code) => MemberPlanPrice::query()->where('plan_id', $this->plan($code)->id)
             ->pluck('amount_paise', 'interval')->all();
 
-        $this->assertEquals(['month' => 9900, 'quarter' => 24900, 'half_year' => 44900, 'year' => 79900], $prices('pro'));
-        $this->assertEquals(['month' => 19900, 'quarter' => 49900, 'half_year' => 89900, 'year' => 159900], $prices('hero'));
+        // 2026-10-11 launch prices; the 6-month term is no longer offered.
+        $this->assertEquals(['month' => 9900, 'quarter' => 25900, 'year' => 119900], $prices('pro'));
+        $this->assertEquals(['month' => 24900, 'quarter' => 62900, 'year' => 240000], $prices('hero'));
         // Drafts: nothing is sold until /control links each one to a Razorpay plan.
         $this->assertSame(0, MemberPlanPrice::query()->where('is_active', true)->count());
     }
@@ -108,8 +109,8 @@ class MemberBookingPerksTest extends TestCase
         $this->assertSame(['period' => 'yearly', 'every' => 1], MemberPlanPrice::razorpayTerm('year'));
 
         $quarter = $this->sellable('pro', MemberPlanPrice::INTERVAL_QUARTER);
-        $this->assertSame('₹249/3 months', $quarter->label());
-        $this->assertSame('₹449/6 months', $this->sellable('pro', MemberPlanPrice::INTERVAL_HALF_YEAR)->label());
+        $this->assertSame('₹259/3 months', $quarter->label());
+        $this->assertSame('₹1,199/year', $this->sellable('pro', MemberPlanPrice::INTERVAL_YEAR)->label());
     }
 
     public function test_catalogue_offers_the_longer_terms_once_they_are_on_sale(): void
@@ -118,7 +119,7 @@ class MemberBookingPerksTest extends TestCase
 
         $hero = collect($this->getJson('/api/membership/plans')->assertOk()->json('data.plans'))->firstWhere('code', 'hero');
 
-        $this->assertSame([['interval' => 'quarter', 'amount_paise' => 49900, 'label' => '₹499/3 months']],
+        $this->assertSame([['interval' => 'quarter', 'amount_paise' => 62900, 'label' => '₹629/3 months']],
             collect($hero['prices'])->map(fn (array $p) => collect($p)->only(['interval', 'amount_paise', 'label'])->all())->all());
     }
 

@@ -42,8 +42,8 @@ class WebMembershipTest extends TestCase
             ->assertSee('Priority venue booking')
             ->assertSee('Sign in')
             // Prices reach the page as data for the switcher, from the catalogue.
-            ->assertSee('₹799', false)
-            ->assertSee('₹499', false)
+            ->assertSee('₹1,199', false)
+            ->assertSee('₹629', false)
             ->assertSee('/3 months', false);
     }
 
@@ -76,20 +76,20 @@ class WebMembershipTest extends TestCase
     public function test_web_checkout_creates_the_subscription_and_verify_turns_the_plan_on(): void
     {
         $member = $this->member();
-        $price = $this->sellable('hero', MemberPlanPrice::INTERVAL_HALF_YEAR);
+        $price = $this->sellable('hero', MemberPlanPrice::INTERVAL_QUARTER);
 
         $subId = $this->actingAs($member)
             ->postJson('/membership/checkout', ['price_id' => $price->id])
             ->assertCreated()
-            ->assertJsonPath('data.interval', 'half_year')
-            ->assertJsonPath('data.amount_paise', 89900)
+            ->assertJsonPath('data.interval', 'quarter')
+            ->assertJsonPath('data.amount_paise', 62900)
             ->json('data.subscription_id');
 
-        $this->assertSame(20, $this->razorpay->callsTo('/subscriptions')[0]['body']['total_count']);
+        $this->assertSame(40, $this->razorpay->callsTo('/subscriptions')[0]['body']['total_count']);
 
         $this->razorpay->setStatus($subId, 'active', [
             'current_start' => Carbon::now()->getTimestamp(),
-            'current_end' => Carbon::now()->addMonths(6)->getTimestamp(),
+            'current_end' => Carbon::now()->addMonths(3)->getTimestamp(),
             'paid_count' => 1,
         ]);
 
@@ -134,7 +134,7 @@ class WebMembershipTest extends TestCase
         $body = $this->razorpay->callsTo('/plans')[0]['body'];
         $this->assertSame('monthly', $body['period']);
         $this->assertSame(3, $body['interval']);
-        $this->assertSame(24900, $body['item']['amount']);
+        $this->assertSame(25900, $body['item']['amount']);
         $this->assertSame('Haraan Pro (3 months)', $body['item']['name']);
     }
 }
