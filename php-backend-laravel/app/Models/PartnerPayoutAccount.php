@@ -47,6 +47,24 @@ final class PartnerPayoutAccount extends Model
         return $bank . $tail;
     }
 
+    /**
+     * The destination in full, for the finance desk that has to send the money:
+     * "vadi@okhdfc" or "HDFC · 50100012344321 · IFSC HDFC0001234". Only ever shown
+     * in /control to finance and the partner's manager — never in the partner app.
+     */
+    public function fullLine(): string
+    {
+        if ($this->method === 'upi') {
+            return (string) ($this->upi_vpa ?: '—');
+        }
+
+        return implode(' · ', array_filter([
+            $this->bank_name ?: null,
+            $this->account_number ?: null,
+            $this->ifsc_code ? 'IFSC ' . $this->ifsc_code : null,
+        ])) ?: '—';
+    }
+
     /** •••• 4321 — only the last four survive. */
     public function maskTail(?string $num): string
     {

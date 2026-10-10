@@ -27,9 +27,22 @@ class PayoutBatchesTable
                 TextColumn::make('partner.name')
                     ->label('Partner')
                     ->weight('bold')
-                    ->description(fn (PayoutBatch $r): string => static::destination($r))
                     ->searchable()
                     ->sortable(),
+                // Where to send it, in full: finance copies this into the bank or UPI app.
+                TextColumn::make('send_to')
+                    ->label('Send to')
+                    ->state(fn (PayoutBatch $r): string => static::account($r)?->fullLine() ?? 'No settlement account on file')
+                    ->description(fn (PayoutBatch $r): ?string => ($a = static::account($r))
+                        ? strtoupper((string) $a->method) . ' · ' . ($a->account_holder ?: 'no name on file') . ' · ' . ($a->isVerified() ? 'verified' : 'not verified yet')
+                        : null)
+                    ->color(fn (PayoutBatch $r): ?string => static::account($r)?->isVerified() ? null : 'warning')
+                    ->icon(fn (PayoutBatch $r): ?string => static::account($r)?->isVerified() ? 'heroicon-m-check-badge' : 'heroicon-m-exclamation-triangle')
+                    ->iconColor(fn (PayoutBatch $r): string => static::account($r)?->isVerified() ? 'success' : 'warning')
+                    ->copyable(fn (PayoutBatch $r): bool => static::account($r) !== null)
+                    ->copyableState(fn (PayoutBatch $r): ?string => static::account($r)?->method === 'upi' ? static::account($r)?->upi_vpa : static::account($r)?->account_number)
+                    ->copyMessage('Copied')
+                    ->wrap(),
                 TextColumn::make('amount')
                     ->money('INR')
                     ->weight('bold')
@@ -92,8 +105,9 @@ class PayoutBatchesTable
                     ])
                     ->fillForm(fn (PayoutBatch $r): array => ['reference' => $r->reference])
                     ->modalHeading('Mark settlement as paid')
-                    ->modalDescription(fn (PayoutBatch $r): string => 'Confirms ' . number_format((float) $r->amount, 2)
-                        . ' has left our account for ' . ($r->partner?->name ?: 'this partner') . '.')
+                    ->modalDescription(fn (PayoutBatch $r): string => 'Confirms ₹' . number_format((float) $r->amount, 2)
+                        . ' has left our account for ' . ($r->partner?->name ?: 'this partner') . '. Sent to: '
+                        . (static::account($r) ? static::account($r)->fullLine() . ' (' . (static::account($r)->account_holder ?: 'no name') . ')' : 'no settlement account on file') . '.')
                     ->action(function (PayoutBatch $r, array $data): void {
                         $r->update([
                             'status' => 'paid',
@@ -150,11 +164,15 @@ class PayoutBatchesTable
             ->emptyStateDescription('Create one to pay a partner what they have collected.');
     }
 
-    /** Masked destination for the row description, so the desk can eyeball it. */
-    private static function destination(PayoutBatch $record): string
-    {
-        $account = PartnerPayoutAccount::query()->where('partner_id', $record->partner_id)->first();
+    /** @var array<int, PartnerPayoutAccount|null> one lookup per partner per request */
+    private static array $accounts = [];
 
-        return $account?->summaryLine() ?: 'no settlement account on file';
+    private static function account(PayoutBatch $record): ?PartnerPayoutAccount
+    {
+        $id = (int) $record->partner_id;
+
+        return array_key_exists($id, static::$accounts)
+            ? static::$accounts[$id]
+            : (static::$accounts[$id] = PartnerPayoutAccount::query()->where('partner_id', $id)->first());
     }
 }

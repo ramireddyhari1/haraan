@@ -121,7 +121,7 @@ class PayoutBatchForm
             . ' · in open batches ' . PartnerSettlement::inr($s['inFlight']);
     }
 
-    /** Where the money goes, masked — or a warning if there's nowhere to send it. */
+    /** Where the money goes, in full (finance sends it) — or a warning if there's nowhere to send it. */
     public static function destinationLine(mixed $partnerId): string
     {
         if (blank($partnerId)) {
@@ -134,7 +134,7 @@ class PayoutBatchForm
             return '⚠ No settlement account on file — the partner must add one in /partner → Payouts.';
         }
 
-        return $account->summaryLine()
+        return $account->fullLine()
             . ' · ' . ($account->account_holder ?: 'no name on file')
             . ' · ' . ($account->isVerified() ? 'verified' : '⚠ not verified yet');
     }

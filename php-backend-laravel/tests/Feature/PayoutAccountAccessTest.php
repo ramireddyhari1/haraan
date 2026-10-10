@@ -114,4 +114,18 @@ final class PayoutAccountAccessTest extends TestCase
         $this->as($this->owner)->getJson('/api/partner/payouts')
             ->assertJsonPath('account.changed.name', 'Haraan finance');
     }
+
+    public function test_finance_sees_the_full_destination_on_partner_settlements(): void
+    {
+        $finance = User::factory()->create(['role' => 'FINANCE']);
+        PartnerPayoutAccount::create(['partner_id' => $this->owner->id, 'method' => 'upi', 'account_holder' => 'Vadi Sports', 'upi_vpa' => '6300112233@ibl']);
+        \App\Models\PayoutBatch::create(['partner_id' => $this->owner->id, 'amount' => 20, 'status' => 'processing']);
+
+        $this->actingAs($finance);
+        \Filament\Facades\Filament::setCurrentPanel(\Filament\Facades\Filament::getPanel('admin'));
+        \Livewire\Livewire::test(\App\Filament\Resources\PayoutBatches\Pages\ListPayoutBatches::class)
+            ->assertSee('6300112233@ibl')
+            ->assertSee('Vadi Sports')
+            ->assertDontSee('63••••');
+    }
 }
