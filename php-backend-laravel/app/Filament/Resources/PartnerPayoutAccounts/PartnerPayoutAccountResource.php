@@ -187,7 +187,7 @@ class PartnerPayoutAccountResource extends Resource
                     ->requiresConfirmation()
                     ->visible(fn (PartnerPayoutAccount $r): bool => $r->isVerified() && PayoutAccountEditor::staffMayVerify(auth()->user()))
                     ->action(function (PartnerPayoutAccount $r): void {
-                        app(PayoutAccountEditor::class)->unverify($r);
+                        app(PayoutAccountEditor::class)->unverify($r, auth()->user());
                         Notification::make()->title('Verification removed')->warning()->send();
                     }),
             ])

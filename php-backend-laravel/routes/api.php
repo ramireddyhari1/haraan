@@ -824,3 +824,13 @@ Route::prefix('v1/workforce')->middleware('auth.jwt')->group(function (): void {
     Route::get('/payroll/compliance-export', [WorkforceIntelligenceController::class, 'complianceExport'])
         ->middleware('throttle:60,1');
 });
+
+// What Haraan changed on the partner's account: feed, read marks, private live channel.
+Route::middleware(['auth.jwt', 'auth.partner'])
+    ->prefix('partner')
+    ->controller(\App\Http\Controllers\Api\PartnerUpdatesController::class)
+    ->group(function (): void {
+        Route::get('/updates', 'index');
+        Route::post('/updates/seen', 'seen');
+        Route::post('/realtime/auth', 'auth')->middleware('throttle:30,1');
+    });

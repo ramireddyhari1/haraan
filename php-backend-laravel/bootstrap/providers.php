@@ -2,6 +2,7 @@
 
 return [
     App\Providers\AppServiceProvider::class,
+    App\Providers\PartnerUpdatesServiceProvider::class,
     App\Providers\Filament\AdminPanelProvider::class,
     App\Providers\Filament\PartnerPanelProvider::class,
     App\Providers\Filament\EmployeePanelProvider::class,

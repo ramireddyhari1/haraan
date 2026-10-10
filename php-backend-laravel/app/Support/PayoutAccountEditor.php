@@ -5,12 +5,9 @@ declare(strict_types=1);
 namespace App\Support;
 
 use App\Models\AdminAction;
-use App\Models\DeviceToken;
 use App\Models\PartnerManager;
 use App\Models\PartnerPayoutAccount;
 use App\Models\User;
-use App\Services\Fcm\FcmClient;
-use Illuminate\Support\Facades\Log;
 
 /**
  * The one door through which a settlement destination changes, whoever walks
@@ -91,10 +88,13 @@ final class PayoutAccountEditor
             ], $account);
         }
 
-        // Tell the owner whenever the change wasn't theirs (desk staff included).
-        if ($actor->id !== $partnerId) {
-            $this->pushOwner($partnerId, $account, $actor, $kind);
-        }
+        // Tell the owner — live in the app, push, WhatsApp — whenever Haraan made the change.
+        PartnerUpdates::record(
+            $partnerId, 'payout_account.changed',
+            'Your settlement account was changed',
+            'Money now goes to ' . $account->summaryLine() . ' (' . ($account->account_holder ?: 'no name') . '). Haraan checks it before the next transfer. Not expected? Call your Haraan manager.',
+            'payouts', $account, $actor,
+        );
 
         return $account;
     }
@@ -103,12 +103,24 @@ final class PayoutAccountEditor
     {
         $account->update(['verified_at' => now(), 'verified_by_id' => $actor->id]);
         AdminAction::log('payout_account.verified', ['account_id' => $account->id, 'partner_id' => $account->partner_id], $account);
+        PartnerUpdates::record(
+            (int) $account->partner_id, 'payout_account.verified',
+            'Your settlement account is verified',
+            'Settlements go to ' . $account->summaryLine() . '.',
+            'payouts', $account, $actor,
+        );
     }
 
-    public function unverify(PartnerPayoutAccount $account): void
+    public function unverify(PartnerPayoutAccount $account, ?User $actor = null): void
     {
         $account->update(['verified_at' => null, 'verified_by_id' => null]);
         AdminAction::log('payout_account.unverified', ['account_id' => $account->id, 'partner_id' => $account->partner_id], $account);
+        PartnerUpdates::record(
+            (int) $account->partner_id, 'payout_account.unverified',
+            'Settlement account needs checking again',
+            'Haraan removed the verification on ' . $account->summaryLine() . '. Transfers wait until it is checked.',
+            'payouts', $account, $actor,
+        );
     }
 
     /**
@@ -131,33 +143,5 @@ final class PayoutAccountEditor
         };
 
         return ['name' => $name, 'kind' => (string) $a->updated_by_kind, 'at' => $a->updated_at?->toIso8601String()];
-    }
-
-    private function pushOwner(int $partnerId, PartnerPayoutAccount $account, User $actor, string $kind): void
-    {
-        try {
-            $fcm = app(FcmClient::class);
-            if (! $fcm->isConfigured()) {
-                return;
-            }
-            $who = match ($kind) {
-                self::KIND_MANAGER => $actor->name . ' (your Haraan manager)',
-                self::KIND_HARAAN => 'Haraan finance',
-                default => (string) $actor->name,
-            };
-            $title = 'Settlement account changed';
-            $body = $who . ' set it to ' . $account->summaryLine() . '. Not you? Open Payouts.';
-            $data = ['type' => 'partner_payout_account_changed'];
-
-            DeviceToken::pushable()->where('user_id', $partnerId)->chunkById(100, function ($tokens) use ($fcm, $title, $body, $data): void {
-                foreach ($tokens as $device) {
-                    if ($fcm->send($device->token, $title, $body, $data) === FcmClient::INVALID) {
-                        $device->delete();
-                    }
-                }
-            });
-        } catch (\Throwable $e) {
-            Log::warning('Payout account change push failed for partner ' . $partnerId . ': ' . $e->getMessage());
-        }
     }
 }

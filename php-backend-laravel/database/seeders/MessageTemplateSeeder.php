@@ -46,6 +46,23 @@ class MessageTemplateSeeder extends Seeder
                 ],
             ],
             [
+                // To the PARTNER OWNER, whenever Haraan (admin, finance, their manager)
+                // changes something on their account: settlement account, settlements,
+                // venue, courts, slots, plan. See App\Support\PartnerUpdates.
+                'key' => 'partner.account_update',
+                'name' => 'Partner account update',
+                'category' => 'utility',
+                'provider_template_id' => 'partner_account_update',
+                'body' => "Hi {{1}}, there is an update on your Haraan partner account.\n\n{{2}}\n\nChanged by: {{3}}\n\n"
+                    . "You can see the details in the Haraan Partner app. If you did not expect this change, "
+                    . "please reply to this message or call your Haraan manager.",
+                'variables' => [
+                    '1' => 'partner first name',
+                    '2' => 'what changed, e.g. "₹2,400 settled to your account. UTR 123456 · sent to 63••••@ibl."',
+                    '3' => 'who changed it: the Haraan manager by name, Haraan finance, or Haraan',
+                ],
+            ],
+            [
                 // To the VENUE OWNER, not the customer. Owners almost never have a
                 // 24-hour window open with us, so without this approved template the
                 // alert is free text WhatsApp refuses to deliver.
