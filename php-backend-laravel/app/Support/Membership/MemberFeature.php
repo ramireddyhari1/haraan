@@ -25,6 +25,12 @@ final class MemberFeature
 
     public const ADS_HIDDEN = 'ads.hidden';
 
+    /**
+     * How many phones and browsers may be signed in at once. Counted live from member_devices
+     * and enforced by MemberDevices in the auth middleware; anything below 1 reads as 1.
+     */
+    public const ACCOUNT_DEVICES = 'account.devices';
+
     public const AI_CAREER_READ = 'ai.career_read';
 
     public const AI_DELIVERY_REVIEW = 'ai.delivery_review';
@@ -82,6 +88,7 @@ final class MemberFeature
     /** @var array<string, array{type: string, label: string}> */
     private const REGISTRY = [
         self::ADS_HIDDEN => ['type' => self::TYPE_BOOLEAN, 'label' => 'No ads'],
+        self::ACCOUNT_DEVICES => ['type' => self::TYPE_LIMIT, 'label' => 'Signed-in devices'],
         self::AI_CAREER_READ => ['type' => self::TYPE_BOOLEAN, 'label' => 'AI career read'],
         self::AI_DELIVERY_REVIEW => ['type' => self::TYPE_QUOTA, 'label' => 'AI delivery reviews'],
         self::TOURNAMENTS_ACTIVE_HOSTED => ['type' => self::TYPE_LIMIT, 'label' => 'Tournaments you host'],

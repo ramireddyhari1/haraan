@@ -133,6 +133,7 @@ class AppUserResource extends Resource
             SupportThreadsRelationManager::class,
             RewardGrantsRelationManager::class,
             ActivityTimelineRelationManager::class,
+            \App\Filament\Resources\AppUsers\RelationManagers\SignedInDevicesRelationManager::class,
             DevicesRelationManager::class,
         ];
     }

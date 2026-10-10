@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Support;
 
+use App\Models\MemberDevice;
 use App\Models\User;
+use App\Services\Membership\MemberDevices;
 
 final class JwtService
 {
@@ -17,7 +19,7 @@ final class JwtService
      * mint tokens that survive every logout. Issuing through here makes that
      * impossible to get wrong.
      */
-    public static function issueForUser(User $user, string $secret, int $ttlSeconds = 604800): string
+    public static function issueForUser(User $user, string $secret, int $ttlSeconds = 604800, ?MemberDevice $device = null): string
     {
         // A suspended account must not be able to sign back in. Refusing here rather than
         // in each of the six login controllers means a seventh cannot forget it — the same
@@ -26,13 +28,26 @@ final class JwtService
             throw new \App\Exceptions\AccountSuspendedException();
         }
 
-        return self::issue([
+        // A sign-in from the member app is a device: it takes (or queues for) one of the plan's
+        // device slots, and the token names that device as `sid` so the middleware can sign it
+        // out or hold it at the chooser. Partner-app and console tokens carry no sid.
+        $request = app()->bound('request') ? app('request') : null;
+        if ($device === null && MemberDevices::isMemberAppRequest($request)) {
+            $device = app(MemberDevices::class)->enrollApp($user, $request, $ttlSeconds);
+        }
+
+        $payload = [
             'sub' => $user->id,
             'email' => $user->email,
             'phone' => $user->phone,
             'role' => $user->role,
             'tv' => (int) ($user->token_version ?? 0),
-        ], $secret, $ttlSeconds);
+        ];
+        if ($device !== null) {
+            $payload['sid'] = $device->public_id;
+        }
+
+        return self::issue($payload, $secret, $ttlSeconds);
     }
 
     /**

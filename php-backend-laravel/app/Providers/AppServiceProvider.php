@@ -46,6 +46,19 @@ class AppServiceProvider extends ServiceProvider
                 return;
             }
 
+            // Signing out of a member browser frees its device slot.
+            $sid = session()->get(\App\Http\Middleware\EnforceMemberDevice::SESSION_KEY);
+            if (is_string($sid) && $sid !== '') {
+                $device = \App\Models\MemberDevice::query()
+                    ->where('public_id', $sid)
+                    ->where('user_id', $event->user->getAuthIdentifier())
+                    ->first();
+                if ($device !== null) {
+                    app(\App\Services\Membership\MemberDevices::class)->revoke($device, \App\Models\MemberDevice::REASON_SIGNED_OUT);
+                }
+                session()->forget(\App\Http\Middleware\EnforceMemberDevice::SESSION_KEY);
+            }
+
             $token = session()->pull('partner_web_push_token');
 
             if (is_string($token) && $token !== '') {

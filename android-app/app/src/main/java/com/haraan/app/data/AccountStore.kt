@@ -169,6 +169,20 @@ object AccountStore {
     return next
   }
 
+  /**
+   * Swap the ACTIVE session's token for a fresh one for the same account — used when an
+   * older session is re-issued bound to this phone (device limits). Writes the roster row and
+   * the active slot together, keeping the active-account invariant.
+   */
+  fun replaceActiveToken(context: Context, newToken: String) {
+    val oldToken = TokenStore.getToken(context)
+    val current = accounts(context)
+    if (current.any { it.token == oldToken }) {
+      write(context, current.map { if (it.token == oldToken) it.copy(token = newToken) else it })
+    }
+    TokenStore.saveToken(context, newToken)
+  }
+
   /** Sign out of everything on this device — roster and active session both. */
   fun clearAll(context: Context) {
     write(context, emptyList())

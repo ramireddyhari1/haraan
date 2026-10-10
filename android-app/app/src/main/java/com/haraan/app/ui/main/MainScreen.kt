@@ -381,23 +381,38 @@ fun MainScreen(
     // large amount of per-session state in `remember` (feeds, profiles, chat threads,
     // gate results); keying it means a switch discards all of it at once rather than
     // relying on every screen to notice the account moved.
+    val logoutLocally: () -> Unit = {
+      com.haraan.app.data.TokenStore.saveToken(context, "")
+      cachedToken = null
+      viewModel.onPhoneChanged("")
+      viewModel.onOtpChanged("")
+    }
+    val reloadSession: () -> Unit = {
+      // Re-read rather than trusting a passed-in value: AccountStore is the thing
+      // that just wrote the active slot, so it is the authority on what it now holds.
+      cachedToken = com.haraan.app.data.TokenStore.getToken(context)
+      sessionEpoch++
+    }
     androidx.compose.runtime.key(sessionEpoch) {
-      MainAppContainer(
+      // The plan's device limit (Free 1, Pro 1, Hero 3): a phone past it sees the device
+      // chooser instead of the shell; one signed out from elsewhere drops this account.
+      com.haraan.app.ui.devices.DeviceGate(
         token = activeToken,
-        onItemClick = onItemClick,
-        onLogout = {
-          com.haraan.app.data.TokenStore.saveToken(context, "")
-          cachedToken = null
-          viewModel.onPhoneChanged("")
-          viewModel.onOtpChanged("")
+        onSessionEnded = { message ->
+          android.widget.Toast.makeText(context, message, android.widget.Toast.LENGTH_LONG).show()
+          val active = com.haraan.app.data.AccountStore.active(context)
+          val next = active?.let { com.haraan.app.data.AccountStore.remove(context, it.playerId) }
+          if (next != null) reloadSession() else logoutLocally()
         },
-        onSessionChanged = {
-          // Re-read rather than trusting a passed-in value: AccountStore is the thing
-          // that just wrote the active slot, so it is the authority on what it now holds.
-          cachedToken = com.haraan.app.data.TokenStore.getToken(context)
-          sessionEpoch++
-        },
-      )
+        onTokenReplaced = { reloadSession() },
+      ) {
+        MainAppContainer(
+          token = activeToken,
+          onItemClick = onItemClick,
+          onLogout = logoutLocally,
+          onSessionChanged = reloadSession,
+        )
+      }
     }
   } else {
     com.haraan.app.ui.LoginRoute(

@@ -43,6 +43,7 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.PrivacyTip
 import androidx.compose.material.icons.filled.Shield
@@ -250,6 +251,7 @@ fun AccountProfileScreen(
     var showBookings by remember { mutableStateOf(false) }
     var showVenueSheet by remember { mutableStateOf(false) }
     var showPrivacy by remember { mutableStateOf(false) }
+    var showDevices by remember { mutableStateOf(false) }
     var legalSlug by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(reloadKey, isGuest) {
@@ -294,10 +296,11 @@ fun AccountProfileScreen(
     com.haraan.app.ui.DismissOnBack(showVenueSheet) { showVenueSheet = false }
     com.haraan.app.ui.DismissOnBack(legalSlug != null) { legalSlug = null }
     com.haraan.app.ui.DismissOnBack(showPrivacy && !showVenueSheet) { showPrivacy = false }
+    com.haraan.app.ui.DismissOnBack(showDevices) { showDevices = false }
     com.haraan.app.ui.DismissOnBack(showBookings && !showVenueSheet) { showBookings = false }
     // Nothing open → Back leaves the account screen entirely.
     com.haraan.app.ui.DismissOnBack(
-        !showVenueSheet && !showPrivacy && !showBookings && legalSlug == null
+        !showVenueSheet && !showPrivacy && !showDevices && !showBookings && legalSlug == null
     ) { onClose() }
 
     // Full pages, each carrying its own header — never nested inside the account's.
@@ -308,6 +311,15 @@ fun AccountProfileScreen(
 
     if (showPrivacy) {
         PrivacySettingsScreen(onClose = { showPrivacy = false }, onSignOut = onSignOut, modifier = modifier)
+        return
+    }
+
+    if (showDevices) {
+        com.haraan.app.ui.devices.SignedInDevicesRoute(
+            onClose = { showDevices = false },
+            onSignedOutHere = { showDevices = false; onSignOut() },
+            onOpenPlans = { com.haraan.app.data.membership.MembershipNav.open() },
+        )
         return
     }
 
@@ -382,6 +394,7 @@ fun AccountProfileScreen(
                 onOpenBookings = { showBookings = true },
                 onOpenPlayerProfile = onOpenPlayerProfile,
                 onOpenPrivacy = { showPrivacy = true },
+                onOpenDevices = { showDevices = true },
                 onOpenLegal = { legalSlug = it },
                 onOpenSupport = onOpenSupport,
                 onSignOut = onSignOut,
@@ -399,6 +412,7 @@ private fun Content(
     onOpenBookings: () -> Unit,
     onOpenPlayerProfile: () -> Unit,
     onOpenPrivacy: () -> Unit,
+    onOpenDevices: () -> Unit,
     onOpenLegal: (String) -> Unit,
     onOpenSupport: () -> Unit,
     onSignOut: () -> Unit,
@@ -524,6 +538,15 @@ private fun Content(
                     iconBg = Color(0xFFF8FAFC),
                     iconTint = Color(0xFF334155),
                     onClick = onOpenPrivacy,
+                )
+                ThinDivider()
+                SettingRow(
+                    icon = Icons.Default.PhoneAndroid,
+                    title = "Signed-in devices",
+                    subtitle = "Phones and browsers on your account",
+                    iconBg = Color(0xFFF8FAFC),
+                    iconTint = Color(0xFF334155),
+                    onClick = onOpenDevices,
                 )
                 ThinDivider()
                 SettingRow(

@@ -286,9 +286,9 @@ class HaraanAuthRepository(
   /**
    * End [token]'s session on the SERVER, not just on this device.
    *
-   * The backend bumps the account's token_version, which invalidates every token that
-   * account holds — including on its other devices. That is the only revocation these
-   * stateless JWTs allow, and it is why the sign-out confirmation says so out loud.
+   * A token minted for a device (it carries `sid`) signs out just this phone and frees its
+   * device slot. A session from before device limits has nothing narrower to revoke, so the
+   * backend bumps the account's token_version and ends it on every device.
    *
    * Returns false when the call didn't land. Callers still forget the token locally in
    * that case: leaving an account the user asked to remove sitting in the switcher is
@@ -325,6 +325,8 @@ class HaraanAuthRepository(
       readTimeout = 30000
       setRequestProperty("Content-Type", "application/json")
       setRequestProperty("Accept", "application/json")
+      // Every sign-in names this phone, so it takes one of the plan's device slots.
+      com.haraan.app.data.devices.DeviceIdentity.headersOrEmpty().forEach { (k, v) -> setRequestProperty(k, v) }
     }
 
     try {

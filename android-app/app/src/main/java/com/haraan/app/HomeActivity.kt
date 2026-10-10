@@ -115,6 +115,7 @@ class HomeActivity : ComponentActivity(), PaymentResultWithDataListener {
     installSplashScreen()
     val t0 = android.os.SystemClock.uptimeMillis()
     super.onCreate(savedInstanceState)
+    com.haraan.app.data.devices.DeviceIdentity.init(applicationContext)
 
     // Cheap and ordering-sensitive, so these stay on the critical path: the channel
     // must exist before any notification can be posted, and the permission prompt

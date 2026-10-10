@@ -61,6 +61,7 @@ class MembershipSettingsPage extends Page implements HasForms
             $values[$key] = MembershipSettings::text($key);
         }
         $values['in_app_checkout'] = (bool) FeatureFlag::query()->where('key', MembershipSettings::IN_APP_CHECKOUT_FLAG)->value('enabled');
+        $values[MembershipSettings::DEVICE_LIMITS_KEY] = MembershipSettings::deviceLimitsEnforced();
 
         $this->form->fill($values);
     }
@@ -111,6 +112,16 @@ class MembershipSettingsPage extends Page implements HasForms
                     ]),
                 Section::make('Advanced insights')
                     ->schema([$number('insight_sport_cooldown_days')]),
+                Section::make('Signed-in devices')
+                    ->description('How many devices each plan allows is set per plan under Member plans (“Signed-in devices”); a single member can be given more with an override. A member can sign devices out from the app or haraan.app → Account → Signed-in devices, and you can from their profile.')
+                    ->schema([
+                        Toggle::make(MembershipSettings::DEVICE_LIMITS_KEY)
+                            ->label('Enforce the device limit')
+                            ->helperText('Off: every device is still listed, but nobody is held at the device chooser.'),
+                        $number('device_idle_days'),
+                        $text('device_limit_title'),
+                        $text('device_limit_body'),
+                    ]),
             ])
             ->statePath('data');
     }
@@ -122,6 +133,12 @@ class MembershipSettingsPage extends Page implements HasForms
         foreach (array_merge(array_keys(MembershipSettings::NUMBERS), array_keys(MembershipSettings::TEXTS)) as $key) {
             AppSetting::set(MembershipSettings::storageKey($key), isset($state[$key]) ? trim((string) $state[$key]) : null, MembershipSettings::GROUP);
         }
+
+        AppSetting::set(
+            MembershipSettings::storageKey(MembershipSettings::DEVICE_LIMITS_KEY),
+            ($state[MembershipSettings::DEVICE_LIMITS_KEY] ?? false) ? '1' : '0',
+            MembershipSettings::GROUP,
+        );
 
         FeatureFlag::query()->updateOrCreate(
             ['key' => MembershipSettings::IN_APP_CHECKOUT_FLAG],

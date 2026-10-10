@@ -948,6 +948,12 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         return $this->hasMany(AdminAction::class, 'subject_id')->where('subject_type', 'User');
     }
 
+    /** Phones and browsers this member is (or was) signed in on. See MemberDevices. */
+    public function memberDevices(): HasMany
+    {
+        return $this->hasMany(\App\Models\MemberDevice::class);
+    }
+
     /** Push notification device tokens registered for this user. */
     public function deviceTokens(): HasMany
     {

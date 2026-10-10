@@ -30,6 +30,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(prepend: [EnforcePlatformOperations::class]);
         $middleware->web(append: [EnforcePlatformOperations::class]);
 
+        // Membership device limits for signed-in browsers (the app's are in auth.jwt).
+        $middleware->web(append: [\App\Http\Middleware\EnforceMemberDevice::class]);
+
         $middleware->alias([
             'auth.jwt'         => \App\Http\Middleware\EnsureJwtAuthenticated::class,
             'auth.jwt.optional' => \App\Http\Middleware\OptionalJwtAuthenticated::class,

@@ -227,6 +227,17 @@ Route::middleware('auth.jwt')->prefix('account')->controller(PrivacyController::
 });
 
 // -------------------------------------------------------------------------
+//  Signed-in devices (Account → Signed-in devices, and the device-limit chooser).
+//  Reachable by a device held at the chooser — see MemberDevices::exemptFromLimit.
+// -------------------------------------------------------------------------
+Route::middleware(['auth.jwt', 'throttle:30,1'])->prefix('account/devices')
+    ->controller(\App\Http\Controllers\Api\MemberDevicesController::class)->group(function (): void {
+        Route::get('/', 'index');
+        Route::post('/enroll', 'enroll');
+        Route::delete('/{id}', 'destroy');
+    });
+
+// -------------------------------------------------------------------------
 //  Account deletion, in-app half (Account → Privacy → Delete account).
 //  Google Play requires an in-app deletion path AND a public web URL; the web
 //  twin is Web\AccountDeletionController at /account/delete. Throttled because

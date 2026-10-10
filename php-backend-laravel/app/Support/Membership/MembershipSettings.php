@@ -33,6 +33,7 @@ final class MembershipSettings
         'priority_booking_max_days' => ['membership.priority_booking_max_days', 30, 0, 365, 'Priority venue booking: most extra days allowed', 'Caps any plan’s extra booking days, including a plan set to unlimited.'],
         'venue_booking_window_days' => ['venues.booking_window_days', 60, 1, 365, 'Default venue booking window (days ahead)', 'For venues that haven’t set their own window. Members’ priority days are added on top.'],
         'insight_sport_cooldown_days' => ['membership.insight_sport_cooldown_days', 7, 0, 90, 'Advanced insights: days before a chosen sport can be swapped', '0 turns the cooldown off.'],
+        'device_idle_days' => ['membership.device_idle_days', 30, 1, 365, 'Free a device slot after (days unused)', 'A phone or browser nobody has opened for this long stops counting toward the limit and has to sign in again.'],
     ];
 
     /**
@@ -44,10 +45,22 @@ final class MembershipSettings
         'web_headline' => ['Membership', 60, 'Website page headline', 'The title on haraan.app/membership.'],
         'web_lede' => ['Pro and Hero, across Events, Pulse and Actionboard.', 160, 'Website page intro', 'One line under the headline.'],
         'app_store_note' => ['Plans can’t be bought in the app.', 160, 'App note when in-app checkout is off', 'Shown on the app’s Membership screen instead of a buy button.'],
+        'device_limit_title' => ['You’re signed in on too many devices', 80, 'Device limit screen: headline', 'Shown on a phone or browser that signs in past the plan’s limit.'],
+        'device_limit_body' => ['Your plan lets you stay signed in on :limit at a time. Sign out of one to keep going here.', 200, 'Device limit screen: message', ':limit becomes “1 device” or “3 devices”.'],
     ];
 
     /** Feature flag (Platform → Feature flags) that lets the app sell plans itself. Off by default. */
     public const IN_APP_CHECKOUT_FLAG = 'membership_in_app_checkout';
+
+    /** Whether the per-plan device limit is enforced. Devices are recorded either way. */
+    public const DEVICE_LIMITS_KEY = 'device_limits_enabled';
+
+    public static function deviceLimitsEnforced(): bool
+    {
+        $stored = AppSetting::get(self::storageKey(self::DEVICE_LIMITS_KEY));
+
+        return $stored === null || $stored === '' ? (bool) config('membership.device_limits_enabled', true) : $stored === '1';
+    }
 
     public static function int(string $key): int
     {

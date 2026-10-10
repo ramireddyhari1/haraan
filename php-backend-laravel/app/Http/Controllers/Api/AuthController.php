@@ -128,9 +128,19 @@ final class AuthController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
+        // A device-bound token signs out just that device and frees its slot; the member's
+        // other phones and browsers stay signed in. A token from before device limits has
+        // nothing narrower to revoke, so it still ends every session the account holds.
+        $device = $request->attributes->get('member_device');
+        if ($device instanceof \App\Models\MemberDevice) {
+            app(\App\Services\Membership\MemberDevices::class)->revoke($device, \App\Models\MemberDevice::REASON_SIGNED_OUT);
+
+            return response()->json(['message' => 'Logout successful', 'revoked' => true, 'scope' => 'device']);
+        }
+
         JwtService::revokeAllFor($user);
 
-        return response()->json(['message' => 'Logout successful', 'revoked' => true]);
+        return response()->json(['message' => 'Logout successful', 'revoked' => true, 'scope' => 'account']);
     }
 
     public function me(Request $request): JsonResponse

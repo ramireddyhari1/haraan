@@ -296,6 +296,13 @@ Route::middleware('auth')->controller(AccountController::class)->group(function 
     Route::post('/logout', 'logout')->name('site.logout');
 });
 
+// Signed-in devices — the web twin of the app's screen, and where a browser past the
+// plan's device limit is held (EnforceMemberDevice).
+Route::middleware('auth')->controller(\App\Http\Controllers\Web\MemberDevicesController::class)->group(function (): void {
+    Route::get('/account/devices', 'show')->name('site.account.devices');
+    Route::post('/account/devices/{id}/sign-out', 'destroy')->middleware('throttle:20,1')->name('site.account.devices.remove');
+});
+
 // Terms & Conditions / Privacy Policy — public documents, readable signed out.
 Route::get('/legal/{slug}', [AccountController::class, 'legal'])
     ->name('site.legal');

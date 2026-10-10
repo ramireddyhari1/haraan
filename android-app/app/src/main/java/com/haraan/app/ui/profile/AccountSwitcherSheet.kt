@@ -216,17 +216,21 @@ fun AccountSwitcherSheet(
     }
   }
 
-  // Sign-out is account-wide by necessity: these tokens carry no per-device id, so the
-  // only revocation available invalidates the account's sessions everywhere. Saying that
-  // plainly beats a surprise sign-out on someone's other phone.
+  // Sign-out ends only this phone's session for a device-bound token. A session from before
+  // device limits can only be revoked account-wide, and then the copy says so.
   confirmSignOut?.let { target ->
     AlertDialog(
       onDismissRequest = { confirmSignOut = null },
       title = { Text("Sign out of ${target.handleOrId}?", color = Text1, fontWeight = FontWeight.Bold) },
       text = {
+        val deviceBound = com.haraan.app.data.devices.DeviceIdentity.tokenHasDevice(target.token)
         Text(
-          "This removes the account from this device and ends its session on your other devices too. " +
-            "Your other accounts here stay signed in.",
+          if (deviceBound) {
+            "This removes the account from this phone. Your other devices and your other accounts here stay signed in."
+          } else {
+            "This removes the account from this device and ends its session on your other devices too. " +
+              "Your other accounts here stay signed in."
+          },
           color = Text2,
           fontSize = 14.sp,
         )
