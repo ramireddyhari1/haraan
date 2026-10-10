@@ -10,8 +10,8 @@ android {
         applicationId = "com.haraan.partner"
         minSdk = 24
         targetSdk = 36
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "1.3"
         // Live prod backend (same host the consumer app uses). The old EC2 IP
         // (13.204.63.181) is dead; partner endpoints live under /api/partner/*.
         buildConfigField("String", "API_BASE_URL", "\"https://haraan.app\"")
