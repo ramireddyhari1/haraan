@@ -925,6 +925,19 @@ private fun CameraMode(
     val lensContext = LocalContext.current
     val lens = remember { readBackLens(lensContext) }
     var cameraIntrinsics by remember { mutableStateOf<com.haraan.app.vision.CameraIntrinsics?>(null) }
+    /** The bowler's-end stumps, when seen: the pitch guide and the 3D run towards them. */
+    var bowlersEndBase by remember { mutableStateOf<com.haraan.app.vision.BowlersEnd?>(null) }
+    // Steadied over many sightings: one taken through the bowler's stride moved the ground.
+    val bowlersEndFilter = remember { com.haraan.app.vision.BowlersEndFilter() }
+    // The stumps steadied over many frames, for measuring the flight: see SteadyWicket.
+    val steadyWicket = remember { com.haraan.app.vision.SteadyWicket() }
+    // The corridor the live tracker was last given, for tracking the saved clip the same way.
+    val corridorRef = remember { java.util.concurrent.atomic.AtomicReference<FloatArray?>(null) }
+    // Bumped each time a clip is armed: a clip analysis finishing after the next ball is
+    // under way must not put the old ball back on screen.
+    var clipGeneration by remember { mutableStateOf(0) }
+    /** The rate the shown flight was tracked at from the saved clip; null for the live one. */
+    var refinedFps by remember { mutableStateOf<Double?>(null) }
     var uprightWidthPx by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     // Field validation: taped distance, a recording window, and the log itself.
     val validation = remember { com.haraan.app.vision.WicketValidation() }
@@ -1022,6 +1035,16 @@ private fun CameraMode(
      * upload queue moves and deletes the original on its own schedule.
      */
     var arPath by remember { mutableStateOf<com.haraan.app.vision.ArPath?>(null) }
+    // The after-ball replay — the delivery at speed, the result, then the stadium — and the
+    // frames it is played from; see DeliveryReplaySequence.
+    val replayFrames = remember { ReplayFrameRing() }
+    DisposableEffect(Unit) { onDispose { replayFrames.release() } }
+    var liveSequence by remember { mutableStateOf<LiveReplay?>(null) }
+    // The last ball's result, left on the live picture until the next ball; see LiveResultOverlay.
+    var liveResult by remember { mutableStateOf<LiveReplay?>(null) }
+    // Fulltrack-style setup: line both sets of stumps up in boxes. Opens by itself on the
+    // behind-the-bowler camera, where the stumps are the whole calibration.
+    var setupAligning by remember { mutableStateOf(session.role == com.haraan.app.data.MatchDeviceRole.LBW_REVIEW) }
     var showAr by remember { mutableStateOf(false) }
     var replayClip by remember { mutableStateOf<ReplayClip?>(null) }
     var showVideo by remember { mutableStateOf(false) }
@@ -1130,6 +1153,7 @@ private fun CameraMode(
         var lastAnalysisErrorLogMs = 0L
         var lastGateLogMs = 0L
         var idleAnalysisFrame = 0
+        var lastLiveFrameMs = Long.MIN_VALUE / 2
 
         ImageAnalysis.Analyzer { image ->
             try {
@@ -1144,6 +1168,17 @@ private fun CameraMode(
                     // Free: read off the frame's metadata, not its pixels.
                     if (pendingClipStart.compareAndSet(true, false)) {
                         clipStartSensorMs = image.imageInfo.timestamp / 1_000_000.0
+                    }
+                    // About thirty looked at a second whatever the camera runs at: a 60 fps
+                    // session is for the CLIP, which is tracked again at full rate once saved.
+                    val stampMs = image.imageInfo.timestamp / 1_000_000L
+                    if (stampMs - lastLiveFrameMs in 0 until LIVE_MIN_FRAME_MS) return@Analyzer
+                    lastLiveFrameMs = stampMs
+                    // While a ball is being filmed, a small upright copy of each frame looked
+                    // at, for the replay straight after it.
+                    if (trackingLive) {
+                        runCatching { image.toBitmap() }.getOrNull()
+                            ?.let { replayFrames.add(stampMs.toDouble(), it, image.imageInfo.rotationDegrees) }
                     }
                     val turn = ((image.imageInfo.rotationDegrees % 360) + 360) % 360
                     val sideways = turn == 90 || turn == 270
@@ -1354,17 +1389,29 @@ private fun CameraMode(
                                 focus = wicketTracker.focus(),
                                 allowSearch = wicketLock == null || idleAnalysisFrame % 16 == 0,
                             )
-                            wicketLock = wicketTracker.onFrame(battersEndOnly(sightings, cameraIntrinsics), cameraMove, uprightAspect, frameMs)
+                            bowlersEndOf(sightings, cameraIntrinsics)?.let { bowlersEndBase = bowlersEndFilter.add(it) ?: bowlersEndBase }
+                            wicketLock = wicketTracker.onFrame(battersEndOnly(sightings, cameraIntrinsics, bowlersEndBase), cameraMove, uprightAspect, frameMs)
+                            steadyWicket.add(wicketLock, frameMs)
                         }
                         // From behind the bowler, look only along the delivery's corridor and
                         // expect the ball to head for the batter's stumps. See setCorridor.
                         if (frameMs - lastCorridorMs >= CORRIDOR_REFRESH_MS) {
                             lastCorridorMs = frameMs
-                            val c = deliveryCorridor(wicketLock, cameraIntrinsics, uprightWidthPx, uprightAspect)
+                            // From the steadied stumps: they outlive the live lock the bowler's
+                            // run-up knocks out at the moment of release. See SteadyWicket.
+                            val steady = steadyWicket.value()
+                            val c = deliveryCorridor(steady ?: wicketLock, cameraIntrinsics, uprightWidthPx, uprightAspect)
+                            // A lock flickering for a moment keeps the corridor it had: dropping
+                            // it would restart the tracker, perhaps mid-delivery. Only no lock at
+                            // all goes back to the whole frame.
                             if (c == null) {
-                                vision.setCorridor(null, null, null, null, null)
+                                if (wicketLock == null && steady == null) {
+                                    vision.setCorridor(null, null, null, null, null)
+                                    corridorRef.set(null)
+                                }
                             } else {
                                 vision.setCorridor(c[0], c[1], c[2], c[3], com.haraan.app.vision.Point2(c[4].toDouble(), c[5].toDouble()))
+                                corridorRef.set(c)
                             }
                         }
                         val sighting = vision.onFrame(
@@ -1396,9 +1443,15 @@ private fun CameraMode(
                             }
                             trackQuality = vision.quality()
                         }
-                        // Asked on every frame, sighting or not: going quiet IS the signal.
-                        val flight = vision.track()
-                        if (com.haraan.app.vision.FlightEnd.check(flight, frameMs, uprightAspect, wicketLock) != null) {
+                        // Asked on every frame, sighting or not: going quiet IS the signal. A flight
+                        // a newer track replaced before it went quiet counts as finished now.
+                        val replaced = vision.takeFinished()?.takeIf { fin ->
+                            com.haraan.app.vision.FlightEnd.check(
+                                fin, fin.last().timestampMs + com.haraan.app.vision.FlightEnd.QUIET_MS, uprightAspect, wicketLock,
+                            ) != null
+                        }
+                        val flight = replaced ?: vision.track()
+                        if (replaced != null || com.haraan.app.vision.FlightEnd.check(flight, frameMs, uprightAspect, wicketLock) != null) {
                             val called = calledFlight
                             if (called == null) {
                                 calledFlight = flight
@@ -1491,12 +1544,14 @@ private fun CameraMode(
                                     allowSearch = allowSearch,
                                 )
                                 if (sightings.isNotEmpty()) lastSightingMs = frameClockMs
+                                bowlersEndOf(sightings, cameraIntrinsics)?.let { bowlersEndBase = bowlersEndFilter.add(it) ?: bowlersEndBase }
                                 wicketLock = wicketTracker.onFrame(
-                                    sightings = battersEndOnly(sightings, cameraIntrinsics),
+                                    sightings = battersEndOnly(sightings, cameraIntrinsics, bowlersEndBase),
                                     motion = cameraMove,
                                     frameAspect = uprightAspect,
                                     timestampMs = frameClockMs,
                                 )
+                                steadyWicket.add(wicketLock, frameClockMs)
                             }
                             val now = System.currentTimeMillis()
                             if (now < validationUntilMs) {
@@ -2021,6 +2076,7 @@ private fun CameraMode(
                     // Clear of the shutter row and the hint line above it.
                     safeBottomY = size.height * GUIDE_SAFE_BOTTOM,
                     guideTypeface = guideTypeface,
+                    bowlersEnd = bowlersEndBase,
                 )
             }
         }
@@ -2557,6 +2613,11 @@ private fun CameraMode(
                     onClick = { showGuide = !showGuide },
                 ) { tint -> PitchGlyph(Modifier.size(20.dp), tint) }
                 ToolButton(
+                    label = "Setup",
+                    active = setupAligning,
+                    onClick = { setupAligning = !setupAligning },
+                ) { tint -> CalibrateGlyph(Modifier.size(20.dp), tint) }
+                ToolButton(
                     // Says what a tap will do, not what the state is called.
                     label = if (manual) "Clear" else "Wicket",
                     active = manual,
@@ -2742,7 +2803,8 @@ private fun CameraMode(
          * checked for null here: a lock that is coasting is still a lock and must not be
          * measured from.
          */
-        val showFlight: (List<com.haraan.app.vision.BallSighting>) -> Unit = { flight ->
+        // [replay]: play the after-ball replay for it — false when a result is only refined.
+        val showFlight: (List<com.haraan.app.vision.BallSighting>, Boolean) -> Unit = { flight, replay ->
             /*
              * NO PITCH CORNERS? THE STUMPS ARE ENOUGH FOR A 3D FLIGHT.
              *
@@ -2753,8 +2815,9 @@ private fun CameraMode(
              * height assumed at chest level. Used only when there are no corners, and its
              * numbers are labelled as rough wherever they appear.
              */
-            val (quadFor3d, groundCamera) = flightCameras(found, wicketLock, cameraIntrinsics, uprightWidthPx, uprightAspect)
-            lastMetrics = com.haraan.app.vision.FlightMetrics.of(flight, uprightAspect, quadFor3d, wicketLock, groundCamera).also { metrics ->
+            val measureLock = steadyWicket.value() ?: wicketLock
+            val (quadFor3d, groundCamera) = flightCameras(found, measureLock, cameraIntrinsics, uprightWidthPx, uprightAspect, bowlersEndBase)
+            lastMetrics = com.haraan.app.vision.FlightMetrics.of(flight, uprightAspect, quadFor3d, measureLock, groundCamera).also { metrics ->
                 // From the fitted flight when there is one — either end of the pitch.
                 lastBounce = metrics.bounce
                 // The path on the real picture first; the 3D replay follows it.
@@ -2763,10 +2826,13 @@ private fun CameraMode(
                         ?: groundCamera?.let { cam -> com.haraan.app.vision.ArPath.fromFlight(f3, cam) }
                 } ?: com.haraan.app.vision.ArPath.fromTrack(flight, uprightAspect, wicketLock, metrics.lbw)
                 arPath = path
-                if (!path.isEmpty) {
-                    showAr = true
-                } else if (metrics.flight3d != null) {
-                    showReplay = true
+                val frames = flight.firstOrNull()?.let { replayFrames.since(it.timestampMs - ReplayFrameRing.LEAD_MS) }.orEmpty()
+                when {
+                    !replay -> liveResult?.let { old -> liveResult = LiveReplay(old.frames, path, metrics.flight3d?.speedKmh, metrics.flight3d, old.ballMs) }
+                    // As a ball-tracking camera shows it: on the live picture, at once, and left
+                    // there; the full replay is one tap away rather than forced on every ball.
+                    !path.isEmpty -> liveResult = LiveReplay(frames, path, metrics.flight3d?.speedKmh, metrics.flight3d, flight.firstOrNull()?.timestampMs ?: 0L)
+                    metrics.flight3d != null -> showReplay = true
                 }
             }
         }
@@ -2797,7 +2863,7 @@ private fun CameraMode(
                 deliveryFlash++
                 view.performHapticFeedback(Feel.TICK)
             }
-            showFlight(flight)
+            showFlight(flight, true)
             if (autoSegment && recording) {
                 // A beat after the ball for the clip, then the segment closes and is kept.
                 delay(AUTO_TAIL_MS)
@@ -2810,8 +2876,8 @@ private fun CameraMode(
          * THE AUTO LOOP. Starts the next segment whenever nothing else needs the screen: not
          * recording, no replay up, nobody tapping out a calibration.
          */
-        LaunchedEffect(autoMode, recording, showAr, showReplay, showVideo, stumpCalTapping, wicketTapping, videoCapture) {
-            if (!autoMode || recording || showAr || showReplay || showVideo || stumpCalTapping || wicketTapping) {
+        LaunchedEffect(autoMode, recording, showAr, showReplay, showVideo, liveSequence, setupAligning, stumpCalTapping, wicketTapping, videoCapture) {
+            if (!autoMode || recording || showAr || showReplay || showVideo || liveSequence != null || setupAligning || stumpCalTapping || wicketTapping) {
                 return@LaunchedEffect
             }
             if (videoCapture == null || !granted) return@LaunchedEffect
@@ -2846,8 +2912,12 @@ private fun CameraMode(
             showReplay = false
             showAr = false
             showVideo = false
+            liveSequence = null
+            replayFrames.clear()
             arPath = null
             replayClip = null
+            refinedFps = null
+            clipGeneration++
             clipStartSensorMs = null
             pendingClipStart.set(false)
             trackingLive = true
@@ -2890,7 +2960,7 @@ private fun CameraMode(
                      * are on screen. Worked out here only when it never was — a ball the
                      * tracker lost early, or a hot phone that paused tracking.
                      */
-                    if (lastMetrics == null) showFlight(calledFlight ?: vision.track())
+                    if (lastMetrics == null) showFlight(calledFlight ?: vision.track(), true)
                     // The window closed. Nobody pressed stop, so this is the only way to
                     // know it is shut and the next delivery can be armed.
                     view.performHapticFeedback(Feel.TICK)
@@ -2916,6 +2986,49 @@ private fun CameraMode(
                         ?: com.haraan.app.vision.ArPath.fromTrack(vision.track(), uprightAspect, wicketLock, lastMetrics?.lbw)
                     if (copied && !pathForClip.isEmpty) {
                         replayClip = ReplayClip(replayFile, clipStartSensorMs, pathForClip)
+                    }
+                    /*
+                     * THE SAME BALL AGAIN, FROM THE SAVED CLIP AT ITS FULL RATE.
+                     *
+                     * The live analyser looks at ~30 frames a second and loses a far ball before
+                     * it pitches; the clip has every frame the camera took (60 a second where the
+                     * phone can). Tracked again over the stretch around the live flight, and shown
+                     * instead when it saw more of the ball — a second or two after the ball, as
+                     * a broadcast replay is. A copy is analysed: the queue moves the clip, and
+                     * the replay copy is overwritten by the next ball.
+                     */
+                    val live = calledFlight ?: vision.track()
+                    val startMs = clipStartSensorMs
+                    if (copied && startMs != null && live.size >= com.haraan.app.vision.FlightEnd.MIN_FLIGHT_POINTS) {
+                        val generation = clipGeneration
+                        val corridorNow = corridorRef.get()
+                        val lockNow = steadyWicket.value() ?: wicketLock
+                        val aspectNow = uprightAspect
+                        scope.launch {
+                            val refined = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                                val copy = File(ctx.cacheDir, "replay/refine.mp4")
+                                runCatching { replayFile.copyTo(copy, overwrite = true) }.getOrNull()?.let { f ->
+                                    com.haraan.app.vision.ClipFlightAnalyzer().analyse(
+                                        clip = f,
+                                        clipStartSensorMs = startMs,
+                                        fromSensorMs = live.first().timestampMs - com.haraan.app.vision.ClipFlightAnalyzer.LEAD_MS.toDouble(),
+                                        toSensorMs = live.last().timestampMs + com.haraan.app.vision.ClipFlightAnalyzer.TAIL_MS.toDouble(),
+                                        corridor = corridorNow,
+                                        wicket = lockNow,
+                                        uprightAspect = aspectNow,
+                                    ).also { runCatching { f.delete() } }
+                                }
+                            }
+                            android.util.Log.i(
+                                ANALYSIS_TAG,
+                                "clip re-analysis: live ${live.size} pts, clip ${refined?.track?.size} pts at ${refined?.fps?.let { "%.0f".format(it) }} fps over ${refined?.framesAnalysed} frames",
+                            )
+                            if (refined == null || generation != clipGeneration || recording) return@launch
+                            if (refined.track.size <= live.size) return@launch
+                            refinedFps = refined.fps
+                            showFlight(refined.track, false)
+                            arPath?.takeIf { !it.isEmpty }?.let { replayClip = ReplayClip(replayFile, startMs, it) }
+                        }
                     }
                     /*
                      * Persisted in the review queue:
@@ -3026,6 +3139,8 @@ private fun CameraMode(
             recording && trackedPoints > 0 -> "Ball seen in $trackedPoints frames$trackWord"
             recording -> "Filming this ball"
             uploadError != null -> uploadError!!
+            // The shown flight was tracked again from the saved clip at its full rate.
+            refinedFps != null && live -> "Ball tracked from the %.0f fps clip".format(refinedFps)
             // Said out loud rather than left to a small coloured dot. Somebody holding
             // this phone at the boundary needs to know the difference between "idle" and
             // "the scorer has stopped hearing from me".
@@ -3071,6 +3186,21 @@ private fun CameraMode(
             onArm = { armDelivery(latestCue?.takeIf { it.inPlay }?.seq) },
         )
 
+        /*
+         * THE REPLAY PLAYS ITSELF, ONCE, a moment after the result lands on the live picture:
+         * long enough to see the answer where the ball was bowled, then the delivery at speed
+         * and the stadium. Keyed to the ball, so a result refined from the saved clip does not
+         * start it again; the Replay button plays it again on demand.
+         */
+        LaunchedEffect(liveResult?.ballMs) {
+            val r = liveResult ?: return@LaunchedEffect
+            delay(AUTO_REPLAY_AFTER_MS)
+            if (liveResult?.ballMs == r.ballMs && liveSequence == null) liveSequence = liveResult
+        }
+        // The last ball's result stays until the next ball is seen in flight.
+        LaunchedEffect(trackedPoints, recording, calledFlight) {
+            if (recording && trackedPoints > 0 && calledFlight == null) liveResult = null
+        }
         // A ball being filmed takes the screen back: the person holding the phone must see
         // that it is recording, and the viewfinder is what they aim with.
         LaunchedEffect(recording) { if (recording) showGallery = false }
@@ -3081,6 +3211,65 @@ private fun CameraMode(
                 uprightAspect = uprightAspect,
                 onHandOff = { if (lastMetrics?.flight3d != null) showReplay = true },
                 onDone = { showAr = false },
+            )
+        }
+        if (setupAligning && granted && !recording) {
+            val guide = com.haraan.app.vision.StumpAlignGuide.guide(cameraIntrinsics?.focalFw ?: 1.4, uprightAspect)
+            val far = wicketLock?.takeIf {
+                it.kind == com.haraan.app.vision.WicketKind.STUMPS && it.state != com.haraan.app.vision.WicketTrackState.LOST
+            }?.anchor?.base
+            StumpAlignSetup(
+                guide = guide,
+                uprightAspect = uprightAspect,
+                farSeen = far,
+                nearSeen = bowlersEndBase?.base,
+                onDone = { farFound, nearFound ->
+                    /*
+                     * Both sets known at once: the detector's reading where it has one inside
+                     * the box, the box itself where it has not — the person put them there.
+                     */
+                    if (!farFound) {
+                        wicketTracker.lockManually(
+                            baseLeft = guide.far.baseLeft,
+                            baseRight = guide.far.baseRight,
+                            top = com.haraan.app.vision.Point2(guide.far.centreX, guide.far.topY),
+                            kind = com.haraan.app.vision.WicketKind.STUMPS,
+                            frameAspect = uprightAspect,
+                        )
+                        wicketLock = wicketTracker.lock()
+                        wicketDiagnostics = wicketTracker.diagnostics()
+                    }
+                    if (!nearFound) {
+                        val k = com.haraan.app.vision.PitchGeometry.STUMP_CENTRES_SPAN_M / com.haraan.app.vision.PitchGeometry.STUMP_SET_WIDTH_M
+                        bowlersEndBase = com.haraan.app.vision.BowlersEnd(
+                            com.haraan.app.vision.Point2(guide.near.centreX, guide.near.baseY),
+                            guide.near.width * k,
+                        )
+                    }
+                    view.performHapticFeedback(Feel.COMMIT)
+                    setupAligning = false
+                },
+                onCancel = { setupAligning = false },
+            )
+        }
+        val result = liveResult
+        if (result != null && liveSequence == null) {
+            LiveResultOverlay(
+                path = result.path,
+                uprightAspect = uprightAspect,
+                speedKmh = result.speedKmh,
+                onReplay = { liveSequence = result }.takeIf { result.frames.size >= 2 || result.flight != null },
+            )
+        }
+        liveSequence?.let { seq ->
+            DeliveryReplaySequence(
+                frames = seq.frames,
+                path = seq.path,
+                speedKmh = seq.speedKmh,
+                flight = seq.flight,
+                // In Auto nobody may be holding the phone: the stadium closes itself.
+                stadiumAutoCloseMs = if (autoMode) AUTO_REPLAY_HOLD_MS else null,
+                onDone = { liveSequence = null },
             )
         }
         val clipToPlay = replayClip
@@ -3116,6 +3305,16 @@ private fun CameraMode(
         }
     }
 }
+
+/** One ball's after-ball replay: its frames, the path drawn over them, and its 3D flight. */
+internal class LiveReplay(
+    val frames: List<Pair<Double, ByteArray>>,
+    val path: com.haraan.app.vision.ArPath,
+    val speedKmh: Double?,
+    val flight: com.haraan.app.vision.Flight3d?,
+    /** Which ball: its first sighting on the camera's clock. */
+    val ballMs: Long = 0L,
+)
 
 /** The one commitment on the screen: solid brand blue, and it dips under a thumb. */
 @Composable
@@ -4308,6 +4507,9 @@ private fun DeliveryDetectedFlash(trigger: Int, modifier: Modifier = Modifier) {
 /** How long Auto films after the ball is done: the batter's shot and the follow-through. */
 private const val AUTO_TAIL_MS = 1_200L
 
+/** The result sits on the live picture this long before the replay plays itself. */
+private const val AUTO_REPLAY_AFTER_MS = 1_000L
+
 /** The pause before the next Auto segment starts. */
 private const val AUTO_REARM_MS = 400L
 
@@ -4775,7 +4977,7 @@ internal fun Rect.normalise(point: Offset) =
 // ─────────────────────────────────────────────────────── CameraX plumbing ─────
 
 /*
- * A FIXED 30 FPS, ON EVERY STREAM.
+ * A FIXED RATE, ON EVERY STREAM — 60 where the phone can, else 30.
  *
  * Asking only the video stream for 30 was not enough: CameraX bound "30" and a Realme
  * RMX3933 still ran the session at a fixed 20 (the repeating request carried [20, 20]) —
@@ -4785,14 +4987,17 @@ internal fun Rect.normalise(point: Offset) =
  * which the tracker copes with far better than missing frames.
  */
 @androidx.annotation.OptIn(androidx.camera.camera2.interop.ExperimentalCamera2Interop::class)
-private fun <T> lockFrameRate(builder: androidx.camera.core.ExtendableBuilder<T>) {
+private fun <T> lockFrameRate(builder: androidx.camera.core.ExtendableBuilder<T>, fps: Int = TARGET_FPS) {
     androidx.camera.camera2.interop.Camera2Interop.Extender(builder).setCaptureRequestOption(
         android.hardware.camera2.CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE,
-        android.util.Range(TARGET_FPS, TARGET_FPS),
+        android.util.Range(fps, fps),
     )
 }
 
 private const val TARGET_FPS = 30
+
+/** The live analyser skips frames closer together than this: ~30 a second at 60 fps. */
+private const val LIVE_MIN_FRAME_MS = 20L
 
 /**
  * WHICH CAMERA THE 3D FLIGHT IS FITTED THROUGH.
@@ -4812,12 +5017,13 @@ private fun flightCameras(
     camera: com.haraan.app.vision.CameraIntrinsics?,
     uprightWidthPx: Int,
     uprightAspect: Float,
+    bowlersEnd: com.haraan.app.vision.BowlersEnd? = null,
 ): Pair<com.haraan.app.vision.PitchQuad?, com.haraan.app.vision.PitchCamera?> {
     val ground = lock?.let { l ->
         val cam = camera ?: return@let null
         if (uprightWidthPx <= 0 || uprightAspect <= 0f) return@let null
         val h = (uprightWidthPx / uprightAspect).toInt()
-        com.haraan.app.vision.PitchGround.best(l, cam, uprightWidthPx, h)?.pitchCamera(uprightWidthPx, h)
+        com.haraan.app.vision.PitchGround.best(l, cam, uprightWidthPx, h, bowlersEnd = bowlersEnd)?.pitchCamera(uprightWidthPx, h)
     }
     val quad = found?.takeIf { it.source != com.haraan.app.vision.QuadSource.DETECTED || ground == null }
     return quad to (if (quad != null) null else ground)
@@ -4838,13 +5044,54 @@ private fun flightCameras(
 internal fun battersEndOnly(
     sightings: List<com.haraan.app.vision.WicketSighting>,
     camera: com.haraan.app.vision.CameraIntrinsics?,
+    /**
+     * The bowler's stumps, when seen. The batter's set lies beyond them — higher in the
+     * picture and roughly behind them along the pitch — so anything lower or well off to the
+     * side is not it. On a real net clip a stump-like shape low at the frame's right edge was
+     * locked as the batter's stumps without this, and no delivery could be found after.
+     */
+    bowlersEnd: com.haraan.app.vision.BowlersEnd? = null,
 ): List<com.haraan.app.vision.WicketSighting> {
     val focal = camera?.focalFw ?: ASSUMED_FOCAL_FW
     return sightings.filterNot { s ->
         val set = (s as? com.haraan.app.vision.WicketSighting.Stumps)?.set ?: return@filterNot false
         val span = set.spanX
-        span > 0f && focal * com.haraan.app.vision.PitchGeometry.STUMP_CENTRES_SPAN_M / span < BOWLERS_END_MAX_M
+        if (span > 0f && focal * com.haraan.app.vision.PitchGeometry.STUMP_CENTRES_SPAN_M / span < BOWLERS_END_MAX_M) {
+            return@filterNot true
+        }
+        val near = bowlersEnd ?: return@filterNot false
+        val base = set.baseMiddle
+        base.y > near.base.y - BEYOND_BOWLER_MIN_RISE ||
+            kotlin.math.abs(base.x - near.base.x) > BEHIND_BOWLER_MAX_SIDE ||
+            // A pitch's length away, the batter's set looks several times narrower than the
+            // bowler's; something nearly as wide is a nearer thing, not the other wicket.
+            near.spanFw < span * BATTERS_MIN_NARROWER
     }
+}
+
+/** The batter's stumps sit at least this much higher in the picture than the bowler's. */
+private const val BEYOND_BOWLER_MIN_RISE = 0.05
+
+/** ...and within this much of them across the picture. */
+private const val BEHIND_BOWLER_MAX_SIDE = 0.40
+
+/** The bowler's set must look at least this many times wider than the batter's. */
+private const val BATTERS_MIN_NARROWER = 3.0
+
+/**
+ * The bowler's-end stumps among a frame's sightings — the nearest set that [battersEndOnly]
+ * drops — as its base, normalised; null when none is in view.
+ */
+internal fun bowlersEndOf(
+    sightings: List<com.haraan.app.vision.WicketSighting>,
+    camera: com.haraan.app.vision.CameraIntrinsics?,
+): com.haraan.app.vision.BowlersEnd? {
+    val focal = camera?.focalFw ?: ASSUMED_FOCAL_FW
+    return sightings
+        .mapNotNull { (it as? com.haraan.app.vision.WicketSighting.Stumps)?.set }
+        .filter { it.spanX > 0f && focal * com.haraan.app.vision.PitchGeometry.STUMP_CENTRES_SPAN_M / it.spanX < BOWLERS_END_MAX_M }
+        .maxByOrNull { it.spanX }
+        ?.let { com.haraan.app.vision.BowlersEnd(it.baseMiddle, it.spanX.toDouble()) }
 }
 
 /** Nearer than this, a set of stumps is the bowler's end the camera stands behind. */
@@ -4870,7 +5117,10 @@ internal fun deliveryCorridor(
 ): FloatArray? {
     val l = lock ?: return null
     if (l.kind != com.haraan.app.vision.WicketKind.STUMPS) return null
-    if (l.state == com.haraan.app.vision.WicketTrackState.TENTATIVE || l.state == com.haraan.app.vision.WicketTrackState.LOST) return null
+    // Only a settled lock: a stumps tracker re-acquiring after the bowler ran through the
+    // picture can hold the wrong thing for a moment, and a corridor built on it pointed the
+    // ball tracker at the wrong place for the very second the ball was bowled.
+    if (l.state != com.haraan.app.vision.WicketTrackState.CONFIRMED || l.heldFrames < CORRIDOR_MIN_HELD_FRAMES) return null
     val cam = camera ?: return null
     if (uprightWidthPx <= 0 || uprightAspect <= 0f) return null
     val h = (uprightWidthPx / uprightAspect).toInt()
@@ -4888,6 +5138,9 @@ internal fun deliveryCorridor(
         by,
     )
 }
+
+/** Frames a lock must have held, confirmed, before a corridor is built on it. */
+private const val CORRIDOR_MIN_HELD_FRAMES = 15
 
 /** Stumps at least this far off: the camera is behind the bowler, and the corridor applies. */
 private const val CORRIDOR_MIN_DISTANCE_M = 10.0
@@ -5047,9 +5300,9 @@ private fun bindCamera(
             )
             .build()
 
-        val preview = Preview.Builder()
+        fun previewAt(fps: Int) = Preview.Builder()
             .setResolutionSelector(sizedFor(android.util.Size(1280, 720)))
-            .also { lockFrameRate(it) }
+            .also { lockFrameRate(it, fps) }
             .build()
             .also { it.setSurfaceProvider(view.surfaceProvider) }
 
@@ -5066,11 +5319,11 @@ private fun bindCamera(
          * delays the recording. Filming is the product; vision is bolted to the side of
          * it, and it yields.
          */
-        val analysis = ImageAnalysis.Builder()
+        fun analysisAt(fps: Int) = ImageAnalysis.Builder()
             .setResolutionSelector(sizedFor(android.util.Size(1280, 720)))
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
-            .also { lockFrameRate(it) }
+            .also { lockFrameRate(it, fps) }
             .also { watchExposure(it, shutter) }
             .build()
             .also { it.setAnalyzer(analysisExecutor, onFrame) }
@@ -5105,15 +5358,28 @@ private fun bindCamera(
                 .build()
         }
 
+        /*
+         * EVERY STREAM AT THE ONE RATE. The session has one exposure frame-rate range, and
+         * the preview and analysis used to pin it to 30 whatever the recording asked for —
+         * so a "60 fps" clip was filmed at 30. Now all three are pinned to the rate being
+         * tried. The analyser still LOOKS at about 30 a second (see LIVE_MIN_FRAME_MS); the
+         * extra frames are in the clip, where the ball is tracked again at full rate once
+         * it is saved (ClipFlightAnalyzer) — the far half of the flight, where it pitches,
+         * is only ever seen at the higher rate.
+         */
+        var analysis: ImageAnalysis? = null
         fun bindWith(fps: Int?): Pair<VideoCapture<Recorder>, androidx.camera.core.Camera>? = runCatching {
             val capture = buildCapture(fps)
+            val rate = fps ?: TARGET_FPS
+            val a = analysisAt(rate)
             provider.unbindAll()
+            analysis = a
             capture to provider.bindToLifecycle(
                 lifecycleOwner,
                 CameraSelector.DEFAULT_BACK_CAMERA,
-                preview,
+                previewAt(rate),
                 capture,
-                analysis,
+                a,
             )
         }.getOrNull()
 
@@ -5151,7 +5417,7 @@ private fun bindCamera(
                     bound.second.cameraInfo.supportedFrameRateRanges.joinToString(),
             )
             shutter.attach(bound.second)
-            onReady(bound.first, analysis, gotFps)
+            analysis?.let { onReady(bound.first, it, gotFps) }
         }
     }, ContextCompat.getMainExecutor(context))
 }

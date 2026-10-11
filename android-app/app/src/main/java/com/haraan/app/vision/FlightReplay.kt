@@ -9,6 +9,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -32,6 +33,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -173,6 +176,62 @@ fun FlightReplayOverlay(
 
 private const val REPLAY_MAX_FONT_SCALE = 1.1f
 
+/**
+ * Eases the drawn camera towards the planned one: each part moves a share of the way per
+ * frame, by real elapsed time, so the feel is the same at 30, 60 or 120 frames a second.
+ */
+internal class CameraFollower(private val lagSeconds: Double = FOLLOW_LAG_S) {
+    private var eye: Point3? = null
+    private var target: Point3? = null
+    private var up: Point3? = null
+    private var zoom = 1.0
+    private var lastNanos = 0L
+
+    fun reset() {
+        eye = null
+        lastNanos = 0L
+    }
+
+    fun follow(planned: ReplayCamera, nowNanos: Long): ReplayCamera {
+        val dt = if (lastNanos == 0L || nowNanos <= lastNanos) 0.0 else (nowNanos - lastNanos) / 1e9
+        lastNanos = nowNanos
+        val e = eye
+        // First frame, or back after a long pause: start where planned.
+        if (e == null || dt > 0.25) {
+            eye = planned.eye; target = planned.target; up = planned.up; zoom = planned.zoom
+            return planned
+        }
+        val k = 1.0 - kotlin.math.exp(-dt / lagSeconds)
+        fun mix(a: Point3, b: Point3) = Point3(a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k, a.z + (b.z - a.z) * k)
+        val ne = mix(e, planned.eye)
+        val nt = mix(target!!, planned.target)
+        val nu = mix(up!!, planned.up)
+        zoom += (planned.zoom - zoom) * k
+        eye = ne; target = nt; up = nu
+        return ReplayCamera(ne, nt, nu, zoom)
+    }
+}
+
+/** How far behind its planned pose the drawn camera trails, as a time constant. */
+private const val FOLLOW_LAG_S = 0.11
+
+/**
+ * The stadium's textures, made once per process — a replay opening after every ball should
+ * not rebuild them — and warmed while the delivery's own replay is still playing.
+ */
+object ReplayTextures {
+    val grain: ShaderBrush by lazy { grainBrush() }
+    val crowd: ShaderBrush by lazy { crowdBrush() }
+    val turf: ShaderBrush by lazy { turfBrush() }
+
+    fun warm() {
+        grain; crowd; turf
+    }
+}
+
+/** The slow turn round the stumps after the ball has arrived. */
+private const val HOLD_ORBIT_MS = 2_600
+
 @Composable
 private fun FlightReplayContent(
     flight: Flight3d,
@@ -187,10 +246,26 @@ private fun FlightReplayContent(
     val glide = remember { Animatable(1f) }
     val play = remember { Animatable(0f) }
     val bails = remember { Animatable(0f) }
+    // After the ball arrives: the closing turn round the stumps, 0..1.
+    val hold = remember { Animatable(0f) }
+    /*
+     * THE CAMERA HAS HANDS. Each shot is a pose for this moment, and the cut between two of
+     * them, or the ball camera riding a ball that bounces, changed direction from one frame
+     * to the next — a jolt no operator would make. The pose the scene is drawn from follows
+     * the planned one with a little lag instead (see [CameraFollower]), so every move eases
+     * in and out; and a frame clock keeps the picture redrawing every display frame while
+     * the replay is up, so a move still settling after the ball has arrived finishes smoothly
+     * instead of stopping where the last ball frame left it.
+     */
+    val follower = remember { CameraFollower() }
+    var frameNanos by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(Unit) {
+        while (true) withFrameNanos { frameNanos = it }
+    }
     var generation by remember { mutableIntStateOf(0) }
-    val grain = remember { grainBrush() }
-    val crowd = remember { crowdBrush() }
-    val turf = remember { turfBrush() }
+    val grain = remember { ReplayTextures.grain }
+    val crowd = remember { ReplayTextures.crowd }
+    val turf = remember { ReplayTextures.turf }
     val hostView = LocalView.current
 
     val startMs = flight.releaseMs
@@ -204,6 +279,8 @@ private fun FlightReplayContent(
     LaunchedEffect(flight, generation) {
         bails.snapTo(0f)
         play.snapTo(0f)
+        hold.snapTo(0f)
+        follower.reset()
         /*
          * FELT ON THE SAME TIMELINE IT IS SEEN ON. The replay's own clock decides when each
          * knock lands — release, the bounce, the stumps — so the hand feels the ball hit the
@@ -230,9 +307,11 @@ private fun FlightReplayContent(
             return@LaunchedEffect
         }
         play.animateTo(1f, tween(playMs, easing = LinearEasing))
+        launch { hold.animateTo(1f, tween(HOLD_ORBIT_MS, easing = LinearEasing)) }
         if (hits == true) bails.animateTo(1f, tween(550, easing = FastOutSlowInEasing))
         if (autoCloseAfterMs != null) {
-            delay(autoCloseAfterMs)
+            // The turn round the stumps plays out before the replay closes itself.
+            delay(maxOf(autoCloseAfterMs, HOLD_ORBIT_MS.toLong()))
             onClose()
         }
     }
@@ -265,7 +344,10 @@ private fun FlightReplayContent(
         Canvas(Modifier.fillMaxSize()) {
             val progress = play.value.toDouble()
             val nowMs = startMs + (endMs - startMs) * progress
-            val camera = previous.cameraAt(progress).lerp(view.cameraAt(progress), glide.value.toDouble())
+            val shot = ShotContext(flight, startMs, endMs, hold.value.toDouble())
+            val planned = previous.cameraAt(progress, shot).lerp(view.cameraAt(progress, shot), glide.value.toDouble())
+            // A held still (debug) is drawn exactly where planned.
+            val camera = if (holdAt != null) planned else follower.follow(planned, frameNanos)
             drawScene(camera, flight, startMs, nowMs, grain, crowd, turf, bails.value)
         }
 
@@ -359,6 +441,8 @@ private fun FlightReplayContent(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Row(
                     Modifier
+                        // Six views: on a narrow phone the row scrolls rather than wraps.
+                        .horizontalScroll(androidx.compose.foundation.rememberScrollState())
                         .clip(RoundedCornerShape(999.dp))
                         .background(Glass)
                         .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(999.dp))
@@ -602,7 +686,7 @@ internal fun DrawScope.drawScene(
     // ── Night sky, and the floodlit haze where the ground meets it ──
     val horizon = camera.project(Point3(0.0, -3000.0, 0.0), w, h)?.y?.toFloat()
         ?: camera.project(Point3(0.0, 3000.0, 0.0), w, h)?.y?.toFloat()
-    val skyFoot = (horizon ?: size.height * 0.3f).coerceIn(1f, size.height)
+    val skyFoot = (horizon ?: size.height * 0.3f).coerceIn(1f, maxOf(1f, size.height))
     drawRect(
         Brush.verticalGradient(
             listOf(Night, RampDeep.copy(alpha = 0.5f).compositeOver(Night), RampDeep.copy(alpha = 0.8f).compositeOver(Night)),
@@ -944,3 +1028,4 @@ internal object HaraanMarkShapes {
         pieces.map { piece -> piece.filterIndexed { i, _ -> i % 3 == 0 || i == piece.lastIndex } }
     }
 }
+

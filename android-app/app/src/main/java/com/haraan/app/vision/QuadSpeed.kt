@@ -194,8 +194,17 @@ object QuadSpeed {
     /** A bounce fitted just behind the stump line is a full toss fitted low; metres behind is not a ball. */
     const val MIN_BOUNCE_ALONG_M = -0.5
 
-    /** The bowler's popping crease is 20.12 m from the stumps' line plus 1.22 m; a little past it. */
-    const val MAX_BOUNCE_ALONG_M = 21.5
+    /*
+     * The shortest ball bowled — a bouncer — pitches 11-13 m from the batter's stumps. A fit
+     * pitching it nearer the bowler than [MAX_BOUNCE_ALONG_M] is something else: on a 120 fps
+     * net clip (2026-10-11) the bowler's follow-through and a fielder fitted as 16-41 km/h
+     * "deliveries" pitching 15.7-21.4 m up, under the bowler's feet. (This was 21.5, the
+     * bowler's crease, which only caught a camera model gone wrong.)
+     */
+    const val MAX_BOUNCE_ALONG_M = 15.0
+
+    /** A best fit this close to [MAX_BOUNCE_ALONG_M] was pushed there by the limit. */
+    const val EDGE_MARGIN_M = 0.6
 
     /**
      * The delivery in three dimensions, or why not. [estimate] is this, read for one number;
@@ -249,8 +258,26 @@ object QuadSpeed {
          */
         val first = run.first().timestampMs.toDouble()
         val last = run.last().timestampMs.toDouble()
+        /*
+         * ...AND PAST ITS LAST SIGHTING. Filmed from behind the bowler, a ball going away
+         * shrinks to a few pixels and is often lost before it pitches: on a real net video
+         * all eight sightings of a delivery were in the air. Made to pitch inside them, the
+         * fit bent the flight backwards ("travels away from the batter"). Searched a little
+         * beyond, the sightings make one parabola, and where it meets the ground is the
+         * bounce.
+         */
+        /*
+         * ...UNLESS THE PICTURE SHOWS IT PITCH. From behind the bowler a ball comes down the
+         * picture until it lands and goes back up it after: the lowest sighting with a clear
+         * climb after it IS the bounce. Left to the open search, a 4K net clip with twenty
+         * sightings after the bounce was fitted pitching past its last sighting — the late,
+         * rising points taken alone as a ball coming down — with no out leg, so the path was
+         * projected into the stumps when the ball had bounced over them.
+         */
+        val turn = if (bounce?.atMs == null) pictureBounceMs(run) else null
         val (from, to, step) = bounce?.atMs?.let { Triple(it - TB_SEARCH_MS, it + TB_SEARCH_MS, TB_STEP_MS) }
-            ?: Triple(first, last, TB_SCAN_STEP_MS)
+            ?: turn?.let { Triple(it - TURN_SEARCH_MS, it + TURN_SEARCH_MS, TB_STEP_MS) }
+            ?: Triple(first, last + EXTRAPOLATE_BOUNCE_MS, TB_SCAN_STEP_MS)
 
         var best: DoubleArray? = null
         var bestTb = from
@@ -259,7 +286,7 @@ object QuadSpeed {
             var tb = a
             while (tb <= b) {
                 val near = run.filter { abs(it.timestampMs - tb) <= MAX_LOOKBACK_MS }
-                val fit = fitFlight(near, camera, tb)
+                val fit = fitFlight(near, camera, tb)?.takeIf { physical(it.first) }
                 if (fit != null && fit.second < bestError) {
                     bestError = fit.second
                     best = fit.first
@@ -270,7 +297,7 @@ object QuadSpeed {
         }
         scan(from, to, step)
         // A coarse scan, then the frame either side of its answer at full resolution.
-        if (bounce?.atMs == null && best != null) {
+        if (bounce?.atMs == null && turn == null && best != null) {
             val coarse = bestTb
             scan(coarse - TB_SCAN_STEP_MS, coarse + TB_SCAN_STEP_MS, TB_STEP_MS)
         }
@@ -293,8 +320,10 @@ object QuadSpeed {
         if (v[1] < MIN_BOUNCE_ALONG_M) {
             return FitResult.Refused("the fit pitched the ball %.1f m behind the stumps — the camera model is wrong".format(-v[1]))
         }
-        if (v[1] > MAX_BOUNCE_ALONG_M) {
-            return FitResult.Refused("the fit pitched the ball %.1f m up, past the bowler's crease — the camera model is wrong".format(v[1]))
+        // At the very edge of where a delivery can pitch, the search found nothing in range
+        // and stopped against the limit: that is not a fit (a fielder walking, a follow-through).
+        if (v[1] > MAX_BOUNCE_ALONG_M - EDGE_MARGIN_M) {
+            return FitResult.Refused("the fit pitched the ball %.1f m up, nearer the bowler than any delivery".format(v[1]))
         }
         val hasAfter = v.size == 8 && v[6] < 0
         return FitResult.Ok(
@@ -332,10 +361,53 @@ object QuadSpeed {
 
     /** Search either side of the bounce finder's moment, and in what steps. */
     private const val TB_SEARCH_MS = 40.0
+
+    /*
+     * A BALL COMES DOWN TO THE PITCH AND GOES UP OFF IT. Unchecked, the search over bounce
+     * moments found a "flight" for a full ball whose bounce was never seen (4K net clip,
+     * 2026-10-12) by pitching it just after release and treating the whole descent as the
+     * leg AFTER the bounce — a ball still falling once it has bounced — and fitted it better
+     * than the real answer: "pitched 21.9 m up". Coming down into the bounce and, when there
+     * is a leg after it, climbing out of it, are now required of every candidate.
+     */
+    private fun physical(v: DoubleArray): Boolean {
+        if (v.size < 5 || v[4] <= 0.0) return false
+        // ...and lands where a delivery can: the refusal below used to see only the single
+        // best candidate, so one out of range threw away every one that was not.
+        if (v[1] < MIN_BOUNCE_ALONG_M || v[1] > MAX_BOUNCE_ALONG_M) return false
+        return v.size < 8 || v[7] > 0.0
+    }
+
+    /** The share of its pace along and across the pitch a ball keeps off the bounce. */
+    private const val PACE_KEPT_OFF_PITCH = 0.88
+
+    /** Either side of the lowest point in the picture, when the ball is seen to climb after it. */
+    private const val TURN_SEARCH_MS = 60.0
+
+    /**
+     * When the sightings come down the picture and clearly go back up it — at least
+     * [TURN_MIN_AFTER] sightings after the lowest, climbing [TURN_MIN_RISE] of the frame —
+     * the time of the lowest one; else null. Picture y grows downwards.
+     */
+    private fun pictureBounceMs(run: List<BallSighting>): Double? {
+        if (run.size < MIN_PRE_BOUNCE + TURN_MIN_AFTER) return null
+        val low = run.indices.maxByOrNull { run[it].y } ?: return null
+        if (low < MIN_PRE_BOUNCE || run.size - 1 - low < TURN_MIN_AFTER) return null
+        val fell = run[low].y - run.first().y
+        val rose = run[low].y - run.subList(low + 1, run.size).minOf { it.y }
+        if (fell < TURN_MIN_RISE || rose < TURN_MIN_RISE) return null
+        return run[low].timestampMs.toDouble()
+    }
+
+    private const val TURN_MIN_AFTER = 4
+    private const val TURN_MIN_RISE = 0.01f
     private const val TB_STEP_MS = 2.0
 
     /** The whole-flight search, when no bounce was found to start from. */
     private const val TB_SCAN_STEP_MS = 8.0
+
+    /** How far past the last sighting the bounce may be extrapolated. */
+    private const val EXTRAPOLATE_BOUNCE_MS = 600.0
 
     /**
      * One flight through the rays, for a given bounce moment [tb]. Unknowns, all linear:
@@ -347,7 +419,17 @@ object QuadSpeed {
         val before = points.count { it.timestampMs <= tb }
         val after = points.size - before
         if (before < MIN_PRE_BOUNCE) return null
-        val n = if (after >= 2) 8 else 5
+        /*
+         * AFTER THE BOUNCE THE BALL KEEPS ITS LINE. Its own across-and-along speed after
+         * the bounce used to be three more unknowns, and seen from behind the bowler — where
+         * along-the-pitch is depth, the axis one camera sees worst — it came out pointing
+         * back at the bowler on a 4K net clip with twenty clean sightings after the bounce,
+         * so the leg was thrown away and the path was projected into the stumps. Off the
+         * pitch a ball keeps its line and loses some pace, so that motion is the incoming
+         * one scaled by [PACE_KEPT_OFF_PITCH], and only the climb off the pitch is solved.
+         * The answer is still eight numbers, as before.
+         */
+        val n = if (after >= 2) 6 else 5
         val c = camera.centre
         val up = camera.up
         val ata = Array(n) { DoubleArray(n) }
@@ -365,7 +447,7 @@ object QuadSpeed {
             if (s <= 0) {
                 j[0][2] = s; j[1][3] = s; j[2][4] = -up * s
             } else {
-                j[0][5] = s; j[1][6] = s; j[2][7] = up * s
+                j[0][2] = PACE_KEPT_OFF_PITCH * s; j[1][3] = PACE_KEPT_OFF_PITCH * s; j[2][5] = up * s
             }
             // cross(a + J u, d) = 0  →  ([d]x J) u = cross(a, d)
             val rhs = PitchCamera.cross(a, d)
@@ -390,7 +472,12 @@ object QuadSpeed {
             for (k in 0 until n) r += coeff[k] * u[k]
             error += r * r
         }
-        return u to error / rows.size
+        val full = if (n == 6) {
+            doubleArrayOf(u[0], u[1], u[2], u[3], u[4], PACE_KEPT_OFF_PITCH * u[2], PACE_KEPT_OFF_PITCH * u[3], u[5])
+        } else {
+            u
+        }
+        return full to error / rows.size
     }
 
     /** Gaussian elimination with partial pivoting; null when singular. */

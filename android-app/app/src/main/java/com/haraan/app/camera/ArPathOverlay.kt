@@ -52,6 +52,8 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.input.pointer.pointerInput
@@ -107,6 +109,16 @@ private fun colourOf(leg: ArLeg) = when (leg) {
     ArLeg.PROJECTED -> PathProjected
 }
 
+/** The fitted flight's tube: a deep broadcast red, and the darker rim under it. */
+private val TubeRed = Color(0xFFD7141E)
+private val TubeRim = Color(0xFF6E0A10)
+
+/** The flight's shadow on the pitch. */
+private val ShadowTint = Color(0xFF9B8CFF)
+
+/** Width of the ribbon for a trail seen only in 2D. */
+private const val FLAT_RIBBON_DP = 4.5f
+
 /**
  * The path as far as [uptoMs], drawn into [frame] (the picture's rectangle on screen).
  * [stumpsGlow] 0..1 lights the stumps with the verdict.
@@ -117,26 +129,83 @@ internal fun DrawScope.drawArPath(path: ArPath, frame: Rect, uptoMs: Double, stu
     val core = 4.5.dp.toPx()
 
     clipRect(frame.left, frame.top, frame.right, frame.bottom) {
-        // The stumps, lit with the answer once the ball is there.
-        if (stumpsGlow > 0f && path.stumps.isNotEmpty()) {
+        /*
+         * THE CHANNEL ON THE PITCH, under everything: wicket to wicket, the stumps' width,
+         * as a lavender strip that narrows into the distance like paint. Grown in step with
+         * the ball, so a replay lays it down as the ball goes.
+         */
+        val shadow = path.shadow.filter { it.ms <= uptoMs }
+        if (shadow.size >= 2) {
+            val strip = Path().apply {
+                val first = at(shadow.first().left.x, shadow.first().left.y)
+                moveTo(first.x, first.y)
+                for (s in shadow) at(s.left.x, s.left.y).let { lineTo(it.x, it.y) }
+                for (s in shadow.asReversed()) at(s.right.x, s.right.y).let { lineTo(it.x, it.y) }
+                close()
+            }
+            val near = shadow.first()
+            val far = shadow.last()
+            drawPath(
+                strip,
+                Brush.linearGradient(
+                    listOf(ShadowTint.copy(alpha = 0.30f), ShadowTint.copy(alpha = 0.62f)),
+                    start = at((near.left.x + near.right.x) / 2, (near.left.y + near.right.y) / 2),
+                    end = at((far.left.x + far.right.x) / 2, (far.left.y + far.right.y) / 2),
+                ),
+            )
+        }
+
+        /*
+         * THE BATTER'S STUMPS IN 3D, from the moment the replay starts: three shaded stumps
+         * and the bails, standing where the wicket is measured to be, so the flight is seen
+         * arriving at something solid. Glass-white while the ball is on its way; the
+         * verdict's colour, with a glow, once it gets there.
+         */
+        if (path.stumps.size == 3) {
             val tone = when (path.hitting) {
                 true -> Hitting
                 false -> Missing
                 null -> Unjudged
             }
-            val middle = path.stumps[path.stumps.size / 2]
-            val c = at((middle.first.x + middle.second.x) / 2, (middle.first.y + middle.second.y) / 2)
-            val span = (at(middle.first.x, middle.first.y) - at(middle.second.x, middle.second.y)).getDistance()
-            val r = (span * 1.3f).coerceAtLeast(24.dp.toPx())
-            drawCircle(
-                Brush.radialGradient(listOf(tone.copy(alpha = 0.45f * stumpsGlow), Color.Transparent), c, r),
-                r,
-                c,
-                blendMode = BlendMode.Plus,
-            )
-            for ((foot, top) in path.stumps) {
-                drawLine(tone.copy(alpha = stumpsGlow), at(foot.x, foot.y), at(top.x, top.y), 3.2.dp.toPx(), StrokeCap.Round)
+            val lit = stumpsGlow.coerceIn(0f, 1f)
+            val body = lerp(Color.White.copy(alpha = 0.78f), tone, lit)
+            val feet = path.stumps.map { at(it.first.x, it.first.y) }
+            val tops = path.stumps.map { at(it.second.x, it.second.y) }
+            val gap = ((feet[2] - feet[0]).getDistance() / 2f).coerceAtLeast(1f)
+            val w = (gap * 0.42f).coerceAtLeast(2.2.dp.toPx())
+            if (lit > 0f) {
+                val c = (feet[1] + tops[1]) / 2f
+                val r = ((tops[1] - feet[1]).getDistance() * 1.1f).coerceAtLeast(24.dp.toPx())
+                drawCircle(Brush.radialGradient(listOf(tone.copy(alpha = 0.45f * lit), Color.Transparent), c, r), r, c, blendMode = BlendMode.Plus)
             }
+            for (i in 0..2) {
+                val foot = feet[i]
+                val top = tops[i]
+                val axis = (top - foot).let { d -> val n = d.getDistance(); if (n < 1e-3f) Offset(0f, -1f) else d / n }
+                val side = Offset(-axis.y, axis.x) * (w / 2f)
+                val bar = Path().apply {
+                    moveTo((foot + side).x, (foot + side).y)
+                    lineTo((top + side).x, (top + side).y)
+                    lineTo((top - side).x, (top - side).y)
+                    lineTo((foot - side).x, (foot - side).y)
+                    close()
+                }
+                // Lit from the left like the picture: bright edge, body, darker edge.
+                drawPath(
+                    bar,
+                    Brush.linearGradient(
+                        listOf(Color.White.copy(alpha = body.alpha), body, body.copy(red = body.red * 0.55f, green = body.green * 0.55f, blue = body.blue * 0.55f)),
+                        start = foot + side,
+                        end = foot - side,
+                    ),
+                )
+                drawCircle(body, w / 2f, top)
+                drawPath(bar, Color.Black.copy(alpha = 0.25f), style = Stroke(0.8.dp.toPx()))
+            }
+            // The bails across the tops.
+            val lift = (tops[1] - feet[1]).let { d -> val n = d.getDistance(); if (n < 1e-3f) Offset(0f, -1f) else d / n } * (w * 0.6f)
+            drawLine(body, tops[0] + lift, tops[1] + lift, (w * 0.55f).coerceAtLeast(1.5.dp.toPx()), StrokeCap.Round)
+            drawLine(body, tops[1] + lift, tops[2] + lift, (w * 0.55f).coerceAtLeast(1.5.dp.toPx()), StrokeCap.Round)
         }
 
         // The line itself, three passes: glow, core, bright centre.
@@ -150,24 +219,82 @@ internal fun DrawScope.drawArPath(path: ArPath, frame: Rect, uptoMs: Double, stu
                 val prev = path.points.getOrNull(i - 1)
                 if (prev != null && prev.ms < uptoMs) {
                     val f = (uptoMs - prev.ms) / (p.ms - prev.ms)
-                    shown += ArPoint(uptoMs, prev.x + (p.x - prev.x) * f, prev.y + (p.y - prev.y) * f, p.leg)
+                    shown += ArPoint(uptoMs, prev.x + (p.x - prev.x) * f, prev.y + (p.y - prev.y) * f, p.leg, prev.width + (p.width - prev.width) * f)
                 }
                 break
             }
         }
         val dash = PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 7.dp.toPx()))
-        for (pass in 0..2) {
-            for (i in 1 until shown.size) {
-                val a = shown[i - 1]
-                val b = shown[i]
-                val colour = colourOf(b.leg)
-                val projected = b.leg == ArLeg.PROJECTED
-                val start = at(a.x, a.y)
-                val end = at(b.x, b.y)
-                when (pass) {
-                    0 -> if (!projected) drawLine(colour.copy(alpha = 0.28f), start, end, core * 3f, StrokeCap.Round, blendMode = BlendMode.Plus)
-                    1 -> drawLine(colour, start, end, core, StrokeCap.Round, pathEffect = if (projected) dash else null)
-                    2 -> if (!projected) drawLine(Color.White.copy(alpha = 0.55f), start, end, core * 0.3f, StrokeCap.Round)
+        val tubed = true
+        if (tubed) {
+            /*
+             * A FITTED FLIGHT IS ONE SMOOTH RIBBON: its edges offset from the curve by the
+             * ball's width in perspective — thick at the hand near the lens, thin at the far
+             * stumps — filled deep red, rimmed darker, with a soft highlight down its length.
+             * Drawn as joined segments it showed seams and bumps at every sample. The stretch
+             * after an unseen bounce is the same ribbon, a little softer: a projection.
+             */
+            val minW = 2.dp.toPx()
+            val maxW = 13.dp.toPx()
+            val seenEnd = shown.indexOfFirst { it.leg == ArLeg.PROJECTED }.let { if (it < 0) shown.size else it }
+            val seen = shown.subList(0, seenEnd)
+            val projected = if (seenEnd < shown.size) shown.subList((seenEnd - 1).coerceAtLeast(0), shown.size) else emptyList()
+            fun ribbon(points: List<ArPoint>, alpha: Float) {
+                if (points.size < 2) return
+                val centres = points.map { at(it.x, it.y) }
+                // A seen-only trail has no 3D width: a steady ball-width ribbon instead.
+                val widths = points.map { if (it.width > 0.0) (it.width * frame.width).toFloat().coerceIn(minW, maxW) else FLAT_RIBBON_DP.dp.toPx() }
+                val left = ArrayList<Offset>(points.size)
+                val right = ArrayList<Offset>(points.size)
+                for (i in centres.indices) {
+                    val a = centres[(i - 1).coerceAtLeast(0)]
+                    val b = centres[(i + 1).coerceAtMost(centres.size - 1)]
+                    val t = (b - a).let { d -> val n = d.getDistance(); if (n < 1e-3f) Offset(0f, 1f) else d / n }
+                    val normal = Offset(-t.y, t.x) * (widths[i] / 2f)
+                    left += centres[i] + normal
+                    right += centres[i] - normal
+                }
+                val outline = Path().apply {
+                    moveTo(left[0].x, left[0].y)
+                    for (p in left.drop(1)) lineTo(p.x, p.y)
+                    for (p in right.asReversed()) lineTo(p.x, p.y)
+                    close()
+                }
+                drawPath(outline, TubeRed.copy(alpha = alpha))
+                // Round ends, so the ribbon starts and stops like a tube, not a cut.
+                drawCircle(TubeRed.copy(alpha = alpha), widths.first() / 2f, centres.first())
+                drawCircle(TubeRed.copy(alpha = alpha), widths.last() / 2f, centres.last())
+                drawPath(outline, TubeRim.copy(alpha = alpha), style = Stroke(1.2.dp.toPx()))
+                val shine = Path().apply {
+                    val first = centres.first() + (left.first() - centres.first()) * 0.35f
+                    moveTo(first.x, first.y)
+                    for (i in 1 until centres.size) {
+                        val p = centres[i] + (left[i] - centres[i]) * 0.35f
+                        lineTo(p.x, p.y)
+                    }
+                }
+                drawPath(
+                    shine,
+                    Color.White.copy(alpha = 0.30f * alpha),
+                    style = Stroke(widths.average().toFloat() * 0.18f + 0.5f, cap = StrokeCap.Round),
+                )
+            }
+            ribbon(seen, 1f)
+            ribbon(projected, 0.72f)
+        } else {
+            for (pass in 0..2) {
+                for (i in 1 until shown.size) {
+                    val a = shown[i - 1]
+                    val b = shown[i]
+                    val colour = colourOf(b.leg)
+                    val projected = b.leg == ArLeg.PROJECTED
+                    val start = at(a.x, a.y)
+                    val end = at(b.x, b.y)
+                    when (pass) {
+                        0 -> if (!projected) drawLine(colour.copy(alpha = 0.28f), start, end, core * 3f, StrokeCap.Round, blendMode = BlendMode.Plus)
+                        1 -> drawLine(colour, start, end, core, StrokeCap.Round, pathEffect = if (projected) dash else null)
+                        2 -> if (!projected) drawLine(Color.White.copy(alpha = 0.55f), start, end, core * 0.3f, StrokeCap.Round)
+                    }
                 }
             }
         }

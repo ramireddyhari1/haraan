@@ -86,5 +86,19 @@
                 <data android:scheme="haraan" android:host="replay-3d" />
             </intent-filter>
         </activity>
+        <activity
+            android:name="com.haraan.app.vision.NetReplayActivity"
+            android:exported="true"
+            android:label="Net replay"
+            android:keepScreenOn="true"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Haraan.Camera">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="haraan" android:host="net-replay" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>

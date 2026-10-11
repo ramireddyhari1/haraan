@@ -239,4 +239,73 @@ class PitchGroundTest {
         assertTrue(!best.heightMeasured)
         assertEquals(PitchGround.DEFAULT_CAMERA_HEIGHT_M, best.heightM, 1e-9)
     }
+
+    // ---- two sets of stumps: the pitch runs between them -----------------------------
+
+    /**
+     * Filmed from beside the pitch line, the guide used to run from the batter's stumps to
+     * the phone. With the bowler's-end stumps in view it must run to THEM.
+     */
+    @Test
+    fun `with the bowler's stumps in view the guide runs between the two sets`() {
+        val farX = 1.6
+        val farY = 21.0
+        val nearX = 0.3
+        val nearY = 1.2
+        val (cam, lock, _) = scene(farX, farY, 1.4, 0.10, 0.0)
+        val near = cam.project(nearX, nearY)
+        val g = PitchGround.fromWicket(lock, CameraIntrinsics(focalFw, "test"), w, h, 1.4)!!
+        val aimed = g.aimedAt(near)
+        assertNotNull(aimed)
+        val len = hypot(nearX - farX, nearY - farY)
+        val dx = (nearX - farX) / len
+        val dy = (nearY - farY) / len
+        for (along in listOf(2.0, 6.0, 10.0, 16.0)) {
+            val truth = cam.project(farX + dx * along, farY + dy * along)
+            val got = aimed!!.project(along, 0.0)!!
+            assertTrue("along $along: got $got truth $truth", PitchGround.near(got, truth, 3.0))
+        }
+        // The old guide, aimed at the phone, is visibly elsewhere by the far end of it.
+        val old = g.project(16.0, 0.0)!!
+        val truth16 = cam.project(farX + dx * 16.0, farY + dy * 16.0)
+        assertTrue("the fix must matter here", !PitchGround.near(old, truth16, 15.0))
+    }
+
+    @Test
+    fun `an implausible other end leaves the guide as it was`() {
+        val (cam, lock, _) = scene(0.4, 12.0, 1.4, 0.10, 0.0)
+        val g = PitchGround.fromWicket(lock, CameraIntrinsics(focalFw, "test"), w, h, 1.4)!!
+        // A point 2 m from the stumps is not the other end of a pitch.
+        assertNull(g.aimedAt(cam.project(0.4, 10.0)))
+        // Nor is a point in the sky.
+        assertNull(g.aimedAt(w / 2.0 to 10.0))
+    }
+
+    /**
+     * A phone held low just behind the bowler's stumps: guessing 1.4 m stretched every band
+     * towards the camera. With both sets in view the pitch's 20.12 m gives the height.
+     */
+    @Test
+    fun `with both sets in view the height comes from the pitch length`() {
+        for (camH in listOf(0.5, 0.9, 1.6)) {
+            val farX = 0.9
+            val farY = 22.5
+            val ux = -0.035
+            val uy = -kotlin.math.sqrt(1 - ux * ux)
+            val nearX = farX + ux * PitchGeometry.STUMPS_TO_STUMPS_M
+            val nearY = farY + uy * PitchGeometry.STUMPS_TO_STUMPS_M
+            val pitch = kotlin.math.atan(camH / farY) + 0.04
+            val (cam, lock, _) = scene(farX, farY, camH, pitch, 0.0)
+            val nearPx = cam.project(nearX, nearY)
+            val g = PitchGround.fromTwoWickets(lock, CameraIntrinsics(focalFw, "test"), w, h, BowlersEnd(Point2(nearPx.first / w, nearPx.second / h), 0.0))
+            assertNotNull("height $camH", g)
+            assertEquals("height", camH, g!!.heightM, 0.03)
+            assertTrue(g.heightMeasured)
+            for (along in listOf(1.0, 3.0, 6.0, 9.0, 14.0)) {
+                val truth = cam.project(farX + ux * along, farY + uy * along)
+                val got = g.project(along, 0.0)!!
+                assertTrue("h $camH along $along: got $got truth $truth", PitchGround.near(got, truth, 3.0))
+            }
+        }
+    }
 }

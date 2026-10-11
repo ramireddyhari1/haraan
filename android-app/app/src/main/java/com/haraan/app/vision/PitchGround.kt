@@ -8,6 +8,72 @@ import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
+ * The bowler's-end stumps, as seen: their base (normalised upright) and the picture width
+ * between the outer stumps' centres (frame widths) — the same Laws-sized set as the batter's,
+ * so the two widths together say how far apart they look.
+ */
+data class BowlersEnd(val base: Point2, val spanFw: Double)
+
+/**
+ * THE BOWLER'S STUMPS DO NOT MOVE; WHAT IS SEEN OF THEM DOES.
+ *
+ * The ground is solved from both wickets, and it used to be solved from the LAST sighting
+ * of the near set. On a 120 fps net clip (2026-10-11) that sighting was taken mid-stride
+ * with the bowler's leg across the stumps half the time, and the camera's height came out
+ * anywhere from 0.2 m to 1.97 m from one ball to the next on a phone that never moved —
+ * so two deliveries were drawn diving through the near stumps. The median of the recent
+ * sightings is what is used instead; a sighting far from it is a leg, not the stumps, and
+ * a run of agreeing sightings somewhere else is the phone having been moved.
+ */
+class BowlersEndFilter(private val keep: Int = KEEP) {
+    private val seen = ArrayDeque<BowlersEnd>()
+
+    /** Folds in one sighting; returns the steady estimate, or null until there is one. */
+    fun add(s: BowlersEnd): BowlersEnd? {
+        seen.addLast(s)
+        while (seen.size > keep) seen.removeFirst()
+        // The phone moved: the latest sightings agree with each other and not with the rest.
+        if (seen.size > MOVED_RUN * 2) {
+            val run = seen.toList().takeLast(MOVED_RUN)
+            val all = value()
+            val rx = median(run.map { it.base.x })
+            val ry = median(run.map { it.base.y })
+            val rs = median(run.map { it.spanFw })
+            val agree = run.count { abs(it.base.x - rx) <= rs * 0.25 && abs(it.base.y - ry) <= rs * 0.25 }
+            if (agree >= MOVED_RUN - 1 && (all == null || abs(rx - all.base.x) > rs * 0.5 || abs(ry - all.base.y) > rs * 0.5)) {
+                seen.clear()
+                seen.addAll(run)
+            }
+        }
+        return value()
+    }
+
+    /** The steady estimate: medians of the sightings near the overall median. */
+    fun value(): BowlersEnd? {
+        if (seen.size < MIN_SIGHTINGS) return null
+        val mx = median(seen.map { it.base.x })
+        val my = median(seen.map { it.base.y })
+        val ms = median(seen.map { it.spanFw })
+        val near = seen.filter { abs(it.base.x - mx) <= ms * 0.5 && abs(it.base.y - my) <= ms * 0.5 && abs(it.spanFw - ms) <= ms * 0.15 }
+        if (near.size < MIN_SIGHTINGS) return null
+        return BowlersEnd(Point2(median(near.map { it.base.x }), median(near.map { it.base.y })), median(near.map { it.spanFw }))
+    }
+
+    fun clear() = seen.clear()
+
+    private fun median(v: List<Double>): Double = v.sorted().let { s -> if (s.size % 2 == 1) s[s.size / 2] else (s[s.size / 2 - 1] + s[s.size / 2]) / 2.0 }
+
+    companion object {
+        /** About ten seconds of the camera screen's one-in-three stump checks. */
+        const val KEEP = 90
+        const val MIN_SIGHTINGS = 5
+
+        /** This many agreeing sightings away from the estimate mean the phone was moved. */
+        const val MOVED_RUN = 8
+    }
+}
+
+/**
  * The pitch as it really lies on the ground in this camera's picture, from the wicket alone.
  *
  * WHY. The length guide used to be drawn as a fixed multiple of the stump height on screen,
@@ -117,6 +183,55 @@ class PitchGround private constructor(
     }
 
     /**
+     * THE PITCH RUNS TO THE OTHER STUMPS, NOT TO THE PHONE.
+     *
+     * Without more to go on, the pitch is taken to run from the wicket towards the camera's
+     * foot. When the bowler's-end stumps are in the picture too, the real pitch line is
+     * known: from these stumps to those. [bowlersEndPx] is that set's base, in the same
+     * upright frame pixels as [project]; its ray is dropped onto this ground and the pitch is
+     * re-aimed along the line between the two. Null when the point is not on the ground in
+     * front of the camera, or is not a plausible other end (under 5 m or past 26 m away).
+     */
+    fun aimedAt(bowlersEndPx: Pair<Double, Double>): PitchGround? {
+        val (g, length) = aimedRaw(bowlersEndPx) ?: return null
+        if (length < MIN_PITCH_SPAN_M || length > MAX_PITCH_SPAN_M) return null
+        return g
+    }
+
+    /** This ground with its height marked as measured (by the pitch's length). */
+    private fun copyMeasured() = PitchGround(
+        fPx = fPx, cx = cx, cy = cy, cameraHeightM = cameraHeightM, pitchRad = pitchRad, rollRad = rollRad,
+        stumpsX = stumpsX, stumpsY = stumpsY, towardX = towardX, towardY = towardY,
+        stumpsDistanceM = stumpsDistanceM, heightMeasured = true,
+    )
+
+    /** [aimedAt] without the plausibility limits, with the two sets' distance apart. */
+    private fun aimedRaw(bowlersEndPx: Pair<Double, Double>): Pair<PitchGround, Double>? {
+        val cr = cos(-rollRad)
+        val sr = sin(-rollRad)
+        val x = bowlersEndPx.first - cx
+        val y = bowlersEndPx.second - cy
+        val xN = (x * cr - y * sr) / fPx
+        val yN = (x * sr + y * cr) / fPx
+        val c = cos(pitchRad)
+        val s = sin(pitchRad)
+        val dz = -(yN * c + s)
+        if (dz >= -1e-6) return null
+        val t = cameraHeightM / -dz
+        val gx = t * xN
+        val gy = t * (c - yN * s)
+        val dx = gx - stumpsX
+        val dy = gy - stumpsY
+        val length = hypot(dx, dy)
+        if (length < 1e-6) return null
+        return PitchGround(
+            fPx = fPx, cx = cx, cy = cy, cameraHeightM = cameraHeightM, pitchRad = pitchRad, rollRad = rollRad,
+            stumpsX = stumpsX, stumpsY = stumpsY, towardX = dx / length, towardY = dy / length,
+            stumpsDistanceM = stumpsDistanceM, heightMeasured = heightMeasured,
+        ) to length
+    }
+
+    /**
      * The furthest distance down the pitch (towards the camera) whose centre still projects
      * above [maxYPx], searched in quarter metres up to [limitM].
      */
@@ -133,6 +248,10 @@ class PitchGround private constructor(
     companion object {
         /** A camera on a stand, or held at chest height. */
         const val DEFAULT_CAMERA_HEIGHT_M = 1.4
+
+        /** How far apart two sets of stumps may plausibly be: a short net to a long pitch. */
+        private const val MIN_PITCH_SPAN_M = 5.0
+        private const val MAX_PITCH_SPAN_M = 26.0
 
         /**
          * The ground under a locked wicket, or null when it cannot be solved (no span, a
@@ -249,15 +368,145 @@ class PitchGround private constructor(
          * The best ground there is: measured from gravity when the phone is held still,
          * otherwise the stumps alone at the assumed height.
          */
+        /**
+         * BOTH SETS OF STUMPS IN VIEW: THE PITCH ITSELF IS THE RULER.
+         *
+         * The batter's stumps alone fix the ground only once a camera height is assumed or
+         * read from gravity, and on a real net filmed from just behind the bowler's stumps —
+         * a phone held low — the assumed 1.4 m stretched every band towards the camera: SHORT
+         * ended almost at the bowler's stumps instead of six metres short of them. Two sets of
+         * stumps are [PitchGeometry.STUMPS_TO_STUMPS_M] apart by the Laws, so the height is
+         * the one at which, dropped onto the ground, they come out exactly that far apart.
+         * The distance between them only shrinks as the height grows, so a bisection finds it.
+         *
+         * Null when no height in reach gives a full pitch (a short practice net, a mis-seen
+         * second set) — the caller then keeps what it had.
+         */
+        fun fromTwoWickets(
+            lock: WicketLock,
+            camera: CameraIntrinsics,
+            widthPx: Int,
+            heightPx: Int,
+            bowlersEnd: BowlersEnd,
+        ): PitchGround? =
+            solveHeight(lock, camera, widthPx, heightPx, bowlersEnd.base)
+                ?: lensFromSpans(lock, bowlersEnd)?.let { solveHeight(lock, it, widthPx, heightPx, bowlersEnd.base) }
+
+        /**
+         * THE LENS, FROM THE TWO SETS' SIZES. Both sets are the Laws' width, so how much
+         * smaller the far one looks, with 20.12 m between them, gives the focal length. Used
+         * only when the lens the camera reported cannot make the pitch its full length — a
+         * clip filmed in a cropped slow-motion mode, or re-encoded by a messenger: on a real
+         * net video the assumed lens put the two sets 15 m apart and nothing could be solved.
+         */
+        private fun lensFromSpans(lock: WicketLock, bowlersEnd: BowlersEnd): CameraIntrinsics? {
+            val far = lock.anchor.span(lock.aspect)
+            val near = bowlersEnd.spanFw
+            if (far <= 0.0 || near <= far * 2) return null
+            val focal = PitchGeometry.STUMPS_TO_STUMPS_M / (PitchGeometry.STUMP_CENTRES_SPAN_M * (1.0 / far - 1.0 / near))
+            if (focal < MIN_FOCAL_FW || focal > MAX_FOCAL_FW) return null
+            return CameraIntrinsics(focal, "from the two sets of stumps")
+        }
+
+        private const val MIN_FOCAL_FW = 0.6
+        private const val MAX_FOCAL_FW = 4.0
+
+        private fun solveHeight(
+            lock: WicketLock,
+            camera: CameraIntrinsics,
+            widthPx: Int,
+            heightPx: Int,
+            bowlersEnd: Point2,
+        ): PitchGround? {
+            val px = bowlersEnd.x * widthPx to bowlersEnd.y * heightPx
+            fun at(h: Double) = fromWicket(lock, camera, widthPx, heightPx, h)?.aimedRaw(px)
+            var lo = MIN_SOLVED_HEIGHT_M
+            var hi = MAX_SOLVED_HEIGHT_M
+            val low = at(lo)?.second ?: return null
+            val high = at(hi)?.second ?: return null
+            val target = PitchGeometry.STUMPS_TO_STUMPS_M
+            if (low < target || high > target) return null
+            repeat(24) {
+                val mid = (lo + hi) / 2
+                val len = at(mid)?.second ?: return null
+                if (len > target) lo = mid else hi = mid
+            }
+            val g = at((lo + hi) / 2)?.first ?: return null
+            return g.copyMeasured()
+        }
+
+        private const val MIN_SOLVED_HEIGHT_M = 0.15
+        private const val MAX_SOLVED_HEIGHT_M = 4.0
+
+        /*
+         * The answer changes only when the stumps or the phone do, and it is asked for on every
+         * drawn frame by the guide, by the stumps drawn at both ends, by the corridor and by the
+         * 3D fit. Solving it each time — two bisections nested inside a third when both sets of
+         * stumps are in view — froze the screen. So the last answer is kept, keyed by its
+         * inputs rounded to well under a pixel.
+         */
+        private data class BestKey(val parts: List<Long>)
+
+        private val bestCache = Any()
+        private var bestKey: BestKey? = null
+        private var bestValue: PitchGround? = null
+
+        private fun keyOf(
+            lock: WicketLock,
+            camera: CameraIntrinsics,
+            widthPx: Int,
+            heightPx: Int,
+            tilt: DeviceTilt.Reading?,
+            bowlersEnd: BowlersEnd?,
+        ): BestKey {
+            fun q(v: Double, scale: Double) = Math.round(v * scale)
+            val a = lock.anchor
+            return BestKey(
+                listOf(
+                    q(a.baseLeft.x, 1e4), q(a.baseLeft.y, 1e4), q(a.baseRight.x, 1e4), q(a.baseRight.y, 1e4),
+                    a.top?.let { q(it.x, 1e4) } ?: -1, a.top?.let { q(it.y, 1e4) } ?: -1,
+                    lock.kind.ordinal.toLong(), q(camera.focalFw, 1e4), widthPx.toLong(), heightPx.toLong(),
+                    tilt?.let { q(it.pitchRad, 1e3) } ?: Long.MIN_VALUE, tilt?.let { q(it.rollRad, 1e3) } ?: Long.MIN_VALUE,
+                    bowlersEnd?.let { q(it.base.x, 1e4) } ?: -1, bowlersEnd?.let { q(it.base.y, 1e4) } ?: -1,
+                    bowlersEnd?.let { q(it.spanFw, 1e4) } ?: -1,
+                ),
+            )
+        }
+
         fun best(
             lock: WicketLock,
             camera: CameraIntrinsics,
             widthPx: Int,
             heightPx: Int,
             tilt: DeviceTilt.Reading? = DeviceTilt.steady(),
-        ): PitchGround? =
-            tilt?.let { fromWicketAndTilt(lock, camera, widthPx, heightPx, it) }
+            /** The bowler's-end stumps, when they are in view. */
+            bowlersEnd: BowlersEnd? = null,
+        ): PitchGround? {
+            val key = keyOf(lock, camera, widthPx, heightPx, tilt, bowlersEnd)
+            synchronized(bestCache) { if (key == bestKey) return bestValue }
+            val value = solveBest(lock, camera, widthPx, heightPx, tilt, bowlersEnd)
+            synchronized(bestCache) {
+                bestKey = key
+                bestValue = value
+            }
+            return value
+        }
+
+        private fun solveBest(
+            lock: WicketLock,
+            camera: CameraIntrinsics,
+            widthPx: Int,
+            heightPx: Int,
+            tilt: DeviceTilt.Reading?,
+            bowlersEnd: BowlersEnd?,
+        ): PitchGround? {
+            // The pitch's own length beats both gravity and a guess, when it can be seen.
+            bowlersEnd?.let { fromTwoWickets(lock, camera, widthPx, heightPx, it) }?.let { return it }
+            val g = tilt?.let { fromWicketAndTilt(lock, camera, widthPx, heightPx, it) }
                 ?: fromWicket(lock, camera, widthPx, heightPx)
+                ?: return null
+            return bowlersEnd?.let { g.aimedAt(it.base.x * widthPx to it.base.y * heightPx) } ?: g
+        }
 
         private class Solved(val pitch: Double, val sX: Double, val sY: Double, val perspectiveSlope: Double)
 

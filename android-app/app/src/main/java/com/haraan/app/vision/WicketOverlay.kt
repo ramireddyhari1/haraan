@@ -119,6 +119,11 @@ fun DrawScope.drawWicketLock(
     safeBottomY: Float = Float.MAX_VALUE,
     /** The face the band names are painted in; the app's display face when given. */
     guideTypeface: Typeface? = null,
+    /**
+     * The bowler's-end stumps' base, normalised, when they are in the picture: the guide is
+     * then laid along the real pitch, from the locked stumps to these, not towards the phone.
+     */
+    bowlersEnd: BowlersEnd? = null,
 ) {
     if (box.width <= 0f) return
 
@@ -180,7 +185,37 @@ fun DrawScope.drawWicketLock(
     if ((lock.state == WicketTrackState.CONFIRMED || lock.state == WicketTrackState.REACQUIRE) &&
         camera != null && framePx != null && guideReveal > 0f
     ) {
-        drawLengthGuide(lock, box, density, camera, framePx, guideReveal, alpha, safeBottomY, guideTypeface)
+        drawLengthGuide(lock, box, density, camera, framePx, guideReveal, alpha, safeBottomY, guideTypeface, bowlersEnd)
+    }
+
+    /*
+     * THE BOWLER'S STUMPS, DRAWN AS THE BATTER'S ARE. Both ends of the pitch are landmarks the
+     * guide is laid between; marking only one left the other looking unrecognised. The same
+     * stumps, at the bowler's set's own base and width, its height from the pitch model when
+     * the lens is known.
+     */
+    if (bowlersEnd != null) {
+        val near = bowlersEnd
+        val half = near.spanFw / 2.0
+        val top = if (camera != null && framePx != null) {
+            val (fw, fh) = framePx
+            PitchGround.best(lock, camera, fw, fh, bowlersEnd = near)?.let { g ->
+                val pc = g.pitchCamera(fw, fh)
+                val foot = pc.project(Point3(0.0, PitchGeometry.STUMPS_TO_STUMPS_M, 0.0))
+                val head = pc.project(Point3(0.0, PitchGeometry.STUMPS_TO_STUMPS_M, PitchGeometry.STUMP_HEIGHT_M))
+                if (foot != null && head != null) Point2(near.base.x + (head.x - foot.x), near.base.y + (head.y - foot.y)) else null
+            }
+        } else {
+            null
+        }
+        val bowlerLock = lock.copy(
+            anchor = WicketAnchor(
+                Point2(near.base.x - half, near.base.y),
+                Point2(near.base.x + half, near.base.y),
+                top = top,
+            ),
+        )
+        drawWicketLock(bowlerLock, box, density, guideReveal = 0f)
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -908,9 +943,10 @@ private fun DrawScope.drawLengthGuide(
     alpha: Float,
     safeBottomY: Float,
     typeface: Typeface?,
+    bowlersEnd: BowlersEnd?,
 ) {
     val (fw, fh) = framePx
-    val ground = PitchGround.best(lock, camera, fw, fh) ?: return
+    val ground = PitchGround.best(lock, camera, fw, fh, bowlersEnd = bowlersEnd) ?: return
 
     fun toView(p: Pair<Double, Double>) = Offset(
         box.originX + (p.first / fw).toFloat() * box.width,

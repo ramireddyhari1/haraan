@@ -191,7 +191,10 @@ data class FlightMetrics(
         ): FlightMetrics {
             // The current flight only. Sightings from before the ball was lost belong to a
             // different delivery and averaging across the gap would describe neither.
-            val run = TrailGeometry.runs(track).lastOrNull().orEmpty()
+            val whole = TrailGeometry.runs(track).lastOrNull().orEmpty()
+            // From behind the bowler (the stumps' ground, no corners) the far end is cut
+            // where the track stops behaving like a receding ball: see [FlightTrim].
+            val run = if (quad == null && ground != null) FlightTrim.receding(whole, frameAspect, wicket?.anchor?.base) else whole
             val aspect = if (frameAspect > 0f) frameAspect.toDouble() else 1.0
 
             /*
