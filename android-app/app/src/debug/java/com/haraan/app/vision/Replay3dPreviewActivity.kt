@@ -29,6 +29,9 @@ import java.io.File
  *                 projected back through them — so it must land on the drawn pitch and
  *                 stumps, which is the check that the projection is right.
  *   `?mode=video` the slow-motion clip replay, on `cache/replay/test.mp4`.
+ *   `?mode=guide` the length guide alone, for a wicket at `bx`,`by` (base middle, normalised)
+ *                 `span` (outer stump centres, frame widths) apart — the band names must
+ *                 show however far down the pitch the stumps are.
  *
  * `?ball=miss` swaps in a ball sliding down leg.
  */
@@ -47,6 +50,11 @@ class Replay3dPreviewActivity : ComponentActivity() {
         setContent {
             when (mode) {
                 "ar" -> ArPreview(flight)
+                "guide" -> GuidePreview(
+                    bx = data.getQueryParameter("bx")?.toDoubleOrNull() ?: 0.614,
+                    by = data.getQueryParameter("by")?.toDoubleOrNull() ?: 0.508,
+                    span = data.getQueryParameter("span")?.toDoubleOrNull() ?: 0.028,
+                )
                 "video" -> {
                     val path = remember { pathFor(flight, 720.0, 1280.0) }
                     if (path != null) {
@@ -64,6 +72,27 @@ class Replay3dPreviewActivity : ComponentActivity() {
                     startView = ReplayView.entries.firstOrNull { it.name.equals(view, ignoreCase = true) },
                 )
             }
+        }
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun GuidePreview(bx: Double, by: Double, span: Double) {
+        val aspect = 720f / 1280f
+        val lock = WicketLock(
+            anchor = WicketAnchor(Point2(bx - span / 2, by), Point2(bx + span / 2, by)),
+            kind = WicketKind.STUMPS, source = WicketLockSource.DETECTED, state = WicketTrackState.CONFIRMED,
+            confidence = 1f, ageFrames = 0, jitter = 0f, heldFrames = 30, aspect = aspect, subPixel = true,
+        )
+        val density = LocalDensity.current
+        Canvas(Modifier.fillMaxSize()) {
+            drawRect(androidx.compose.ui.graphics.Color(0xFF6B3A2A))
+            val box = FrameBox.letterbox(size.width, size.height, aspect)
+            drawWicketLock(
+                lock, box, density,
+                camera = CameraIntrinsics(1.4, "preview"),
+                framePx = 720 to 1280,
+                safeBottomY = size.height * 0.86f,
+            )
         }
     }
 

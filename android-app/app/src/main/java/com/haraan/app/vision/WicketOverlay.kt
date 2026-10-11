@@ -1053,8 +1053,21 @@ private fun DrawScope.drawLengthGuide(
     val left = stumpHalf + 0.16
     val right = halfW - 0.10
     val roomAcross = right - left
+    /*
+     * Bands too far down the pitch to carry painted words — from a camera at chest height
+     * 15 m back, YORKER, FULL and GOOD LENGTH together are a strip a few pixels deep — are
+     * named beside the pitch instead, flat and readable. They used to be left out, and the
+     * guide then showed coloured lines nobody could name.
+     */
+    val flat = ArrayList<Pair<LengthBand, Double>>()
     for (band in LENGTH_BANDS) {
-        if (band.toM > laid + 0.01) break
+        val seenMid = (band.fromM + minOf(band.toM, laid)) / 2
+        if (band.fromM >= laid) break
+        if (band.toM > laid + 0.01) {
+            // Not all of it is in view: no room to paint the word, but it can be named.
+            flat.add(band to seenMid)
+            continue
+        }
         val textW = textPaint.measureText(band.label)
         val aspect = textW / textH
         val across = minOf(roomAcross, 1.0)
@@ -1068,8 +1081,15 @@ private fun DrawScope.drawLengthGuide(
         val tr = at(a0, w1) ?: continue
         val br = at(a1, w1) ?: continue
         val bl = at(a1, w0) ?: continue
-        // Too small to read, or past the controls: leave it out rather than smudge it.
-        if (bl.y - tl.y < with(density) { 8.dp.toPx() } || bl.y > safeBottomY) continue
+        // Past the controls: leave it out. Too small to read as paint: name it flat instead.
+        if (bl.y > safeBottomY) continue
+        // Too small to read as paint, or running off the side of the screen (a wicket right
+        // of centre put YORKER half off the edge): name it flat beside the pitch instead.
+        val offSide = minOf(tl.x, bl.x) < 0f || maxOf(tr.x, br.x) > size.width
+        if (bl.y - tl.y < with(density) { 8.dp.toPx() } || offSide) {
+            flat.add(band to (band.fromM + band.toM) / 2)
+            continue
+        }
         val m = android.graphics.Matrix()
         val ok = m.setPolyToPoly(
             floatArrayOf(0f, 0f, textW, 0f, textW, textH, 0f, textH), 0,
@@ -1081,5 +1101,63 @@ private fun DrawScope.drawLengthGuide(
         canvas.concat(m)
         canvas.drawText(band.label, 0f, -metrics.ascent, textPaint)
         canvas.restore()
+    }
+    drawFlatBandLabels(flat, ::at, halfW, density, alpha, safeBottomY, typeface)
+}
+
+/**
+ * Band names as plain labels beside the pitch's edge, at each band's depth: a dot in the
+ * band's colour and the name in white. Nearest band first, because it has the most room;
+ * a label that would overlap the one before it is dropped rather than stacked.
+ */
+private fun DrawScope.drawFlatBandLabels(
+    bands: List<Pair<LengthBand, Double>>,
+    at: (Double, Double) -> Offset?,
+    halfW: Double,
+    density: Density,
+    alpha: Float,
+    safeBottomY: Float,
+    typeface: Typeface?,
+) {
+    if (bands.isEmpty()) return
+    val canvas = drawContext.canvas.nativeCanvas
+    val paint = Paint().apply {
+        isAntiAlias = true
+        this.typeface = typeface ?: Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        textSize = with(density) { 10.5.sp.toPx() }
+        letterSpacing = 0.06f
+        color = android.graphics.Color.argb((240 * alpha).toInt(), 255, 255, 255)
+        setShadowLayer(with(density) { 2.dp.toPx() }, 0f, 1f, android.graphics.Color.argb((200 * alpha).toInt(), 0, 0, 0))
+    }
+    val fm = paint.fontMetrics
+    val textH = fm.descent - fm.ascent
+    val gap = with(density) { 2.dp.toPx() }
+    val pad = with(density) { 7.dp.toPx() }
+    val dotR = with(density) { 3.dp.toPx() }
+    var lastTop = Float.MAX_VALUE
+    // Nearest the camera first: the largest bands, lowest on the screen.
+    for ((band, alongM) in bands.sortedByDescending { it.second }) {
+        val edge = at(alongM, halfW) ?: continue
+        val y = edge.y
+        if (y > safeBottomY) continue
+        val top = y - textH / 2
+        if (top + textH + gap > lastTop) continue
+        val textW = paint.measureText(band.label)
+        // Right of the pitch, unless that runs off the screen: then left of it.
+        val rightX = edge.x + pad
+        val x: Float
+        val dotX: Float
+        if (rightX + dotR * 3 + textW < size.width - pad) {
+            dotX = rightX + dotR
+            x = rightX + dotR * 3
+        } else {
+            val leftEdge = at(alongM, -halfW) ?: continue
+            x = leftEdge.x - pad - textW
+            dotX = x + textW + dotR * 2
+            if (x < pad) continue
+        }
+        drawCircle(band.colour.copy(alpha = alpha), dotR, Offset(dotX, y))
+        canvas.drawText(band.label, x, y - (fm.ascent + fm.descent) / 2, paint)
+        lastTop = top
     }
 }

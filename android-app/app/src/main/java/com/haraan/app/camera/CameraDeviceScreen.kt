@@ -761,11 +761,24 @@ private fun CameraMode(
      * is worth: vision stops, filming continues. The clip is what a review is built on;
      * the trail is a nice thing to watch while it is being filmed.
      *
-     * MODERATE is the first level at which Android is actually throttling rather than
-     * merely warm, so it is the first level worth reacting to. Below API 29 there is
-     * nothing to listen to and this stays false — the same behaviour as before.
+     * TWO LEVELS, NOT ONE. Pausing at MODERATE meant a phone in the Indian sun never
+     * tracked at all: on a vivo I2407 at an outdoor net, charging, the status was SEVERE
+     * before the first frame and every delivery went untracked. So:
+     *
+     *   warm (MODERATE, SEVERE): the ball is still tracked and the stumps still found, but
+     *     lighter — the ball at its baseline resolution, the pitch-corner Hough search off,
+     *     the stump search on every other frame.
+     *   very hot (CRITICAL): the same, with the stump search on one frame in four. The same
+     *     vivo, charging over USB in the sun, sat at CRITICAL with its CPUs at 54 °C — warm,
+     *     not dangerous; its thermal HAL escalates early.
+     *   hot (EMERGENCY and up, the step before Android starts shutting things down):
+     *     analysis pauses, filming continues.
+     *
+     * Below API 29 there is nothing to listen to and both stay false.
      */
     var thermalThrottled by remember { mutableStateOf(false) }
+    var thermalWarm by remember { mutableStateOf(false) }
+    var thermalVeryHot by remember { mutableStateOf(false) }
     DisposableEffect(ctx) {
         // minSdk here is 24, so most of the fleet this ships to has no thermal API at all.
         // Those phones behave exactly as they did before: vision runs until the operator
@@ -774,12 +787,19 @@ private fun CameraMode(
         val power = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
             ?: return@DisposableEffect onDispose { }
 
-        val hot = { status: Int -> status >= PowerManager.THERMAL_STATUS_MODERATE }
+        val hot = { status: Int -> status >= PowerManager.THERMAL_STATUS_EMERGENCY }
+        val veryHot = { status: Int -> status >= PowerManager.THERMAL_STATUS_CRITICAL }
+        val warm = { status: Int -> status >= PowerManager.THERMAL_STATUS_MODERATE }
         // Whatever it is right now: a phone handed over already warm should not have to
         // get hotter still before the app notices.
-        thermalThrottled = hot(power.currentThermalStatus)
+        val now = power.currentThermalStatus
+        thermalThrottled = hot(now)
+        thermalVeryHot = veryHot(now)
+        thermalWarm = warm(now)
         val listener = PowerManager.OnThermalStatusChangedListener { status ->
             thermalThrottled = hot(status)
+            thermalVeryHot = veryHot(status)
+            thermalWarm = warm(status)
         }
         power.addThermalStatusListener(analysisExecutor, listener)
         onDispose { runCatching { power.removeThermalStatusListener(listener) } }
@@ -1099,6 +1119,7 @@ private fun CameraMode(
          */
         var lumaScratch: ByteArray? = null
         var lumaFrame = 0
+        var lastCorridorMs = 0L
         /** The U (blue-difference) plane, for the colour pass. Same one-buffer rule. */
         var chromaScratch: ByteArray? = null
 
@@ -1196,7 +1217,7 @@ private fun CameraMode(
                         lastGateLogMs = gateNow
                         android.util.Log.i(
                             ANALYSIS_TAG,
-                            "gates tracking=$trackingNow thermal=$thermalThrottled opencv=${stumpDetector.available} " +
+                            "gates tracking=$trackingNow thermal=${if (thermalThrottled) "hot" else if (thermalVeryHot) "very-hot" else if (thermalWarm) "warm" else "ok"} opencv=${stumpDetector.available} " +
                                 "pitch=$lookingForPitch wicket=$lookingForWicket auto=$autoSegment " +
                                 "frame=${image.width}x${image.height}@${image.imageInfo.rotationDegrees} " +
                                 "trackerFrames=${wicketTracker.diagnostics().framesSeen} " +
@@ -1221,12 +1242,12 @@ private fun CameraMode(
                              * a missed frame costs more than a sharper one gains.
                              */
                             if ((vision.detail() > 1.0 && b.framesSeen >= 45 && b.averageProcessingMs > BALL_BUDGET_MS) ||
-                                (vision.detail() > 1.0 && thermalThrottled)
+                                (vision.detail() > 1.0 && thermalWarm)
                             ) {
                                 vision.setDetail(1.0)
                                 android.util.Log.i(
                                     ANALYSIS_TAG,
-                                    "ball detail stepped down to 1.0 (avg %.1f ms, thermal=$thermalThrottled)".format(b.averageProcessingMs),
+                                    "ball detail stepped down to 1.0 (avg %.1f ms, warm=$thermalWarm)".format(b.averageProcessingMs),
                                 )
                             }
                         }
@@ -1333,7 +1354,18 @@ private fun CameraMode(
                                 focus = wicketTracker.focus(),
                                 allowSearch = wicketLock == null || idleAnalysisFrame % 16 == 0,
                             )
-                            wicketLock = wicketTracker.onFrame(sightings, cameraMove, uprightAspect, frameMs)
+                            wicketLock = wicketTracker.onFrame(battersEndOnly(sightings, cameraIntrinsics), cameraMove, uprightAspect, frameMs)
+                        }
+                        // From behind the bowler, look only along the delivery's corridor and
+                        // expect the ball to head for the batter's stumps. See setCorridor.
+                        if (frameMs - lastCorridorMs >= CORRIDOR_REFRESH_MS) {
+                            lastCorridorMs = frameMs
+                            val c = deliveryCorridor(wicketLock, cameraIntrinsics, uprightWidthPx, uprightAspect)
+                            if (c == null) {
+                                vision.setCorridor(null, null, null, null, null)
+                            } else {
+                                vision.setCorridor(c[0], c[1], c[2], c[3], com.haraan.app.vision.Point2(c[4].toDouble(), c[5].toDouble()))
+                            }
                         }
                         val sighting = vision.onFrame(
                             luma = bytes,
@@ -1384,7 +1416,9 @@ private fun CameraMode(
                         // transform does not starve CPU from stump detection. Stump detector
                         // runs on every frame at full 25+ FPS for instant lock-on.
                         idleAnalysisFrame++
-                        if (lookingForPitch && (idleAnalysisFrame % 4 == 0)) {
+                        // Warm phone: the Hough search is the heaviest thing here and the least
+                        // needed — the stumps give the ground on their own.
+                        if (lookingForPitch && !thermalWarm && (idleAnalysisFrame % 4 == 0)) {
                             pitchDetector.detect(
                                 luma = bytes,
                                 width = image.width,
@@ -1394,7 +1428,12 @@ private fun CameraMode(
                             )?.let { pitchQuad = it }
                         }
 
-                        if (lookingForWicket) {
+                        val wicketEvery = when {
+                            thermalVeryHot -> 4
+                            thermalWarm -> 2
+                            else -> 1
+                        }
+                        if (lookingForWicket && idleAnalysisFrame % wicketEvery == 0) {
                             /*
                              * HOW HARD TO LOOK, BY WHAT IS ALREADY KNOWN.
                              *
@@ -1453,7 +1492,7 @@ private fun CameraMode(
                                 )
                                 if (sightings.isNotEmpty()) lastSightingMs = frameClockMs
                                 wicketLock = wicketTracker.onFrame(
-                                    sightings = sightings,
+                                    sightings = battersEndOnly(sightings, cameraIntrinsics),
                                     motion = cameraMove,
                                     frameAspect = uprightAspect,
                                     timestampMs = frameClockMs,
@@ -4783,6 +4822,83 @@ private fun flightCameras(
     val quad = found?.takeIf { it.source != com.haraan.app.vision.QuadSource.DETECTED || ground == null }
     return quad to (if (quad != null) null else ground)
 }
+
+/**
+ * THE BATTER'S STUMPS, NOT THE ONES THE PHONE STANDS BEHIND.
+ *
+ * Filmed from behind the bowler's arm at a real net (vivo I2407), the bowler's-end stumps
+ * stood three metres in front of the lens, filled the bottom of the picture, and were the
+ * set the detector found and locked — the batter's stumps 20 m down the pitch were never
+ * looked at again, and the length guide, laid from the locked stumps back towards the
+ * camera, had three metres to work with and drew nothing. The measured wicket is always the
+ * batter's. A set whose width in the picture puts it nearer than [BOWLERS_END_MAX_M] is the
+ * near end, so it is dropped before the tracker sees it and the search carries on down the
+ * pitch.
+ */
+internal fun battersEndOnly(
+    sightings: List<com.haraan.app.vision.WicketSighting>,
+    camera: com.haraan.app.vision.CameraIntrinsics?,
+): List<com.haraan.app.vision.WicketSighting> {
+    val focal = camera?.focalFw ?: ASSUMED_FOCAL_FW
+    return sightings.filterNot { s ->
+        val set = (s as? com.haraan.app.vision.WicketSighting.Stumps)?.set ?: return@filterNot false
+        val span = set.spanX
+        span > 0f && focal * com.haraan.app.vision.PitchGeometry.STUMP_CENTRES_SPAN_M / span < BOWLERS_END_MAX_M
+    }
+}
+
+/** Nearer than this, a set of stumps is the bowler's end the camera stands behind. */
+private const val BOWLERS_END_MAX_M = 4.0
+
+/** A typical phone main camera, ~39° across a portrait frame, when the lens is not known yet. */
+private const val ASSUMED_FOCAL_FW = 1.4
+
+/**
+ * The strip a delivery travels through when filmed from behind the bowler, and where it is
+ * going: [left, top, right, bottom, targetX, targetY], normalised upright — or null when the
+ * view is not that one (no stumps lock, or stumps nearer than [CORRIDOR_MIN_DISTANCE_M]).
+ *
+ * From the hand, above and beside the stumps on the picture, down to just below the batter's
+ * stumps; snapped to a 0.02 grid so a lock that jitters by a pixel does not restart the
+ * tracker's picture every second.
+ */
+internal fun deliveryCorridor(
+    lock: com.haraan.app.vision.WicketLock?,
+    camera: com.haraan.app.vision.CameraIntrinsics?,
+    uprightWidthPx: Int,
+    uprightAspect: Float,
+): FloatArray? {
+    val l = lock ?: return null
+    if (l.kind != com.haraan.app.vision.WicketKind.STUMPS) return null
+    if (l.state == com.haraan.app.vision.WicketTrackState.TENTATIVE || l.state == com.haraan.app.vision.WicketTrackState.LOST) return null
+    val cam = camera ?: return null
+    if (uprightWidthPx <= 0 || uprightAspect <= 0f) return null
+    val h = (uprightWidthPx / uprightAspect).toInt()
+    val distance = com.haraan.app.vision.PitchGround.best(l, cam, uprightWidthPx, h)?.stumpsDistanceM ?: return null
+    if (distance < CORRIDOR_MIN_DISTANCE_M) return null
+    fun snap(v: Double) = (Math.round(v / 0.02) * 0.02).toFloat()
+    val bx = snap(l.anchor.base.x)
+    val by = snap(l.anchor.base.y)
+    return floatArrayOf(
+        (bx - CORRIDOR_HALF_WIDTH).coerceAtLeast(0f),
+        (by - CORRIDOR_ABOVE).coerceAtLeast(0f),
+        (bx + CORRIDOR_HALF_WIDTH).coerceAtMost(1f),
+        (by + CORRIDOR_BELOW).coerceAtMost(1f),
+        bx,
+        by,
+    )
+}
+
+/** Stumps at least this far off: the camera is behind the bowler, and the corridor applies. */
+private const val CORRIDOR_MIN_DISTANCE_M = 10.0
+
+/** Corridor reach either side of the stumps, above them (to the hand), and below their foot. */
+private const val CORRIDOR_HALF_WIDTH = 0.36f
+private const val CORRIDOR_ABOVE = 0.36f
+private const val CORRIDOR_BELOW = 0.12f
+
+/** How often the corridor is re-derived from the lock. */
+private const val CORRIDOR_REFRESH_MS = 1_000L
 
 /** The finer ball analysis asked for at start; see [OpenCvBallTracker.setDetail]. */
 private const val BALL_DETAIL = 1.5

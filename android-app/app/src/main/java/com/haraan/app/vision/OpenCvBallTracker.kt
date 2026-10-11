@@ -72,6 +72,58 @@ class OpenCvBallTracker(
 
     /** The detail in use now. */
     fun detail(): Double = detail
+
+    /*
+     * FILMED FROM BEHIND THE BOWLER: A CORRIDOR AND A DESTINATION.
+     *
+     * Behind the bowler's arm the ball travels AWAY from the lens. On a real net video
+     * (2026-10-11, batter's stumps ~20 m off) it was 3-4 px across in the 480-wide analysis
+     * and crossed the picture at under half the speed floor — while the bowler's knee,
+     * swinging through at ball-like speed and roundness, was what got followed. Two facts
+     * about this view fix that:
+     *
+     *   the ball only ever travels the strip between the bowler's hand and the batter's
+     *   stumps, so that strip is analysed at full resolution instead of the whole frame
+     *   at a third of it — the ball is ~2.7x bigger in pixels for about the same work;
+     *
+     *   a delivery is heading for the batter's stumps. A slow candidate is believed only
+     *   when it moves towards them, and a new track is only promoted to "the ball" when
+     *   its overall direction points at them. Knees and arms swing every which way.
+     *
+     * Set by the camera screen only when the locked wicket is far (the bowler's-end view).
+     * Normalised upright coordinates; null for either means the whole-frame behaviour.
+     */
+    private class Corridor(val left: Float, val top: Float, val right: Float, val bottom: Float)
+
+    @Volatile private var pendingCorridor: Pair<Corridor?, Point2?>? = null
+    private var corridor: Corridor? = null
+    private var target: Point2? = null
+    /** Upright width over height of the whole frame; for angles in a non-square picture. */
+    private var frameAspect = 9f / 16f
+
+    /**
+     * Analyse only [left]..[right] x [top]..[bottom] of the upright frame (normalised), at up
+     * to full resolution, and expect deliveries to head for [towards]. Pass nulls to go back
+     * to the whole frame. Takes effect on the next frame.
+     */
+    fun setCorridor(left: Float?, top: Float?, right: Float?, bottom: Float?, towards: Point2?) {
+        val c = if (left == null || top == null || right == null || bottom == null) {
+            null
+        } else {
+            Corridor(left.coerceIn(0f, 1f), top.coerceIn(0f, 1f), right.coerceIn(0f, 1f), bottom.coerceIn(0f, 1f))
+                .takeIf { it.right - it.left > 0.05f && it.bottom - it.top > 0.05f }
+        }
+        val same = c?.let { n -> corridor?.let { o -> n.left == o.left && n.top == o.top && n.right == o.right && n.bottom == o.bottom } }
+            ?: (corridor == null)
+        if (same && towards == target) return
+        pendingCorridor = c to towards
+    }
+
+    /** Test hook: told each frame's surviving candidates. Null in the app. */
+    internal var debug: ((String) -> Unit)? = null
+
+    /** True while analysing a corridor rather than the whole frame. */
+    fun corridorActive(): Boolean = corridor != null
     private var scratchLuma: Mat? = null
     private var scratchPacked: ByteArray? = null
 
@@ -145,6 +197,19 @@ class OpenCvBallTracker(
                 previous = null
                 forgetBackground()
                 resetTrackingState()
+            }
+            pendingCorridor?.let { (c, t) ->
+                pendingCorridor = null
+                val moved = c?.let { n -> corridor?.let { o -> n.left != o.left || n.top != o.top || n.right != o.right || n.bottom != o.bottom } }
+                    ?: (corridor != null)
+                corridor = c
+                target = t
+                if (moved) {
+                    previous?.release()
+                    previous = null
+                    forgetBackground()
+                    resetTrackingState()
+                }
             }
             areaScale = detail * detail
             bodyMargin = (4 * detail).toInt()
@@ -238,6 +303,11 @@ class OpenCvBallTracker(
         }
         scratchLuma!!.put(0, 0, packed)
 
+        val upW = if (turn == 90 || turn == 270) height else width
+        val upH = if (turn == 90 || turn == 270) width else height
+        frameAspect = upW.toFloat() / upH
+        corridor?.let { c -> return corridorGray(scratchLuma!!, width, height, turn, c) }
+
         val scale = analysisWidth * detail / width
         if (scale >= 1.0) {
             // Already small enough; blur in place on a copy.
@@ -262,6 +332,90 @@ class OpenCvBallTracker(
         small.release()
         return upright(blurred, turn)
     }
+
+    /**
+     * The corridor, cut from the sensor frame before anything else, scaled only as far as
+     * [CORRIDOR_PIXEL_BUDGET] needs, blurred and turned upright. Sets [areaScale] so the
+     * physical size limits mean the same ball they do at the 480-wide baseline.
+     */
+    private fun corridorGray(full: Mat, width: Int, height: Int, turn: Int, c: Corridor): Mat? {
+        // The upright rectangle in sensor pixels, by the same turns as [upright].
+        val (x0, x1, y0, y1) = when (turn) {
+            90 -> listOf(c.top * width, c.bottom * width, (1f - c.right) * height, (1f - c.left) * height)
+            180 -> listOf((1f - c.right) * width, (1f - c.left) * width, (1f - c.bottom) * height, (1f - c.top) * height)
+            270 -> listOf((1f - c.bottom) * width, (1f - c.top) * width, c.left * height, c.right * height)
+            else -> listOf(c.left * width, c.right * width, c.top * height, c.bottom * height)
+        }
+        val rx = x0.toInt().coerceIn(0, width - 2)
+        val ry = y0.toInt().coerceIn(0, height - 2)
+        val rw = (x1.toInt() - rx).coerceIn(2, width - rx)
+        val rh = (y1.toInt() - ry).coerceIn(2, height - ry)
+        val sub = Mat(full, Rect(rx, ry, rw, rh))
+        val scale = minOf(1.0, sqrt(CORRIDOR_PIXEL_BUDGET / (rw.toDouble() * rh)))
+        val baseline = analysisWidth.toDouble() / width
+        val k = scale / baseline
+        areaScale = k * k
+        bodyMargin = (4 * k).toInt()
+        val small = Mat()
+        if (scale < 1.0) {
+            Imgproc.resize(sub, small, Size(rw * scale, rh * scale), 0.0, 0.0, Imgproc.INTER_AREA)
+        } else {
+            sub.copyTo(small)
+        }
+        sub.release()
+        val blurred = Mat()
+        Imgproc.GaussianBlur(small, blurred, Size(5.0, 5.0), 0.0)
+        small.release()
+        return upright(blurred, turn)
+    }
+
+    /** A point of the analysed Mat (normalised to it) back in whole-frame upright coordinates. */
+    private fun toFrame(cx: Float, cy: Float): Pair<Float, Float> {
+        val c = corridor ?: return cx to cy
+        return (c.left + cx * (c.right - c.left)) to (c.top + cy * (c.bottom - c.top))
+    }
+
+    /**
+     * Whether a move of ([dx], [dy]) from ([fromX], [fromY]) heads for the target, within
+     * [maxDeg]. Always true when there is no target. Angles in true picture proportions.
+     */
+    private fun headsForTarget(fromX: Float, fromY: Float, dx: Float, dy: Float, maxDeg: Double): Boolean {
+        val t = target ?: return true
+        val vx = dx.toDouble()
+        val vy = dy.toDouble() / frameAspect
+        val tx = t.x - fromX
+        val ty = (t.y - fromY) / frameAspect
+        val vn = sqrt(vx * vx + vy * vy)
+        val tn = sqrt(tx * tx + ty * ty)
+        if (vn < 1e-9 || tn < 1e-9) return true
+        return (vx * tx + vy * ty) / (vn * tn) >= kotlin.math.cos(Math.toRadians(maxDeg))
+    }
+
+    /** Frames a confirmed track may go unseen: more in a corridor, where a far ball fades. */
+    private fun coastFrames(): Int = if (corridor != null) CORRIDOR_COAST_FRAMES else MAX_COAST_FRAMES
+
+    private fun coastGapMs(): Long = if (corridor != null) CORRIDOR_COAST_GAP_MS else MAX_COAST_GAP_MS
+
+    /** How squarely a move heads for the target: 1 straight at it, 0 at right angles or worse. */
+    private fun targetAlignment(fromX: Float, fromY: Float, dx: Float, dy: Float): Float {
+        val t = target ?: return 1f
+        val vx = dx.toDouble()
+        val vy = dy.toDouble() / frameAspect
+        val tx = t.x - fromX
+        val ty = (t.y - fromY) / frameAspect
+        val vn = sqrt(vx * vx + vy * vy)
+        val tn = sqrt(tx * tx + ty * ty)
+        if (vn < 1e-9 || tn < 1e-9) return 1f
+        return ((vx * tx + vy * ty) / (vn * tn)).toFloat().coerceIn(0f, 1f)
+    }
+
+    /** The slowest a ball may move: lower when it is heading for the batter's stumps. */
+    private fun minSpeed(fromX: Float, fromY: Float, dx: Float, dy: Float): Float =
+        if (target != null && headsForTarget(fromX, fromY, dx, dy, TOWARDS_TARGET_DEG)) {
+            MIN_FLIGHT_SPEED_PER_MS * SLOW_TOWARDS_TARGET
+        } else {
+            MIN_FLIGHT_SPEED_PER_MS
+        }
 
     /**
      * The sensor's picture turned the way the viewer holds it. Consumes [source].
@@ -363,7 +517,8 @@ class OpenCvBallTracker(
             val nearBall = area > MAX_AREA_PX && area <= MAX_NEAR_BALL_AREA_PX
             // The floor rises with the detail, but only linearly: finer analysis is for
             // smaller balls, yet a few-pixel speck of sensor noise is still a speck.
-            if (rawArea < MIN_AREA_PX * detail || (area > MAX_AREA_PX && !nearBall)) {
+            val rawFloor = if (corridor != null) MIN_AREA_PX * CORRIDOR_RAW_FLOOR else MIN_AREA_PX * detail
+            if (rawArea < rawFloor || (area > MAX_AREA_PX && !nearBall)) {
                 rejectedSize++
                 contour.release()
                 continue
@@ -448,6 +603,7 @@ class OpenCvBallTracker(
                 contour.release()
                 continue
             }
+            toFrame(cx, cy).let { (fx, fy) -> cx = fx; cy = fy }
 
             candidates.add(
                 Candidate(
@@ -467,6 +623,9 @@ class OpenCvBallTracker(
             return null
         }
 
+        debug?.invoke(
+            "t=$timestampMs cands=" + candidates.joinToString { "(%.3f,%.3f a=%.0f c=%.2f)".format(it.x, it.y, it.area, it.circularity) },
+        )
         // 3. Multi-candidate association & state-machine update
         return updateTracking(candidates, timestampMs)
     }
@@ -482,7 +641,7 @@ class OpenCvBallTracker(
         val confirmed = confirmedTrack
         if (confirmed != null) {
             val dt = (timestampMs - confirmed.lastPoint.timestampMs).coerceAtLeast(1)
-            if (dt > MAX_COAST_GAP_MS) {
+            if (dt > coastGapMs()) {
                 confirmedTrack = null
                 trackingState = TrackingState.LOST
             } else {
@@ -502,11 +661,22 @@ class OpenCvBallTracker(
                     val speed = dist / dt.toFloat()
 
                     // Minimum speed: must not be stationary / lingering body part
-                    if (speed < MIN_FLIGHT_SPEED_PER_MS) {
+                    if (speed < minSpeed(confirmed.lastPoint.x, confirmed.lastPoint.y, dx, dy)) {
                         rejectedStationary++
                         continue
                     }
                     if (speed > MAX_FLIGHT_SPEED_PER_MS) {
+                        rejectedTrajectory++
+                        continue
+                    }
+
+                    /*
+                     * In a corridor the ball never turns back across the picture — not even off
+                     * the pitch, which reverses it up-down only. A bowler's foot sweeping in
+                     * from the side does, and on the net video the track left the ball for it
+                     * straight after the bounce.
+                     */
+                    if (corridor != null && abs(confirmed.velocityX * dt) > REVERSE_MIN_STEP && confirmed.velocityX * dx < 0f) {
                         rejectedTrajectory++
                         continue
                     }
@@ -608,7 +778,7 @@ class OpenCvBallTracker(
                     )
                 } else {
                     missedConfirmedFrames++
-                    if (missedConfirmedFrames <= MAX_COAST_FRAMES) {
+                    if (missedConfirmedFrames <= coastFrames()) {
                         trackingState = TrackingState.TEMPORARILY_LOST
                     } else {
                         confirmedTrack = null
@@ -622,17 +792,22 @@ class OpenCvBallTracker(
         val nextTentative = mutableListOf<TrackHypothesis>()
         var promotedTrack: TrackHypothesis? = null
 
+        // In a corridor a far, small ball drops a frame now and then; one is forgiven.
+        val tentativeGap = if (corridor != null) CORRIDOR_TENTATIVE_GAP_MS else MAX_TENTATIVE_GAP_MS
+        /*
+         * BEST FIT FIRST, NOT FIRST COME. Each track proposes every candidate it could take,
+         * scored; the proposals are then granted best-first, one candidate to one track. Taken
+         * in turn instead, a track seeded on noise claimed the ball's sighting before the
+         * ball's own track was asked, and the ball's track starved (net video, 2026-10-11).
+         */
+        class Proposal(val track: TrackHypothesis, val idx: Int, val score: Float, val vx: Float, val vy: Float)
+        val proposals = ArrayList<Proposal>()
         for (tentative in tentativeTracks) {
             val dt = timestampMs - tentative.lastPoint.timestampMs
-            if (dt > MAX_TENTATIVE_GAP_MS) {
+            if (dt > tentativeGap) {
                 // Tentative tracks cannot coast across gaps; must be strictly consecutive
                 continue
             }
-
-            var bestIdx: Int? = null
-            var bestScore = -1f
-            var bestVx = 0f
-            var bestVy = 0f
 
             for ((idx, cand) in candidates.withIndex()) {
                 if (idx in usedCandidates) continue
@@ -642,7 +817,16 @@ class OpenCvBallTracker(
                 val dist = sqrt((dx * dx + dy * dy).toDouble()).toFloat()
                 val speed = dist / dt.toFloat()
 
-                if (speed < MIN_FLIGHT_SPEED_PER_MS || speed > MAX_FLIGHT_SPEED_PER_MS) {
+                if (speed < minSpeed(tentative.lastPoint.x, tentative.lastPoint.y, dx, dy) || speed > MAX_FLIGHT_SPEED_PER_MS) {
+                    continue
+                }
+                /*
+                 * Every step of a delivery from behind the bowler goes towards the batter's
+                 * stumps. Without this, a track seeded on noise at the far end jumped a fifth
+                 * of the frame sideways to take the ball's own sighting — tracks claim
+                 * candidates in turn — and the ball's track starved.
+                 */
+                if (corridor != null && !headsForTarget(tentative.lastPoint.x, tentative.lastPoint.y, dx, dy, CORRIDOR_STEP_DEG)) {
                     continue
                 }
 
@@ -691,22 +875,43 @@ class OpenCvBallTracker(
                     }
                 }
 
-                val score = (cand.circularity.toFloat() * 0.4f) + (dirScore * 0.4f) +
-                    min(1f, speed / 0.002f) * 0.2f
-                if (score > bestScore) {
-                    bestScore = score
-                    bestIdx = idx
-                    bestVx = candVx
-                    bestVy = candVy
+                val score = if (corridor != null) {
+                    // How squarely the step heads for the stumps counts most in a corridor.
+                    (cand.circularity.toFloat() * 0.25f) + (dirScore * 0.25f) +
+                        targetAlignment(tentative.lastPoint.x, tentative.lastPoint.y, dx, dy) * 0.5f
+                } else {
+                    (cand.circularity.toFloat() * 0.4f) + (dirScore * 0.4f) + min(1f, speed / 0.002f) * 0.2f
                 }
+                proposals.add(Proposal(tentative, idx, score, candVx, candVy))
             }
+        }
 
-            if (bestIdx != null) {
-                usedCandidates.add(bestIdx)
-                val cand = candidates[bestIdx]
+        val granted = HashMap<TrackHypothesis, Proposal>()
+        // Whole-frame tracking keeps its original order — each track in turn takes its best —
+        // because its score rewards speed, and granted best-first it paired tracks with the
+        // sighting two steps ahead and broke a plain rolling ball into fragments.
+        val ordered = if (corridor != null) {
+            proposals.sortedByDescending { it.score }
+        } else {
+            tentativeTracks.flatMap { tr -> proposals.filter { it.track === tr }.sortedByDescending { it.score } }
+        }
+        for (prop in ordered) {
+            if (prop.track in granted || prop.idx in usedCandidates) continue
+            granted[prop.track] = prop
+            usedCandidates.add(prop.idx)
+        }
+        for (tentative in tentativeTracks) {
+            val prop = granted[tentative]
+            if (prop == null && corridor != null && timestampMs - tentative.lastPoint.timestampMs < tentativeGap) {
+                // Missed this frame; kept for the next, inside the forgiven gap.
+                nextTentative.add(tentative)
+                continue
+            }
+            if (prop != null) {
+                val cand = candidates[prop.idx]
                 tentative.points.add(cand)
-                tentative.velocityX = bestVx
-                tentative.velocityY = bestVy
+                tentative.velocityX = prop.vx
+                tentative.velocityY = prop.vy
                 nextTentative.add(tentative)
 
                 // Check promotion criteria: >= 3 points with net displacement >= 0.035
@@ -714,7 +919,17 @@ class OpenCvBallTracker(
                     val totDx = tentative.points.last().x - tentative.points.first().x
                     val totDy = tentative.points.last().y - tentative.points.first().y
                     val totDist = sqrt((totDx * totDx + totDy * totDy).toDouble()).toFloat()
-                    if (totDist >= MIN_CONFIRMATION_DISPLACEMENT) {
+                    val needed = if (target != null) MIN_CONFIRMATION_DISPLACEMENT * TARGET_DISPLACEMENT_SHARE else MIN_CONFIRMATION_DISPLACEMENT
+                    val first = tentative.points.first()
+                    /*
+                     * From behind the bowler a delivery falls from the hand towards the far
+                     * pitch, so until it pitches it moves DOWN the picture. Something crossing
+                     * the far end — a vehicle behind the net, a fielder walking — moves level,
+                     * and on the net video one was confirmed first and kept the real ball out.
+                     */
+                    val falling = corridor == null ||
+                        (totDy > 0f && totDy / frameAspect >= abs(totDx) * FALLING_MIN_SLOPE)
+                    if (totDist >= needed && falling && headsForTarget(first.x, first.y, totDx, totDy, PROMOTE_TOWARDS_TARGET_DEG)) {
                         if (promotedTrack == null || tentative.points.size > promotedTrack.points.size) {
                             promotedTrack = tentative
                         }
@@ -725,7 +940,9 @@ class OpenCvBallTracker(
 
         // Step 3: Promote qualified tentative track
         if (promotedTrack != null) {
-            if (confirmedTrack == null || missedConfirmedFrames > 0) {
+            // In a corridor a coasting ball is still the ball: it fades near the far end, and
+            // a newcomer crossing the far end had been taking its place.
+            if (confirmedTrack == null || (missedConfirmedFrames > 0 && corridor == null)) {
                 confirmedTrack = promotedTrack
                 missedConfirmedFrames = 0
                 trackingState = TrackingState.CONFIRMED
@@ -753,14 +970,26 @@ class OpenCvBallTracker(
             .map { candidates[it] }
             .sortedByDescending { it.circularity }
 
-        for (cand in unusedCands.take(2)) {
-            if (nextTentative.size < MAX_TENTATIVE_TRACKS) {
+        /*
+         * In a corridor the ball is one blob among fifty — a net's mesh shimmering under
+         * compression, the bowler's limbs — and several are rounder than a ball going away.
+         * Two seeds a frame meant it was rarely given a track at all; the direction test at
+         * promotion is what sorts them, so more are let in to be sorted.
+         */
+        val seeds = if (corridor != null) CORRIDOR_SEEDS else 2
+        val cap = if (corridor != null) CORRIDOR_MAX_TENTATIVE else MAX_TENTATIVE_TRACKS
+        for (cand in unusedCands.take(seeds)) {
+            if (nextTentative.size < cap) {
                 nextTentative.add(TrackHypothesis(cand))
             }
         }
 
         tentativeTracks.clear()
         tentativeTracks.addAll(nextTentative)
+        debug?.invoke(
+            "t=$timestampMs confirmed=${confirmedTrack?.points?.size} tentative=" +
+                tentativeTracks.joinToString { tr -> tr.points.joinToString("/") { "%.3f,%.3f".format(it.x, it.y) } },
+        )
 
         if (confirmedTrack == null) {
             trackingState = if (tentativeTracks.isNotEmpty()) TrackingState.TENTATIVE else TrackingState.LOST
@@ -772,7 +1001,7 @@ class OpenCvBallTracker(
     private fun handleMissOnGlobalMotion() {
         if (confirmedTrack != null) {
             missedConfirmedFrames++
-            if (missedConfirmedFrames <= MAX_COAST_FRAMES) {
+            if (missedConfirmedFrames <= coastFrames()) {
                 trackingState = TrackingState.TEMPORARILY_LOST
             } else {
                 confirmedTrack = null
@@ -785,7 +1014,7 @@ class OpenCvBallTracker(
     private fun handleMissOnNoCandidate() {
         if (confirmedTrack != null) {
             missedConfirmedFrames++
-            if (missedConfirmedFrames <= MAX_COAST_FRAMES) {
+            if (missedConfirmedFrames <= coastFrames()) {
                 trackingState = TrackingState.TEMPORARILY_LOST
             } else {
                 confirmedTrack = null
@@ -980,6 +1209,47 @@ class OpenCvBallTracker(
 
         /** Below this a candidate is sensor noise; above it, it is a person or a shadow. */
         const val MIN_AREA_PX = 14.0
+
+        /** Most pixels a corridor is analysed at; about what the whole frame costs at 1.5. */
+        const val CORRIDOR_PIXEL_BUDGET = 300_000.0
+
+        /** Raw-pixel blob floor in a corridor, as a multiple of [MIN_AREA_PX]. */
+        const val CORRIDOR_RAW_FLOOR = 1.5
+
+        /** Heading for the batter's stumps: within this, a slow candidate is still a ball. */
+        const val TOWARDS_TARGET_DEG = 40.0
+
+        /** ...and down to this share of the normal speed floor. */
+        const val SLOW_TOWARDS_TARGET = 0.35f
+
+        /**
+         * A new track must head for the stumps within this to be promoted. The real ball on
+         * the net video headed 7 degrees off; a bus behind the net, moving across, 38.
+         */
+        const val PROMOTE_TOWARDS_TARGET_DEG = 25.0
+
+        /** tan(35 degrees): how steeply a corridor track must fall to be promoted. The ball on the net video fell at 60-70; far-end movers drifted at under 20. */
+        const val FALLING_MIN_SLOPE = 0.70f
+
+        /** Each step of a new track in a corridor must head for the stumps within this. */
+        const val CORRIDOR_STEP_DEG = 35.0
+
+        /** A new track in a corridor may skip one frame at 30 fps. */
+        const val CORRIDOR_TENTATIVE_GAP_MS = 110L
+
+        /** Sideways motion, in frame widths per step, below which a reversal is not judged. */
+        const val REVERSE_MIN_STEP = 0.006f
+
+        /** A confirmed ball in a corridor may go unseen this long (it fades going away). */
+        const val CORRIDOR_COAST_FRAMES = 4
+        const val CORRIDOR_COAST_GAP_MS = 200L
+
+        /** New tracks seeded per frame, and held at once, inside a corridor. */
+        const val CORRIDOR_SEEDS = 6
+        const val CORRIDOR_MAX_TENTATIVE = 14
+
+        /** A ball going away moves little in the picture; this share of the usual displacement confirms it. */
+        const val TARGET_DISPLACEMENT_SHARE = 0.5f
 
         /** The finest [setDetail] allowed: 720 wide off a 1280 frame is 1.5. */
         const val MAX_DETAIL = 2.0
