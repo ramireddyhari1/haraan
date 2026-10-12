@@ -620,8 +620,22 @@ internal fun MainAppContainer(
     else locationState = com.haraan.app.data.LocationState.Denied
   }
 
+  // Re-detect on every open when the saved place came from GPS: the header used to show
+  // wherever the phone was LAST detected (say Tadepalle) until the user tapped "Use my
+  // current location". Silent — the cached place stays up, no "Locating…" flash — and
+  // only a real result replaces it, so a failed fix never blanks a good city.
+  LaunchedEffect(Unit) {
+    if (locationRepository.shouldAutoRefresh()) {
+      val fresh = runCatching { locationRepository.detectCurrent() }.getOrNull()
+      if (fresh is com.haraan.app.data.LocationState.Resolved) locationState = fresh
+    }
+  }
+
   fun requestCurrentLocation() {
-    if (locationRepository.hasPermission()) {
+    // Under Android 12+'s "Approximate location" the fix is snapped to a ~2 km grid —
+    // enough to put a Vaddeswaram user in Tadepalle. Asking for FINE again shows the
+    // system's "change to precise" dialog; whatever they answer, detection still runs.
+    if (locationRepository.hasPrecisePermission()) {
       detectLocation()
     } else {
       locationPermissionLauncher.launch(

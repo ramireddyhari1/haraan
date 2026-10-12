@@ -59,6 +59,19 @@ class LocationRepository(private val context: Context) {
         const val QUICK_FIX_MS = 6_000L
         const val GPS_FIX_MS = 12_000L
         const val GEOCODE_MS = 5_000L
+
+        /**
+         * A fix this tight names the right village. Coarser ones (a cell tower, or the
+         * ~2 km grid Android hands out under "Approximate location") routinely land in
+         * the NEXT town — Vaddeswaram reading as Tadepalle — so they trigger a GPS try.
+         */
+        const val GOOD_ACCURACY_M = 300f
+
+        /** A last-known fix older than this is where the phone WAS, not where it is. */
+        const val MAX_FIX_AGE_MS = 2 * 60_000L
+
+        const val SOURCE_GPS = "gps"
+        const val SOURCE_MANUAL = "manual"
     }
 
     private val prefs = context.getSharedPreferences("location_prefs", Context.MODE_PRIVATE)
@@ -86,6 +99,27 @@ class LocationRepository(private val context: Context) {
         )
     }
 
+    /** Has the user granted PRECISE location (not just Android 12+'s "Approximate")? */
+    fun hasPrecisePermission(): Boolean =
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+
+    /**
+     * Should the app silently re-detect on open? Yes when the saved place came from GPS
+     * (it goes stale the moment the user moves), no when they picked a city by hand —
+     * someone browsing Bengaluru from Vijayawada must not be yanked back home. Installs
+     * from before `source` existed: a GPS detection always saved an area, a manual pick
+     * never did, so the area tells them apart.
+     */
+    fun shouldAutoRefresh(): Boolean {
+        if (!hasPermission()) return false
+        return when (prefs.getString("source", null)) {
+            SOURCE_MANUAL -> false
+            SOURCE_GPS -> true
+            else -> prefs.getString("city", null) == null || !prefs.getString("area", "").isNullOrBlank()
+        }
+    }
+
     fun recents(): List<CityOption> {
         val raw = prefs.getString("recents", "") ?: return emptyList()
         return raw.split("|").filter { it.isNotBlank() }.map { CityOption(it) }
@@ -111,6 +145,7 @@ class LocationRepository(private val context: Context) {
             .putString("plusCode", "") // …nor a precise Plus Code
             .remove("lat")
             .remove("lng")
+            .putString("source", SOURCE_MANUAL)
             .apply()
         addRecent(option.name)
         return LocationState.Resolved(option.name, option.district)
@@ -182,6 +217,7 @@ class LocationRepository(private val context: Context) {
             .putString("plusCode", plusCode)
             .putString("lat", loc.latitude.toString())
             .putString("lng", loc.longitude.toString())
+            .putString("source", SOURCE_GPS)
             .apply()
         addRecent(city)
         return LocationState.Resolved(city, district, area, plusCode, loc.latitude, loc.longitude)
@@ -217,14 +253,33 @@ class LocationRepository(private val context: Context) {
      *
      * The previous version awaited step 1 with NO timeout, so a phone that could not
      * produce a balanced fix never reached steps 2-4 and the UI sat on "Reading GPS…"
-     * forever. City-level accuracy is all any caller needs, so the earliest answer wins.
+     * forever.
+     *
+     * "City-level is enough" turned out to be wrong for villages a few km apart: a
+     * balanced fix is often a cell tower in the neighbouring town, and the last-known
+     * fix was taken at ANY age — so someone home in Vaddeswaram read "Tadepalle". Now
+     * a fix is only taken as-is when it is tight ([GOOD_ACCURACY_M]); otherwise GPS
+     * gets a turn, and among the leftovers the freshest, most accurate one wins, with
+     * stale last-knowns used only when there is nothing else at all.
      */
     @Suppress("MissingPermission")
-    private suspend fun currentFix(): Location? =
-        withTimeoutOrNull(QUICK_FIX_MS) { fusedCurrent(Priority.PRIORITY_BALANCED_POWER_ACCURACY) }
-            ?: fusedLast()
-            ?: withTimeoutOrNull(GPS_FIX_MS) { fusedCurrent(Priority.PRIORITY_HIGH_ACCURACY) }
-            ?: legacyLast()
+    private suspend fun currentFix(): Location? {
+        val quick = withTimeoutOrNull(QUICK_FIX_MS) { fusedCurrent(Priority.PRIORITY_BALANCED_POWER_ACCURACY) }
+        if (quick != null && quick.isTight()) return quick
+
+        // HIGH_ACCURACY needs FINE; under "Approximate" Android still answers, coarsely.
+        val gps = withTimeoutOrNull(GPS_FIX_MS) { fusedCurrent(Priority.PRIORITY_HIGH_ACCURACY) }
+        if (gps != null && gps.isTight()) return gps
+
+        val candidates = listOfNotNull(quick, gps, fusedLast(), legacyLast())
+        return candidates.filter { it.isFresh() }.minByOrNull { it.accuracyOrWorst() }
+            ?: candidates.maxByOrNull { it.elapsedRealtimeNanos }
+    }
+
+    private fun Location.accuracyOrWorst(): Float = if (hasAccuracy()) accuracy else Float.MAX_VALUE
+    private fun Location.isTight(): Boolean = hasAccuracy() && accuracy <= GOOD_ACCURACY_M && isFresh()
+    private fun Location.isFresh(): Boolean =
+        (android.os.SystemClock.elapsedRealtimeNanos() - elapsedRealtimeNanos) / 1_000_000 <= MAX_FIX_AGE_MS
 
     @Suppress("MissingPermission")
     private suspend fun fusedCurrent(priority: Int): Location? = suspendCancellableCoroutine { cont ->
