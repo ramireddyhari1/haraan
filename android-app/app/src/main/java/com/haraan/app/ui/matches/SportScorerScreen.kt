@@ -2,6 +2,10 @@ package com.haraan.app.ui.matches
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -94,6 +99,9 @@ fun SportScorerScreen(
     var error by remember { mutableStateOf("") }
     var confirmFinish by remember { mutableStateOf(false) }
     var confirmPeriod by remember { mutableStateOf(false) }
+    // What the tap in flight is worth, shown over that side's score until the board settles.
+    var pending by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     fun run(block: suspend () -> Boolean, failure: String) {
         if (busy) return
@@ -101,20 +109,29 @@ fun SportScorerScreen(
         error = ""
         scope.launch {
             val ok = runCatching { block() }.getOrDefault(false)
-            if (!ok) error = failure
+            if (!ok) { error = failure; pending = null }
             busy = false
         }
     }
 
     fun send(e: ScorerEvent) {
-        hapticConfirm(view)
+        if (busy) return
+        val thud = thudFor(sport, e, board)
+        scope.launch { cricketThud(context, thud) }
+        pending = pendingLabelFor(sport, e, board)?.let { label -> e.side!! to label }
         run({ onEvent(e) }, "Couldn't record that. Check your connection and try again.")
     }
 
     fun undo(sequence: Int?) {
-        hapticTick(view)
+        if (busy) return
+        scope.launch { cricketThud(context, Thud.UNDO) }
         run({ onUndo(sequence) }, "Couldn't undo that.")
     }
+
+    // The ghost stays until the server's replay arrives with the new event, so the figure
+    // never falls back to the old score in the gap between "recorded" and "re-read".
+    LaunchedEffect(board.feed.firstOrNull()?.sequence) { pending = null }
+    LaunchedEffect(pending) { if (pending != null) { kotlinx.coroutines.delay(8000); pending = null } }
 
     // A kabaddi match with nothing recorded yet is scored on the mat from its first raid.
     LaunchedEffect(sport, board.feed.isEmpty(), board.matRules) {
@@ -141,7 +158,7 @@ fun SportScorerScreen(
             }
         }
 
-        ScorerBoard(state, board, theme)
+        ScorerBoard(state, board, theme, pending)
 
         AnimatedVisibility(error.isNotBlank()) {
             Text(error, fontSize = 12.5.sp, color = Color(0xFFDC2626), textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp))
@@ -207,7 +224,7 @@ fun SportScorerScreen(
 
 /** The board the scorer keeps in view — the sport's live unit, and what is at stake. */
 @Composable
-private fun ScorerBoard(state: MatchUiState, board: SportBoard, theme: SportTheme) {
+private fun ScorerBoard(state: MatchUiState, board: SportBoard, theme: SportTheme, pending: Pair<String, String>?) {
     val (left, right, caption) = when {
         board.sport == "tennis" -> Triple(
             board.points?.first ?: "0", board.points?.second ?: "0",
@@ -219,15 +236,24 @@ private fun ScorerBoard(state: MatchUiState, board: SportBoard, theme: SportThem
         )
         else -> Triple("${board.totals.first}", "${board.totals.second}", board.periodLabel.ifBlank { "Live" })
     }
+    // The tap's worth is added straight away; the server's figure replaces it when it lands
+    // (and agrees, so nothing rolls twice). Tennis points aren't sums, so they wait.
+    fun optimistic(figure: String, side: String): String {
+        val p = pending?.takeIf { it.first == side && board.sport != "tennis" } ?: return figure
+        val n = p.second.removePrefix("+").toIntOrNull() ?: return figure
+        return figure.toIntOrNull()?.let { "${it + n}" } ?: figure
+    }
     Column(
         Modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(RoundedCornerShape(16.dp)).background(Color.White)
             .border(1.dp, Line, RoundedCornerShape(16.dp)).padding(vertical = 12.dp, horizontal = 14.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            ScoreHalf(state.team1.ifBlank { "Home" }, left, board.serving == "home" || board.raiding == "home", theme, Modifier.weight(1f))
+            ScoreHalf(state.team1.ifBlank { "Home" }, optimistic(left, "home"), board.serving == "home" || board.raiding == "home", theme, state.team1Color, pending?.takeIf { it.first == "home" }?.second, Modifier.weight(1f))
             Text(caption, fontSize = 10.5.sp, color = Faint, textAlign = TextAlign.Center, modifier = Modifier.weight(1.3f))
-            ScoreHalf(state.team2.ifBlank { "Away" }, right, board.serving == "away" || board.raiding == "away", theme, Modifier.weight(1f))
+            ScoreHalf(state.team2.ifBlank { "Away" }, optimistic(right, "away"), board.serving == "away" || board.raiding == "away", theme, state.team2Color, pending?.takeIf { it.first == "away" }?.second, Modifier.weight(1f))
         }
+        Spacer(Modifier.height(10.dp))
+        ScorerCourt(board.sport.lowercase(), board, state)
         val situations = situationsFor(board, state)
         if (situations.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
@@ -237,14 +263,28 @@ private fun ScorerBoard(state: MatchUiState, board: SportBoard, theme: SportThem
 }
 
 @Composable
-private fun ScoreHalf(name: String, figure: String, active: Boolean, theme: SportTheme, modifier: Modifier) {
+private fun ScoreHalf(name: String, figure: String, active: Boolean, theme: SportTheme, accent: Color, pending: String?, modifier: Modifier) {
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             ServeMarker(active, theme.spark, size = 7)
             if (active) Spacer(Modifier.width(5.dp))
             Text(name, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        RollingFigure(figure, Ink, 30)
+        Box(contentAlignment = Alignment.TopEnd) {
+            LandingFigure(figure, Ink, accent, 34, Modifier.padding(horizontal = 14.dp))
+            // The tap in flight: it rises off the figure and fades as the server's answer lands.
+            androidx.compose.animation.AnimatedVisibility(
+                visible = pending != null,
+                enter = fadeIn(tween(120)) + slideInVertically(tween(260)) { it / 2 },
+                exit = fadeOut(tween(220)) + slideOutVertically(tween(260)) { -it },
+            ) {
+                Text(
+                    pending ?: "",
+                    fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = accent,
+                    modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(accent.copy(alpha = 0.12f)).padding(horizontal = 5.dp, vertical = 1.dp),
+                )
+            }
+        }
     }
 }
 
@@ -359,7 +399,7 @@ private fun BasketballPad(
         PlayerChips(squad, player, accent) { player = if (player == it) null else it; if (assist == it) assist = null }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             listOf("+2" to "2", "+3" to "3", "FT" to "1").forEach { (label, detail) ->
-                BigButton(label, accent, enabled, Modifier.weight(1f)) {
+                BigButton(label, accent, enabled, Modifier.weight(1f), glyph = { ShotSpotGlyph(detail.toInt(), Color.White) }) {
                     send(ScorerEvent("point", side, detail, player, if (detail != "1") assist else null))
                     assist = null
                 }
@@ -426,6 +466,7 @@ private fun KabaddiPad(
     val doOrDie = board.doOrDie && board.raiding == raider
 
     fun reset() { touches = 0; bonus = false; raiderName = null; tackler = null }
+    val view = LocalView.current
 
     if (board.raiding == null) {
         SectionLabel("Who raids first?")
@@ -446,17 +487,16 @@ private fun KabaddiPad(
         }
         SectionLabel(if (raiderName != null) "Raider: $raiderName" else "Raider (optional)")
         PlayerChips(if (raider == "home") state.homeSquad else state.awaySquad, raiderName, raidColor) { raiderName = if (raiderName == it) null else it }
-        SectionLabel("Defenders touched out ($defendersOn on mat)")
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            (0..defendersOn.coerceAtMost(7)).forEach { n ->
-                val on = touches == n
-                Box(
-                    Modifier.size(44.dp).clip(CircleShape)
-                        .background(if (on) raidColor else Color(0xFFF1F5F9))
-                        .pressable { touches = n },
-                    contentAlignment = Alignment.Center,
-                ) { Text("$n", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = if (on) Color.White else Ink) }
-            }
+        SectionLabel(
+            when (touches) {
+                0 -> "Tap the defenders the raider touched ($defendersOn on mat)"
+                1 -> "1 defender touched out"
+                else -> "$touches defenders touched out"
+            },
+        )
+        DefenderRow(defendersOn, touches, defColor) {
+            view.performHapticFeedback(if (it > touches) android.view.HapticFeedbackConstants.VIRTUAL_KEY else android.view.HapticFeedbackConstants.CLOCK_TICK)
+            touches = it
         }
         Spacer(Modifier.height(10.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -547,12 +587,24 @@ private fun DoneNote(board: SportBoard, state: MatchUiState) {
 /** The last few recorded moments, each with its own undo. */
 @Composable
 private fun RecentEvents(state: MatchUiState, board: SportBoard, enabled: Boolean, onUndo: (Int) -> Unit) {
+    // What was already recorded when the screen opened stays still; only new rows arrive.
+    val baseline = remember { board.feed.firstOrNull()?.sequence ?: 0 }
     SectionLabel("Recorded")
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Color.White).border(1.dp, Line, RoundedCornerShape(16.dp))) {
         board.feed.take(8).forEachIndexed { i, m ->
             if (i > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(Line))
             val accent = when (m.side) { "home" -> state.team1Color; "away" -> state.team2Color; else -> Muted }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            androidx.compose.runtime.key(m.sequence) {
+            val fresh = remember { m.sequence > baseline }
+            val enter = remember { androidx.compose.animation.core.Animatable(if (fresh) 0f else 1f) }
+            LaunchedEffect(Unit) { if (fresh) enter.animateTo(1f, tween(420, easing = androidx.compose.animation.core.FastOutSlowInEasing)) }
+            Row(
+                Modifier.fillMaxWidth()
+                    .graphicsLayer { translationY = (1f - enter.value) * -14.dp.toPx(); alpha = 0.25f + 0.75f * enter.value }
+                    .background(accent.copy(alpha = 0.10f * (1f - enter.value)))
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Box(Modifier.size(8.dp).clip(CircleShape).background(accent))
                 Spacer(Modifier.width(10.dp))
                 Column(Modifier.weight(1f)) {
@@ -571,6 +623,7 @@ private fun RecentEvents(state: MatchUiState, board: SportBoard, enabled: Boolea
                 RoundIcon(size = 30, enabled = enabled, onClick = { onUndo(m.sequence) }) {
                     Icon(Icons.Filled.Undo, "Undo this", tint = Muted, modifier = Modifier.size(15.dp))
                 }
+            }
             }
         }
     }
@@ -643,21 +696,33 @@ private fun SectionLabel(text: String) {
 }
 
 @Composable
-private fun BigButton(label: String, color: Color, enabled: Boolean, modifier: Modifier, small: Boolean = false, onClick: () -> Unit) {
-    Box(
-        modifier.clip(RoundedCornerShape(14.dp)).background(if (enabled) color else color.copy(alpha = 0.4f))
-            .pressable(enabled = enabled, onClick = onClick).padding(vertical = if (small) 13.dp else 16.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(label, fontSize = if (small) 12.5.sp else 15.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, maxLines = 1)
+private fun BigButton(
+    label: String,
+    color: Color,
+    enabled: Boolean,
+    modifier: Modifier,
+    small: Boolean = false,
+    sub: String? = null,
+    glyph: (@Composable () -> Unit)? = null,
+    onClick: () -> Unit,
+) {
+    ScoreKey(color, enabled, modifier, height = if (small) 50.dp else if (sub != null || glyph != null) 66.dp else 58.dp, onClick = onClick) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            glyph?.let { it(); Spacer(Modifier.width(8.dp)) }
+            Column(horizontalAlignment = if (glyph != null) Alignment.Start else Alignment.CenterHorizontally) {
+                Text(label, fontSize = if (small) 13.sp else 16.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, maxLines = 1)
+                if (sub != null) Text(sub, fontSize = 10.5.sp, fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.78f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
     }
 }
 
 @Composable
 private fun StatKey(label: String, color: Color, enabled: Boolean, modifier: Modifier, onClick: () -> Unit) {
     Box(
-        modifier.clip(RoundedCornerShape(11.dp)).background(Color(0xFFF1F5F9)).border(1.dp, Line, RoundedCornerShape(11.dp))
-            .pressable(enabled = enabled, onClick = onClick).padding(vertical = 12.dp),
+        modifier.pressable(enabled = enabled, haptic = null, onClick = onClick)
+            .clip(RoundedCornerShape(11.dp)).background(Color(0xFFF1F5F9)).border(1.dp, Line, RoundedCornerShape(11.dp))
+            .padding(vertical = 12.dp),
         contentAlignment = Alignment.Center,
     ) { Text(label, fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold, color = color, maxLines = 1) }
 }
@@ -665,10 +730,11 @@ private fun StatKey(label: String, color: Color, enabled: Boolean, modifier: Mod
 @Composable
 private fun SmallButton(label: String, enabled: Boolean, modifier: Modifier = Modifier, dark: Boolean = false, onClick: () -> Unit) {
     Box(
-        modifier.clip(RoundedCornerShape(12.dp))
+        modifier.pressable(enabled = enabled, haptic = if (dark) com.haraan.app.ui.Feel.SELECT else null, onClick = onClick)
+            .clip(RoundedCornerShape(12.dp))
             .background(if (dark) Ink.copy(alpha = if (enabled) 1f else 0.4f) else Color(0xFFF1F5F9))
             .border(1.dp, if (dark) Color.Transparent else Line, RoundedCornerShape(12.dp))
-            .pressable(enabled = enabled, onClick = onClick).padding(horizontal = 12.dp, vertical = 11.dp),
+            .padding(horizontal = 12.dp, vertical = 11.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(label, fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = if (dark) Color.White else if (enabled) Ink else Faint, maxLines = 1)
@@ -692,7 +758,7 @@ private fun Toggle(label: String, on: Boolean, accent: Color, onClick: () -> Uni
 @Composable
 private fun Pill(label: String, enabled: Boolean, icon: Boolean = false, onClick: () -> Unit) {
     Row(
-        Modifier.clip(RoundedCornerShape(20.dp)).background(Color(0xFFF1F5F9)).pressable(enabled = enabled, onClick = onClick)
+        Modifier.pressable(enabled = enabled, haptic = null, onClick = onClick).clip(RoundedCornerShape(20.dp)).background(Color(0xFFF1F5F9))
             .padding(horizontal = 13.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -707,7 +773,7 @@ private fun Pill(label: String, enabled: Boolean, icon: Boolean = false, onClick
 @Composable
 private fun RoundIcon(size: Int = 36, enabled: Boolean = true, onClick: () -> Unit, content: @Composable () -> Unit) {
     Box(
-        Modifier.size(size.dp).clip(CircleShape).background(Color(0xFFEFF2F7)).pressable(enabled = enabled, onClick = onClick),
+        Modifier.size(size.dp).pressable(enabled = enabled, haptic = null, onClick = onClick).clip(CircleShape).background(Color(0xFFEFF2F7)),
         contentAlignment = Alignment.Center,
     ) { content() }
 }

@@ -47,6 +47,7 @@ import androidx.compose.ui.unit.sp
 import com.haraan.app.data.MatchScoreState
 import com.haraan.app.data.SquadMember
 import kotlinx.coroutines.delay
+import com.haraan.app.ui.pressable
 import kotlinx.coroutines.launch
 import com.haraan.app.ui.theme.HaraanColors
 
@@ -109,11 +110,14 @@ fun FootballScorerScreen(
     val statCounts = remember { androidx.compose.runtime.mutableStateMapOf<String, Int>() }
     val feed = remember { mutableStateListOf<ScorerFeedItem>() }
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    fun feel(kind: Thud) { scope.launch { cricketThud(context, kind) } }
 
     fun stat(kind: String, side: String, inc: Boolean) {
         val key = "$kind-$side"
         val cur = statCounts[key] ?: 0
         if (!inc && cur <= 0) return
+        feel(if (inc) Thud.TICK else Thud.UNDO)
         statCounts[key] = (cur + if (inc) 1 else -1).coerceAtLeast(0)
         scope.launch { runCatching { onStat(kind, side, inc) } }
     }
@@ -136,6 +140,7 @@ fun FootballScorerScreen(
         val minute = clock.minute
         val team = if (side == "home") setup.teamA else setup.teamB
         feed.add(0, ScorerFeedItem(kind, side, team, player, label))
+        feel(when (kind) { "goal" -> Thud.SIX; "red" -> Thud.WICKET; else -> Thud.FOUR })
         if (kind == "goal") { if (side == "home") home++ else away++ }
 
         scope.launch {
@@ -161,6 +166,7 @@ fun FootballScorerScreen(
     }
 
     fun undo(item: ScorerFeedItem, index: Int) {
+        feel(Thud.UNDO)
         feed.removeAt(index)
         if (item.kind == "goal") {
             if (item.side == "home") { if (home > 0) home-- } else { if (away > 0) away-- }
@@ -170,11 +176,12 @@ fun FootballScorerScreen(
 
     Column(modifier = modifier.fillMaxSize().background(Bg)) {
 
-        Scoreboard(setup, home, away, clock, onBack = onDone, enabled = !finishing)
+        Scoreboard(setup, home, away, clock, possession, onBack = onDone, enabled = !finishing)
 
         ClockBar(
             clock = clock,
             onToggle = {
+                feel(Thud.DELIVERY)
                 val next = clock.copy(running = !clock.running)
                 pushClock(next)
                 // A stopped clock is a dead ball for possession, so a pause never counts.
@@ -187,12 +194,14 @@ fun FootballScorerScreen(
                 }
             },
             onHalfTime = {
+                feel(Thud.DELIVERY)
                 val next = clock.copy(running = false)
                 pushClock(next, phase = "half_time")
                 if (possession != null) setPossession(null)
                 scope.launch { runCatching { onMarker("period", null, next.minute, "Half time") } }
             },
             onSecondHalf = {
+                feel(Thud.DELIVERY)
                 pushClock(clock.startSecondHalf())
                 scope.launch { runCatching { onMarker("period", null, setup.halfLengthMin, "Second half") } }
             },
@@ -247,8 +256,8 @@ fun FootballScorerScreen(
                     }
                 } else {
                     LazyColumn(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp)) {
-                        itemsIndexed(feed) { index, item ->
-                            FeedRow(item) { undo(item, index) }
+                        itemsIndexed(feed, key = { _, item -> item.id }) { index, item ->
+                            Box(Modifier.animateItem()) { FeedRow(item) { undo(item, index) } }
                         }
                     }
                 }
@@ -339,6 +348,7 @@ private fun Scoreboard(
     home: Int,
     away: Int,
     clock: MatchClock,
+    possession: String?,
     onBack: () -> Unit,
     enabled: Boolean,
 ) {
@@ -370,19 +380,13 @@ private fun Scoreboard(
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             TeamName(setup.teamA, Modifier.weight(1f), TextAlign.Start)
-            Text(
-                "$home",
-                fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = Ink,
-                modifier = Modifier.padding(horizontal = 10.dp),
-            )
+            LandingFigure("$home", Ink, Blue, 38, Modifier.padding(horizontal = 12.dp))
             Text("–", fontSize = 22.sp, color = Faint)
-            Text(
-                "$away",
-                fontSize = 34.sp, fontWeight = FontWeight.ExtraBold, color = Ink,
-                modifier = Modifier.padding(horizontal = 10.dp),
-            )
+            LandingFigure("$away", Ink, Blue, 38, Modifier.padding(horizontal = 12.dp))
             TeamName(setup.teamB, Modifier.weight(1f), TextAlign.End)
         }
+        Spacer(Modifier.height(12.dp))
+        FootballPitch(possession, home, away, clock.running)
     }
 }
 
@@ -427,7 +431,13 @@ private fun ClockBar(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text(clock.label, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = Ink)
+            Text(
+                clock.label,
+                style = androidx.compose.ui.text.TextStyle(
+                    fontSize = 26.sp, color = Ink, fontFamily = com.haraan.app.theme.ArchivoDisplay,
+                    fontFeatureSettings = "tnum", letterSpacing = (-0.5).sp,
+                ),
+            )
             Text(clock.halfLabel, fontSize = 11.5.sp, color = Faint)
         }
 
@@ -445,9 +455,9 @@ private fun ClockBar(
 private fun ClockAction(label: String, primary: Boolean, onClick: () -> Unit) {
     Box(
         Modifier
+            .pressable(haptic = null, onClick = onClick)
             .clip(RoundedCornerShape(10.dp))
             .background(if (primary) Blue else Color(0xFFF1F5F9))
-            .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
         Text(
@@ -461,35 +471,35 @@ private fun ClockAction(label: String, primary: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun GoalButton(team: String, modifier: Modifier, onClick: () -> Unit) {
-    Row(
-        modifier
-            .clip(RoundedCornerShape(14.dp))
-            .background(Blue)
-            .clickable(onClick = onClick)
-            .padding(vertical = 14.dp),
-        horizontalArrangement = Arrangement.Center,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text("Goal", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        Spacer(Modifier.width(6.dp))
-        Text(
-            team, fontSize = 12.5.sp, color = Color.White.copy(alpha = 0.82f),
-            maxLines = 1, overflow = TextOverflow.Ellipsis,
-        )
+    ScoreKey(Blue, enabled = true, modifier = modifier, height = 66.dp, onClick = onClick) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 12.dp)) {
+            GoalGlyph(Color.White)
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text("Goal", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                Text(
+                    team, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.8f),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
     }
 }
 
 @Composable
 private fun CardButton(label: String, modifier: Modifier, onClick: () -> Unit) {
-    Box(
+    Row(
         modifier
+            .pressable(onClick = onClick)
             .clip(RoundedCornerShape(12.dp))
             .background(Surface)
             .border(1.dp, Line, RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
-            .padding(vertical = 11.dp),
-        contentAlignment = Alignment.Center,
+            .padding(vertical = 9.dp, horizontal = 10.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        BookingCardGlyph(Color(0xFFFACC15))
+        Spacer(Modifier.width(6.dp))
         Text(
             label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Muted,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -627,12 +637,11 @@ private fun StatStepper(count: Int, onDec: () -> Unit, onInc: () -> Unit) {
             Modifier.size(34.dp).clickable(onClick = onDec),
             contentAlignment = Alignment.Center,
         ) { Text("−", fontSize = 19.sp, fontWeight = FontWeight.Bold, color = if (count > 0) Muted else Faint) }
-        Text(
-            "$count", Modifier.width(26.dp), fontSize = 15.sp, fontWeight = FontWeight.Bold,
-            color = Ink, textAlign = TextAlign.Center,
-        )
+        Box(Modifier.width(26.dp), contentAlignment = Alignment.Center) {
+            RollingFigure("$count", Ink, 15, fontWeight = FontWeight.Bold, display = false)
+        }
         Box(
-            Modifier.size(34.dp).clip(RoundedCornerShape(9.dp)).background(Blue).clickable(onClick = onInc),
+            Modifier.size(34.dp).pressable(haptic = null, onClick = onInc).clip(RoundedCornerShape(9.dp)).background(Blue),
             contentAlignment = Alignment.Center,
         ) { Text("+", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White) }
     }
@@ -651,8 +660,13 @@ private fun FeedRow(item: ScorerFeedItem, onUndo: () -> Unit) {
         Text(
             item.minuteLabel,
             fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Faint,
-            modifier = Modifier.width(48.dp),
+            modifier = Modifier.width(44.dp),
         )
+        when (item.kind) {
+            "goal" -> GoalGlyph(Ink, Modifier.padding(end = 10.dp))
+            "yellow" -> BookingCardGlyph(Color(0xFFFACC15), Modifier.padding(end = 10.dp))
+            "red" -> BookingCardGlyph(Red, Modifier.padding(end = 10.dp))
+        }
         Column(Modifier.weight(1f)) {
             Text(
                 when (item.kind) {

@@ -89,4 +89,9 @@ data class ScorerFeedItem(
     val teamName: String,
     val player: String?,
     val minuteLabel: String,
+    /** Stable row key, so a new row slides in and an undone one folds away. */
+    val id: Long = nextFeedId(),
 )
+
+private var feedIds = 0L
+private fun nextFeedId(): Long = ++feedIds
