@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- In-app updates: the app downloads its new APK and hands it to Android to install.
+         The partner app is never on Google Play, whose policy forbids this. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.CAMERA" />
     <!-- Outcome haptics (ui/Haptics.kt). A normal permission, granted at install;
          without it Vibrator.vibrate() silently does nothing. -->

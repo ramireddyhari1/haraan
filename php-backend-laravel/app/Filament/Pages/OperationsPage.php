@@ -42,7 +42,8 @@ class OperationsPage extends Page implements HasForms
 
     protected string $view = 'filament.pages.operations';
 
-    private const SECTIONS = ['ops', 'app'];
+    // The `app` version rules moved to → App updates, which is routed; this page is not yet.
+    private const SECTIONS = ['ops'];
 
     public static function canAccess(): bool
     {

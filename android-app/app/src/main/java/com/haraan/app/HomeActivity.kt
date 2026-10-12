@@ -115,6 +115,8 @@ class HomeActivity : ComponentActivity(), PaymentResultWithDataListener {
     installSplashScreen()
     val t0 = android.os.SystemClock.uptimeMillis()
     super.onCreate(savedInstanceState)
+    // Phones that installed from Play update through Play; sideloaded ones download the APK.
+    com.haraan.app.appupdate.AppUpdater.store = com.haraan.app.appupdate.PlayStoreTransport()
     com.haraan.app.data.devices.DeviceIdentity.init(applicationContext)
 
     // Cheap and ordering-sensitive, so these stay on the critical path: the channel
@@ -189,6 +191,9 @@ class HomeActivity : ComponentActivity(), PaymentResultWithDataListener {
               // The launch is visually complete — now it's safe to burn CPU.
               startDeferredWarmups()
             })
+          } else {
+            // /control → App updates. After the splash, so the sheet never lands on it.
+            com.haraan.app.appupdate.AppUpdateHost()
           }
         }
       }

@@ -27,12 +27,27 @@ final class EnforcePlatformOperations
     /** Path prefixes never blocked. */
     private const ALWAYS_OPEN = [
         'control', 'partner', 'employee', 'livewire', 'filament', 'up',
-        'api/config', 'api/partner', 'api/webhooks', 'broadcasting', 'storage', 'build', 'css', 'js',
+        'api/config', 'api/app/update', 'api/partner', 'api/webhooks', 'broadcasting', 'storage', 'build', 'css', 'js',
         'account/delete', 'favicon.ico', 'robots.txt',
     ];
 
     public function handle(Request $request, Closure $next): Response
     {
+        // The partner API stays open through maintenance, but a partner app below the minimum
+        // version is refused, so a forced update can't be dodged by an app that skips the sheet.
+        // Only builds with the updater send this header; older ones are never blocked here.
+        if ($request->is('api/partner/*')) {
+            $partnerVersion = $request->header('X-Partner-App-Version');
+            if (is_string($partnerVersion) && Operations::appNeedsUpdate($partnerVersion, Operations::APP_PARTNER)) {
+                return response()->json([
+                    'error' => 'update_required',
+                    'message' => PlatformRules::string('partner_app.update_message'),
+                    'min_version' => Operations::minimumAppVersion(Operations::APP_PARTNER),
+                    'url' => PlatformRules::string('partner_app.apk_url'),
+                ], 426);
+            }
+        }
+
         if ($this->alwaysOpen($request)) {
             return $next($request);
         }

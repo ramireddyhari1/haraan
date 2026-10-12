@@ -33,12 +33,15 @@ object HaraanHttp {
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .addInterceptor { chain ->
-                chain.proceed(
+                val response = chain.proceed(
                     chain.request().newBuilder()
                         .header("Accept", "application/json")
                         .header("X-App-Version", BuildConfig.VERSION_NAME)
                         .build()
                 )
+                // Below /control's minimum version: bring up the update screen now.
+                if (response.code == 426) com.haraan.app.appupdate.AppUpdater.requestCheck()
+                response
             }
             .build()
     }

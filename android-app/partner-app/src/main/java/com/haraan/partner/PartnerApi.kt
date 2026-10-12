@@ -2284,6 +2284,8 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
             connectTimeout = 15000
             readTimeout = 15000
             setRequestProperty("Accept", "application/json")
+            // The server refuses partner apps below /control's minimum version (426).
+            setRequestProperty("X-Partner-App-Version", BuildConfig.VERSION_NAME)
             token?.let { setRequestProperty("Authorization", "Bearer $it") }
             if (json != null) {
                 doOutput = true
@@ -2295,6 +2297,7 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
             val code = conn.responseCode
             val stream = if (code in 200..299) conn.inputStream else conn.errorStream
             val body = stream?.let { BufferedReader(InputStreamReader(it)).use(BufferedReader::readText) } ?: ""
+            if (code == 426) com.haraan.partner.appupdate.AppUpdater.requestCheck()
             if (code !in 200..299) throw ApiException(code, parseError(body, code), body)
             return body
         } finally {

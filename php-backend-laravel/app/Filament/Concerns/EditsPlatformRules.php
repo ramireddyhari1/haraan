@@ -7,6 +7,7 @@ namespace App\Filament\Concerns;
 use App\Models\AdminAction;
 use App\Support\PlatformRules;
 use Filament\Forms\Components\Select;
+use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
@@ -91,7 +92,9 @@ trait EditsPlatformRules
                 ->minValue($def['min'] ?? null)->maxValue($def['max'] ?? null),
             PlatformRules::TYPE_FLOAT => TextInput::make($name)->numeric()->required()->step('any')
                 ->minValue($def['min'] ?? null)->maxValue($def['max'] ?? null),
-            default => TextInput::make($name)->maxLength($def['max'] ?? 255)
+            default => ($def['multiline'] ?? false)
+                ? Textarea::make($name)->rows(4)->maxLength($def['max'] ?? 255)
+                : TextInput::make($name)->maxLength($def['max'] ?? 255)
                 ->required(! is_array($def['default']) && (string) $def['default'] !== '')
                 ->regex($def['pattern'] ?? null),
         };

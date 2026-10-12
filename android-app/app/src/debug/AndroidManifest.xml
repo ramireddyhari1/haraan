@@ -8,6 +8,12 @@
   at runtime, because two locks on this door cost nothing.
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!--
+      In-app updates for the APK published at haraan.app/haraan.apk, which is this debug build.
+      Debug-only on purpose: Google Play forbids an app from updating itself, so the Play
+      (release) build must not even declare it; there the update goes through Play.
+    -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application>
         <activity
             android:name="com.haraan.app.vision.VisionDiagnosticsActivity"

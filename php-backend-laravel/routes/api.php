@@ -70,6 +70,8 @@ Route::get('/health', static fn () => response()->json([
 
 // Remote config / feature flags — anonymous-safe; resolved per viewer when logged in.
 Route::middleware('auth.jwt.optional')->get('/config', [ConfigController::class, 'index']);
+// In-app update sheet for the Haraan and Partner Android apps (/control → App updates).
+Route::get('/app/update', [\App\Http\Controllers\Api\AppUpdateController::class, 'show'])->middleware('throttle:60,1');
 
 // On-the-fly UI translation (Google Cloud Translation proxy; server-side key + cache).
 Route::middleware('throttle:120,1')->post('/translate', [TranslationController::class, 'translate']);

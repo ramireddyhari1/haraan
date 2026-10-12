@@ -28,6 +28,9 @@ class MainActivity : ComponentActivity() {
                 PartnerApp()
                 if (showSplash) {
                     BrandSplash(onFinished = { showSplash = false })
+                } else {
+                    // /control → App updates. After the splash, so the sheet never lands on it.
+                    com.haraan.partner.appupdate.AppUpdateHost()
                 }
             }
         }

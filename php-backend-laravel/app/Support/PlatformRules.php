@@ -44,7 +44,8 @@ final class PlatformRules
      */
     public const SECTIONS = [
         'ops' => ['label' => 'Emergency switches', 'description' => 'Stop parts of the platform at once. Every switch is enforced on the server, for the app and the website.', 'workspace' => 'admin'],
-        'app' => ['label' => 'App version', 'description' => 'Make people update the Android app.', 'workspace' => 'admin'],
+        'app' => ['label' => 'Haraan app updates', 'description' => 'The update sheet in the Haraan Android app. Phones that installed from Google Play update through Play; phones that installed the APK from haraan.app download it inside the app.', 'workspace' => 'admin'],
+        'partner_app' => ['label' => 'Partner app updates', 'description' => 'The update sheet in the Haraan Partner Android app. It downloads the APK below inside the app and hands it to Android to install. Publish the new APK at the link first, then raise the latest version.', 'workspace' => 'admin'],
         'fees' => ['label' => 'Fees, commission & tax', 'description' => 'Platform defaults. An event set to “Platform default” uses these; an event with its own value keeps it.', 'workspace' => 'finance'],
         'bookings' => ['label' => 'Bookings & holds', 'description' => 'How long unpaid orders hold stock, and how much one order may buy.', 'workspace' => 'admin'],
         'waitlist' => ['label' => 'Waitlist', 'description' => 'What happens when a waitlisted slot frees up.', 'workspace' => 'admin'],
@@ -92,7 +93,19 @@ final class PlatformRules
         'app.latest_version' => ['section' => 'app', 'type' => self::TYPE_TEXT, 'default' => '', 'max' => 20, 'pattern' => '/^(\d+(\.\d+){0,3})?$/', 'label' => 'Latest Android version', 'help' => 'Apps older than this are asked (not forced) to update.'],
         'app.force_update' => ['section' => 'app', 'type' => self::TYPE_BOOL, 'default' => false, 'label' => 'Force everyone below the latest version to update', 'help' => 'Treats the latest version as the minimum.', 'danger' => true],
         'app.update_message' => ['section' => 'app', 'type' => self::TYPE_TEXT, 'default' => 'A new version of Haraan is available. Update to keep booking and scoring.', 'max' => 200, 'label' => 'Update message', 'help' => ''],
-        'app.update_url' => ['section' => 'app', 'type' => self::TYPE_TEXT, 'default' => 'https://play.google.com/store/apps/details?id=com.haraan.app', 'max' => 255, 'pattern' => '#^https://#', 'label' => 'Update link', 'help' => 'Must be https.'],
+        'app.update_url' => ['section' => 'app', 'type' => self::TYPE_TEXT, 'default' => 'https://play.google.com/store/apps/details?id=com.haraan.app', 'max' => 255, 'pattern' => '#^https://#', 'label' => 'Google Play link', 'help' => 'Opened by phones that installed from Play when an in-app update is not possible. Must be https.'],
+        'app.apk_url' => ['section' => 'app', 'type' => self::TYPE_TEXT, 'default' => 'https://haraan.app/haraan.apk', 'max' => 255, 'pattern' => '#^https://#', 'label' => 'APK download link', 'help' => 'For phones that installed the APK, not Play. The app downloads this file and Android installs it over the old one. It must be signed with the same key, or Android refuses it.'],
+        'app.whats_new' => ['section' => 'app', 'type' => self::TYPE_TEXT, 'multiline' => true, 'default' => '', 'max' => 600, 'label' => 'What’s new', 'help' => 'One change per line, shown as a short list on the update sheet. Empty hides the list.'],
+        'app.remind_hours' => ['section' => 'app', 'type' => self::TYPE_INT, 'default' => 24, 'min' => 1, 'max' => 720, 'label' => 'Ask again after “Later” (hours)', 'help' => 'Only for optional updates. A required update cannot be put off.'],
+
+        // ── Partner app version ─────────────────────────────────────────────────────
+        'partner_app.min_version' => ['section' => 'partner_app', 'type' => self::TYPE_TEXT, 'default' => '', 'max' => 20, 'pattern' => '/^(\d+(\.\d+){0,3})?$/', 'label' => 'Minimum partner app version', 'help' => 'e.g. 1.4. Older partner apps show a full-screen update and the partner API refuses them. Empty allows every version. Builds before the updater (1.3 and older) cannot show it.'],
+        'partner_app.latest_version' => ['section' => 'partner_app', 'type' => self::TYPE_TEXT, 'default' => '', 'max' => 20, 'pattern' => '/^(\d+(\.\d+){0,3})?$/', 'label' => 'Latest partner app version', 'help' => 'The version of the APK at the link below. Older apps are offered the update. Empty offers nothing.'],
+        'partner_app.force_update' => ['section' => 'partner_app', 'type' => self::TYPE_BOOL, 'default' => false, 'label' => 'Force every partner below the latest version to update', 'help' => 'Treats the latest version as the minimum.', 'danger' => true],
+        'partner_app.update_message' => ['section' => 'partner_app', 'type' => self::TYPE_TEXT, 'default' => 'A new version of the Partner app is ready.', 'max' => 200, 'label' => 'Update message', 'help' => ''],
+        'partner_app.apk_url' => ['section' => 'partner_app', 'type' => self::TYPE_TEXT, 'default' => 'https://haraan.app/partner.apk', 'max' => 255, 'pattern' => '#^https://#', 'label' => 'APK download link', 'help' => 'Must be https and signed with the same key as the installed app.'],
+        'partner_app.whats_new' => ['section' => 'partner_app', 'type' => self::TYPE_TEXT, 'multiline' => true, 'default' => '', 'max' => 600, 'label' => 'What’s new', 'help' => 'One change per line. Empty hides the list.'],
+        'partner_app.remind_hours' => ['section' => 'partner_app', 'type' => self::TYPE_INT, 'default' => 12, 'min' => 1, 'max' => 720, 'label' => 'Ask again after “Later” (hours)', 'help' => 'Only for optional updates.'],
 
         // ── Fees, commission & tax ──────────────────────────────────────────────────
         'fees.event_platform_fee_type' => ['section' => 'fees', 'type' => self::TYPE_SELECT, 'options' => self::FEE_TYPES, 'default' => 'none', 'label' => 'Event platform fee', 'help' => ''],

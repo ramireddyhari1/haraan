@@ -75,36 +75,79 @@ final class Operations
         }
     }
 
+    public const APP_MEMBER = 'member';
+
+    public const APP_PARTNER = 'partner';
+
+    /** The PlatformRules section holding an app's version rules. */
+    private static function section(string $app): string
+    {
+        return $app === self::APP_PARTNER ? 'partner_app' : 'app';
+    }
+
     /**
      * The version an app must be at or above, or null when every version is allowed.
      * Force update promotes the latest version to the minimum.
      */
-    public static function minimumAppVersion(): ?string
+    public static function minimumAppVersion(string $app = self::APP_MEMBER): ?string
     {
-        $min = trim(PlatformRules::string('app.min_version'));
-        $latest = trim(PlatformRules::string('app.latest_version'));
+        $s = self::section($app);
+        $min = trim(PlatformRules::string("{$s}.min_version"));
+        $latest = trim(PlatformRules::string("{$s}.latest_version"));
 
-        if (PlatformRules::bool('app.force_update') && $latest !== '') {
+        if (PlatformRules::bool("{$s}.force_update") && $latest !== '') {
             $min = ($min === '' || version_compare($latest, $min, '>')) ? $latest : $min;
         }
 
         return $min !== '' ? $min : null;
     }
 
-    public static function appNeedsUpdate(?string $appVersion): bool
+    public static function appNeedsUpdate(?string $appVersion, string $app = self::APP_MEMBER): bool
     {
-        $min = self::minimumAppVersion();
+        $min = self::minimumAppVersion($app);
         $v = self::cleanVersion($appVersion);
 
         return $min !== null && $v !== null && version_compare($v, $min, '<');
     }
 
-    public static function appUpdateAvailable(?string $appVersion): bool
+    public static function appUpdateAvailable(?string $appVersion, string $app = self::APP_MEMBER): bool
     {
-        $latest = trim(PlatformRules::string('app.latest_version'));
+        $latest = trim(PlatformRules::string(self::section($app).'.latest_version'));
         $v = self::cleanVersion($appVersion);
 
         return $latest !== '' && $v !== null && version_compare($v, $latest, '<');
+    }
+
+    /**
+     * Everything an app's update sheet needs: whether to show it, whether it can be put off,
+     * where to get the build, and the admin's copy. Served by GET /api/app/update.
+     *
+     * @return array<string, mixed>
+     */
+    public static function updateState(string $app, ?string $appVersion): array
+    {
+        $s = self::section($app);
+        $required = self::appNeedsUpdate($appVersion, $app);
+        $notes = array_values(array_filter(array_map(
+            // A regex, not ltrim(): a charlist holding "•" strips single bytes and can eat
+            // the lead byte of ₹ or any other multibyte character.
+            static fn (string $line): string => trim((string) preg_replace('/^\s*(?:[-*]|\x{2022})\s*/u', '', $line)),
+            preg_split('/\R/u', PlatformRules::string("{$s}.whats_new")) ?: [],
+        ), static fn (string $line): bool => $line !== ''));
+
+        return [
+            'app' => $app,
+            'current_version' => self::cleanVersion($appVersion),
+            'available' => $required || self::appUpdateAvailable($appVersion, $app),
+            'required' => $required,
+            'latest_version' => trim(PlatformRules::string("{$s}.latest_version")) ?: null,
+            'min_version' => self::minimumAppVersion($app),
+            'message' => PlatformRules::string("{$s}.update_message"),
+            'whats_new' => $notes,
+            'apk_url' => PlatformRules::string("{$s}.apk_url"),
+            'store_url' => $app === self::APP_MEMBER ? PlatformRules::string('app.update_url') : null,
+            'remind_after_hours' => PlatformRules::int("{$s}.remind_hours"),
+        ];
     }
 
     /**

@@ -129,6 +129,8 @@ dependencies {
 
   // Fused location (fresh GPS fix instead of the flaky LocationManager last-known)
   implementation("com.google.android.gms:play-services-location:21.3.0")
+  // In-app updates for phones that installed from Google Play (appupdate/PlayStoreTransport).
+  implementation("com.google.android.play:app-update-ktx:2.1.0")
 
   // Google code scanner — the ActionBoard Join sheet's "Scan QR". Runs in Play services'
   // own UI, so the app needs no CAMERA permission for it.
