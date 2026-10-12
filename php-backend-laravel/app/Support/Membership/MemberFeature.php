@@ -58,6 +58,13 @@ final class MemberFeature
 
     public const APP_ICON_HERO = 'app.icon_hero';
 
+    /**
+     * Track a clip: a filmed delivery picked from the phone, run through the match camera's ball
+     * tracking. It runs on the phone, so the app reads this from the member's own entitlements
+     * (ClipTrackingAccess.kt); nothing on the server to guard.
+     */
+    public const TRACKING_CLIP_UPLOAD = 'tracking.clip_upload';
+
     public const SUPPORT_PRIORITY = 'support.priority';
 
     /**
@@ -99,6 +106,7 @@ final class MemberFeature
         self::PROFILE_MEMBER_BADGE => ['type' => self::TYPE_BOOLEAN, 'label' => 'Member badge'],
         self::APP_ICON_PRO => ['type' => self::TYPE_BOOLEAN, 'label' => 'Pro app icon'],
         self::APP_ICON_HERO => ['type' => self::TYPE_BOOLEAN, 'label' => 'Hero app icon'],
+        self::TRACKING_CLIP_UPLOAD => ['type' => self::TYPE_BOOLEAN, 'label' => 'Track a clip'],
         self::SUPPORT_PRIORITY => ['type' => self::TYPE_BOOLEAN, 'label' => 'Priority support'],
         self::INSIGHTS_ADVANCED_SPORTS => ['type' => self::TYPE_LIMIT, 'label' => 'Advanced insights'],
         self::EVENTS_EARLY_ACCESS => ['type' => self::TYPE_LIMIT, 'label' => 'Early ticket access'],

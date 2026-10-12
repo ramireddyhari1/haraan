@@ -188,6 +188,8 @@ data class FlightMetrics(
              * replay — possible at all. See [PitchGround.pitchCamera].
              */
             ground: PitchCamera? = null,
+            /** The ball, for release speed: see [BallDrag]. Leather when nobody said. */
+            ball: BallDrag = BallDrag.LEATHER,
         ): FlightMetrics {
             // The current flight only. Sightings from before the ball was lost belong to a
             // different delivery and averaging across the gap would describe neither.
@@ -209,7 +211,7 @@ data class FlightMetrics(
                 quad != null -> QuadSpeed.fit(run, quad, roughBounce, frameAspect)
                 ground != null -> QuadSpeed.fit(run, ground, null, frameAspect)
                 else -> null
-            }
+            }?.let { r -> if (r is QuadSpeed.FitResult.Ok) QuadSpeed.FitResult.Ok(r.flight.copy(ball = ball)) else r }
             val flight3d = (fit as? QuadSpeed.FitResult.Ok)?.flight
             val camera = quad?.let { PitchCamera.from(it, frameAspect) } ?: ground
             val bounce = flight3d?.let { f ->
@@ -423,14 +425,14 @@ data class FlightMetrics(
                     fit.flight.speedKmh,
                     "km/h",
                     if (fromGround && heightMeasured) {
-                        "average before the bounce, from the stumps and the phone's tilt (camera %.2f m up)"
-                            .format(fit.flight.cameraHeightM)
+                        "release speed (%s ball), from the stumps and the phone's tilt (camera %.2f m up)"
+                            .format(fit.flight.ball.label.lowercase(), fit.flight.cameraHeightM)
                     } else if (fromGround) {
-                        "average before the bounce, from the stumps alone (camera assumed %.1f m up) — rough"
-                            .format(fit.flight.cameraHeightM)
+                        "release speed (%s ball), from the stumps alone (camera assumed %.1f m up) — rough"
+                            .format(fit.flight.ball.label.lowercase(), fit.flight.cameraHeightM)
                     } else {
-                        "average before the bounce, from the pitch calibration (camera %.1f m up) — a little under release speed"
-                            .format(fit.flight.cameraHeightM)
+                        "release speed (%s ball), from the pitch calibration (camera %.1f m up)"
+                            .format(fit.flight.ball.label.lowercase(), fit.flight.cameraHeightM)
                     },
                 )
                 is QuadSpeed.FitResult.Refused -> MetricValue.Unavailable(fit.reason)

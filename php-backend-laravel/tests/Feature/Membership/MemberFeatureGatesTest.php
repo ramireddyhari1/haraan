@@ -183,20 +183,21 @@ class MemberFeatureGatesTest extends TestCase
 
     // ── matches.camera_angles ───────────────────────────────────────────────
 
-    public function test_free_scorers_pair_one_camera_angle_and_pro_pairs_two(): void
+    public function test_free_scorers_need_a_booked_slot_and_pro_pairs_two_angles(): void
     {
         $scorer = $this->player();
         $match = $this->scoredMatch($scorer);
 
+        // Free includes no cameras; a booked venue slot or a plan does (see CameraAccessTest).
+        $this->asMember($scorer)->postJson("/api/matches/{$match->id}/devices", ['role' => MatchDevice::ROLE_LBW])
+            ->assertForbidden()
+            ->assertJsonPath('code', 'camera_locked');
+
+        $this->paidSubscription($scorer, 'pro');
+        MemberEntitlements::flush();
         $this->asMember($scorer)->postJson("/api/matches/{$match->id}/devices", ['role' => MatchDevice::ROLE_LBW])->assertOk();
         // Re-pairing the same angle is not a second angle.
         $this->asMember($scorer)->postJson("/api/matches/{$match->id}/devices", ['role' => MatchDevice::ROLE_LBW])->assertOk();
-        $this->asMember($scorer)->postJson("/api/matches/{$match->id}/devices", ['role' => MatchDevice::ROLE_BOWLER])
-            ->assertForbidden()
-            ->assertJsonPath('code', 'limit_reached')
-            ->assertJsonPath('feature', MemberFeature::MATCHES_CAMERA_ANGLES);
-
-        $this->paidSubscription($scorer, 'pro');
         MemberEntitlements::flush();
         $this->asMember($scorer)->postJson("/api/matches/{$match->id}/devices", ['role' => MatchDevice::ROLE_BOWLER])->assertOk();
     }

@@ -92,6 +92,9 @@ final class MatchesController extends Controller
             // Cricket keeps its own pipeline and has no rules generation to stamp.
             'sport_state' => array_filter([
                 'format' => $v['format'] ?? null,
+                // Tennis, tape, leather… The match camera turns its measured flight into
+                // release speed with this ball's air drag; it was validated and then dropped.
+                'ball' => $v['ball'] ?? null,
                 'rules_version' => strtolower((string) ($v['sport'] ?? 'cricket')) === 'cricket'
                     ? null : SportRules::CURRENT_VERSION,
             ], static fn ($x) => $x !== null) ?: null,

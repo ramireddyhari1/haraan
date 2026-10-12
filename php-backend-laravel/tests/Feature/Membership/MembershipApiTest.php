@@ -125,6 +125,28 @@ class MembershipApiTest extends TestCase
         $this->assertSame([true, true], $icons($hero));
     }
 
+    public function test_track_a_clip_is_hero_only(): void
+    {
+        $tracking = function (User $user): bool {
+            $rows = collect($this->asMember($user)->getJson('/api/membership')->assertOk()->json('data.entitlements'))
+                ->keyBy('key');
+
+            return (bool) $rows['tracking.clip_upload']['enabled'];
+        };
+
+        $this->assertFalse($tracking($this->member()));
+
+        $pro = $this->member();
+        $this->paidSubscription($pro, 'pro');
+        MemberEntitlements::flush();
+        $this->assertFalse($tracking($pro));
+
+        $hero = $this->member();
+        $this->paidSubscription($hero, 'hero');
+        MemberEntitlements::flush();
+        $this->assertTrue($tracking($hero));
+    }
+
     // ── Checkout ────────────────────────────────────────────────────────────
 
     public function test_subscribe_creates_a_razorpay_subscription_and_grants_nothing_yet(): void

@@ -6,7 +6,16 @@ import android.os.Build
 import android.view.HapticFeedbackConstants
 import android.view.View
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import com.haraan.app.ui.track.BallTrackScene
+import com.haraan.app.ui.track.ClipTrackActivity
+import com.haraan.app.ui.track.FilmGlyph
+import com.haraan.app.ui.track.PlayGlyph
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -138,6 +147,8 @@ private val Hairline = Color(0xFFE2E8F0)
 private val Field = Color(0xFFF8FAFC)
 private val Danger = Color(0xFFDC2626)
 private val Accent = HaraanColors.EventsBlue
+private val HeroOnyx = Color(0xFF111111)
+private val HeroGold = Color(0xFFE8C26A)
 
 private fun View.tick() = performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
 private fun View.confirm() = performHapticFeedback(
@@ -170,6 +181,31 @@ internal fun JoinMatchSheet(
   // Step two of a private code: the match it opened, waiting for a side to be picked.
   var picking by remember { mutableStateOf<CodeMatchPreview?>(null) }
   val target = remember(input) { parseJoinInput(input) }
+  // Track a clip: the system's own video picker, then the tracking screen.
+  val pickClip = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+    if (uri != null) {
+      view.confirm()
+      ClipTrackActivity.open(context, uri)
+      onDismiss()
+    }
+  }
+  // Track a clip is a Hero feature (tracking.clip_upload): asked as the sheet opens, so the card
+  // already says whether it opens the gallery or the plans.
+  var clipAccess by remember { mutableStateOf<com.haraan.app.data.membership.ClipTrackingAccess.State?>(null) }
+  LaunchedEffect(Unit) { clipAccess = com.haraan.app.data.membership.ClipTrackingAccess.check(context) }
+  fun openClipTracking() {
+    scope.launch {
+      val state = clipAccess ?: com.haraan.app.data.membership.ClipTrackingAccess.check(context).also { clipAccess = it }
+      if (state == com.haraan.app.data.membership.ClipTrackingAccess.State.ALLOWED) {
+        pickClip.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
+      } else {
+        // Not on a plan that includes it: the plans, where Hero says what it adds.
+        view.tick()
+        com.haraan.app.data.membership.MembershipNav.open()
+        onDismiss()
+      }
+    }
+  }
   val shake = remember { Animatable(0f) }
 
   // A small tick the moment a code becomes recognisable — the phone agreeing with you
@@ -284,7 +320,7 @@ internal fun JoinMatchSheet(
       Spacer(Modifier.height(18.dp))
       Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         ModeTile(
-          icon = Icons.Outlined.GroupAdd,
+          glyph = { tint -> PlayGlyph(tint, Modifier.size(20.dp)) },
           title = "Play",
           caption = "Private match\nHRN-XXXX",
           lit = target is JoinTarget.PrivateMatch,
@@ -296,7 +332,7 @@ internal fun JoinMatchSheet(
           },
         )
         ModeTile(
-          icon = Icons.Outlined.Videocam,
+          glyph = { tint -> FilmGlyph(tint, Color(0xFFDC2626), Modifier.size(20.dp)) },
           title = "Film",
           caption = "Second camera\n10-letter code",
           lit = target is JoinTarget.Camera,
@@ -436,6 +472,12 @@ internal fun JoinMatchSheet(
         },
         ready = target != null && !busy,
         onClick = { commit(target) },
+      )
+
+      Spacer(Modifier.height(18.dp))
+      TrackClipCard(
+        locked = clipAccess != null && clipAccess != com.haraan.app.data.membership.ClipTrackingAccess.State.ALLOWED,
+        onClick = { openClipTracking() },
       )
       }
      }
@@ -661,7 +703,7 @@ private fun TeamTile(
 
 @Composable
 private fun ModeTile(
-  icon: ImageVector,
+  glyph: @Composable (Color) -> Unit,
   title: String,
   caption: String,
   lit: Boolean,
@@ -682,7 +724,7 @@ private fun ModeTile(
   val border by animateColorAsState(if (lit) Accent else Hairline, tween(180), label = "modeTileBorder")
   val wash by animateColorAsState(if (lit) Accent.copy(alpha = 0.07f) else Color.White, tween(180), label = "modeTileWash")
   val chip by animateColorAsState(if (lit) Accent else Accent.copy(alpha = 0.10f), tween(180), label = "modeTileChip")
-  val glyph by animateColorAsState(if (lit) Color.White else Accent, tween(180), label = "modeTileGlyph")
+  val glyphTint by animateColorAsState(if (lit) Color.White else Accent, tween(180), label = "modeTileGlyph")
 
   Column(
     modifier
@@ -700,7 +742,7 @@ private fun ModeTile(
         .background(chip),
       contentAlignment = Alignment.Center,
     ) {
-      Icon(icon, contentDescription = null, tint = glyph, modifier = Modifier.size(19.dp))
+      glyph(glyphTint)
     }
     Spacer(Modifier.height(10.dp))
     Text(title, color = Ink, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
@@ -768,6 +810,112 @@ private fun PrimaryJoinButton(label: String, ready: Boolean, onClick: () -> Unit
       label = "joinButtonLabel",
     ) { text ->
       Text(text, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.2.sp)
+    }
+  }
+}
+
+/**
+ * TRACK A CLIP — the one drawn object in the sheet, and it carries the feature: a delivery let
+ * go behind the bowler's arm, pitching and lighting the far stumps, played once as the sheet
+ * opens (a tick in the hand as it pitches). The card leans towards the finger and dips under
+ * it, and opens the phone's video picker.
+ */
+@Composable
+private fun TrackClipCard(locked: Boolean, onClick: () -> Unit) {
+  val view = LocalView.current
+  val flight = remember { Animatable(0f) }
+  val lit = remember { Animatable(0f) }
+  LaunchedEffect(Unit) {
+    kotlinx.coroutines.delay(260)
+    launch {
+      kotlinx.coroutines.delay(1_000)
+      view.tick()
+    }
+    flight.animateTo(1f, tween(1_250, easing = androidx.compose.animation.core.LinearOutSlowInEasing))
+    lit.animateTo(1f, tween(320))
+  }
+  var pressed by remember { mutableStateOf(false) }
+  var tiltX by remember { mutableStateOf(0f) }
+  var tiltY by remember { mutableStateOf(0f) }
+  val scale by animateFloatAsState(
+    if (pressed) 0.97f else 1f,
+    spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+    label = "trackCardScale",
+  )
+  val rx by animateFloatAsState(if (pressed) tiltX else 0f, spring(dampingRatio = 0.55f, stiffness = 500f), label = "trackCardRx")
+  val ry by animateFloatAsState(if (pressed) tiltY else 0f, spring(dampingRatio = 0.55f, stiffness = 500f), label = "trackCardRy")
+  val lift by animateFloatAsState(if (pressed) 1f else 6f, tween(140), label = "trackCardLift")
+
+  Row(
+    Modifier
+      .fillMaxWidth()
+      .graphicsLayer {
+        scaleX = scale
+        scaleY = scale
+        rotationX = rx
+        rotationY = ry
+        cameraDistance = 14f * density
+      }
+      .shadow(lift.dp, RoundedCornerShape(22.dp), clip = false, ambientColor = Color.Black.copy(alpha = 0.06f), spotColor = Accent.copy(alpha = 0.25f))
+      .clip(RoundedCornerShape(22.dp))
+      .background(Color.White)
+      .border(1.dp, Hairline, RoundedCornerShape(22.dp))
+      .pointerInput(Unit) {
+        detectTapGestures(
+          onPress = { at ->
+            // Leans towards where it was pressed, a few degrees, like a card under a thumb.
+            tiltY = ((at.x / size.width) - 0.5f) * 8f
+            tiltX = -((at.y / size.height) - 0.5f) * 8f
+            pressed = true
+            view.tick()
+            tryAwaitRelease()
+            pressed = false
+          },
+          onTap = { onClick() },
+        )
+      }
+      .padding(10.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    BallTrackScene(
+      progress = flight.value,
+      lit = lit.value,
+      modifier = Modifier
+        .size(width = 104.dp, height = 116.dp)
+        .clip(RoundedCornerShape(16.dp)),
+    )
+    Spacer(Modifier.width(14.dp))
+    Column(Modifier.weight(1f)) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Track a clip", color = Ink, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold)
+        Spacer(Modifier.width(8.dp))
+        // Whose feature it is, in the Hero plan's own onyx and gold.
+        Text(
+          "HERO",
+          color = HeroGold,
+          fontSize = 9.5.sp,
+          fontWeight = FontWeight.ExtraBold,
+          letterSpacing = 1.2.sp,
+          modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(HeroOnyx)
+            .padding(horizontal = 7.dp, vertical = 2.dp),
+        )
+      }
+      Spacer(Modifier.height(3.dp))
+      Text(
+        "A video filmed from behind the bowler's stumps — every ball's speed, length and line.",
+        color = Muted,
+        fontSize = 12.5.sp,
+        lineHeight = 17.sp,
+      )
+      Spacer(Modifier.height(8.dp))
+      Text(
+        if (locked) "Included with Hero  →" else "Choose a video  →",
+        color = Accent,
+        fontSize = 13.5.sp,
+        fontWeight = FontWeight.Bold,
+      )
     }
   }
 }

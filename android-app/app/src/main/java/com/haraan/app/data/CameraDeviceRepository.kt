@@ -29,7 +29,46 @@ data class CameraSession(
     val videoQuality: String = DEFAULT_VIDEO_QUALITY,
     /** Hours to keep sent clips in the gallery, from /control. Null from an older server. */
     val clipKeepHours: Int? = null,
+    /** May this match use its cameras right now. Null from an older server, which never gated them. */
+    val cameraAccess: CameraAccess? = null,
+    /** The ball set when the match was made ("tennis", "leather"…), for release speed. */
+    val ballType: String? = null,
 )
+
+/**
+ * The server's answer to "may this match use second-screen cameras right now": the owner's
+ * plan includes them (Pro, Hero), or they are inside a venue slot they booked — a 6–7 PM
+ * booking works 6:00–7:00 only. [untilMs] lets a camera pause on time between check-ins.
+ */
+data class CameraAccess(
+    val allowed: Boolean,
+    /** "plan" or "booking"; null when locked. */
+    val via: String?,
+    /** Cameras this match may have; null = no ceiling. */
+    val angles: Int?,
+    val untilMs: Long?,
+    val opensAtMs: Long?,
+    val venue: String?,
+) {
+    fun allowsAt(nowMs: Long): Boolean = allowed && (untilMs == null || nowMs < untilMs)
+
+    companion object {
+        fun from(json: JSONObject?): CameraAccess? {
+            json ?: return null
+            fun text(key: String): String? = json.optString(key).takeIf { it.isNotBlank() && it != "null" }
+            fun instant(key: String): Long? = text(key)
+                ?.let { runCatching { java.time.OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull() }
+            return CameraAccess(
+                allowed = json.optBoolean("allowed", true),
+                via = text("via"),
+                angles = if (json.isNull("angles")) null else json.optInt("angles"),
+                untilMs = instant("until"),
+                opensAtMs = instant("opensAt"),
+                venue = text("venue"),
+            )
+        }
+    }
+}
 
 /** What the camera records at when nobody has said otherwise: frame rate before pixels. */
 const val DEFAULT_VIDEO_QUALITY = "1080p60"
@@ -46,6 +85,8 @@ data class CameraHeartbeat(
     val clipKeepHours: Int? = null,
     /** The recording quality set in /control. Null from an older server. */
     val videoQuality: String? = null,
+    /** Re-read every beat: the booked slot ending pauses the camera; a new one resumes it. */
+    val cameraAccess: CameraAccess? = null,
 )
 
 /**
@@ -89,12 +130,14 @@ sealed interface ClipUploadResult {
  * printed in red under the headline, so the screen writes its own copy per kind instead.
  */
 class PairingProblem(val kind: Kind, cause: Throwable? = null) : Exception(kind.name, cause) {
-    enum class Kind { INVALID, EXPIRED, OFFLINE, SERVER }
+    enum class Kind { INVALID, EXPIRED, OFFLINE, SERVER, CAMERA_TIME_OVER }
 
     companion object {
         fun of(status: Int) = PairingProblem(
             when (status) {
                 404 -> Kind.INVALID
+                // The match's camera time is over: its booked slot ended (CameraAccess).
+                403 -> Kind.CAMERA_TIME_OVER
                 // 410 is the server's "expired or already used".
                 409, 410 -> Kind.EXPIRED
                 else -> Kind.SERVER
@@ -156,6 +199,8 @@ open class CameraDeviceRepository {
             venue = data.optString("venue"),
             videoQuality = videoQualityOf(data.optString("videoQuality")),
             clipKeepHours = if (data.has("clipKeepHours")) data.optInt("clipKeepHours", -1).takeIf { it >= 0 } else null,
+            cameraAccess = CameraAccess.from(data.optJSONObject("cameraAccess")),
+            ballType = data.optString("ballType").takeIf { it.isNotBlank() && it != "null" },
         )
     }
 
@@ -181,6 +226,7 @@ open class CameraDeviceRepository {
             matchStatus = data.optString("matchStatus"),
             videoQuality = data.optString("videoQuality").takeIf { it.isNotBlank() }?.let { videoQualityOf(it) },
             clipKeepHours = if (data.has("clipKeepHours")) data.optInt("clipKeepHours", -1).takeIf { it >= 0 } else null,
+            cameraAccess = CameraAccess.from(data.optJSONObject("cameraAccess")),
         )
     }
 

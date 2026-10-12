@@ -306,11 +306,16 @@ class MatchDeviceRepository {
             )
         }
 
-    suspend fun devices(token: String, matchId: String): List<MatchDeviceInfo> =
+    suspend fun devices(token: String, matchId: String): List<MatchDeviceInfo> = board(token, matchId).first
+
+    /** The devices, and whether this match may use cameras right now (null: older server). */
+    suspend fun board(token: String, matchId: String): Pair<List<MatchDeviceInfo>, CameraAccess?> =
         withContext(Dispatchers.IO) {
             val response = getJson("/api/matches/$matchId/devices", token)
-            if (response.code !in 200..299) return@withContext emptyList()
-            val arr = JSONObject(response.body).optJSONArray("data") ?: return@withContext emptyList()
+            if (response.code !in 200..299) return@withContext emptyList<MatchDeviceInfo>() to null
+            val root = JSONObject(response.body)
+            val tracking = CameraAccess.from(root.optJSONObject("cameraAccess"))
+            val arr = root.optJSONArray("data") ?: return@withContext emptyList<MatchDeviceInfo>() to tracking
             buildList {
                 for (i in 0 until arr.length()) {
                     val o = arr.optJSONObject(i) ?: continue
@@ -325,7 +330,7 @@ class MatchDeviceRepository {
                         ),
                     )
                 }
-            }
+            } to tracking
         }
 
     suspend fun clips(token: String, matchId: String): List<MatchClip> =

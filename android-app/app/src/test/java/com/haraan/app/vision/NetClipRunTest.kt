@@ -25,7 +25,7 @@ class NetClipRunTest {
         val f = RandomAccessFile(raw, "r")
         val y = ByteArray(ySize); val u = ByteArray(uSize)
         val stumps = ColourStumpDetector(); val wickets = WicketTracker(); val ball = OpenCvBallTracker()
-        val camera = CameraIntrinsics(1.4, "assumed")
+        val camera = CameraIntrinsics(System.getenv("NET_FOCAL")?.toDouble() ?: 1.4, "assumed")
         val aspect = 720f / 1280f
         val still = FrameMotion(0f, 0f, 1f, 0f, 30, 32)
         val dbg = System.getenv("NET_DEBUG")?.split("-")?.map { it.toInt() }
@@ -87,7 +87,7 @@ class NetClipRunTest {
                 }
             }
             out.println("  TRIM kept=${FlightTrim.receding(track, aspect, l.anchor.base).size}/${track.size} out=${f3?.hasOutLeg} hits=${f3?.hitsStumps}")
-            out.println("  METRICS far=${"%.4f,%.4f,%.5f".format(l.anchor.base.x, l.anchor.base.y, l.anchor.span(aspect))} near=${bowlersEnd?.let { "%.3f,%.3f,%.4f".format(it.base.x, it.base.y, it.spanFw) }} ground=${g != null} h=${g?.heightM} dist=${g?.stumpsDistanceM} speed3d=${f3?.speedKmh} bounce=${f3?.let { "%.2f,%.2f".format(it.bounceX, it.bounceY) }} refused=$refused")
+            out.println("  METRICS far=${"%.4f,%.4f,%.5f".format(l.anchor.base.x, l.anchor.base.y, l.anchor.span(aspect))} near=${bowlersEnd?.let { "%.3f,%.3f,%.4f".format(it.base.x, it.base.y, it.spanFw) }} ground=${g != null} h=${g?.heightM} dist=${g?.stumpsDistanceM} speed3d=${f3?.speedKmh} ground=${f3?.groundKmh} leather=${f3?.copy(ball = BallDrag.LEATHER)?.speedKmh} tennis=${f3?.copy(ball = BallDrag.TENNIS)?.speedKmh} bounce=${f3?.let { "%.2f,%.2f".format(it.bounceX, it.bounceY) }} refused=$refused")
             if (f3 != null && pc != null) {
                 val p = ArPath.fromFlight(f3, pc)
                 if (p != null) {

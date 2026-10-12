@@ -162,7 +162,7 @@ class PitchGroundTest {
         val metrics = FlightMetrics.of(track, w.toFloat() / h, quad = null, wicket = lock, ground = cam)
         val flight = metrics.flight3d
         assertNotNull("no 3D flight without corners", flight)
-        assertEquals("speed", 90.0, flight!!.speedKmh, 9.0)
+        assertEquals("speed", 90.0, flight!!.groundKmh, 9.0)
         assertEquals("bounce along the pitch", bounceY, flight.bounceY, 1.0)
         assertNotNull("a path for the picture", ArPath.fromFlight(flight, cam))
         val bounce = metrics.bounce

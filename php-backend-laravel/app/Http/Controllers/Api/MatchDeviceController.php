@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api;
 
+use App\Services\CameraAccess;
 use App\Http\Controllers\Controller;
 use App\Models\LiveMatch;
 use App\Models\MatchDevice;
@@ -49,14 +50,36 @@ final class MatchDeviceController extends Controller
             return response()->json(['error' => 'Unknown device role.'], 422);
         }
 
-        // Camera angles are a member plan limit: count the OTHER roles already paired or
-        // pairing on this match. Re-pairing a role that's already counted is always allowed.
+        // Second-screen cameras need a plan that includes them, or a venue slot the scorer
+        // booked that covers right now (a 6–7 PM slot works 6:00–7:00). See CameraAccess.
+        $access = app(CameraAccess::class)->forOwner($user);
+        if (! $access['allowed']) {
+            return response()->json([
+                'error' => $this->lockedMessage($access),
+                'code' => 'camera_locked',
+                'cameraAccess' => $access,
+            ], 403);
+        }
+
+        // Count the OTHER roles already paired or pairing on this match. Re-pairing a role
+        // that's already counted is always allowed.
         $otherAngles = MatchDevice::where('match_id', $match->id)
             ->where('status', '!=', MatchDevice::STATUS_REVOKED)
             ->where('role', '!=', $role)
             ->distinct()
             ->count('role');
-        app(MemberEntitlements::class)->assertWithinLimit($user, MemberFeature::MATCHES_CAMERA_ANGLES, $otherAngles);
+        if ($access['via'] === CameraAccess::VIA_PLAN) {
+            app(MemberEntitlements::class)->assertWithinLimit($user, MemberFeature::MATCHES_CAMERA_ANGLES, $otherAngles);
+        } elseif ($access['angles'] !== null && $otherAngles + 1 > $access['angles']) {
+            return response()->json([
+                'error' => $access['angles'] === 1
+                    ? 'Your booked slot includes one camera. Pro or Hero adds a second angle.'
+                    : 'Your booked slot includes ' . $access['angles'] . ' cameras.',
+                'code' => 'limit_reached',
+                'feature' => MemberFeature::MATCHES_CAMERA_ANGLES,
+                'cameraAccess' => $access,
+            ], 403);
+        }
 
         // One live pairing per role: a scorer who taps twice wants the code they are
         // looking at to be the one that works, not a pile of valid codes.
@@ -92,7 +115,11 @@ final class MatchDeviceController extends Controller
             ->map(fn (MatchDevice $d) => $this->devicePayload($d))
             ->all();
 
-        return response()->json(['data' => $devices]);
+        return response()->json([
+            'data' => $devices,
+            // So the scorer sees whether cameras can be added, and until when, before anyone bowls.
+            'cameraAccess' => app(CameraAccess::class)->forMatch($match),
+        ]);
     }
 
     /** Cut a device loose. Its session token stops working on the next request. */
@@ -170,6 +197,15 @@ final class MatchDeviceController extends Controller
             ], 410);
         }
 
+        // A code minted inside a booked slot cannot be claimed once the slot is over.
+        $access = app(CameraAccess::class)->forMatch(LiveMatch::find($device->match_id));
+        if (! $access['allowed']) {
+            return response()->json([
+                'error' => 'This match\'s camera time is over. The scorer can add a camera again with Pro or Hero, or in their next booked slot.',
+                'code' => 'camera_locked',
+            ], 403);
+        }
+
         $session = MatchDevice::freshSessionToken();
         $device->update([
             'status' => MatchDevice::STATUS_CONNECTED,
@@ -194,6 +230,13 @@ final class MatchDeviceController extends Controller
             // Known before the first frame, so the camera binds at the right rate.
             'videoQuality' => \App\Support\PlatformRules::string('creation.camera_video_quality'),
             'clipKeepHours' => \App\Support\PlatformRules::int('creation.camera_clip_keep_hours'),
+            // Until when this camera may film and track. See CameraAccess.
+            'cameraAccess' => $access,
+            // The ball set when the match was made: how fast it slows in the air decides the
+            // release speed the camera reports. Null when the creator didn't say.
+            'ballType' => is_array($match?->sport_state)
+                ? ($match->sport_state['ball'] ?? $match->sport_state['format']['ball'] ?? null)
+                : null,
         ]]);
     }
 
@@ -224,6 +267,8 @@ final class MatchDeviceController extends Controller
             'clipKeepHours' => \App\Support\PlatformRules::int('creation.camera_clip_keep_hours'),
             // What the camera records at, from /control. Applied between balls.
             'videoQuality' => \App\Support\PlatformRules::string('creation.camera_video_quality'),
+            // Re-asked every beat: the booked slot ending pauses the camera; a new one resumes it.
+            'cameraAccess' => app(CameraAccess::class)->forMatch($match),
         ]]);
     }
 
@@ -592,6 +637,19 @@ final class MatchDeviceController extends Controller
         }
 
         return [$match, $user, null];
+    }
+
+    /** What a locked scorer is told: when their slot opens, or how to unlock cameras. */
+    private function lockedMessage(array $access): string
+    {
+        if ($access['opensAt'] !== null) {
+            $at = \Illuminate\Support\Carbon::parse($access['opensAt'])
+                ->setTimezone(\App\Support\BusinessClock::zone())->format('g:i A');
+
+            return "Cameras open at {$at}, when your slot" . ($access['venue'] ? " at {$access['venue']}" : '') . ' starts.';
+        }
+
+        return 'Add a camera with Pro or Hero, or during a venue slot you have booked.';
     }
 
     /** @return array<string,mixed> */

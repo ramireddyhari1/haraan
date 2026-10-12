@@ -118,10 +118,18 @@ class QuadSpeedTest {
         return out
     }
 
+    /*
+     * The flights here are simulated with no air drag, so the speed they were "bowled" at is the
+     * fitted ground speed. Release speed (what the camera shows) is that carried back through a
+     * ball's drag, checked on its own in BallDragTest.
+     */
     private fun speedOf(track: List<BallSighting>, quad: PitchQuad): MetricValue {
         val bounce = BouncePoint.find(track, quad)
         assertNotNull("the bounce has to be found first", bounce)
-        return QuadSpeed.estimate(track, quad, bounce!!, aspect.toFloat())
+        return when (val fit = QuadSpeed.fit(track, quad, bounce!!, aspect.toFloat())) {
+            is QuadSpeed.FitResult.Ok -> MetricValue.Estimated(fit.flight.groundKmh, "km/h", "ground")
+            is QuadSpeed.FitResult.Refused -> MetricValue.Unavailable(fit.reason)
+        }
     }
 
     private fun assertKmh(expected: Double, value: MetricValue, tolerancePct: Double) {
@@ -248,7 +256,7 @@ class QuadSpeedTest {
         assertTrue(result.trustworthy)
         val track = delivery(lens, kmh = 130.0, lengthM = 5.0)
         val fit = QuadSpeed.fit(track, result.quad, null, aspect.toFloat()) as QuadSpeed.FitResult.Ok
-        assertTrue("expected ~130, got ${fit.flight.speedKmh}", abs(fit.flight.speedKmh - 130.0) / 130.0 < 0.05)
+        assertTrue("expected ~130, got ${fit.flight.groundKmh}", abs(fit.flight.groundKmh - 130.0) / 130.0 < 0.05)
     }
 
     @Test
@@ -258,7 +266,7 @@ class QuadSpeedTest {
         val result = StumpCalibration.solve(stumpTaps(lens, CameraEnd.STRIKER, noise), CameraEnd.STRIKER, aspect.toFloat())!!
         val track = delivery(lens, kmh = 120.0, lengthM = 6.0)
         val fit = QuadSpeed.fit(track, result.quad, null, aspect.toFloat()) as QuadSpeed.FitResult.Ok
-        assertTrue("expected ~120, got ${fit.flight.speedKmh}", abs(fit.flight.speedKmh - 120.0) / 120.0 < 0.10)
+        assertTrue("expected ~120, got ${fit.flight.groundKmh}", abs(fit.flight.groundKmh - 120.0) / 120.0 < 0.10)
     }
 
     @Test
@@ -308,7 +316,7 @@ class QuadSpeedTest {
         val fit = QuadSpeed.fit(track, quad, null, aspect.toFloat())
         assertTrue("expected a fit, got $fit", fit is QuadSpeed.FitResult.Ok)
         val flight = (fit as QuadSpeed.FitResult.Ok).flight
-        assertTrue("expected ~125 km/h, got ${flight.speedKmh}", abs(flight.speedKmh - 125.0) / 125.0 < 0.05)
+        assertTrue("expected ~125 km/h, got ${flight.groundKmh}", abs(flight.groundKmh - 125.0) / 125.0 < 0.05)
         assertEquals(6.0, flight.bounceY, 0.35)
     }
 
@@ -317,7 +325,7 @@ class QuadSpeedTest {
         val lens = batterEndLens(height = 2.0, behind = 6.0, focal = 1.6)
         val track = delivery(lens, kmh = 85.0, lengthM = 4.5)
         val fit = QuadSpeed.fit(track, batterEndQuad(lens), null, aspect.toFloat()) as QuadSpeed.FitResult.Ok
-        assertTrue("expected ~85 km/h, got ${fit.flight.speedKmh}", abs(fit.flight.speedKmh - 85.0) / 85.0 < 0.05)
+        assertTrue("expected ~85 km/h, got ${fit.flight.groundKmh}", abs(fit.flight.groundKmh - 85.0) / 85.0 < 0.05)
     }
 
     @Test
@@ -326,7 +334,7 @@ class QuadSpeedTest {
         val track = delivery(lens, kmh = 120.0)
         val quad = quadFrom(lens)
         val scanned = QuadSpeed.fit(track, quad, null, aspect.toFloat()) as QuadSpeed.FitResult.Ok
-        assertTrue(abs(scanned.flight.speedKmh - 120.0) / 120.0 < 0.05)
+        assertTrue(abs(scanned.flight.groundKmh - 120.0) / 120.0 < 0.05)
     }
 
     @Test

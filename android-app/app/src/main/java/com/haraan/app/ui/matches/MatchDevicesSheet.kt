@@ -121,6 +121,7 @@ fun MatchDevicesSheet(matchId: String, onDismiss: () -> Unit, onOpenClips: () ->
     val repo = remember { MatchDeviceRepository() }
 
     var devices by remember { mutableStateOf<List<MatchDeviceInfo>>(emptyList()) }
+    var tracking by remember { mutableStateOf<com.haraan.app.data.CameraAccess?>(null) }
     var pairing by remember { mutableStateOf<PairingSession?>(null) }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -132,7 +133,10 @@ fun MatchDevicesSheet(matchId: String, onDismiss: () -> Unit, onOpenClips: () ->
         while (true) {
             val token = TokenStore.getToken(ctx)
             if (TokenStore.isSignedIn(token)) {
-                devices = runCatching { repo.devices(token!!, matchId) }.getOrDefault(devices)
+                runCatching { repo.board(token!!, matchId) }.getOrNull()?.let { (list, t) ->
+                    devices = list
+                    tracking = t
+                }
                 // The moment the code is claimed, the QR has done its job.
                 pairing?.let { open ->
                     if (devices.any { it.id == open.id && it.status != "pending" }) pairing = null
@@ -170,6 +174,7 @@ fun MatchDevicesSheet(matchId: String, onDismiss: () -> Unit, onOpenClips: () ->
                     fontSize = 13.sp,
                     lineHeight = 18.sp,
                 )
+                tracking?.let { TrackingNote(it) { com.haraan.app.data.membership.MembershipNav.open(); onDismiss() } }
                 Spacer(Modifier.height(16.dp))
 
                 SetupScene(Modifier.fillMaxWidth().height(150.dp))
@@ -183,7 +188,8 @@ fun MatchDevicesSheet(matchId: String, onDismiss: () -> Unit, onOpenClips: () ->
                 SectionLabel("WHERE WILL IT STAND?")
                 Spacer(Modifier.height(10.dp))
                 MatchDeviceRole.entries.forEach { role ->
-                    RoleCard(role, enabled = !busy) {
+                    val locked = tracking?.allowsAt(System.currentTimeMillis()) == false
+                    RoleCard(role, enabled = !busy && !locked, locked = locked) {
                         error = null
                         busy = true
                         scope.launch {
@@ -461,10 +467,12 @@ private fun NeedGlyph(need: Need, modifier: Modifier) {
 }
 
 @Composable
-private fun RoleCard(role: MatchDeviceRole, enabled: Boolean, onClick: () -> Unit) {
+private fun RoleCard(role: MatchDeviceRole, enabled: Boolean, locked: Boolean = false, onClick: () -> Unit) {
     Row(
         Modifier
             .pressable(enabled = enabled, onClick = onClick)
+            // Locked until a plan or the booked slot: shown, so the scorer sees what they'd get.
+            .graphicsLayer { alpha = if (locked) 0.45f else 1f }
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(Well)
@@ -705,3 +713,60 @@ private fun qrBitmap(content: String, size: Int): Bitmap? = try {
     null
 }
 
+/**
+ * Whether cameras can be added to this match, said before anyone bowls, with what unlocks them:
+ * Pro or Hero any time, or a venue slot the scorer booked — a 6–7 PM booking works 6:00 to 7:00.
+ */
+@Composable
+private fun TrackingNote(t: com.haraan.app.data.CameraAccess, onSeePlans: () -> Unit) {
+    val now = System.currentTimeMillis()
+    fun clock(ms: Long): String = java.time.format.DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.ENGLISH)
+        .format(java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault()))
+    val on = t.allowsAt(now)
+    // Only the booked slot is worth a line while it's on; a plan needs no announcement.
+    if (on && t.via == "plan") return
+    val line = when {
+        on && t.untilMs != null -> "Cameras are on till ${clock(t.untilMs)}" +
+            (t.venue?.let { ", for your slot at $it." } ?: ", for your booked slot.") +
+            (if (t.angles == 1) " One camera with a slot." else "")
+        t.opensAtMs != null -> "Cameras open at ${clock(t.opensAtMs)}" +
+            (t.venue?.let { ", when your slot at $it starts." } ?: ", when your slot starts.")
+        else -> "Add cameras with Pro or Hero, or during a venue slot you've booked: a 6–7 PM slot gives you cameras from 6:00 to 7:00."
+    }
+    val tint = if (on) Turf else Ink2
+    Spacer(Modifier.height(12.dp))
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(if (on) Turf.copy(alpha = 0.08f) else Well)
+            .border(1.dp, if (on) Turf.copy(alpha = 0.3f) else Hair, RoundedCornerShape(14.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // A ball and its path: lit while cameras are on, a dashed outline while they wait.
+            androidx.compose.foundation.Canvas(Modifier.size(width = 26.dp, height = 18.dp)) {
+                val path = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(1.dp.toPx(), size.height * 0.85f)
+                    quadraticTo(size.width * 0.45f, size.height * 0.05f, size.width - 6.dp.toPx(), size.height * 0.45f)
+                }
+                drawPath(
+                    path, tint.copy(alpha = 0.7f),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(
+                        width = 1.6.dp.toPx(),
+                        pathEffect = if (on) null else androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4f, 4f)),
+                    ),
+                )
+                drawCircle(tint, 3.6.dp.toPx(), androidx.compose.ui.geometry.Offset(size.width - 4.dp.toPx(), size.height * 0.45f))
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(line, color = if (on) Ink else Ink2, fontSize = 12.5.sp, lineHeight = 17.sp, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal, modifier = Modifier.weight(1f))
+        }
+        if (!on) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "See Pro and Hero",
+                color = Color.White, fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Blue)
+                    .pressable(onClick = onSeePlans).padding(horizontal = 12.dp, vertical = 7.dp),
+            )
+        }
+    }
+}

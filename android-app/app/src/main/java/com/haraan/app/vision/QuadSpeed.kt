@@ -354,7 +354,7 @@ object QuadSpeed {
         is FitResult.Ok -> MetricValue.Estimated(
             result.flight.speedKmh,
             "km/h",
-            "average before the bounce, from the pitch corners (camera %.1f m up) — a little under release speed"
+            "release speed, from the pitch corners (camera %.1f m up) and the ball's drag"
                 .format(result.flight.cameraHeightM),
         )
     }
@@ -524,8 +524,14 @@ data class Flight3d(
     val firstSeenMs: Double,
     val lastSeenMs: Double,
     val cameraHeightM: Double,
+    /** The ball, for how fast it slows in the air. See [BallDrag]. */
+    val ball: BallDrag = BallDrag.LEATHER,
 ) {
-    val speedKmh: Double get() = hypot(inVx, inVy) * 3.6
+    /** The fitted steady speed over the ground before the bounce: the average, not the release. */
+    val groundKmh: Double get() = hypot(inVx, inVy) * 3.6
+
+    /** Release speed — what a speed gun reads — for [ball]. Every readout shows this one. */
+    val speedKmh: Double get() = releaseKmh(this)
     val hasOutLeg: Boolean get() = outVx != null && outVy != null && outVzUp != null
 
     /** Where the ball was at [ms] on the sightings' clock. Height never below the grass. */
@@ -565,7 +571,7 @@ data class Flight3d(
             abs(it.x) <= LbwProjector.HITTING_LIMIT_M && it.z <= LbwProjector.OVER_THE_TOP_M
         }
 
-    private companion object {
+    internal companion object {
         const val G = 9.81
         const val RELEASE_Y_M = 18.4
         const val MAX_BACKFILL_MS = 400.0

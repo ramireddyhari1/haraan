@@ -256,6 +256,11 @@ private fun joinProblemOf(error: Throwable): JoinProblem {
             "Turn on mobile data or Wi-Fi on this phone, then try again.",
             canRetry = true,
         )
+        com.haraan.app.data.PairingProblem.Kind.CAMERA_TIME_OVER -> JoinProblem(
+            "This match's camera time is over",
+            "Cameras work during the scorer's booked venue slot, or any time with Pro or Hero.",
+            canRetry = false,
+        )
         com.haraan.app.data.PairingProblem.Kind.SERVER -> JoinProblem(
             "Haraan isn't answering",
             "That's on our side, not yours. Give it a moment and try again.",
@@ -808,6 +813,38 @@ private fun CameraMode(
     // time somebody is holding the phone, and tracking the warm-up is noise.
     var trackedPoints by remember { mutableStateOf(0) }
     var trackingLive by remember { mutableStateOf(false) }
+    /*
+     * MAY THIS MATCH USE ITS CAMERA RIGHT NOW.
+     *
+     * The match owner's plan (Pro, Hero), or a venue slot they booked — a 6–7 PM booking
+     * films and tracks from 6:00 to 7:00 and no longer. Known at join, re-read every
+     * heartbeat, and checked against the clock here too, so the slot ending pauses the camera
+     * on time between check-ins. It stays paired: the owner's next slot or a plan resumes it.
+     * Null (an older server) means the gate does not exist, so the camera works.
+     */
+    var trackingAccess by remember { mutableStateOf(session.cameraAccess) }
+    /*
+     * THE BALL, for release speed: a tennis ball loses pace three times as fast as a leather
+     * one, so the same flight was bowled ~10 km/h quicker. From the match when its creator set
+     * it; otherwise the last one used on this phone; changeable on the SPEED row.
+     */
+    var ball by remember {
+        mutableStateOf(
+            com.haraan.app.vision.BallDrag.fromServer(session.ballType)
+                ?: com.haraan.app.vision.BallDrag.fromServer(
+                    ctx.getSharedPreferences("camera_ball", android.content.Context.MODE_PRIVATE).getString("ball", null),
+                )
+                ?: com.haraan.app.vision.BallDrag.LEATHER,
+        )
+    }
+    var clockMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(15_000)
+            clockMs = System.currentTimeMillis()
+        }
+    }
+    val trackingAllowed = trackingAccess?.allowsAt(clockMs) ?: true
     // What the detector is seeing, for the overlay. Short on purpose: a long trail smears
     // into a blur and hides the jitter that tells you it is tracking the wrong thing.
     var ballTrail by remember { mutableStateOf<List<com.haraan.app.vision.BallSighting>>(emptyList()) }
@@ -1711,6 +1748,14 @@ private fun CameraMode(
             // The admin's retention for the gallery, applied to what is kept already.
             beat.clipKeepHours?.let { uploadQueue.setKeepHours(it) }
             beat.videoQuality?.let { if (it != videoQuality) pendingQuality = it }
+            beat.cameraAccess?.let { next ->
+                // Felt in the hand the moment a booked slot opens, as "the ball is on" is.
+                if (next.allowsAt(System.currentTimeMillis()) && trackingAccess?.allowsAt(System.currentTimeMillis()) == false) {
+                    view.performHapticFeedback(Feel.TICK)
+                }
+                trackingAccess = next
+                clockMs = System.currentTimeMillis()
+            }
             delay(20_000)
         }
     }
@@ -2584,6 +2629,14 @@ private fun CameraMode(
                     },
                     onOpenReplay = lastMetrics?.flight3d?.let { { showReplay = true } },
                     onWatchClip = replayClip?.let { { showVideo = true } },
+                    ball = ball,
+                    onBall = { next ->
+                        ball = next
+                        ctx.getSharedPreferences("camera_ball", android.content.Context.MODE_PRIVATE)
+                            .edit().putString("ball", next.serverValue).apply()
+                        // The ball already on screen re-reads at once, replay included.
+                        liveResult?.let { r -> r.flight?.copy(ball = next)?.let { f -> liveResult = LiveReplay(r.frames, r.path, f.speedKmh, f, r.ballMs) } }
+                    },
                     modifier = Modifier
                         .align(Alignment.TopStart)
                         .statusBarsPadding()
@@ -2817,7 +2870,7 @@ private fun CameraMode(
              */
             val measureLock = steadyWicket.value() ?: wicketLock
             val (quadFor3d, groundCamera) = flightCameras(found, measureLock, cameraIntrinsics, uprightWidthPx, uprightAspect, bowlersEndBase)
-            lastMetrics = com.haraan.app.vision.FlightMetrics.of(flight, uprightAspect, quadFor3d, measureLock, groundCamera).also { metrics ->
+            lastMetrics = com.haraan.app.vision.FlightMetrics.of(flight, uprightAspect, quadFor3d, measureLock, groundCamera, ball).also { metrics ->
                 // From the fitted flight when there is one — either end of the pitch.
                 lastBounce = metrics.bounce
                 // The path on the real picture first; the 3D replay follows it.
@@ -2891,6 +2944,11 @@ private fun CameraMode(
         val armDelivery: (Int?) -> Unit = fun(ballSeq: Int?) {
             val capture = videoCapture ?: return
             if (recording) return
+            // Outside the owner's plan or booked slot the camera is paused: no clip, no tracking.
+            if (!trackingAllowed) {
+                if (ballSeq == null) view.performHapticFeedback(Feel.REMOVE)
+                return
+            }
             // An Auto segment only when the auto loop armed it; the scorer and the button
             // always make a clip that is kept.
             val wasAuto = armingAuto
@@ -3145,6 +3203,11 @@ private fun CameraMode(
             // this phone at the boundary needs to know the difference between "idle" and
             // "the scorer has stopped hearing from me".
             !live -> "Reconnecting to the match…"
+            // Paused: say when it opens again, if the owner has a slot later today.
+            !trackingAllowed -> trackingAccess?.opensAtMs?.let { at ->
+                "Camera opens at ${clockLabel(at)}" + (trackingAccess?.venue?.let { " · $it" } ?: "")
+            } ?: trackingAccess?.untilMs?.let { "Camera paused · the booked slot ended at ${clockLabel(it)}" }
+                ?: "Camera paused · needs Pro, Hero or a booked slot"
             // Said plainly, and said with what still works. A phone that has gone quiet
             // about the ball while the operator can see it is filming invites the guess
             // that the whole thing has broken.
@@ -3156,6 +3219,8 @@ private fun CameraMode(
             pendingCount > 0 -> "$pendingCount queued · waiting to send"
             trackedPoints > 0 -> "$clipsSent sent · ball seen in $trackedPoints frames$trackWord"
             clipsSent > 0 -> "$clipsSent sent · films on the scorer's BALL"
+            trackingAccess?.via == "booking" && trackingAccess?.untilMs != null && clipsSent == 0 ->
+                "Camera on till ${clockLabel(trackingAccess!!.untilMs!!)} · films on BALL"
             else -> "Films on the scorer's BALL · or tap to film"
         }
         ShutterControl(
@@ -3172,7 +3237,7 @@ private fun CameraMode(
             status = status,
             isError = uploadError != null || (queueError != null && pendingCount > 0),
             recording = recording,
-            canFilm = granted && videoCapture != null && !recording,
+            canFilm = granted && videoCapture != null && !recording && trackingAllowed,
             landscape = landscape,
             // The backup: a tap during a ball the cue missed still files the clip under
             // that ball, so the scorer's REVIEW finds it.
@@ -3535,7 +3600,10 @@ private data class MetricCardData(
     val note: String,
 )
 
-private fun metricCards(metrics: com.haraan.app.vision.FlightMetrics?): List<MetricCardData> {
+private fun metricCards(
+    metrics: com.haraan.app.vision.FlightMetrics?,
+    ball: com.haraan.app.vision.BallDrag = com.haraan.app.vision.BallDrag.LEATHER,
+): List<MetricCardData> {
     fun reason(m: com.haraan.app.vision.MetricValue?, waiting: String) = when (m) {
         is com.haraan.app.vision.MetricValue.Unavailable -> "Needs ${m.reason.removePrefix("needs ")}"
         null -> waiting
@@ -3553,7 +3621,9 @@ private fun metricCards(metrics: com.haraan.app.vision.FlightMetrics?): List<Met
             label = "Speed",
             // Measured from the stumps side-on, or estimated from the pitch corners behind
             // the arm; the note says which.
-            value = (speed as? com.haraan.app.vision.MetricValue.Measured)?.value
+            // The fitted flight re-read for the ball chosen now, so changing the chip moves it.
+            value = metrics?.flight3d?.copy(ball = ball)?.speedKmh
+                ?: (speed as? com.haraan.app.vision.MetricValue.Measured)?.value
                 ?: (speed as? com.haraan.app.vision.MetricValue.Estimated)?.value,
             decimals = 0,
             unit = "km/h",
@@ -3610,6 +3680,8 @@ private fun DeliveryMetricsStack(
     onOpenReplay: (() -> Unit)? = null,
     /** Null until the delivery's clip is finished and kept. */
     onWatchClip: (() -> Unit)? = null,
+    ball: com.haraan.app.vision.BallDrag = com.haraan.app.vision.BallDrag.LEATHER,
+    onBall: (com.haraan.app.vision.BallDrag) -> Unit = {},
 ) {
     /*
      * A camera readout sits ON the picture, so it does not grow with the system font size
@@ -3624,7 +3696,7 @@ private fun DeliveryMetricsStack(
             minOf(baseDensity.fontScale, HUD_MAX_FONT_SCALE),
         ),
     ) {
-        DeliveryReadout(metrics, stale, modifier, showLine, hand, onToggleHand, onOpenReplay, onWatchClip)
+        DeliveryReadout(metrics, stale, modifier, showLine, hand, onToggleHand, onOpenReplay, onWatchClip, ball, onBall)
     }
 }
 
@@ -3638,8 +3710,10 @@ private fun DeliveryReadout(
     onToggleHand: () -> Unit,
     onOpenReplay: (() -> Unit)?,
     onWatchClip: (() -> Unit)?,
+    ball: com.haraan.app.vision.BallDrag,
+    onBall: (com.haraan.app.vision.BallDrag) -> Unit,
 ) {
-    val cards = metricCards(metrics)
+    val cards = metricCards(metrics, ball)
     // Which row is open, if any: one at a time, so the panel only ever widens for one note.
     var openRow by remember { mutableStateOf<Int?>(null) }
     val panelWidth by androidx.compose.animation.core.animateDpAsState(
@@ -3686,6 +3760,7 @@ private fun DeliveryReadout(
                     generation = metrics,
                     open = openRow == index,
                     onToggle = { openRow = if (openRow == index) null else index },
+                    accessory = if (card.label == "Speed") ({ BallChip(ball, onBall) }) else null,
                 )
             }
             if (showLine) {
@@ -3808,6 +3883,33 @@ private fun HandChip(hand: com.haraan.app.vision.BatterHand, onToggleHand: () ->
     )
 }
 
+/**
+ * The ball the speed is read for. A tap moves to the next kind; the figure above it re-reads
+ * at once, because the same flight was bowled faster with a ball that slows more in the air.
+ */
+@Composable
+private fun BallChip(ball: com.haraan.app.vision.BallDrag, onBall: (com.haraan.app.vision.BallDrag) -> Unit) {
+    val view = LocalView.current
+    val choices = com.haraan.app.vision.BallDrag.CHOICES
+    Text(
+        ball.label.uppercase(),
+        color = Color.White,
+        fontSize = 8.5.sp,
+        fontWeight = FontWeight.ExtraBold,
+        letterSpacing = 0.6.sp,
+        maxLines = 1,
+        softWrap = false,
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(if (ball == com.haraan.app.vision.BallDrag.TENNIS) Color(0xFF65A30D) else Color(0xFFB91C1C))
+            .clickable {
+                view.performHapticFeedback(Feel.SELECT)
+                onBall(choices[(choices.indexOf(ball) + 1) % choices.size])
+            }
+            .padding(horizontal = 6.dp, vertical = 1.dp),
+    )
+}
+
 @Composable
 private fun RowLabel(text: String) {
     Text(
@@ -3828,6 +3930,8 @@ private fun MetricRow(
     generation: Any?,
     open: Boolean,
     onToggle: () -> Unit,
+    /** Beside the label: the ball chip on the SPEED row. */
+    accessory: (@Composable () -> Unit)? = null,
 ) {
     val shown = remember { Animatable(0f) }
     val pop = remember { Animatable(1f) }
@@ -3854,7 +3958,15 @@ private fun MetricRow(
     val press = remember { MutableInteractionSource() }
 
     Column(Modifier.landingRow(press, pop.value, flash.value, onToggle)) {
-        RowLabel(card.label.uppercase())
+        if (accessory != null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RowLabel(card.label.uppercase())
+                Spacer(Modifier.weight(1f))
+                accessory()
+            }
+        } else {
+            RowLabel(card.label.uppercase())
+        }
         Row(verticalAlignment = Alignment.Bottom, modifier = Modifier.graphicsLayer { alpha = dim }) {
             if (card.value == null) {
                 Text("—", color = Color.White.copy(alpha = 0.3f), fontSize = 17.sp, fontFamily = ArchivoDisplay)
@@ -5444,3 +5556,8 @@ private fun startClip(
             }
     }.getOrNull()
 }
+
+/** "6:00 PM" in the phone's own zone — the slot as the person holding the phone reads it. */
+private fun clockLabel(epochMs: Long): String =
+    java.time.format.DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.ENGLISH)
+        .format(java.time.Instant.ofEpochMilli(epochMs).atZone(java.time.ZoneId.systemDefault()))

@@ -44,6 +44,13 @@
             android:launchMode="singleTop"
             android:exported="true" />
 
+        <!-- Track a clip: a picked video through the match camera's ball tracking. -->
+        <activity
+            android:name=".ui.track.ClipTrackActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.Thanna" />
+
         <!--
           The home-screen icon. Exactly one of these three is enabled at a time; AppIcons.kt
           flips them when a Pro or Hero member picks their tier's icon, and puts the default

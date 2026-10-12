@@ -166,6 +166,8 @@ class CreateMatchFormatTest extends TestCase
         $match = LiveMatch::query()->latest('id')->firstOrFail();
 
         self::assertSame('20 Over Match', $match->competition);
-        self::assertNull($match->sport_state);
+        // No format stored for a legacy client — only the ball, which the match camera reads
+        // for release speed (a tennis ball slows far more in the air than a leather one).
+        self::assertSame(['ball' => 'tennis'], $match->sport_state);
     }
 }

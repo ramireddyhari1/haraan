@@ -98,15 +98,8 @@ class NetReplayActivity : ComponentActivity() {
     }
 }
 
-/**
- * One finished delivery: when it was called on the clip's clock, and what to draw — and its
- * own frames, small JPEGs on the clip's clock, from just before the ball was first seen to a
- * beat after it was called, for the replay to play itself; see [DeliveryReplayView].
- */
-private class Delivery(val calledMs: Double, val startMs: Double, val path: ArPath, val speedKmh: Double?, val flight: Flight3d? = null) {
-    val frames = ArrayList<Pair<Double, ByteArray>>()
-    var tailUntilMs = calledMs + REPLAY_TAIL_MS
-}
+/** One finished delivery: the app's own, from [ClipDeliveryAnalyzer]. */
+private typealias Delivery = ClipDelivery
 
 private sealed interface Phase {
     class Analysing(val progress: Float, val preview: ImageBitmap?, val note: String) : Phase
@@ -295,180 +288,42 @@ private fun PlaybackView(clip: String, p: Phase.Playing) {
     }
 }
 
+/*
+ * The app's own clip analysis ([ClipDeliveryAnalyzer] — the same chain the "Track a clip"
+ * screen and the match camera use), then the clip's shape for playback.
+ */
 private suspend fun analyse(clip: String, from: Int, to: Int, every: Int, publish: (Phase) -> Unit) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-        publish(Phase.Failed("needs Android 9+"))
+    val result = try {
+        ClipDeliveryAnalyzer.analyse(clip, { fraction, found, preview ->
+            publish(Phase.Analysing(fraction, preview?.asImageBitmap(), if (fraction < 0.12f) "finding the stumps" else "$found found"))
+        }, from, to, every)
+    } catch (p: ClipProblem) {
+        publish(Phase.Failed(p.message ?: "cannot analyse $clip"))
         return
     }
     val retriever = MediaMetadataRetriever()
+    var videoAspect = 9f / 16f
     try {
         retriever.setDataSource(clip)
-    } catch (t: Throwable) {
-        publish(Phase.Failed("cannot open $clip: ${t.message}"))
-        return
-    }
-    val count = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT)?.toIntOrNull() ?: 0
-    val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-    val vw = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull() ?: 9f
-    val vh = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toFloatOrNull() ?: 16f
-    val rot = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-    val videoAspect = if (rot == 90 || rot == 270) vh / vw else vw / vh
-    val fps = if (durationMs > 0) count * 1000.0 / durationMs else 30.0
-    /*
-     * Every frame of the clip by default. At 30 a second (what the live camera analyses) a
-     * 120 fps net clip gave 2 believable deliveries of 11; every frame gave 7 — the far half
-     * of the flight, where it pitches, is only ever seen at the higher rate. `--ei every 4`
-     * analyses as the live camera does, for comparison.
-     */
-    val stride = maxOf(1, every)
-    val first = from.coerceAtLeast(0)
-    val last = minOf(to, count - 1)
-
-    val stumps = ColourStumpDetector()
-    val wickets = WicketTracker()
-    val ball = OpenCvBallTracker()
-    val camera = CameraIntrinsics(ASSUMED_FOCAL_FW, "assumed")
-    val aspect = UPRIGHT_W.toFloat() / UPRIGHT_H
-    val still = FrameMotion(0f, 0f, 1f, 0f, 30, 32)
-    val y = ByteArray(SENSOR_W * SENSOR_H)
-    val u = ByteArray(SENSOR_W / 2 * (SENSOR_H / 2))
-    val pixels = IntArray(UPRIGHT_W * UPRIGHT_H)
-    var lock: WicketLock? = null
-    var bowlersEnd: BowlersEnd? = null
-    val nearEnd = BowlersEndFilter()
-    var corridor: FloatArray? = null
-    val steadyLock = SteadyWicket()
-    val recentFrames = ArrayDeque<Pair<Double, ByteArray>>()
-    var lastStumpsMs = Long.MIN_VALUE / 2
-    var lastCorridorMs = Long.MIN_VALUE / 2
-    val deliveries = ArrayList<Delivery>()
-    var analysed = 0
-    try {
-        /*
-         * WARM-UP, as a real setup has one: at the net the phone is placed and the stumps are
-         * locked long before anyone bowls. A clip cut mid run-up starts cold, with the bowler
-         * running through the picture, and the lock was still flickering when the ball was
-         * let go. So the stumps alone are watched over the opening seconds first; then the
-         * clip is analysed from its start with that lock in place.
-         */
-        // The warm-up samples 30 a second whatever the analysis rate: it is three seconds of
-        // clip either way, which is what the stumps need.
-        val warmStride = maxOf(1, Math.round(fps / 30.0).toInt())
-        val warmEnd = minOf(last, first + WARM_UP_FRAMES * warmStride)
-        var w = first
-        var warmed = 0
-        while (w <= warmEnd) {
-            val n = minOf(BATCH, warmEnd - w + 1)
-            for ((k, raw) in retriever.getFramesAtIndex(w, n).withIndex()) {
-                val index = w + k
-                if ((index - first) % warmStride != 0) {
-                    raw.recycle()
-                    continue
-                }
-                val up = Bitmap.createScaledBitmap(raw, UPRIGHT_W, UPRIGHT_H, true)
-                if (up !== raw) raw.recycle()
-                up.getPixels(pixels, 0, UPRIGHT_W, 0, 0, UPRIGHT_W, UPRIGHT_H)
-                ClipFrames.toSensorYuv(pixels, y, u)
-                val seen = stumps.detectCandidates(y, SENSOR_W, SENSOR_H, SENSOR_W, 90, u, SENSOR_W / 2, 1, focus = wickets.focus())
-                bowlersEndOf(seen, camera)?.let { bowlersEnd = nearEnd.add(it) ?: bowlersEnd }
-                lock = wickets.onFrame(battersEndOnly(seen, camera, bowlersEnd), still, aspect, (index * 1000.0 / fps).toLong())
-                steadyLock.add(lock, (index * 1000.0 / fps).toLong())
-                if (++warmed % 6 == 0) publish(Phase.Analysing(0f, up.asImageBitmap(), "finding the stumps"))
-            }
-            w += n
-        }
-
-        var batchStart = first
-        while (batchStart <= last) {
-            val n = minOf(BATCH, last - batchStart + 1)
-            val frames = retriever.getFramesAtIndex(batchStart, n)
-            for ((k, raw) in frames.withIndex()) {
-                val index = batchStart + k
-                if ((index - first) % stride != 0) {
-                    raw.recycle()
-                    continue
-                }
-                val up = Bitmap.createScaledBitmap(raw, UPRIGHT_W, UPRIGHT_H, true)
-                if (up !== raw) raw.recycle()
-                up.getPixels(pixels, 0, UPRIGHT_W, 0, 0, UPRIGHT_W, UPRIGHT_H)
-                ClipFrames.toSensorYuv(pixels, y, u)
-                val ts = (index * 1000.0 / fps).toLong()
-                // A small copy of every analysed frame, kept a few seconds back, so each
-                // delivery can be replayed frame by frame without the video decoder.
-                val thumb = jpegOf(up)
-                recentFrames.addLast(ts.toDouble() to thumb)
-                while (recentFrames.isNotEmpty() && recentFrames.first().first < ts - RECENT_FRAMES_MS) recentFrames.removeFirst()
-                for (d in deliveries) if (ts > d.calledMs && ts <= d.tailUntilMs) d.frames += ts.toDouble() to thumb
-
-                // Stumps every frame until confirmed, then ten a second — as the camera screen.
-                val confirmed = lock?.state == WicketTrackState.CONFIRMED
-                if (!confirmed || ts - lastStumpsMs >= STUMPS_EVERY_MS) {
-                    lastStumpsMs = ts
-                    val seen = stumps.detectCandidates(
-                        y, SENSOR_W, SENSOR_H, SENSOR_W, 90, u, SENSOR_W / 2, 1,
-                        focus = wickets.focus(),
-                    )
-                    bowlersEndOf(seen, camera)?.let { bowlersEnd = nearEnd.add(it) ?: bowlersEnd }
-                    lock = wickets.onFrame(battersEndOnly(seen, camera, bowlersEnd), still, aspect, ts)
-                    steadyLock.add(lock, ts)
-                }
-                // Re-derived every frame until there is one, then once a second.
-                if (corridor == null || ts - lastCorridorMs >= 1_000L) {
-                    lastCorridorMs = ts
-                    // As the camera screen: a flickering lock keeps the corridor it had.
-                    val steady = steadyLock.value()
-                    val c = deliveryCorridor(steady ?: lock, camera, UPRIGHT_W, aspect)
-                    if (c != null) {
-                        corridor = c
-                        ball.setCorridor(c[0], c[1], c[2], c[3], Point2(c[4].toDouble(), c[5].toDouble()))
-                    } else if (lock == null && steady == null) {
-                        corridor = null
-                        ball.setCorridor(null, null, null, null, null)
-                    }
-                }
-                ball.onFrame(y, SENSOR_W, SENSOR_H, SENSOR_W, 90, ts)
-                val l = lock
-                // A flight a newer track replaced before it went quiet is finished now.
-                val replaced = ball.takeFinished()?.takeIf { fin ->
-                    l != null && FlightEnd.check(fin, fin.last().timestampMs + FlightEnd.QUIET_MS, aspect, l) != null
-                }
-                val track = replaced ?: ball.track()
-                if (l != null && (replaced != null || FlightEnd.check(track, ts, aspect, l) != null)) {
-                    // Measured from the steadied stumps, not this frame's: see [SteadyWicket].
-                    deliveryOf(track, steadyLock.value() ?: l, bowlersEnd, camera, aspect, ts)?.let { d ->
-                        d.frames += recentFrames.filter { it.first >= d.startMs - REPLAY_LEAD_MS }
-                        deliveries += d
-                    }
-                    // A fresh start for the next ball, as an Auto segment does.
-                    if (replaced == null) ball.reset()
-                }
-                analysed++
-                if (analysed % 6 == 0) {
-                    publish(
-                        Phase.Analysing(
-                            (index - first).toFloat() / (last - first + 1).coerceAtLeast(1),
-                            up.asImageBitmap(),
-                            "frame $index of $last · ${deliveries.size} found",
-                        ),
-                    )
-                }
-            }
-            batchStart += n
-        }
+        val vw = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toFloatOrNull() ?: 9f
+        val vh = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toFloatOrNull() ?: 16f
+        val rot = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+        videoAspect = if (rot == 90 || rot == 270) vh / vw else vw / vh
+    } catch (_: Throwable) {
     } finally {
-        retriever.release()
-        stumps.release()
-        ball.release()
+        runCatching { retriever.release() }
     }
+    val fps = result.fps
+    val count = (result.durationMs * fps / 1000.0).toInt()
     publish(
         Phase.Playing(
-            deliveries,
-            (first * 1000.0 / fps).toLong(),
-            (last * 1000.0 / fps).toLong(),
+            result.deliveries,
+            (from.coerceAtLeast(0) * 1000.0 / fps).toLong(),
+            (minOf(to, count - 1) * 1000.0 / fps).toLong(),
             videoAspect,
             fps,
-            farBase = (steadyLock.value() ?: lock)?.anchor?.base,
-            nearBase = bowlersEnd?.base,
+            farBase = result.farBase,
+            nearBase = result.nearBase,
         ),
     )
 }
@@ -531,29 +386,6 @@ private fun SetupPreview(p: Phase.Playing) {
             onCancel = {},
         )
     }
-}
-
-/** A called delivery: fitted in 3D through the ground the stumps give, or the seen trail. */
-private fun deliveryOf(
-    track: List<BallSighting>,
-    lock: WicketLock,
-    bowlersEnd: BowlersEnd?,
-    camera: CameraIntrinsics,
-    aspect: Float,
-    calledMs: Long,
-): Delivery? {
-    if (track.size < FlightEnd.MIN_FLIGHT_POINTS) return null
-    val ground = PitchGround.best(lock, camera, UPRIGHT_W, UPRIGHT_H, tilt = null, bowlersEnd = bowlersEnd)
-        ?.pitchCamera(UPRIGHT_W, UPRIGHT_H)
-    val m = FlightMetrics.of(track, aspect, quad = null, wicket = lock, ground = ground)
-    val f3 = m.flight3d
-    // Only a delivery the 3D fit accepts is shown: a broadcast result is a flight with a
-    // speed and a pitching point, and a track the fit refuses — something crossing behind
-    // the net, a fielder — is not a ball bowled.
-    if (f3 == null || ground == null) return null
-    val path = ArPath.fromFlight(f3, ground) ?: return null
-    if (path.isEmpty) return null
-    return Delivery(calledMs.toDouble(), track.first().timestampMs.toDouble(), path, f3.speedKmh, f3)
 }
 
 private const val UPRIGHT_W = 720
