@@ -4,33 +4,21 @@
 @include('site.partials.match-helpers')
 
 {{-- ================================================================= --}}
-{{-- MOBILE APP-STYLE GAMEHUB (mirrors the Android app; ≤720px)         --}}
+{{-- PULSE — one responsive page for phone and desktop.                 --}}
 {{--                                                                    --}}
-{{-- A port of MainScreen.kt PulseTabScreen, in its order: green hero --}}
-{{-- → ActionBoard (straddling the seam) → Top Player → sport chips →   --}}
-{{-- Popular Venues reel → More venues. Values track the app's tokens    --}}
-{{-- (PulseDeep #1E3A8A, PulseGreen #2563EB, 20px card radius);      --}}
-{{-- change both together.                                              --}}
-{{--                                                                    --}}
-{{-- Two deliberate divergences from the app, both about not inventing   --}}
-{{-- facts the web can't know:                                          --}}
-{{--   · No distance chip. The app ranks by a real GPS fix; the site has --}}
-{{--     only a chosen city, and the app's card already omits the chip   --}}
-{{--     when distance is blank — so this is its own empty state, not a  --}}
-{{--     missing feature.                                               --}}
-{{--   · No "Available tonight" badge. The app hardcodes availableTonight--}}
-{{--     = true on every venue, so the badge is decoration there; on the --}}
-{{--     public site it would be a booking claim we haven't checked.     --}}
+{{-- Order: heading + the true state of the lane → ActionBoard (kept as  --}}
+{{-- the app's card) → Top Player on a drawn rostrum → sport filter →    --}}
+{{-- grounds. Everything states only what we know: no distance chip (no --}}
+{{-- GPS fix on the web), no "available tonight" claim, no venue counts  --}}
+{{-- per sport, no stock artwork. With nothing listed the page says so   --}}
+{{-- and draws the kind of court being filtered, to scale.               --}}
 {{-- ================================================================= --}}
 @php
-    // The app's ActionBoard matches are cricket today (LiveMatchRow carries no sport),
-    // so a non-cricket chip empties the board rather than showing football fixtures
-    // that don't exist. Same rule here.
+    // ActionBoard matches are cricket today, so a non-cricket chip empties the board
+    // rather than showing fixtures that don't exist (same rule as the app).
     $hubLive = ($selectedSport === 'All' || $selectedSport === 'Cricket') ? $liveMatches : [];
     $hubFeatured = $hubLive[0] ?? null;
 
-    // Sport → inline glyph, mirroring the app's chip icons (venueSportIcon). Badminton
-    // and Tennis share the racket glyph there, so they collapse to one here too.
     $hubGlyphKey = function (string $sport): string {
         $s = strtolower($sport);
         return match (true) {
@@ -49,500 +37,320 @@
         'volleyball' => '<circle cx="12" cy="12" r="9"></circle><path d="M12 3a15 15 0 0 0 0 18M3.5 8.5a15 15 0 0 1 17 7M3.5 15.5a15 15 0 0 0 17-7"></path>',
         'basketball' => '<circle cx="12" cy="12" r="9"></circle><path d="M12 3v18M3 12h18M5.6 5.6a12 12 0 0 0 12.8 12.8M18.4 5.6A12 12 0 0 1 5.6 18.4"></path>',
     ];
+
+    // Every ground for the current filter, best-rated first, nothing twice.
+    $grounds = $popularVenues->concat($moreVenues)->unique('id')->values();
+    $groundCount = $grounds->count();
+    $fromPrice = $grounds->pluck('price')->filter(fn ($p) => (int) $p > 0)->min();
+    $where = $selectedCity ?: 'India';
+    $sportWord = $selectedSport === 'All' ? null : strtolower($selectedSport);
+
+    $plan = match ($selectedSport) {
+        'Badminton' => 'badminton',
+        'Football' => 'football',
+        default => 'box',
+    };
+
+    // The rostrum's #1 block carries the real leader, or stays open.
+    $leader = $topPlayer ?: null;
+    $leaderInitial = $leader ? mb_strtoupper(mb_substr(trim((string) $leader['name']), 0, 1)) : null;
 @endphp
 
-<div class="mhub">
-    {{-- 1. The app's green hero. This IS the page header, not a banner under one: on the
-         Pulse tab the app renders no outer header at all (MainScreen.kt skips it when
-         `isPulseTab`) and stacks greeting → search → switch on the green band. So the
-         site's white topbar is hidden here (see the CSS) and its three controls live on
-         the green, in the app's order — otherwise the page carries two search bars and
-         two tab controls, one white and one green. --}}
-    <div class="mhub__hero">
-        {{-- The "H" monogram (the app's haraan_copy drawable), not the wordmark: the
-             band wants identity-as-texture, and a wordmark stretched to 210px is a
-             squashed logo. --}}
-        <img class="mhub__mark" src="{{ asset('images/haraan-mark.png') }}" alt="" aria-hidden="true">
+<style>
+    /* Pulse runs on the site's white header (as Events does). The old blue band with a
+       watermark monogram, and the desktop action tiles / sport tiles / promo, are gone. */
+    .pl {
+        --ink: #0F172A; --ink-2: #334155; --ink-3: #64748B; --rule: #E3E8EF;
+        --blue: #2563EB; --blue-ink: #1E40AF; --blue-tint: #EEF4FF; --deep: #1E3A8A;
+        max-width: 1120px; margin: 0 auto; padding: 8px 0 64px;
+        font-family: 'Plus Jakarta Sans', system-ui, sans-serif; color: var(--ink);
+        font-variant-numeric: tabular-nums;
+    }
+    .pl a { color: inherit; }
 
-        @include('site.partials.app-greet', ['onDark' => true])
+    .pl-head { padding: 22px 0 22px; }
+    .pl-head h1 { margin: 0; font-size: clamp(26px, 3.6vw, 40px); line-height: 1.08; font-weight: 800; letter-spacing: -0.025em; }
+    .pl-head p { margin: 10px 0 0; max-width: 620px; font-size: 15.5px; line-height: 1.6; color: var(--ink-2); }
+    .pl-head p strong { color: var(--ink); }
 
-        <form class="mhub__search" action="/search" method="GET" role="search">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="20" y1="20" x2="16.5" y2="16.5"></line></svg>
-            <input type="text" name="q" placeholder="Search grounds, matches, players..." autocomplete="off">
-        </form>
+    .pl-top { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 20px; align-items: stretch; }
 
-        {{-- The app's PulseSegmentedSwitch: a translucent track with a white active
-             pill. Real links here, since the web's two lanes are two pages.
-             The pill is one thumb that slides on tap (site.js), same as the Events header. --}}
-        <div class="mhub__switch is-right" role="tablist" aria-label="Events or Pulse">
-            <span class="mhub__switch-thumb" aria-hidden="true"></span>
-            <a class="mhub__switch-tab" href="/events" role="tab" aria-selected="false">Events</a>
-            <a class="mhub__switch-tab is-on" href="/gamehub" role="tab" aria-selected="true">Pulse</a>
-        </div>
-    </div>
+    /* ActionBoard — the app's card, unchanged in look; only its phone-only "straddle
+       the hero" margin is neutralised, since there is no band to straddle. */
+    .pl .mhub__ab {
+        position: relative; display: block; margin: 0; padding: 18px; background: #fff; border-radius: 20px;
+        text-decoration: none; box-shadow: 0 8px 18px rgba(15, 23, 42, .10), 0 1px 3px rgba(15, 23, 42, .16);
+    }
+    .pl .mhub__ab-head { display: flex; align-items: center; gap: 6px; }
+    .pl .mhub__ab-head img { width: 22px; height: 22px; object-fit: contain; }
+    .pl .mhub__ab-head strong { font-size: 18px; font-weight: 800; letter-spacing: .3px; color: #0F172A; }
+    .pl .mhub__ab-live { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; font-size: 13px; font-weight: 800; letter-spacing: .3px; color: #D32F2F; }
+    .pl .mhub__ab-live i { width: 6px; height: 6px; border-radius: 50%; background: #D32F2F; }
+    .pl .mhub__ab-strip { margin-top: 10px; border-top: 1px solid #E2E8F0; padding-top: 10px; }
+    .pl .mhub__ab-meta { margin: 0 0 8px; font-size: 11px; font-weight: 500; color: #64748B; }
+    .pl .mhub__ab-empty { margin: 8px 0 0; font-size: 13px; color: #64748B; }
+    .pl .mhub__ab-row { display: flex; align-items: center; gap: 6px; }
+    .pl .mhub__ab-row + .mhub__ab-row { margin-top: 6px; }
+    .pl .mhub__ab-logo { display: grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; margin-right: 2px; border-radius: 50%; background: #F1F5F9; font-size: 9px; font-weight: 800; color: #475569; overflow: hidden; }
+    .pl .mhub__ab-logo.has-img { background: #fff; }
+    .pl .mhub__ab-logo img { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
+    .pl .mhub__ab-abbr { font-size: 14px; font-weight: 700; color: #0F172A; }
+    .pl .mhub__ab-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 500; color: #64748B; }
+    .pl .mhub__ab-score { margin-left: auto; font-size: 15px; font-weight: 700; color: #0F172A; font-feature-settings: 'tnum'; }
+    .pl .mhub__ab-ov { min-width: 44px; text-align: right; font-size: 11px; font-weight: 500; color: #94A3B8; font-feature-settings: 'tnum'; }
+    .pl .mhub__ab-row.is-batting .mhub__ab-abbr, .pl .mhub__ab-row.is-batting .mhub__ab-score { font-weight: 800; }
 
-    {{-- 2. ActionBoard — the elevated hero card, straddling the green seam. --}}
-    <a class="mhub__ab" href="/gamehub/actionboard">
-        <div class="mhub__ab-head">
-            <img src="{{ asset('images/haraan-mark.png') }}" alt="" aria-hidden="true">
-            <strong>ActionBoard</strong>
-            @if(count($hubLive))
-                <span class="mhub__ab-live"><i></i>{{ count($hubLive) }} LIVE</span>
-            @endif
-        </div>
+    /* Top player on a drawn rostrum: three plinths, #1 in the middle. */
+    .pl-rank {
+        display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 16px; align-items: center;
+        padding: 16px 18px; background: #fff; border: 1px solid var(--rule); border-radius: 20px;
+        text-decoration: none; box-shadow: 0 1px 1px rgba(15, 23, 42, .03);
+        transition: box-shadow .18s, transform .18s;
+    }
+    .pl-rank:hover { box-shadow: 0 14px 30px -16px rgba(15, 23, 42, .3); transform: translateY(-1px); }
+    .pl-rank:active { transform: translateY(0); }
+    .pl-rank svg { display: block; width: 100%; height: auto; }
+    .pl-rank .plinth { fill: #F1F5F9; stroke: #CBD5E1; stroke-width: 1.2; }
+    .pl-rank .plinth--1 { fill: var(--blue-tint); stroke: #93B4F5; }
+    .pl-rank .plinth-n { font: 800 13px 'Plus Jakarta Sans', system-ui, sans-serif; fill: #94A3B8; }
+    .pl-rank .plinth--1 + .plinth-n { fill: var(--blue); }
+    .pl-rank .seat { fill: none; stroke: #93B4F5; stroke-width: 1.6; stroke-dasharray: 4 3.5; }
+    .pl-rank .face { fill: var(--deep); }
+    .pl-rank .face-t { font: 800 15px 'Plus Jakarta Sans', system-ui, sans-serif; fill: #fff; }
+    .pl-rank .ground { stroke: #CBD5E1; stroke-width: 1.2; }
+    .pl-rank__eyebrow { font-size: 12.5px; font-weight: 700; color: var(--ink-3); }
+    .pl-rank__line { display: block; margin-top: 3px; font-size: 16.5px; font-weight: 800; line-height: 1.3; }
+    .pl-rank__sub { display: block; margin-top: 3px; font-size: 13.5px; line-height: 1.5; color: var(--ink-2); }
+    .pl-rank__go { display: inline-block; margin-top: 8px; font-size: 14px; font-weight: 700; color: var(--blue); }
 
-        @if($hubFeatured)
-            @php
-                // The batting side leads the card, as in the app's live list.
-                $hubRows = collect([$hubFeatured['home'], $hubFeatured['away']])
-                    ->sortByDesc(fn ($t) => (bool) $t['batting'])
-                    ->values();
-                $hubMeta = collect([
-                    $hubFeatured['competition'] ?: null,
-                    ($hubFeatured['home']['overs'] ?: $hubFeatured['away']['overs']) ? trim((string) ($hubFeatured['home']['overs'] ?: $hubFeatured['away']['overs'])) . ' ov' : null,
-                ])->filter()->implode(' • ');
-            @endphp
-            <div class="mhub__ab-strip">
-                @if($hubMeta)<p class="mhub__ab-meta">{{ $hubMeta }}</p>@endif
-                @foreach($hubRows as $team)
-                    @php $abIcon = hrn_team_icon($team['logo'] ?? '', $team['emblem'] ?? ''); @endphp
-                    <div class="mhub__ab-row {{ $team['batting'] ? 'is-batting' : '' }}">
-                        <span class="mhub__ab-logo {{ $abIcon !== '' ? 'has-img' : '' }}">@if($abIcon !== '')<img src="{{ $abIcon }}" alt="{{ $team['abbr'] }}" loading="lazy">@else{{ \Illuminate\Support\Str::of($team['abbr'])->substr(0, 2)->upper() }}@endif</span>
-                        <span class="mhub__ab-abbr">{{ $team['abbr'] }}</span>
-                        <span class="mhub__ab-name">{{ $team['name'] }}</span>
-                        <span class="mhub__ab-score">{{ $team['score'] }}</span>
-                        @if($team['overs'])<span class="mhub__ab-ov">({{ $team['overs'] }})</span>@endif
-                    </div>
-                @endforeach
-            </div>
-        @else
-            {{-- The app's honest empty state, sport-aware — never a scripted match. --}}
-            <p class="mhub__ab-empty">
-                {{ $selectedSport === 'All'
-                    ? 'No live matches right now · tap to open the board'
-                    : 'No live ' . $selectedSport . ' matches right now · tap to open the board' }}
-            </p>
-        @endif
-    </a>
+    /* Sport filter */
+    .pl-chips { display: flex; gap: 8px; margin: 28px 0 0; overflow-x: auto; scrollbar-width: none; padding: 2px 0 4px; }
+    .pl-chips::-webkit-scrollbar { display: none; }
+    .pl-chip {
+        flex: none; display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 15px 0 13px;
+        border-radius: 999px; border: 1px solid var(--rule); background: #fff; color: var(--ink-2);
+        font-size: 14px; font-weight: 600; text-decoration: none; box-shadow: 0 1px 0 rgba(15, 23, 42, .04);
+        transition: border-color .15s, color .15s, transform .08s;
+    }
+    .pl-chip svg { color: var(--ink-3); }
+    .pl-chip:hover { border-color: #C7D2FE; color: var(--blue-ink); }
+    .pl-chip:active { transform: translateY(1px); box-shadow: none; }
+    .pl-chip[aria-current="page"] { background: var(--blue-tint); border-color: var(--blue); color: var(--blue-ink); }
+    .pl-chip[aria-current="page"] svg { color: var(--blue); }
 
-    {{-- 3. Top Player — the app's LeaderboardHomeWidget, on the same ranked-XP board. --}}
-    <a class="mhub__top" href="/gamehub/leaderboard">
-        <span class="mhub__top-face">
-            @if(!empty($topPlayer['avatar']))
-                <img src="{{ $topPlayer['avatar'] }}" alt="" loading="lazy">
+    /* Grounds */
+    .pl-sec { margin-top: 26px; }
+    .pl-sec__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+    .pl h2 { margin: 0; font-size: 21px; font-weight: 800; letter-spacing: -0.015em; }
+    .pl-sec__head span { font-size: 13.5px; color: var(--ink-3); }
+    .pl-grounds { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 18px; }
+    .pl-ground {
+        display: flex; flex-direction: column; background: #fff; border: 1px solid var(--rule); border-radius: 16px;
+        overflow: hidden; text-decoration: none; box-shadow: 0 1px 1px rgba(15, 23, 42, .03);
+        transition: transform .18s ease, box-shadow .18s ease;
+    }
+    .pl-ground:hover { transform: translateY(-2px); box-shadow: 0 14px 30px -14px rgba(15, 23, 42, .28); }
+    .pl-ground:active { transform: translateY(0); }
+    .pl-ground__img { aspect-ratio: 4 / 3; width: 100%; object-fit: cover; background: #E9EEF4; display: block; }
+    .pl-ground__body { padding: 13px 15px 15px; display: flex; flex-direction: column; gap: 3px; flex: 1; }
+    .pl-ground__top { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+    .pl-ground__name { margin: 0; font-size: 16px; font-weight: 800; line-height: 1.3; }
+    .pl-ground__rate { flex: none; font-size: 13px; font-weight: 700; color: var(--ink-2); }
+    .pl-ground__rate i { font-style: normal; color: #EAB308; margin-right: 2px; }
+    .pl-ground__where { font-size: 13.5px; color: var(--ink-3); }
+    .pl-ground__foot { margin-top: auto; padding-top: 10px; display: flex; align-items: center; justify-content: space-between; }
+    .pl-ground__price { font-size: 17px; font-weight: 800; }
+    .pl-ground__price small { font-size: 12.5px; font-weight: 600; color: var(--ink-3); }
+    .pl-ground .mhub__sports { display: inline-flex; gap: 6px; align-items: center; color: var(--ink-3); }
+    .pl-ground .mhub__sports i { font-style: normal; font-size: 12px; font-weight: 700; }
+
+    /* Nothing listed: say so, draw the court being filtered, offer the one real action. */
+    .pl-none {
+        display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; align-items: center;
+        background: #fff; border: 1px solid var(--rule); border-radius: 20px; padding: 22px;
+    }
+    .pl-none h3 { margin: 0; font-size: 19px; font-weight: 800; line-height: 1.3; }
+    .pl-none p { margin: 8px 0 0; font-size: 15px; line-height: 1.6; color: var(--ink-2); }
+    .pl-none .kv-plan__sheet { box-shadow: none; border-color: #EEF1F5; background: #FBFCFD; }
+    .pl-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 18px; }
+    .pl-btn {
+        display: inline-flex; align-items: center; justify-content: center; height: 46px; padding: 0 20px;
+        border-radius: 12px; background: var(--blue); color: #fff !important; font-size: 15px; font-weight: 700;
+        text-decoration: none; box-shadow: 0 1px 0 rgba(255,255,255,.18) inset, 0 2px 0 #1D4ED8, 0 6px 14px -6px rgba(37, 99, 235, .55);
+        transition: transform .08s, box-shadow .08s, background .15s;
+    }
+    .pl-btn:hover { background: #1F5BE0; }
+    .pl-btn:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(255,255,255,.18) inset, 0 0 0 #1D4ED8, 0 2px 6px -4px rgba(37, 99, 235, .5); }
+    .pl-link { font-size: 15px; font-weight: 700; color: var(--blue) !important; text-decoration: none; }
+    .pl-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+    @media (max-width: 900px) {
+        .pl-top { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+        .pl-none { grid-template-columns: minmax(0, 1fr); }
+    }
+    @media (max-width: 720px) {
+        /* Phone: the site header above already greets, searches and switches lanes. */
+        .pl { padding: 0 16px 8px; }
+        .pl-head { padding: 18px 0 16px; }
+        .pl-head h1 { font-size: 26px; }
+        .pl-head p { font-size: 14.5px; margin-top: 6px; }
+        .pl .mhub__ab { padding: 16px; }
+        .pl-rank { grid-template-columns: 96px minmax(0, 1fr); gap: 14px; padding: 14px 16px; }
+        .pl-rank__line { font-size: 15.5px; }
+        .pl-chips { margin: 22px -16px 0 0; padding-right: 16px; }
+        .pl-sec { margin-top: 20px; }
+        .pl-grounds { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+        .pl-none { padding: 18px; gap: 18px; }
+        .pl-btn { flex: 1 1 100%; }
+        .pl-actions { gap: 14px; }
+    }
+</style>
+
+<div class="pl">
+    {{-- 1. What this lane is, and what's true in it right now. --}}
+    <header class="pl-head">
+        <h1>Turfs &amp; courts in {{ $where }}</h1>
+        <p>
+            @if($groundCount > 0)
+                <strong>{{ $groundCount }} {{ \Illuminate\Support\Str::plural('ground', $groundCount) }}</strong>{{ $sportWord ? ' for '.$sportWord : '' }} take bookings on Pulse{{ $fromPrice ? ', from ₹'.number_format((int) $fromPrice).' an hour' : '' }}.
             @else
-                <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="5"></circle><path d="M8.2 12.5 7 22l5-2.6L17 22l-1.2-9.5"></path></svg>
+                Book a court by the hour, score your match live on ActionBoard, and climb the rankings. <strong>No ground{{ $sportWord ? ' for '.$sportWord : '' }} takes online bookings here yet.</strong>
             @endif
-        </span>
-        <span class="mhub__top-copy">
-            <strong>Top Player</strong>
-            @if($topPlayer)
-                <span class="mhub__top-line">{{ $topPlayer['name'] }} &nbsp;•&nbsp; +{{ $topPlayer['xp'] }} XP</span>
-                <span class="mhub__top-rank">#{{ $topPlayer['rank'] }}{{ $selectedCity ? ' in ' . $selectedCity : '' }}</span>
-            @else
-                {{-- Two lines, as the app allows this state: it's a sentence, not a name,
-                     and one line ellipsises it to "Play a ranked matc…". --}}
-                <span class="mhub__top-line mhub__top-line--empty">
-                    {{ $selectedCity ? 'No ranked players in ' . $selectedCity . ' yet' : 'Play a ranked match to appear here' }}
-                </span>
-            @endif
-        </span>
-        <span class="mhub__top-cta">View Standings</span>
-    </a>
+        </p>
+    </header>
 
-    {{-- 4. Sport chips — a global filter over the venues below AND the ActionBoard. --}}
-    <div class="mhub__chips">
-        @foreach($sportChips as $chip)
-            @php $key = $chip === 'All' ? 'all' : $hubGlyphKey($chip); @endphp
-            <a class="mhub__chip {{ $chip === $selectedSport ? 'is-on' : '' }}"
-               href="{{ $chip === 'All' ? '/gamehub' : '/gamehub?sport=' . urlencode($chip) }}">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $hubIcons[$key] !!}</svg>
-                {{ $chip }}
-            </a>
-        @endforeach
-    </div>
+    <div class="pl-top">
+        {{-- 2. ActionBoard — kept exactly as the app's card. --}}
+        <a class="mhub__ab" href="/gamehub/actionboard">
+            <div class="mhub__ab-head">
+                <img src="{{ asset('images/haraan-mark.png') }}" alt="" aria-hidden="true">
+                <strong>ActionBoard</strong>
+                @if(count($hubLive))
+                    <span class="mhub__ab-live"><i></i>{{ count($hubLive) }} LIVE</span>
+                @endif
+            </div>
 
-    {{-- 5. Popular Venues — the app's top-5-by-rating reel. --}}
-    @php $hubTotal = $popularVenues->count() + $moreVenues->count(); @endphp
-    <div class="mhub__head">
-        <div>
-            <h3>Popular Venues</h3>
-            {{-- The app's contextual subtitle, minus its two GPS branches: without a fix
-                 it says "N venues • top rated", which is exactly how these are ranked.
-                 Pluralised, which the app's string isn't — that's its bug, not its design. --}}
-            <p>{{ $hubTotal ? $hubTotal . ' ' . \Illuminate\Support\Str::plural('venue', $hubTotal) . ' • top rated' : 'No venues yet' }}</p>
-        </div>
-        {{-- Only when there's somewhere to go. The app's "View all" opens its search
-             overlay, which the web answers with the header's search; with ≤5 venues the
-             reel is already the whole catalogue, so a link here would jump nowhere. --}}
-        @if($moreVenues->count())
-            <a href="#mhub-more">View all</a>
-        @endif
-    </div>
-
-    @if($popularVenues->count())
-        <div class="mhub__reel">
-            @foreach($popularVenues as $venue)
-                <a class="mhub__arena" href="{{ \App\Support\SeoUrl::venue($venue) }}">
-                    <span class="mhub__arena-img">
-                        <img src="{{ $venue->image }}" alt="{{ $venue->title }}" loading="lazy" decoding="async">
-                        <span class="mhub__arena-scrim"></span>
-                        <span class="mhub__arena-cat">{{ $venue->category }}</span>
-                        @if($venue->reviews > 0)
-                            <span class="mhub__arena-rate"><i>★</i>{{ $venue->rating }}</span>
-                        @endif
-                    </span>
-                    <span class="mhub__arena-body">
-                        <strong class="mhub__arena-title">{{ $venue->title }}</strong>
-                        <span class="mhub__arena-sub">{{ $venue->tagline ?: $venue->location }}@if(!empty($venue->distance)) • {{ $venue->distance }}@endif</span>
-                        <span class="mhub__arena-foot">
-                            <span class="mhub__price">₹{{ number_format($venue->price) }}<i>/hr</i></span>
-                            @include('site.partials.hub-sports', ['sports' => $venue->sports, 'glyphKey' => $hubGlyphKey, 'icons' => $hubIcons])
-                        </span>
-                    </span>
-                </a>
-            @endforeach
-        </div>
-    @else
-        <p class="mhub__empty">No venues match this filter yet.</p>
-    @endif
-
-    {{-- 6. More venues — strictly what the reel didn't show, so nothing repeats. --}}
-    @if($moreVenues->count())
-        <div class="mhub__head mhub__head--tight" id="mhub-more">
-            <div>
-                <h3>More venues</h3>
-                <p>{{ $moreVenues->count() }} more to explore</p>
-            </div>
-        </div>
-        <div class="mhub__list">
-            @foreach($moreVenues as $venue)
-                <a class="mhub__vcard" href="{{ \App\Support\SeoUrl::venue($venue) }}">
-                    <span class="mhub__vcard-img">
-                        <img src="{{ $venue->image }}" alt="{{ $venue->title }}" loading="lazy" decoding="async">
-                        <span class="mhub__vcard-scrim"></span>
-                        <span class="mhub__arena-cat">{{ $venue->category }}</span>
-                        @if($venue->tagline)<span class="mhub__vcard-tag">{{ $venue->tagline }}</span>@endif
-                    </span>
-                    <span class="mhub__vcard-body">
-                        <span class="mhub__vcard-top">
-                            <span class="mhub__vcard-id">
-                                <strong>{{ $venue->title }}</strong>
-                                <span class="mhub__vcard-loc">
-                                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-                                    {{ $venue->location }}@if(!empty($venue->distance)) • {{ $venue->distance }}@endif
-                                </span>
-                            </span>
-                            @if($venue->reviews > 0)
-                                <span class="mhub__vcard-rate"><i>★</i>{{ $venue->rating }}</span>
-                            @else
-                                <span class="mhub__vcard-new">New</span>
-                            @endif
-                        </span>
-                        <span class="mhub__vcard-foot">
-                            <span class="mhub__price mhub__price--lg">₹{{ number_format($venue->price) }}<i>/hr</i></span>
-                            <span class="mhub__book">Book Slot</span>
-                        </span>
-                    </span>
-                </a>
-            @endforeach
-        </div>
-    @endif
-</div>
-
-<section class="page-shell gamehub-page theme-gamehub">
-    <div class="gamehub-actions">
-        <a href="/gamehub/actionboard" class="gamehub-action-card active thanna-trigger">
-            <div class="action-card__icon-wrapper">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="action-card__svg">
-                    <path d="M21 7.5V16.5M21 7.5L12 3L3 7.5M21 7.5L12 12M3 7.5V16.5M3 7.5L12 12M12 12V21M12 21L21 16.5M12 21L3 16.5" />
-                    <polygon points="12 4.5 8 9.5 11.5 9.5 10.5 14.5 15.5 9.5 12 9.5 13 4.5" fill="currentColor" stroke="none" />
-                </svg>
-            </div>
-            <div class="action-card__content">
-                <span class="action-card__title">ActionBoard</span>
-                <span class="action-card__desc">Join active open sessions</span>
-            </div>
-            <span class="action-card__badge">Live Match</span>
-        </a>
-        <a href="#featured-venues" class="gamehub-action-card">
-            <div class="action-card__icon-wrapper">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="action-card__svg">
-                    <line x1="5" y1="18" x2="5" y2="7" />
-                    <line x1="9" y1="18" x2="9" y2="7" />
-                    <line x1="13" y1="18" x2="13" y2="7" />
-                    <line x1="4" y1="7" x2="14" y2="7" />
-                    <path d="M19.5 3.5l1 1-11.5 11.5-2.5-2.5 13-10z" />
-                    <path d="M6.5 13.5l-3 3c-.7.7-.7 1.8 0 2.5s1.8.7 2.5 0l3-3" />
-                    <circle cx="19" cy="18" r="3" />
-                    <path d="M17 17a3 3 0 0 1 4 2" />
-                </svg>
-            </div>
-            <div class="action-card__content">
-                <span class="action-card__title">Reserve Turf</span>
-                <span class="action-card__desc">Book secure hourly slots</span>
-            </div>
-        </a>
-        <a href="#all-sports" class="gamehub-action-card">
-            <div class="action-card__icon-wrapper">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="action-card__svg">
-                    <ellipse cx="12" cy="10" rx="9" ry="5.5" />
-                    <ellipse cx="12" cy="10" rx="6.2" ry="3.8" />
-                    <line x1="12" y1="8" x2="12" y2="12" />
-                    <circle cx="12" cy="10" r="1.2" />
-                    <path d="M3 10v6c0 3 4 5.5 9 5.5s9-2.5 9-5.5v-6" />
-                    <line x1="7.5" y1="14.2" x2="7.5" y2="19.5" />
-                    <line x1="12" y1="15.5" x2="12" y2="21.5" />
-                    <line x1="16.5" y1="14.2" x2="16.5" y2="19.5" />
-                </svg>
-            </div>
-            <div class="action-card__content">
-                <span class="action-card__title">Explore Arenas</span>
-                <span class="action-card__desc">Find premier sports grounds</span>
-            </div>
-        </a>
-    </div>
-
-    {{-- Live now: real in-progress matches (mobile only; mirrors the app ActionboardLiveStrip) --}}
-    @if(!empty($liveMatches) && count($liveMatches))
-    <section class="gh-live" aria-label="Live matches">
-        <div class="gh-live__head">
-            <span class="gh-live__title"><span class="gh-live__dot"></span>Live now</span>
-            <a href="/gamehub/actionboard" class="gh-live__all">See all</a>
-        </div>
-        <div class="gh-live__scroll">
-            @foreach($liveMatches as $lm)
-                <a class="gh-live__card" href="/gamehub/actionboard/match/{{ $lm['id'] }}">
-                    <div class="gh-live__cardhead">
-                        <span class="gh-live__comp">{{ $lm['competition'] ?: 'Live match' }}</span>
-                        <span class="gh-live__badge">LIVE</span>
-                    </div>
-                    @foreach([$lm['home'], $lm['away']] as $team)
-                        @php $glIcon = hrn_team_icon($team['logo'] ?? '', $team['emblem'] ?? ''); @endphp
-                        <div class="gh-live__team {{ $team['batting'] ? 'is-batting' : '' }}">
-                            <span class="gh-live__logo {{ $glIcon !== '' ? 'has-img' : '' }}">@if($glIcon !== '')<img src="{{ $glIcon }}" alt="{{ $team['abbr'] }}" loading="lazy">@else{{ \Illuminate\Support\Str::of($team['abbr'])->substr(0, 2)->upper() }}@endif</span>
-                            <span class="gh-live__abbr">{{ $team['abbr'] }}</span>
-                            <span class="gh-live__name">{{ $team['name'] }}</span>
-                            <span class="gh-live__score">{{ $team['score'] }}</span>
-                            @if($team['overs'])<span class="gh-live__ov">({{ $team['overs'] }})</span>@endif
+            @if($hubFeatured)
+                @php
+                    $hubRows = collect([$hubFeatured['home'], $hubFeatured['away']])
+                        ->sortByDesc(fn ($t) => (bool) $t['batting'])
+                        ->values();
+                    $hubMeta = collect([
+                        $hubFeatured['competition'] ?: null,
+                        ($hubFeatured['home']['overs'] ?: $hubFeatured['away']['overs']) ? trim((string) ($hubFeatured['home']['overs'] ?: $hubFeatured['away']['overs'])) . ' ov' : null,
+                    ])->filter()->implode(' • ');
+                @endphp
+                <div class="mhub__ab-strip">
+                    @if($hubMeta)<p class="mhub__ab-meta">{{ $hubMeta }}</p>@endif
+                    @foreach($hubRows as $team)
+                        @php $abIcon = hrn_team_icon($team['logo'] ?? '', $team['emblem'] ?? ''); @endphp
+                        <div class="mhub__ab-row {{ $team['batting'] ? 'is-batting' : '' }}">
+                            <span class="mhub__ab-logo {{ $abIcon !== '' ? 'has-img' : '' }}">@if($abIcon !== '')<img src="{{ $abIcon }}" alt="{{ $team['abbr'] }}" loading="lazy">@else{{ \Illuminate\Support\Str::of($team['abbr'])->substr(0, 2)->upper() }}@endif</span>
+                            <span class="mhub__ab-abbr">{{ $team['abbr'] }}</span>
+                            <span class="mhub__ab-name">{{ $team['name'] }}</span>
+                            <span class="mhub__ab-score">{{ $team['score'] }}</span>
+                            @if($team['overs'])<span class="mhub__ab-ov">({{ $team['overs'] }})</span>@endif
                         </div>
                     @endforeach
-                </a>
-            @endforeach
-        </div>
-    </section>
-    @endif
+                </div>
+            @else
+                <p class="mhub__ab-empty">
+                    {{ $selectedSport === 'All'
+                        ? 'No live matches right now · tap to open the board'
+                        : 'No live ' . $selectedSport . ' matches right now · tap to open the board' }}
+                </p>
+            @endif
+        </a>
 
-    <section class="gamehub-hero">
-        <div class="gamehub-hero__copy">
-            <h1>Turfs &amp; courts in {{ $selectedCity ?? 'India' }}</h1>
-            <p>Book cricket turfs, box cricket, football and badminton courts by the hour.</p>
-
-            <div class="search-strip search-strip--gamehub">
-                <label class="search-field">
-                    <span>⌕</span>
-                    <input type="text" id="venueSearchInput" value="" placeholder="Search by name or sport...">
-                </label>
-                <button class="filter-button filter-button--dropdown" type="button" id="venueClearFilter">All Sports</button>
-            </div>
-        </div>
-
-        <div class="gamehub-hero__art">
-            <img src="{{ asset('gamehub.png') }}" alt="Pulse artwork">
-        </div>
-    </section>
-
-    <section class="events-section" id="all-sports">
-        <div class="section-shell__header">
-            <div>
-                <p class="eyebrow eyebrow--soft">Explore by Sport</p>
-                <h2>Find specialized facilities curated for your discipline.</h2>
-            </div>
-        </div>
-
-        @php
-            $sportTiles = [
-                ['name' => 'Cricket', 'icon' => 'https://cdn-icons-png.flaticon.com/512/5140/5140374.png', 'class' => ''],
-                ['name' => 'Football', 'icon' => 'https://cdn-icons-png.flaticon.com/512/7711/7711842.png', 'class' => 'sport-card--football'],
-                ['name' => 'Badminton', 'icon' => 'https://cdn-icons-png.flaticon.com/512/10904/10904303.png', 'class' => ''],
-                ['name' => 'Swimming', 'icon' => 'https://cdn-icons-png.flaticon.com/512/8317/8317259.png', 'class' => ''],
-                ['name' => 'Tennis', 'icon' => 'https://cdn-icons-png.flaticon.com/512/8927/8927653.png', 'class' => ''],
-                ['name' => 'Basketball', 'icon' => 'https://cdn-icons-png.flaticon.com/512/9128/9128501.png', 'class' => ''],
-            ];
-        @endphp
-        <div class="sport-grid">
-            @foreach($sportTiles as $tile)
-                @php $count = (int) (($sportCounts ?? collect())[$tile['name']] ?? 0); @endphp
-                <button class="sport-card {{ $tile['class'] }}" type="button" data-sport="{{ $tile['name'] }}">
-                    <span class="sport-card__icon" aria-hidden="true">
-                        <img src="{{ $tile['icon'] }}" alt="{{ $tile['name'] }} icon" />
+        {{-- 3. Top player, standing on #1 — or #1 left open. --}}
+        <a class="pl-rank" href="/gamehub/leaderboard">
+            <svg viewBox="0 0 132 92" aria-hidden="true">
+                <line class="ground" x1="2" y1="90" x2="130" y2="90"/>
+                <rect class="plinth" x="6" y="58" width="38" height="32" rx="3"/>
+                <text class="plinth-n" x="25" y="80" text-anchor="middle">2</text>
+                <rect class="plinth plinth--1" x="47" y="44" width="38" height="46" rx="3"/>
+                <text class="plinth-n" x="66" y="72" text-anchor="middle">1</text>
+                <rect class="plinth" x="88" y="66" width="38" height="24" rx="3"/>
+                <text class="plinth-n" x="107" y="83" text-anchor="middle">3</text>
+                @if($leader)
+                    <circle class="face" cx="66" cy="24" r="17"/>
+                    <text class="face-t" x="66" y="29.5" text-anchor="middle">{{ $leaderInitial }}</text>
+                @else
+                    <circle class="seat" cx="66" cy="24" r="16"/>
+                @endif
+            </svg>
+            <span>
+                <span class="pl-rank__eyebrow">Top player{{ $selectedCity ? ' · '.$selectedCity : '' }}</span>
+                @if($leader)
+                    <span class="pl-rank__line">{{ $leader['name'] }}</span>
+                    <span class="pl-rank__sub">#{{ $leader['rank'] }} this month · {{ number_format((int) $leader['xp']) }} XP</span>
+                @else
+                    <span class="pl-rank__line">#1 is open</span>
+                    <span class="pl-rank__sub">
+                        {{ $selectedCity ? 'Nobody in '.$selectedCity.' has a ranked match yet.' : 'Pick your city to see who leads near you.' }}
+                        Win one on ActionBoard to take the top spot.
                     </span>
-                    <span>{{ $tile['name'] }}</span><small>{{ $count }} {{ $count === 1 ? 'venue' : 'venues' }}</small>
-                </button>
-            @endforeach
-        </div>
-    </section>
+                @endif
+                <span class="pl-rank__go">Standings →</span>
+            </span>
+        </a>
+    </div>
 
-    <section class="events-section" id="featured-venues">
-        <div class="section-shell__header">
-            <div>
-                <p class="eyebrow eyebrow--soft">Featured Venues</p>
-                <h2>Top-rated facilities for your perfect game.</h2>
+    {{-- 4. Sport filter — over the grounds below and the ActionBoard card above. --}}
+    <nav class="pl-chips" aria-label="Sport">
+        @foreach($sportChips as $chip)
+            @php $key = $chip === 'All' ? 'all' : $hubGlyphKey($chip); @endphp
+            <a class="pl-chip" href="{{ $chip === 'All' ? '/gamehub' : '/gamehub?sport=' . urlencode($chip) }}" @if($chip === $selectedSport) aria-current="page" @endif>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $hubIcons[$key] !!}</svg>
+                {{ $chip === 'All' ? 'All sports' : $chip }}
+            </a>
+        @endforeach
+    </nav>
+
+    {{-- 5. Grounds. --}}
+    <section class="pl-sec">
+        @if($groundCount > 0)
+            <div class="pl-sec__head">
+                <h2>{{ $sportWord ? ucfirst($sportWord).' grounds' : 'Grounds' }}{{ $selectedCity ? ' near '.$selectedCity : '' }}</h2>
+                <span>Best rated first</span>
             </div>
-            <a href="#all-venues" class="text-link">View all</a>
-        </div>
-
-        @if(isset($venues) && count($venues))
-            @php
-                $sportIcons = [
-                    'Cricket' => 'https://cdn-icons-png.flaticon.com/512/5140/5140374.png',
-                    'Football' => 'https://cdn-icons-png.flaticon.com/512/7711/7711842.png',
-                    'Badminton' => 'https://cdn-icons-png.flaticon.com/512/10904/10904303.png',
-                    'Swimming' => 'https://cdn-icons-png.flaticon.com/512/8317/8317259.png',
-                    'Tennis' => 'https://cdn-icons-png.flaticon.com/512/8927/8927653.png',
-                    'Basketball' => 'https://cdn-icons-png.flaticon.com/512/9128/9128501.png',
-                ];
-            @endphp
-            <div class="events-grid gamehub-venues-grid">
-                @foreach($venues as $venue)
-                    <a class="event-card gamehub-venue-card" href="{{ \App\Support\SeoUrl::venue($venue) }}" data-venue-name="{{ \Illuminate\Support\Str::lower($venue->title) }}" data-venue-category="{{ \Illuminate\Support\Str::lower($venue->category) }}">
-                        <div class="event-card__thumb">
-                            <img src="{{ $venue->image }}" alt="{{ $venue->title }}" />
-                            <div class="event-card__thumb-overlay">
-                                <div class="event-card__thumb-text">
-                                    <div class="event-card__thumb-venue">{{ $venue->location }}@if(!empty($venue->distance)) • {{ $venue->distance }}@endif</div>
-                                    <h3 class="event-card__thumb-title">{{ $venue->title }}</h3>
-                                </div>
-                            </div>
-                            @if(isset($venue->badge))
-                                <span class="venue-badge">{{ $venue->badge }}</span>
-                            @endif
-                        </div>
-                        <div class="event-card__body gamehub-venue-card__body">
-                            <!-- Category & Rating Row -->
-                            <div class="event-card__meta gamehub-venue-card__meta">
-                                <span class="event-card__category gamehub-venue-card__category" style="display: flex; align-items: center; gap: 6px;">
-                                    @if(isset($sportIcons[$venue->category]))
-                                        <img src="{{ $sportIcons[$venue->category] }}" alt="{{ $venue->category }} icon" style="width: 16px; height: 16px; object-fit: contain;" />
-                                    @endif
-                                    {{ $venue->category }}
-                                </span>
+            <div class="pl-grounds">
+                @foreach($grounds as $venue)
+                    <a class="pl-ground" href="{{ \App\Support\SeoUrl::venue($venue) }}">
+                        <img class="pl-ground__img" src="{{ $venue->image ?: asset('images/haraan-social-card.png') }}" alt="{{ $venue->title }}" loading="{{ $loop->index < 3 ? 'eager' : 'lazy' }}" decoding="async">
+                        <span class="pl-ground__body">
+                            <span class="pl-ground__top">
+                                <strong class="pl-ground__name">{{ $venue->title }}</strong>
                                 @if($venue->reviews > 0)
-                                    <span class="event-card__rating gamehub-venue-card__rating">
-                                        <span class="gamehub-venue-card__star">★</span>
-                                        <span class="gamehub-venue-card__rating-value">{{ $venue->rating }}</span>
-                                        <span class="gamehub-venue-card__reviews-count">({{ $venue->reviews }})</span>
-                                    </span>
-                                @else
-                                    <span class="event-card__rating gamehub-venue-card__rating gamehub-venue-card__rating--new">New</span>
+                                    <span class="pl-ground__rate"><i>★</i>{{ $venue->rating }}</span>
                                 @endif
-                            </div>
-                            
-                            <!-- Price & Action Button Row -->
-                            <div class="event-card__actions gamehub-venue-card__actions">
-                                <span class="event-card__price gamehub-venue-card__price">
-                                    ₹{{ number_format($venue->price) }}/hr
-                                </span>
-                                <span class="btn btn--solid event-card__btn gamehub-venue-card__btn">
-                                    Book Slot
-                                </span>
-                            </div>
-                        </div>
+                            </span>
+                            <span class="pl-ground__where">{{ trim(($venue->location ?: '').($venue->city && $venue->city !== $venue->location ? ', '.$venue->city : ''), ', ') }}</span>
+                            <span class="pl-ground__foot">
+                                @if($venue->price > 0)
+                                    <span class="pl-ground__price">₹{{ number_format($venue->price) }} <small>/ hour</small></span>
+                                @else
+                                    <span></span>
+                                @endif
+                                @include('site.partials.hub-sports', ['sports' => $venue->sports, 'glyphKey' => $hubGlyphKey, 'icons' => $hubIcons])
+                            </span>
+                        </span>
                     </a>
                 @endforeach
             </div>
         @else
-            <div class="empty-state">
-                <p>No facilities found in this area</p>
-                <button class="filter-button" type="button">Clear all filters</button>
+            <div class="pl-none">
+                <div>
+                    <h3>No {{ $sportWord ? $sportWord.' ' : '' }}ground{{ $selectedCity ? ' near '.$selectedCity : '' }} is on Pulse yet</h3>
+                    <p>When an owner lists one, it shows here with its courts, open slots and hourly price — and you book it in a minute.</p>
+                    <div class="pl-actions">
+                        <a class="pl-btn" href="/partner/login">List your ground</a>
+                        <a class="pl-link" href="/gamehub/actionboard">Score a match instead →</a>
+                    </div>
+                </div>
+                @include('site.partials.court-plan', ['plan' => $plan])
             </div>
         @endif
     </section>
-
-    <a class="promo-banner" href="#all-venues">
-        <img src="{{ asset('gamehub.png') }}" alt="Promo banner">
-        <div class="promo-banner__content">
-            <span class="eyebrow eyebrow--soft">Limited Access</span>
-            <h2>Unlock the Best Arenas in the City</h2>
-            <p>Book elite facilities with professional equipment and instant digital scheduling.</p>
-            <span class="btn btn--solid">Start Booking</span>
-        </div>
-    </a>
-</section>
-
-<script>
-document.addEventListener('DOMContentLoaded', () => {
-    const cards = document.querySelectorAll('.gamehub-action-card');
-    cards.forEach(card => {
-        card.addEventListener('click', (e) => {
-            cards.forEach(c => c.classList.remove('active'));
-            card.classList.add('active');
-        });
-    });
-
-    /* ---- Venue filtering: search box + sport tiles ---- */
-    const searchInput = document.getElementById('venueSearchInput');
-    const clearBtn    = document.getElementById('venueClearFilter');
-    const sportTiles  = document.querySelectorAll('.sport-card[data-sport]');
-    const venueCards  = Array.from(document.querySelectorAll('.gamehub-venue-card'));
-    const venuesGrid  = document.querySelector('.gamehub-venues-grid');
-
-    let activeSport = null;
-
-    // Empty-message element shown when nothing matches.
-    let emptyMsg = null;
-    if (venuesGrid) {
-        emptyMsg = document.createElement('div');
-        emptyMsg.className = 'empty-state';
-        emptyMsg.style.display = 'none';
-        emptyMsg.innerHTML = '<p>No venues match your filters</p>';
-        venuesGrid.parentNode.insertBefore(emptyMsg, venuesGrid.nextSibling);
-    }
-
-    function applyFilters() {
-        const q = (searchInput?.value || '').trim().toLowerCase();
-        let visible = 0;
-
-        venueCards.forEach(card => {
-            const name = card.getAttribute('data-venue-name') || '';
-            const cat  = card.getAttribute('data-venue-category') || '';
-            const matchesText  = !q || name.includes(q) || cat.includes(q);
-            const matchesSport = !activeSport || cat === activeSport.toLowerCase();
-            const show = matchesText && matchesSport;
-            card.style.display = show ? '' : 'none';
-            if (show) visible++;
-        });
-
-        if (emptyMsg) emptyMsg.style.display = visible === 0 ? 'block' : 'none';
-        if (venuesGrid) venuesGrid.style.display = visible === 0 ? 'none' : '';
-    }
-
-    searchInput?.addEventListener('input', applyFilters);
-
-    sportTiles.forEach(tile => {
-        tile.addEventListener('click', () => {
-            const sport = tile.getAttribute('data-sport');
-            if (activeSport === sport) {
-                activeSport = null;
-                tile.classList.remove('is-active');
-            } else {
-                activeSport = sport;
-                sportTiles.forEach(t => t.classList.remove('is-active'));
-                tile.classList.add('is-active');
-            }
-            applyFilters();
-            document.getElementById('featured-venues')?.scrollIntoView({ behavior: 'smooth' });
-        });
-    });
-
-    clearBtn?.addEventListener('click', () => {
-        activeSport = null;
-        if (searchInput) searchInput.value = '';
-        sportTiles.forEach(t => t.classList.remove('is-active'));
-        applyFilters();
-    });
-});
-</script>
+</div>
 @endsection
-
-@include('site.partials.thanna-actionboard')
