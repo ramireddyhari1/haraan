@@ -83,6 +83,85 @@
     };
 @endphp
 
+{{-- Slot board finish (2026-10-16): a booking sheet, not a dashboard. Keys have a
+     darker bottom edge and sink when pressed; the price is stated once; booked
+     keys are recessed. Scoped to the slot container so nothing else moves. --}}
+<style>
+    #slots-grid-container { font-variant-numeric: tabular-nums; }
+    #slots-grid-container .sb-status {
+        display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+        padding: 2px 2px 12px; margin-bottom: 4px; border-bottom: 1px solid #E8EDF4;
+        font-size: 13px; color: #64748B;
+    }
+    #slots-grid-container .sb-status b { color: #0F172A; font-weight: 800; }
+    #slots-grid-container .sb-status__rate { color: #334155; font-weight: 600; white-space: nowrap; }
+    #slots-grid-container .sb-status.is-offline .sb-status__count { color: #B45309; }
+    #slots-grid-container .sb-status.is-checking { border-bottom-color: transparent; }
+
+    #slots-grid-container .sb-group { margin-top: 16px; }
+    #slots-grid-container .sb-group__head {
+        display: flex; align-items: baseline; gap: 8px; margin: 0 2px 10px;
+    }
+    #slots-grid-container .sb-group__head h4 { margin: 0; font-size: 14px; font-weight: 800; color: #0F172A; letter-spacing: -.005em; }
+    #slots-grid-container .sb-group__hours { font-size: 12.5px; color: #94A3B8; font-weight: 500; }
+    #slots-grid-container .sb-group__count { margin-left: auto; font-size: 12.5px; font-weight: 700; color: #475569; }
+    #slots-grid-container .sb-group__count.is-none { color: #94A3B8; }
+
+    #slots-grid-container .sb-keys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+    #slots-grid-container .sb-key {
+        position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
+        min-height: 54px; padding: 8px 4px 9px; margin: 0;
+        background: #FFFFFF; border: 1px solid #D9E1EC; border-bottom: 3px solid #C5D0DF; border-radius: 12px;
+        box-shadow: 0 1px 0 #fff inset; color: #0F172A; cursor: pointer; text-align: center;
+        transform: none; transition: transform .07s ease, border-color .15s ease, background-color .15s ease;
+        -webkit-tap-highlight-color: transparent; user-select: none;
+    }
+    #slots-grid-container .sb-key::before, #slots-grid-container .sb-key::after { content: none; }
+    #slots-grid-container .sb-key:hover { border-color: #B9C6DA; border-bottom-color: #AEBBD0; }
+    #slots-grid-container .sb-key:active:not(.is-booked) { transform: translateY(2px); border-bottom-width: 1px; margin-bottom: 2px; }
+    #slots-grid-container .sb-key__time { font-size: 16.5px; font-weight: 800; letter-spacing: -.01em; line-height: 1.15; }
+    #slots-grid-container .sb-key__time small { margin-left: 3px; font-size: 10.5px; font-weight: 700; color: #94A3B8; letter-spacing: .02em; }
+    #slots-grid-container .sb-key__sub { font-size: 11.5px; font-weight: 700; color: #64748B; line-height: 1.2; }
+    #slots-grid-container .sb-key__soon { font-size: 11px; font-weight: 700; color: #2563EB; line-height: 1.2; }
+
+    /* Peak: costs more, says how much, in a warm ink — no flame. */
+    #slots-grid-container .sb-key.is-peak .sb-key__sub { color: #B45309; }
+
+    /* Picked: the key stays pressed, in blue. */
+    /* !important only here: site-theme-overrides.css forces a pale selected tile with
+       !important on desktop, which turned white text invisible. */
+    #slots-grid-container .sb-key.is-selected {
+        background: #2563EB !important; border-color: #1D4ED8 !important; border-bottom: 1px solid #1D4ED8 !important; margin-top: 2px;
+        min-height: 52px; color: #fff; transform: none;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, .22) inset, 0 4px 10px -4px rgba(37, 99, 235, .6) !important;
+    }
+    #slots-grid-container .sb-key.is-selected .sb-key__time { color: #fff !important; }
+    #slots-grid-container .sb-key.is-selected .sb-key__time small,
+    #slots-grid-container .sb-key.is-selected .sb-key__sub,
+    #slots-grid-container .sb-key.is-selected .sb-key__soon { color: rgba(255, 255, 255, .82); }
+
+    /* Taken: recessed into the sheet, time struck through. */
+    #slots-grid-container .sb-key.is-booked {
+        background: #F2F5F9; border: 1px solid #E3E9F1; border-bottom-width: 1px; margin-top: 2px; min-height: 52px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .06) inset; color: #A3AFC0; cursor: not-allowed;
+    }
+    #slots-grid-container .sb-key.is-booked .sb-key__clock { text-decoration: line-through; text-decoration-thickness: 1.5px; text-decoration-color: #B8C3D2; }
+    #slots-grid-container .sb-key.is-booked .sb-key__sub { color: #94A3B8; }
+
+    /* A slot that just changed under the viewer: one brief cue, then calm. */
+    #slots-grid-container .sb-key.is-just-taken { animation: sb-gone .9s ease; }
+    #slots-grid-container .sb-key.is-just-freed { animation: sb-back .9s ease; }
+    @keyframes sb-gone { 0%, 40% { background: #FEE2E2; border-color: #FCA5A5; } }
+    @keyframes sb-back { 0%, 40% { background: #DCFCE7; border-color: #86EFAC; } }
+    @media (prefers-reduced-motion: reduce) {
+        #slots-grid-container .sb-key { transition: none; }
+        #slots-grid-container .sb-key.is-just-taken, #slots-grid-container .sb-key.is-just-freed { animation: none; }
+    }
+
+    #slots-grid-container .sb-key--skel { cursor: default; border-color: #E8EDF4; border-bottom-color: #E1E7F0; background: linear-gradient(90deg, #F4F7FB 25%, #EAF0F7 50%, #F4F7FB 75%) 0 0 / 200% 100%; animation: sb-shimmer 1.2s linear infinite; }
+    @keyframes sb-shimmer { to { background-position: -200% 0; } }
+</style>
+
 <div class="mven" data-venue-id="{{ $venue->id }}">
     {{-- ── 1. Hero gallery ───────────────────────────────────────────────── --}}
     <div class="mven__hero">
@@ -2055,12 +2134,9 @@
         if (liveStates === null) {
             const n = Math.min(slots.length, 9);
             container.innerHTML = `
-                <div class="slots-live is-checking">
-                    <span class="slots-live__dot"></span>
-                    <span class="slots-live__label">Checking live availability…</span>
-                </div>
-                <div class="slots-grid slots-grid--skeleton">
-                    ${'<div class="slot-skel"><i></i><i></i></div>'.repeat(n)}
+                <div class="sb-status is-checking"><span class="sb-status__count">Checking what’s open…</span></div>
+                <div class="sb-keys sb-keys--skeleton">
+                    ${'<div class="sb-key sb-key--skel"></div>'.repeat(n)}
                 </div>`;
             return;
         }
@@ -2076,26 +2152,23 @@
         const startsIn = (m) => m < 60 ? `in ${m} min` : `in ${Math.floor(m / 60)}h${m % 60 ? ' ' + (m % 60) + 'm' : ''}`;
 
         let idx = 0;
+        // "6:00 AM" → "6 AM", "12:30 PM" → "12:30 PM": hours as people say them.
+        const spoken = (t) => (t || '').replace(/^0/, '').replace(':00', '');
         const renderGroup = (title, group) => {
             if (!group.length) return '';
             const gOpen = group.filter(s => slotState(s.id) === 'open').length;
             const gShut = group.every(s => slotState(s.id) === 'closed');
-            const bar = group.map(slot => {
-                const st = slotState(slot.id);
-                const key = `${selectedDate}_${selectedSport}_${selectedCourt}_${slot.id}`;
-                const picked = selectedSlots.some(s => s.key === key);
-                return `<i class="slots-bar__seg is-${st}${picked ? ' is-picked' : ''}" data-seg="${key}"></i>`;
-            }).join('');
+            const from = spoken(group[0].time.split(' - ')[0]);
+            const to = spoken((group[group.length - 1].time.split(' - ')[1] || ''));
 
             let groupHtml = `
-                <div class="slots-group">
-                    <div class="slots-group__head">
-                        <span class="slots-group__art">${SLOT_ART[title]}</span>
-                        <h4 class="slots-group__title">${title}</h4>
-                        <span class="slots-group__count ${gOpen ? '' : 'is-full'}">${gOpen ? gOpen + ' of ' + group.length + ' open' : (gShut ? 'Closed' : 'Full')}</span>
-                    </div>
-                    <div class="slots-bar" aria-hidden="true">${bar}</div>
-                    <div class="slots-grid">
+                <section class="sb-group">
+                    <header class="sb-group__head">
+                        <h4>${title}</h4>
+                        <span class="sb-group__hours">${from}${to ? ' – ' + to : ''}</span>
+                        <span class="sb-group__count${gOpen ? '' : ' is-none'}">${gOpen ? gOpen + ' open' : (gShut ? 'Closed' : 'Full')}</span>
+                    </header>
+                    <div class="sb-keys">
             `;
 
             group.forEach((slot) => {
@@ -2108,48 +2181,49 @@
                 const flip = slotFlips[slot.id];
 
                 const [clock, ampm] = slot.time.split(' - ')[0].split(' ');
-                const classes = ['slot-item',
+                const classes = ['slot-item', 'sb-key',
                     isTaken ? (state === 'closed' ? 'is-booked is-closed' : 'is-booked') : (isSelected ? 'is-selected' : 'is-open'),
                     isPeak && !isTaken ? 'is-peak' : '',
                     flip ? 'is-just-' + flip : '',
                 ].filter(Boolean).join(' ');
                 const onclickAttr = isTaken ? '' : `onclick="toggleSlot(this, ${slot.id}, ${r})"`;
-                const priceHtml = state === 'booked' ? `<span class="slot-item__lock">${SLOT_ART.lock}</span>Booked`
-                    : state === 'closed' ? 'Unavailable'
-                    : (isPeak ? `<span class="slot-item__flame">${SLOT_ART.flame}</span>` : '') + '₹' + r.toLocaleString();
+                // The price is said once, in the line above. A key only carries one when
+                // it differs (peak), or the word for why it can't be taken.
+                const sub = state === 'booked' ? 'Booked'
+                    : state === 'closed' ? 'Closed'
+                    : isPeak ? '₹' + r.toLocaleString() : '';
                 const tag = nextUp && nextUp.id === slot.id && slot.start - nowMin <= 240
-                    ? `<span class="slot-item__tag">${startsIn(slot.start - nowMin)}</span>` : '';
+                    ? `<span class="sb-key__soon">${startsIn(slot.start - nowMin)}</span>` : '';
                 const style = animate ? ` style="--i:${idx++}"` : '';
 
                 groupHtml += `
                     <div ${onclickAttr} class="${classes}${animate ? ' is-enter' : ''}" data-key="${slotKey}"${style}
                          role="button" aria-pressed="${isSelected}" aria-disabled="${isTaken}"
                          aria-label="${slot.time}, ${state === 'open' ? '₹' + r + (isPeak ? ' peak' : '') : state}">
-                        ${tag}
-                        <div class="slot-item__time">${clock}<small>${ampm || ''}</small></div>
-                        <div class="slot-item__price">${priceHtml}</div>
+                        <span class="sb-key__time"><span class="sb-key__clock">${clock.replace(/^0/, '')}</span><small>${ampm || ''}</small></span>
+                        ${sub ? `<span class="sb-key__sub">${sub}</span>` : tag}
                     </div>
                 `;
             });
 
             groupHtml += `
                     </div>
-                </div>
+                </section>
             `;
             return groupHtml;
         };
 
-        const live = `
-            <div class="slots-live${liveFailed ? ' is-offline' : ''}">
-                <span class="slots-live__dot"></span>
-                <span class="slots-live__label">Live</span>
-                <span class="slots-live__ago" id="slots-live-ago">${liveAgoText()}</span>
-                <span class="slots-live__stat">
-                    <b class="is-open">${openCount}</b> open${bookedCount ? ` · <b class="is-booked">${bookedCount}</b> booked` : ''}
+        // One quiet line: what's open, and the price once — not a pulsing "LIVE" badge.
+        const peakRates = slots.map(s => slotRate(s.time)).filter(v => v > rate);
+        const head = `
+            <div class="sb-status${liveFailed ? ' is-offline' : ''}">
+                <span class="sb-status__count">
+                    ${liveFailed ? 'Couldn’t refresh · showing last known' : `<b>${openCount}</b> open${bookedCount ? ` · ${bookedCount} booked` : ''}`}
                 </span>
+                <span class="sb-status__rate">₹${rate.toLocaleString()} / hour${peakRates.length ? ' · peak ₹' + Math.max(...peakRates).toLocaleString() : ''}</span>
             </div>`;
 
-        container.innerHTML = live +
+        container.innerHTML = head +
             renderGroup('Morning', slots.filter(s => s.start < 12 * 60)) +
             renderGroup('Afternoon', slots.filter(s => s.start >= 12 * 60 && s.start < 17 * 60)) +
             renderGroup('Evening', slots.filter(s => s.start >= 17 * 60));
