@@ -159,6 +159,39 @@
             }
         }
 
+        /* Light footer, the same idea as the Pulse header band: a white panel
+           with one fine blue edge following its rounded top corners and a soft
+           blue-tinted lift off the page. Overrides both the phone styles
+           (site-mobile-overrides.css) and the desktop block above; `footer.mfoot`
+           outranks their `.mfoot …` selectors without !important. */
+        footer.mfoot {
+            background: #FFFFFF;
+            color: #0F172A;
+            border: 1.5px solid #2563EB;
+            border-bottom: 0;
+            box-shadow: 0 -10px 26px -16px rgba(37, 99, 235, .45);
+        }
+        footer.mfoot .mfoot__accent { display: none; }
+        footer.mfoot .mfoot__cta {
+            background: #F5F8FE;
+            border: 1px solid #DCE6F8;
+            box-shadow: 0 1px 0 #fff inset;
+        }
+        footer.mfoot .mfoot__cta-copy strong { color: #0F172A; }
+        footer.mfoot .mfoot__cta-copy p { color: #64748B; }
+        /* The Google Play badge stays black — it's Google's badge, not our button. */
+        footer.mfoot .mfoot__play { border-color: #000; box-shadow: 0 2px 6px -2px rgba(15, 23, 42, .35); }
+        footer.mfoot .mfoot__apk { color: #1E3A8A; }
+        footer.mfoot .mfoot__apk:hover { color: #2563EB; }
+        footer.mfoot .mfoot__col h4 { color: #94A3B8; }
+        footer.mfoot .mfoot__col a { color: #334155; }
+        footer.mfoot .mfoot__col a:hover { color: #2563EB; }
+        footer.mfoot .mfoot__base { border-top-color: #E6ECF5; }
+        footer.mfoot .mfoot__brand img { filter: none; opacity: 1; }
+        footer.mfoot .mfoot__tag { color: #94A3B8; }
+        footer.mfoot .mfoot__meta small { color: #94A3B8; }
+        footer.mfoot .mfoot__made { color: #64748B; }
+
         /* Focused checkout: the booking review + payment pages hide the whole site
            header (greeting, search, section tabs) so nothing competes with the order.
            These pages carry their own "Back to event" link for navigation. */
