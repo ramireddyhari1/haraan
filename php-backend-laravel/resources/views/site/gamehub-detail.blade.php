@@ -270,6 +270,30 @@
                 @endforeach
             </div>
         @endif
+
+        {{-- ── 9b. FAQ — answered from this venue's own data (PublicWebController::
+             venueFaqs); the same list is the page's FAQPage markup, which search
+             engines only honour when the questions are visible on the page. ── --}}
+        @if(!empty($venueFaqs))
+            <div class="mven__rule"></div>
+            <h2 class="mven__h2">Questions about {{ $venue->title }}</h2>
+            <div class="mven__faq">
+                @foreach($venueFaqs as $faq)
+                    <details @if($loop->first) open @endif>
+                        <summary>{{ $faq['question'] }}</summary>
+                        <p>{{ $faq['answer'] }}</p>
+                    </details>
+                @endforeach
+            </div>
+            <style>
+                .mven__faq details { border-bottom: 1px solid #E2E8F0; padding: 12px 0; }
+                .mven__faq summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; gap: 12px; font-size: 14px; font-weight: 700; color: #0F172A; }
+                .mven__faq summary::-webkit-details-marker { display: none; }
+                .mven__faq summary::after { content: '+'; color: #2563EB; font-weight: 800; }
+                .mven__faq details[open] summary::after { content: '–'; }
+                .mven__faq p { margin: 8px 0 0; font-size: 14px; line-height: 1.55; color: #475569; }
+            </style>
+        @endif
     </div>
 
     {{-- ── 10. Sticky book bar ───────────────────────────────────────────── --}}

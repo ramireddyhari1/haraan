@@ -23,6 +23,12 @@
 
 <link rel="stylesheet" href="{{ asset('css/banner.css') }}?v={{ @filemtime(public_path('css/banner.css')) ?: '1' }}">
 
+{{-- The page heading. Visually hidden (the app-style feed has no headline slot and
+     the sections carry their own titles), but it is the real document outline that
+     screen readers and search engines use as the page's topic. --}}
+<h1 class="vh-heading">{{ $pageHeading ?? 'Events near you' }}</h1>
+<style>.vh-heading{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}</style>
+
 {{-- ============================================================= --}}
 {{-- MOBILE APP-STYLE EVENTS HOME (mirrors the Android app; ≤720px) --}}
 {{-- ============================================================= --}}
@@ -96,7 +102,7 @@
                         $venueLabel = trim((string) $ev->venue) ?: trim((string) $ev->location);
                     @endphp
                     <div class="mfy__page" data-mpager-page data-mpager-card>
-                        <a class="mfy" href="/events/{{ $ev->id }}">
+                        <a class="mfy" href="{{ \App\Support\SeoUrl::event($ev) }}">
                             <img class="mfy__img" src="{{ $img }}" alt=""
                                  decoding="async"
                                  loading="{{ $loop->first ? 'eager' : 'lazy' }}"
@@ -135,7 +141,7 @@
     <div class="mtrends">
         @foreach($mTrending as $ev)
             @php $img = $ev->heroImageUrl() ?? '/bv-white.png'; @endphp
-            <a class="mtrend" href="/events/{{ $ev->id }}">
+            <a class="mtrend" href="{{ \App\Support\SeoUrl::event($ev) }}">
                 <span class="mtrend__rank" data-rank="{{ $loop->iteration }}" aria-hidden="true">{{ $loop->iteration }}</span>
                 <span class="mtrend__img">
                     <img src="{{ $img }}" alt="" loading="lazy" decoding="async">
@@ -201,7 +207,7 @@
                 $mFrom      = $ev->fromPrice();
                 $hasOnwards = $mFrom > 0 && $ev->priceTierCount() > 1;
             @endphp
-            <a class="mcard" href="/events/{{ $ev->id }}">
+            <a class="mcard" href="{{ \App\Support\SeoUrl::event($ev) }}">
                 <div class="mcard__img" style="background-image:url('{{ $img }}')">
                     @if($soon)<span class="mcard__fast"><i>⚡</i>FILLING FAST</span>@endif
                 </div>
@@ -238,7 +244,7 @@
                         <h2>{{ $event['title'] }}</h2>
                         <p class="venue">{{ $event['venue'] }}</p>
                         <p class="price">{{ $event['price'] }}</p>
-                        <a href="/events/{{ $event['id'] }}" class="book-btn">Book tickets</a>
+                        <a href="{{ \App\Support\SeoUrl::event($event) }}" class="book-btn">Book tickets</a>
                     </div>
 
                     <div class="banner-item__right">
@@ -311,7 +317,7 @@
         <div class="trend-grid">
             @foreach($topFive as $ev)
                 @php $timg = $ev->heroImageUrl() ?? asset('events.png'); @endphp
-                <a class="trend-card" href="/events/{{ $ev->id }}">
+                <a class="trend-card" href="{{ \App\Support\SeoUrl::event($ev) }}">
                     <div class="trend-card__media" style="background-image:url('{{ $timg }}')">
                         <span class="trend-card__grad" aria-hidden="true"></span>
                         <span class="trend-card__rank" aria-hidden="true">{{ $loop->iteration }}</span>
@@ -337,7 +343,7 @@
 
         <div class="events-grid-list">
             @forelse ($listedEvents as $event)
-                <a class="event-list-card" href="/events/{{ $event->id }}">
+                <a class="event-list-card" href="{{ \App\Support\SeoUrl::event($event) }}">
                     <div class="event-list-card__media">
                         @php
                             $poster = null;

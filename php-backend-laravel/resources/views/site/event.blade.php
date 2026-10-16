@@ -2227,7 +2227,7 @@
                                 $sTiers = $s->relationLoaded('ticketTypes') ? $s->saleableTicketTypes() : collect();
                                 $sFrom  = $sTiers->count() ? (float) $sTiers->min(fn ($t) => $t->effectivePrice()) : (float) $s->price;
                             @endphp
-                            <a class="dk-card" href="/events/{{ $s->id }}">
+                            <a class="dk-card" href="{{ \App\Support\SeoUrl::event($s) }}">
                                 <div class="dk-card__img">
                                     <img src="{{ $s->heroImageUrl() ?? asset('events.png') }}" alt="{{ $s->title }}" loading="lazy" decoding="async">
                                 </div>

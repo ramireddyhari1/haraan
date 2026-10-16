@@ -183,7 +183,7 @@
     @if($popularVenues->count())
         <div class="mhub__reel">
             @foreach($popularVenues as $venue)
-                <a class="mhub__arena" href="/gamehub/{{ $venue->id }}">
+                <a class="mhub__arena" href="{{ \App\Support\SeoUrl::venue($venue) }}">
                     <span class="mhub__arena-img">
                         <img src="{{ $venue->image }}" alt="{{ $venue->title }}" loading="lazy" decoding="async">
                         <span class="mhub__arena-scrim"></span>
@@ -217,7 +217,7 @@
         </div>
         <div class="mhub__list">
             @foreach($moreVenues as $venue)
-                <a class="mhub__vcard" href="/gamehub/{{ $venue->id }}">
+                <a class="mhub__vcard" href="{{ \App\Support\SeoUrl::venue($venue) }}">
                     <span class="mhub__vcard-img">
                         <img src="{{ $venue->image }}" alt="{{ $venue->title }}" loading="lazy" decoding="async">
                         <span class="mhub__vcard-scrim"></span>
@@ -335,8 +335,8 @@
 
     <section class="gamehub-hero">
         <div class="gamehub-hero__copy">
-            <h1>Venues in {{ $selectedCity ?? 'All India' }}</h1>
-            <p>Discover and book premium sports facilities curated for champions.</p>
+            <h1>Turfs &amp; courts in {{ $selectedCity ?? 'India' }}</h1>
+            <p>Book cricket turfs, box cricket, football and badminton courts by the hour.</p>
 
             <div class="search-strip search-strip--gamehub">
                 <label class="search-field">
@@ -405,7 +405,7 @@
             @endphp
             <div class="events-grid gamehub-venues-grid">
                 @foreach($venues as $venue)
-                    <a class="event-card gamehub-venue-card" href="/gamehub/{{ $venue->id }}" data-venue-name="{{ \Illuminate\Support\Str::lower($venue->title) }}" data-venue-category="{{ \Illuminate\Support\Str::lower($venue->category) }}">
+                    <a class="event-card gamehub-venue-card" href="{{ \App\Support\SeoUrl::venue($venue) }}" data-venue-name="{{ \Illuminate\Support\Str::lower($venue->title) }}" data-venue-category="{{ \Illuminate\Support\Str::lower($venue->category) }}">
                         <div class="event-card__thumb">
                             <img src="{{ $venue->image }}" alt="{{ $venue->title }}" />
                             <div class="event-card__thumb-overlay">

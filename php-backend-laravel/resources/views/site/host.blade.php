@@ -113,7 +113,7 @@
                 <div class="hp-grid">
                     @foreach ($venues as $venue)
                         @php $img = \App\Support\MediaUrl::resolve(is_array($venue->images) ? ($venue->images[0] ?? null) : null); @endphp
-                        <a href="{{ url('/gamehub/'.$venue->id) }}" class="hp-card">
+                        <a href="{{ \App\Support\SeoUrl::venue($venue) }}" class="hp-card">
                             <div class="hp-poster hp-poster-venue" @if ($img) style="background-image:url('{{ $img }}')" @endif>
                                 @if (! $img)<span>{{ strtoupper(mb_substr($venue->name, 0, 1)) }}</span>@endif
                             </div>
@@ -138,7 +138,7 @@
             <div class="hp-grid">
                 @foreach ($events as $event)
                     @php $poster = $event->heroImageUrl(); @endphp
-                    <a href="{{ url('/events/'.$event->id) }}" class="hp-card">
+                    <a href="{{ \App\Support\SeoUrl::event($event) }}" class="hp-card">
                         <div class="hp-poster" @if ($poster) style="background-image:url('{{ $poster }}')" @endif>
                             @if (! $poster)<span>{{ strtoupper(mb_substr($event->title, 0, 1)) }}</span>@endif
                         </div>
@@ -163,7 +163,7 @@
             <div class="hp-grid hp-grid-past">
                 @foreach ($pastEvents as $event)
                     @php $poster = $event->heroImageUrl(); @endphp
-                    <a href="{{ url('/events/'.$event->id) }}" class="hp-card hp-card-past">
+                    <a href="{{ \App\Support\SeoUrl::event($event) }}" class="hp-card hp-card-past">
                         <div class="hp-poster" @if ($poster) style="background-image:url('{{ $poster }}')" @endif>
                             @if (! $poster)<span>{{ strtoupper(mb_substr($event->title, 0, 1)) }}</span>@endif
                         </div>

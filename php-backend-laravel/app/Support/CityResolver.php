@@ -33,6 +33,7 @@ final class CityResolver
         'Ahmedabad',
         'Jaipur',
         'Goa',
+        'Kadapa',
     ];
 
     /**
@@ -42,6 +43,9 @@ final class CityResolver
      * @var array<string, string>
      */
     private const AREA_ALIASES = [
+        // Kadapa / YSR District
+        'kadapa' => 'Kadapa', 'ysr kadapa' => 'Kadapa', 'cuddapah' => 'Kadapa',
+        'proddatur' => 'Kadapa', 'pulivendula' => 'Kadapa', 'rayachoty' => 'Kadapa',
         // Mumbai
         'mumbai' => 'Mumbai', 'bombay' => 'Mumbai', 'bandra' => 'Mumbai',
         'powai' => 'Mumbai', 'andheri' => 'Mumbai', 'juhu' => 'Mumbai',

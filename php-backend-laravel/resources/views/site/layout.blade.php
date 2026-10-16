@@ -30,6 +30,8 @@
     <link rel="manifest" href="{{ asset('site.webmanifest') }}?v=3">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    {{-- Category tiles on the events feed load their icons from here. --}}
+    <link rel="preconnect" href="https://cdn-icons-png.flaticon.com">
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=Poppins:wght@800;900&family=Inter:wght@300..800&display=swap" rel="stylesheet">
     @php
         // Cache-bust assets by file mtime: browsers can cache them, but a new
@@ -49,15 +51,112 @@
     <link rel="stylesheet" href="{{ $assetVer('css/site.css') }}">
     <link rel="stylesheet" href="{{ $assetVer('css/site-theme-overrides.css') }}">
     <link rel="stylesheet" href="{{ $assetVer('css/site-mobile-overrides.css') }}" media="(max-width:1024px)">
-    <script src="https://cdn.lordicon.com/lordicon.js"></script>
     <style>
         /* NB: the desktop mobile-UI-hide safety rules live in site.css
            (@media min-width:1025px) — not duplicated here. */
 
-        /* Brand lockup and mobile footer are phone-only (styled in the mobile
-           overrides ≤720px); never render elsewhere. */
+        /* Brand lockup is phone-only. */
         @media (min-width: 721px) {
-            .mband, .mfoot { display: none !important; }
+            .mband { display: none !important; }
+        }
+
+        /* Shared responsive footer on screens ≥721px */
+        @media (min-width: 721px) {
+            .mfoot {
+                display: block !important;
+                position: relative;
+                margin-top: 56px;
+                background:
+                    radial-gradient(120% 78% at 0% 0%, rgba(37, 99, 235, .18) 0%, transparent 55%),
+                    radial-gradient(120% 78% at 100% 0%, rgba(59, 130, 246, .14) 0%, transparent 55%),
+                    #0B1220;
+                color: #E7ECF4;
+                border-radius: 28px 28px 0 0;
+                padding: 44px 32px calc(30px + env(safe-area-inset-bottom, 0px));
+                font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+                overflow: hidden;
+            }
+            .mfoot .mfoot__inner {
+                max-width: 1140px;
+                margin: 0 auto;
+            }
+            .mfoot .mfoot__accent {
+                position: absolute; top: 0; left: 0; right: 0; height: 3px;
+                background: linear-gradient(90deg, #2563EB 0%, #60A5FA 100%);
+            }
+            .mfoot .mfoot__cta {
+                display: flex;
+                flex-direction: row;
+                align-items: center;
+                justify-content: space-between;
+                gap: 20px;
+                background: rgba(255, 255, 255, .05);
+                border: 1px solid rgba(255, 255, 255, .10);
+                border-radius: 18px;
+                padding: 20px 24px;
+                margin-bottom: 28px;
+            }
+            .mfoot .mfoot__cta-copy strong {
+                display: block; font-size: 17px; font-weight: 800; color: #fff; margin-bottom: 4px;
+            }
+            .mfoot .mfoot__cta-copy p {
+                margin: 0; font-size: 13.5px; color: rgba(231, 236, 244, .7);
+            }
+            .mfoot .mfoot__cta-actions {
+                display: flex;
+                align-items: center;
+                gap: 14px;
+                flex-shrink: 0;
+            }
+            .mfoot .mfoot__play {
+                display: inline-flex; align-items: center; gap: 11px;
+                background: #000; border: 1px solid rgba(255, 255, 255, .2);
+                border-radius: 12px; padding: 9px 18px 9px 14px;
+                text-decoration: none; color: #fff;
+            }
+            .mfoot .mfoot__play svg { width: 22px; height: 22px; flex-shrink: 0; }
+            .mfoot .mfoot__play small { display: block; font-size: 9px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: #AEB6C4; }
+            .mfoot .mfoot__play b { display: block; font-size: 14.5px; font-weight: 700; line-height: 1.2; }
+            .mfoot .mfoot__apk {
+                display: inline-flex; align-items: center; gap: 7px;
+                font-size: 12.5px; font-weight: 700; color: rgba(231, 236, 244, .75);
+                text-decoration: none;
+            }
+            .mfoot .mfoot__apk:hover { color: #fff; }
+            .mfoot .mfoot__cols {
+                display: grid;
+                grid-template-columns: repeat(4, 1fr);
+                gap: 28px 20px;
+                margin: 28px 0;
+            }
+            .mfoot .mfoot__col {
+                display: flex; flex-direction: column; gap: 11px;
+            }
+            .mfoot .mfoot__col h4 {
+                margin: 0 0 4px; font-size: 11px; font-weight: 800;
+                letter-spacing: .1em; text-transform: uppercase; color: rgba(231, 236, 244, .45);
+            }
+            .mfoot .mfoot__col a {
+                font-size: 13.5px; font-weight: 600; color: rgba(231, 236, 244, .85);
+                text-decoration: none; transition: color .15s ease;
+            }
+            .mfoot .mfoot__col a:hover { color: #60A5FA; }
+            .mfoot .mfoot__base {
+                display: flex; flex-direction: row; align-items: center; justify-content: space-between;
+                border-top: 1px solid rgba(255, 255, 255, .10); padding-top: 22px;
+            }
+            .mfoot .mfoot__brand { display: flex; align-items: center; gap: 12px; }
+            .mfoot .mfoot__brand img { height: 18px; width: auto; filter: brightness(0) invert(1); opacity: .95; }
+            .mfoot .mfoot__tag { font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: rgba(231, 236, 244, .5); }
+            .mfoot .mfoot__meta { display: flex; align-items: center; gap: 16px; }
+            .mfoot .mfoot__meta small { font-size: 11px; color: rgba(231, 236, 244, .5); }
+            .mfoot .mfoot__made { font-size: 11px; font-weight: 700; color: rgba(231, 236, 244, .65); }
+        }
+
+        @media (max-width: 720px) {
+            .mfoot .mfoot__cols {
+                grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            }
         }
 
         /* Focused checkout: the booking review + payment pages hide the whole site
@@ -376,79 +475,93 @@
         @yield('content')
     </main>
 
-    {{-- Mobile footer (≤720px, main tabs only): app download + links + brand base.
-         The Play badge targets the final package id — the link goes live the day
-         the listing publishes; until then the direct-APK line below it works. --}}
-    @if(request()->is('/', 'events', 'gamehub'))
+    {{-- Shared footer: app download + links + brand base.
+         Shown across all public pages, omitted on private back-offices (ERP/Admin/Partner),
+         bearer ticket passes, and focused checkout pages. --}}
     @php
-        $footIsHub = request()->is('gamehub');
+        $hideFooter = request()->is(
+            'erp*', 'admin*', 'control*', 'partner*',
+            't/*', 'events/*/book', 'pay',
+            'gamehub/actionboard/*/control'
+        );
+    @endphp
+    @unless($hideFooter)
+    @php
+        $footIsHub = request()->is('gamehub*');
         $footHead  = $footIsHub ? 'Play on the go' : 'Take Haraan with you';
         $footBlurb = $footIsHub
             ? 'Follow live scores, track your stats, and climb the leaderboards from anywhere.'
             : 'Book faster, discover events near you, and keep your tickets in your pocket.';
         $footTag   = $footIsHub ? 'Play. Compete. Climb.' : 'Discover. Book. Play.';
     @endphp
-    <footer class="mfoot">
-        {{-- Brand-gradient hairline: keeps the two-lane (Events blue · Pulse green)
-             identity as a quiet accent instead of flooding the whole sheet. --}}
+    <footer class="mfoot" role="contentinfo">
         <span class="mfoot__accent" aria-hidden="true"></span>
-
-        {{-- Get-the-app card --}}
-        <div class="mfoot__cta">
-            <div class="mfoot__cta-copy">
-                <strong>{{ $footHead }}</strong>
-                <p>{{ $footBlurb }}</p>
+        <div class="mfoot__inner">
+            <div class="mfoot__cta">
+                <div class="mfoot__cta-copy">
+                    <strong>{{ $footHead }}</strong>
+                    <p>{{ $footBlurb }}</p>
+                </div>
+                <div class="mfoot__cta-actions">
+                    <a class="mfoot__play" href="https://play.google.com/store/apps/details?id=com.haraan.app" target="_blank" rel="noopener" aria-label="Get the Haraan app on Google Play">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path fill="#00E3A5" d="M4.1 1.9 14.6 12 4.1 22.1c-.4-.2-.7-.7-.7-1.3V3.2c0-.6.3-1.1.7-1.3z"/>
+                            <path fill="#3DDCFF" d="M17.7 9.1 5.6 2l9 8.7z"/>
+                            <path fill="#FFC933" d="m14.6 12 3.1-2.9 3 1.7c1 .6 1 1.9 0 2.4l-3 1.7z"/>
+                            <path fill="#FF5C6C" d="m14.6 12-9 10 12.1-7.1z"/>
+                        </svg>
+                        <span><small>GET IT ON</small><b>Google Play</b></span>
+                    </a>
+                    <a class="mfoot__apk" href="/haraan.apk">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+                        Download APK
+                    </a>
+                </div>
             </div>
-            <a class="mfoot__play" href="https://play.google.com/store/apps/details?id=com.haraan.app" target="_blank" rel="noopener" aria-label="Get the Haraan app on Google Play">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path fill="#00E3A5" d="M4.1 1.9 14.6 12 4.1 22.1c-.4-.2-.7-.7-.7-1.3V3.2c0-.6.3-1.1.7-1.3z"/>
-                    <path fill="#3DDCFF" d="M17.7 9.1 5.6 2l9 8.7z"/>
-                    <path fill="#FFC933" d="m14.6 12 3.1-2.9 3 1.7c1 .6 1 1.9 0 2.4l-3 1.7z"/>
-                    <path fill="#FF5C6C" d="m14.6 12-9 10 12.1-7.1z"/>
-                </svg>
-                <span><small>GET IT ON</small><b>Google Play</b></span>
-            </a>
-            <a class="mfoot__apk" href="/haraan.apk">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-                Download the Android APK
-            </a>
-        </div>
 
-        {{-- Tidy, labelled link columns — the structure that reads as a real product
-             footer rather than a single wrapped row. --}}
-        <div class="mfoot__cols">
-            <nav class="mfoot__col" aria-label="Explore">
-                <h4>Explore</h4>
-                <a href="/events">Events</a>
-                <a href="/gamehub">Pulse</a>
-                <a href="/gamehub/leaderboard">Leaderboard</a>
-            </nav>
-            <nav class="mfoot__col" aria-label="Your account">
-                <h4>Your account</h4>
-                <a href="/profile">My profile</a>
-                <a href="/bookings">My bookings</a>
-                <a href="/notifications">Notifications</a>
-            </nav>
-            <nav class="mfoot__col" aria-label="Help and legal">
-                <h4>Help &amp; legal</h4>
-                <a href="/support">Support</a>
-                <a href="/legal/terms">Terms of Use</a>
-                <a href="/legal/privacy">Privacy</a>
-            </nav>
-        </div>
-
-        <div class="mfoot__base">
-            <div class="mfoot__brand">
-                <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
-                <span class="mfoot__tag">{{ $footTag }}</span>
+            <div class="mfoot__cols">
+                <nav class="mfoot__col" aria-label="Explore">
+                    <h4>Explore</h4>
+                    <a href="/events">Events</a>
+                    <a href="/gamehub">Pulse Venues</a>
+                    <a href="/gamehub/actionboard">ActionBoard</a>
+                    <a href="/gamehub/leaderboard">Leaderboard</a>
+                </nav>
+                <nav class="mfoot__col" aria-label="Sports & Turfs">
+                    <h4>Play & Score</h4>
+                    <a href="{{ url('/gamehub?sport=Cricket') }}">Cricket Turfs</a>
+                    <a href="{{ url('/gamehub?sport=Badminton') }}">Badminton Courts</a>
+                    <a href="{{ url('/gamehub?sport=Football') }}">Football Grounds</a>
+                    <a href="{{ url('/gamehub/actionboard') }}">Live Matches</a>
+                </nav>
+                <nav class="mfoot__col" aria-label="Your account">
+                    <h4>Your Account</h4>
+                    <a href="/profile">My Profile</a>
+                    <a href="/bookings">My Bookings</a>
+                    <a href="/notifications">Notifications</a>
+                    <a href="/support">Help & Support</a>
+                </nav>
+                <nav class="mfoot__col" aria-label="Help and legal">
+                    <h4>Company & Legal</h4>
+                    <a href="{{ route('site.legal', 'terms') }}">Terms of Service</a>
+                    <a href="{{ route('site.legal', 'privacy') }}">Privacy Policy</a>
+                    <a href="/partner/login">Partner Portal</a>
+                </nav>
             </div>
-            <div class="mfoot__meta">
-                <small>© {{ date('Y') }} Haraan. All rights reserved.</small>
-                <span class="mfoot__made">Made in India</span>
+
+            <div class="mfoot__base">
+                <div class="mfoot__brand">
+                    <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
+                    <span class="mfoot__tag">{{ $footTag }}</span>
+                </div>
+                <div class="mfoot__meta">
+                    <small>© {{ date('Y') }} Haraan. All rights reserved.</small>
+                    <span class="mfoot__made">Made in India</span>
+                </div>
             </div>
         </div>
     </footer>
-    @endif
+    @endunless
 
     <!-- Premium Login Modal -->
     {{-- The floating login modal is hidden on the /login page itself — that page renders the
@@ -827,8 +940,10 @@
         };
     </script>
     @if(config('broadcasting.default') === 'reverb')
-        <script src="https://js.pusher.com/8.2/pusher.min.js"></script>
-        <script src="{{ $assetVer('js/realtime.js') }}"></script>
+        {{-- defer: off the critical path, and deferred scripts still run in order,
+             so realtime.js always finds Pusher loaded. --}}
+        <script src="https://js.pusher.com/8.2/pusher.min.js" defer></script>
+        <script src="{{ $assetVer('js/realtime.js') }}" defer></script>
     @endif
 
     {{-- "Continue with Google" (Google Identity Services). Loaded only when an OAuth
@@ -856,9 +971,11 @@
                 appId: @json(config('services.firebase.app_id')),
             };
         </script>
-        <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
-        <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
-        <script src="{{ $assetVer('js/firebase-phone-auth.js') }}"></script>
+        {{-- ~250 KB of SDK that only the sign-in sheet needs — deferred so it no
+             longer blocks the page; defer keeps the three in order. --}}
+        <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js" defer></script>
+        <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js" defer></script>
+        <script src="{{ $assetVer('js/firebase-phone-auth.js') }}" defer></script>
     @endif
 
     <script>

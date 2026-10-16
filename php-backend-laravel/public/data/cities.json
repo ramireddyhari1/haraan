@@ -1,5 +1,17 @@
 [
     {
+        "id": "kadapa",
+        "name": "Kadapa",
+        "country": "India",
+        "popular": true
+    },
+    {
+        "id": "chennai",
+        "name": "Chennai",
+        "country": "India",
+        "popular": true
+    },
+    {
         "id": "bengaluru",
         "name": "Bengaluru",
         "country": "India",
@@ -9,6 +21,12 @@
         "id": "hyderabad",
         "name": "Hyderabad",
         "country": "India",
-        "popular": false
+        "popular": true
+    },
+    {
+        "id": "mumbai",
+        "name": "Mumbai",
+        "country": "India",
+        "popular": true
     }
 ]

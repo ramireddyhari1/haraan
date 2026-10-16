@@ -81,13 +81,17 @@ Route::controller(PublicWebController::class)->group(function (): void {
     Route::get('/', 'events');
     Route::get('/home', 'home');
     Route::get('/events', 'events');
-    Route::get('/events/{id}', 'eventDetail');
+    // City hub before the detail route; the detail takes "31" or "31-event-title".
+    Route::get('/events/in/{city}', 'cityEvents')->name('site.events.city');
+    Route::get('/events/{id}', 'eventDetail')->where('id', \App\Support\SeoUrl::SEGMENT);
     // Sponsored-slot click-through: counted, then redirected to the advertiser.
     Route::get('/go/ad/{id}', 'adClick')->whereNumber('id')->middleware('throttle:120,1')->name('site.ad.click');
     Route::get('/host/{slug}', 'hostProfile')->name('site.host');
     Route::middleware('auth')->post('/host/{slug}/follow', 'followHost')->name('site.host.follow');
     Route::get('/gamehub', 'gamehub')->name('site.gamehub');
-    Route::get('/gamehub/{id}', 'gamehubDetail')->whereNumber('id');
+    Route::get('/gamehub/{id}', 'gamehubDetail')->where('id', \App\Support\SeoUrl::SEGMENT);
+    Route::get('/venues/{city}', 'cityVenues')->name('site.venues.city');
+    Route::get('/venues/{city}/{sport}', 'cityVenues')->name('site.venues.city.sport');
     Route::get('/gamehub/actionboard', 'actionBoard')->name('site.gamehub.actionboard');
     Route::get('/gamehub/actionboard/match/{id}', 'actionBoardMatchLive')->name('site.gamehub.actionboard.match');
     Route::get('/gamehub/actionboard/match/{id}/info', 'actionBoardMatchInfo')->name('site.gamehub.actionboard.match.info');

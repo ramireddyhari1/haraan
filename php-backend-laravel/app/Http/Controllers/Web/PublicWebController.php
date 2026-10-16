@@ -29,6 +29,7 @@ use App\Support\EventViewRecorder;
 use App\Support\MatchGeocoder;
 use App\Support\MatchProximity;
 use App\Support\MediaUrl;
+use App\Support\SeoUrl;
 use App\Support\Membership\MemberFeature;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
@@ -120,6 +121,12 @@ final class PublicWebController extends Controller
                     ['name' => 'Events'],
                 ],
             ],
+            // The page's one <h1>. The layout is app-style (sections, no headline), so
+            // it was the only public page with no H1 at all — search engines read the
+            // H1 as the page's topic.
+            'pageHeading' => $isHome
+                ? 'Haraan — book events, sports turfs and courts, and follow live scores'
+                : ($seoCity ? 'Events in '.$seoCity : 'Events near you'),
             'events' => $events,
             'forYou' => $this->railFeed('for_you', 20, $category),
             'eventsAd' => $this->usableAd('events'),
@@ -130,7 +137,7 @@ final class PublicWebController extends Controller
         ]);
     }
 
-    public function eventDetail(Request $request, string $id): View
+    public function eventDetail(Request $request, string $id): View|RedirectResponse
     {
         $viewer = $request->user();
 
@@ -156,7 +163,17 @@ final class PublicWebController extends Controller
             });
         }
 
-        $event = $query->findOrFail($id);
+        $event = $query->findOrFail(SeoUrl::id($id));
+
+        // One URL per event: /events/31 (old app shares, Google's existing index) and
+        // any stale slug after a rename 301 to the current /events/31-title, so the
+        // ranking signals all land on a single address.
+        $canonicalSegment = SeoUrl::segment($event, 'title');
+        if ($id !== $canonicalSegment) {
+            $qs = $request->getQueryString();
+
+            return redirect()->to(url('/events/'.$canonicalSegment).($qs ? '?'.$qs : ''), 301);
+        }
 
         $isPreview = strtolower((string) $event->status) !== 'published';
 
@@ -191,7 +208,8 @@ final class PublicWebController extends Controller
         return view('site.event', [
             'title' => $event->title,
             'event' => $event,
-            'id' => $id,
+            // Numeric — the page builds /events/{id}/book and API calls from it.
+            'id' => (string) $event->id,
             'hostProfile' => $hostProfile,
             'similar' => $similar,
             // A draft preview must never be indexed, even though only its owner and
@@ -256,7 +274,7 @@ final class PublicWebController extends Controller
             '@context' => 'https://schema.org',
             '@type' => 'Event',
             'name' => $event->title,
-            'url' => url('/events/'.$event->id),
+            'url' => SeoUrl::event($event),
             'description' => Str::limit($desc, 300),
             'image' => array_values(array_filter($event->imageUrls())) ?: null,
             // The stored date/time is IST wall-clock (the app runs on UTC), so
@@ -286,7 +304,7 @@ final class PublicWebController extends Controller
                 : null,
             'offers' => array_filter([
                 '@type' => 'Offer',
-                'url' => url('/events/'.$event->id),
+                'url' => SeoUrl::event($event),
                 'price' => number_format($price, 2, '.', ''),
                 'priceCurrency' => 'INR',
                 'availability' => ($event->available_slots ?? 1) > 0
@@ -305,13 +323,18 @@ final class PublicWebController extends Controller
             'description' => $desc,
             'image' => $event->heroImageUrl(),
             'type' => 'event',
-            'canonical' => url('/events/'.$event->id),
+            'canonical' => SeoUrl::event($event),
             'jsonld' => $schema,
-            'breadcrumbs' => [
+            'breadcrumbs' => array_values(array_filter([
                 ['name' => 'Haraan', 'url' => url('/')],
                 ['name' => 'Events', 'url' => url('/events')],
+                // The city hub, when the event has a city — internal links from every
+                // event page are what lets "events in <city>" rank.
+                filled($event->city)
+                    ? ['name' => 'Events in '.trim((string) $event->city), 'url' => route('site.events.city', ['city' => SeoUrl::city((string) $event->city)])]
+                    : null,
                 ['name' => $event->title],
-            ],
+            ])),
         ];
     }
 
@@ -625,7 +648,7 @@ final class PublicWebController extends Controller
         ];
     }
 
-    public function gamehubDetail(string $id): View
+    public function gamehubDetail(Request $request, string $id): View|RedirectResponse
     {
         $venue = Venue::published()
             ->with([
@@ -636,7 +659,15 @@ final class PublicWebController extends Controller
                 // would fall back to a different court than the one the player picked.
                 'courts' => fn ($q) => $q->where('is_active', true),
             ])
-            ->findOrFail($id);
+            ->findOrFail(SeoUrl::id($id));
+
+        // Same single-URL rule as events: /gamehub/5 → /gamehub/5-venue-name.
+        $canonicalSegment = SeoUrl::segment($venue, 'name');
+        if ($id !== $canonicalSegment) {
+            $qs = $request->getQueryString();
+
+            return redirect()->to(url('/gamehub/'.$canonicalSegment).($qs ? '?'.$qs : ''), 301);
+        }
 
         // Link to the owner's public page when they have a live one.
         $hostProfile = $venue->partner?->hostProfile;
@@ -645,9 +676,164 @@ final class PublicWebController extends Controller
         return view('site.gamehub-detail', [
             'hostProfile' => $hostProfile,
             'title' => $venue->name.($venue->city ? ' — '.$venue->city : ''),
-            'id' => $id,
-            'venue' => $this->decorateVenueDetail($venue),
-            'seo' => $this->venueSeo($venue),
+            // Numeric — the page posts to /gamehub/{id}/book with it.
+            'id' => (string) $venue->id,
+            'venue' => $decorated = $this->decorateVenueDetail($venue),
+            'venueFaqs' => $faqs = $this->venueFaqs($venue, $decorated),
+            'seo' => $this->venueSeo($venue, $faqs),
+        ]);
+    }
+
+    /**
+     * Local SEO landing page for sports venues by city and optional sport.
+     * e.g., /venues/kadapa, /venues/kadapa/cricket, /venues/kadapa/badminton
+     */
+    public function cityVenues(string $city, ?string $sport = null): View
+    {
+        $cityRaw = trim(urldecode($city));
+        $cityName = CityResolver::detect($cityRaw) ?: ucfirst($cityRaw);
+        $citySlug = strtolower(preg_replace('/[^a-zA-Z0-9]+/', '-', $cityName) ?: 'kadapa');
+
+        $sportMap = [
+            'cricket' => 'Cricket',
+            'box-cricket' => 'Box Cricket',
+            'football' => 'Football',
+            'badminton' => 'Badminton',
+            'basketball' => 'Basketball',
+            'tennis' => 'Tennis',
+            'pickleball' => 'Pickleball',
+            'volleyball' => 'Volleyball',
+        ];
+
+        $sportSlug = $sport ? strtolower(trim(urldecode($sport))) : null;
+        $sportLabel = $sportSlug && isset($sportMap[$sportSlug]) ? $sportMap[$sportSlug] : ($sportSlug ? ucfirst($sportSlug) : null);
+
+        // Fetch published venues in this city
+        $venuesQuery = Venue::published()
+            ->where(function ($q) use ($cityName): void {
+                $q->whereRaw('lower(city) = ?', [strtolower($cityName)])
+                    ->orWhere('location', 'like', "%{$cityName}%")
+                    ->orWhere('address', 'like', "%{$cityName}%");
+            });
+
+        if ($sportLabel !== null) {
+            $sportCheck = $sportLabel === 'Box Cricket' ? 'cricket' : strtolower($sportLabel);
+            $venuesQuery->where(function ($q) use ($sportCheck): void {
+                $q->whereRaw('lower(category) = ?', [$sportCheck])
+                    ->orWhere('sports', 'like', "%{$sportCheck}%");
+            });
+        }
+
+        $venues = $venuesQuery->orderByDesc('is_featured')
+            ->orderBy('sort_order')
+            ->get()
+            ->map(fn (Venue $v) => $this->decorateVenueCard($v));
+
+        // Featured / nearby venues fallback if city has few listings yet
+        $featuredVenues = collect();
+        if ($venues->count() < 3) {
+            $featuredVenues = Venue::published()
+                ->orderByDesc('is_featured')
+                ->limit(6)
+                ->get()
+                ->map(fn (Venue $v) => $this->decorateVenueCard($v));
+        }
+
+        // Live / recent grassroots matches in this area for community engagement
+        $localMatches = LiveMatch::query()
+            ->where('is_private', false)
+            ->where(function ($q) use ($cityName): void {
+                $q->where('competition', 'like', "%{$cityName}%")
+                    ->orWhere('home_full', 'like', "%{$cityName}%")
+                    ->orWhere('away_full', 'like', "%{$cityName}%")
+                    ->orWhere('home', 'like', "%{$cityName}%")
+                    ->orWhere('away', 'like', "%{$cityName}%");
+            })
+            ->orderByDesc('created_at')
+            ->limit(4)
+            ->get();
+
+        // High-intent SEO titles & descriptions
+        $pageTitle = $sportLabel
+            ? "Best {$sportLabel} Turfs in {$cityName} — Book Slots Online"
+            : "Turfs in {$cityName} — Book Cricket, Box Cricket & Badminton Courts";
+
+        $metaTitle = $sportLabel
+            ? "{$sportLabel} Turfs in {$cityName} | Compare Slots & Prices | Haraan"
+            : "Turfs in {$cityName} | Book Cricket, Box Cricket & Badminton | Haraan";
+
+        $metaDesc = $sportLabel
+            ? "Looking for {$sportLabel} turfs in {$cityName}? Compare currently available venues, hourly slot prices and facilities, then book online with Haraan."
+            : "Looking for turfs in {$cityName}? Compare currently available cricket turfs, box cricket venues and badminton courts, then book online with Haraan.";
+
+        $canonicalUrl = url('/venues/' . $citySlug . ($sportSlug ? '/' . $sportSlug : ''));
+
+        $breadcrumbs = [
+            ['name' => 'Haraan', 'url' => url('/')],
+            ['name' => 'Pulse Venues', 'url' => route('site.gamehub')],
+            ['name' => $cityName, 'url' => url('/venues/' . $citySlug)],
+        ];
+        if ($sportLabel) {
+            $breadcrumbs[] = ['name' => $sportLabel];
+        }
+
+        // FAQs for rich snippet inclusion
+        $faqs = [
+            [
+                'question' => "Where can I find turfs in {$cityName}?",
+                'answer' => "Haraan lists currently available sports venues in {$cityName} in one place. Open a venue listing to check its location, sports, booking slots, facilities and current hourly price before you book.",
+            ],
+            [
+                'question' => "How much does a turf cost per hour in {$cityName}?",
+                'answer' => "Prices depend on the venue, sport, time and day. Haraan shows the current hourly rate on each venue listing, so you can compare options before confirming your slot.",
+            ],
+            [
+                'question' => "Can I book a box cricket turf for an evening match in {$cityName}?",
+                'answer' => "Choose a venue with a suitable available evening slot. Each listing shows its opening hours and facilities, including floodlights where the venue has provided that information.",
+            ],
+            [
+                'question' => "How can sports turf owners in {$cityName} list their grounds on Haraan?",
+                'answer' => "Venue managers and turf owners in {$cityName} can sign up via the Haraan Partner Portal to accept online slot reservations, manage schedules, and collect payments.",
+            ],
+        ];
+
+        $faqSchema = [
+            '@context' => 'https://schema.org',
+            '@type' => 'FAQPage',
+            'mainEntity' => array_map(static fn (array $f) => [
+                '@type' => 'Question',
+                'name' => $f['question'],
+                'acceptedAnswer' => [
+                    '@type' => 'Answer',
+                    'text' => $f['answer'],
+                ],
+            ], $faqs),
+        ];
+
+        return view('site.city-venues', [
+            'cityName' => $cityName,
+            'citySlug' => $citySlug,
+            'sportLabel' => $sportLabel,
+            'sportSlug' => $sportSlug,
+            'venues' => $venues,
+            'featuredVenues' => $featuredVenues,
+            'localMatches' => $localMatches,
+            'faqs' => $faqs,
+            'title' => $pageTitle,
+            'seo' => [
+                'title' => $metaTitle,
+                'description' => $metaDesc,
+                'canonical' => $canonicalUrl,
+                // A city/sport with no venue of its own only shows the fallback rail —
+                // a thin page that shouldn't compete in search until real listings exist.
+                // Curated hubs (Kadapa: its own local guide, areas and FAQ) stay indexed
+                // either way — that copy is the page's content, not the listings.
+                'robots' => $venues->isEmpty() && ! in_array($citySlug, SeoUrl::CURATED_VENUE_CITIES, true)
+                    ? 'noindex,follow'
+                    : 'index,follow,max-image-preview:large',
+                'breadcrumbs' => $breadcrumbs,
+                'jsonld' => $faqSchema,
+            ],
         ]);
     }
 
@@ -658,7 +844,7 @@ final class PublicWebController extends Controller
      *
      * @return array<string, mixed>
      */
-    private function venueSeo(Venue $venue): array
+    private function venueSeo(Venue $venue, array $faqs = []): array
     {
         $sports = implode(', ', array_slice($venue->sportsList(), 0, 3));
         $image = MediaUrl::resolveMany(is_array($venue->images) ? $venue->images : [])[0] ?? null;
@@ -673,7 +859,7 @@ final class PublicWebController extends Controller
             '@context' => 'https://schema.org',
             '@type' => 'SportsActivityLocation',
             'name' => $venue->name,
-            'url' => url('/gamehub/'.$venue->id),
+            'url' => SeoUrl::venue($venue),
             'description' => Str::limit($desc, 300),
             'image' => $image,
             'address' => array_filter([
@@ -699,14 +885,191 @@ final class PublicWebController extends Controller
             'title' => $venue->name.($venue->city ? ' — '.$venue->city : ''),
             'description' => $desc,
             'image' => $image,
-            'canonical' => url('/gamehub/'.$venue->id),
-            'jsonld' => $schema,
-            'breadcrumbs' => [
+            'canonical' => SeoUrl::venue($venue),
+            'jsonld' => $faqs ? [$schema, self::faqSchema($faqs)] : $schema,
+            'breadcrumbs' => array_values(array_filter([
                 ['name' => 'Haraan', 'url' => url('/')],
                 ['name' => 'Pulse', 'url' => url('/gamehub')],
+                filled($venue->city)
+                    ? ['name' => 'Turfs in '.trim((string) $venue->city), 'url' => route('site.venues.city', ['city' => SeoUrl::city((string) $venue->city)])]
+                    : null,
                 ['name' => $venue->name],
+            ])),
+        ];
+    }
+
+    /**
+     * Questions a searcher actually types about a turf, answered from the venue's
+     * own data — never filler. A question is skipped when the venue hasn't given us
+     * the fact (no hours set → no "when is it open"). Rendered visibly on the page
+     * AND as FAQPage markup; Google only honours FAQ markup that's on the page.
+     *
+     * @return list<array{question: string, answer: string}>
+     */
+    private function venueFaqs(Venue $venue, object $d): array
+    {
+        $name = $venue->name;
+        $where = trim(implode(', ', array_filter([trim((string) $venue->location), trim((string) $venue->city)])));
+        $faqs = [];
+
+        $sports = array_values(array_filter((array) $d->sports));
+        if ($sports !== []) {
+            $courtCount = array_sum(array_map('count', (array) $d->courts));
+            $faqs[] = [
+                'question' => "Which sports can I play at {$name}?",
+                'answer' => "{$name} hosts ".Str::of(implode(', ', $sports))->replaceLast(', ', ' and ')
+                    .($courtCount > 1 ? " across {$courtCount} courts" : '')
+                    .'. Pick the sport when you book a slot on Haraan.',
+            ];
+        }
+
+        $prices = array_filter(array_map('intval', array_values((array) $d->court_prices)), static fn (int $p) => $p > 0);
+        $from = $prices !== [] ? min($prices) : (int) $d->price;
+        if ($from > 0) {
+            $faqs[] = [
+                'question' => "How much does it cost to book {$name}?",
+                'answer' => "Slots at {$name} start from ₹".number_format($from).' per hour'
+                    .((array) $d->court_peak !== [] ? '; peak hours cost more' : '')
+                    .'. Haraan shows the exact price for your court and time before you pay.',
+            ];
+        }
+
+        if (filled($d->hours)) {
+            $faqs[] = [
+                'question' => "What are the timings of {$name}?",
+                'answer' => "{$name} is open {$d->hours}. Open slots for the next 7 days are listed on this page.",
+            ];
+        }
+
+        $address = trim((string) ($d->address ?: $where));
+        if ($address !== '') {
+            $faqs[] = [
+                'question' => "Where is {$name} located?",
+                'answer' => "{$name} is at {$address}. Use \"Get directions\" on this page to open it in Google Maps.",
+            ];
+        }
+
+        if ($d->is_bookable) {
+            $faqs[] = [
+                'question' => "How do I book {$name} online?",
+                'answer' => 'Tap Book Now, choose a date, court and slot, then pay online. Your booking is confirmed instantly on Haraan.',
+            ];
+        }
+
+        return $faqs;
+    }
+
+    /**
+     * @param list<array{question: string, answer: string}> $faqs
+     * @return array<string, mixed>
+     */
+    private static function faqSchema(array $faqs): array
+    {
+        return [
+            '@context' => 'https://schema.org',
+            '@type' => 'FAQPage',
+            'mainEntity' => array_map(static fn (array $f) => [
+                '@type' => 'Question',
+                'name' => $f['question'],
+                'acceptedAnswer' => ['@type' => 'Answer', 'text' => $f['answer']],
+            ], $faqs),
+        ];
+    }
+
+    /**
+     * Local landing page for events in one city: /events/in/goa. Lists that city's
+     * upcoming published events, then its recent past ones (they still answer
+     * "what happens in Goa"), with an ItemList + FAQ for search. A city with no
+     * published events at all 404s rather than serving an empty, thin page.
+     */
+    public function cityEvents(string $city): View
+    {
+        $slug = SeoUrl::city(urldecode($city));
+
+        // The page exists for exactly the cities that have published events — the
+        // stored spelling ("Bengaluru") is matched by its slug, so no alias table.
+        $cityName = Event::query()
+            ->whereRaw('lower(status) = ?', ['published'])
+            ->whereNotNull('city')
+            ->distinct()
+            ->pluck('city')
+            ->map(fn ($c) => trim((string) $c))
+            ->first(fn (string $c) => $c !== '' && SeoUrl::city($c) === $slug);
+
+        abort_if($cityName === null, 404);
+
+        $base = fn () => Event::query()
+            ->with('ticketTypes')
+            ->whereRaw('lower(status) = ?', ['published'])
+            ->whereRaw('lower(trim(city)) = ?', [mb_strtolower($cityName)]);
+
+        $upcoming = $base()->notFinished()->orderBy('date')->limit(40)->get();
+        $past = $base()->whereNotIn('id', $upcoming->modelKeys())
+            ->orderByDesc('date')->limit(12)->get();
+
+        $categories = $upcoming->pluck('category')->filter()->unique()->values()->all();
+        $catPhrase = $categories !== []
+            ? (string) Str::of(implode(', ', array_map('strtolower', array_slice($categories, 0, 3))))->replaceLast(', ', ' and ')
+            : 'concerts, comedy and workshops';
+
+        $faqs = [
+            [
+                'question' => "What events are happening in {$cityName}?",
+                'answer' => $upcoming->isNotEmpty()
+                    ? "Haraan lists {$upcoming->count()} upcoming ".Str::plural('event', $upcoming->count())." in {$cityName}, including "
+                        .$upcoming->take(3)->pluck('title')->implode(', ').'. Open any event to see dates, prices and the venue.'
+                    : "There are no upcoming events listed in {$cityName} right now. New events are added regularly — check back soon.",
+            ],
+            [
+                'question' => "How do I book event tickets in {$cityName}?",
+                'answer' => 'Pick an event, choose your ticket type and pay online with UPI or card. Your entry pass with a QR code arrives by email and in the Haraan app.',
+            ],
+            [
+                'question' => "How can I list my event in {$cityName} on Haraan?",
+                'answer' => "Organisers in {$cityName} can sign up through the Haraan Partner portal to publish events, sell tickets and check guests in at the door.",
             ],
         ];
+
+        $itemList = $upcoming->isEmpty() ? null : [
+            '@context' => 'https://schema.org',
+            '@type' => 'ItemList',
+            'name' => "Upcoming events in {$cityName}",
+            'itemListElement' => $upcoming->values()->map(fn (Event $e, int $i) => [
+                '@type' => 'ListItem',
+                'position' => $i + 1,
+                'url' => SeoUrl::event($e),
+                'name' => $e->title,
+            ])->all(),
+        ];
+
+        return view('site.city-events', [
+            // The layout appends " | Haraan" to this for the <title>.
+            'title' => "Events in {$cityName} — Concerts, Comedy & Shows",
+            'cityName' => $cityName,
+            'citySlug' => $slug,
+            'upcoming' => $upcoming,
+            'past' => $past,
+            'faqs' => $faqs,
+            'catPhrase' => $catPhrase,
+            'hasVenues' => Venue::published()->whereRaw('lower(trim(city)) = ?', [mb_strtolower($cityName)])->exists(),
+            'seo' => [
+                'title' => "Events in {$cityName} — Concerts, Comedy & Shows",
+                'description' => Str::limit(
+                    "Upcoming events in {$cityName}: {$catPhrase} and more. See dates, venues and ticket prices, then book online in seconds on Haraan.",
+                    158
+                ),
+                'canonical' => route('site.events.city', ['city' => $slug]),
+                // Only past events left → still worth a visit, but it shouldn't
+                // compete for "events in <city>" until something is on again.
+                'robots' => $upcoming->isEmpty() ? 'noindex,follow' : 'index,follow,max-image-preview:large',
+                'breadcrumbs' => [
+                    ['name' => 'Haraan', 'url' => url('/')],
+                    ['name' => 'Events', 'url' => url('/events')],
+                    ['name' => $cityName],
+                ],
+                'jsonld' => array_values(array_filter([$itemList, self::faqSchema($faqs)])),
+            ],
+        ]);
     }
 
     /**
@@ -891,7 +1254,7 @@ final class PublicWebController extends Controller
         $scheduledOpen = (array) (app(MatchJoinController::class)->open($openReq)->getData(true)['data'] ?? []);
 
         return view('site.actionboard', [
-            'title' => 'Action Board',
+            'title' => 'ActionBoard — Live Scores & Matches',
             'matches' => $matches,
             'abFeed' => $feed,
             'abScheduledMine' => $scheduledMine,
@@ -899,6 +1262,16 @@ final class PublicWebController extends Controller
             'abDistrictSummary' => $districtSummary,
             'abDistrictBoard' => $districtBoard,
             'abStateBoard' => $stateBoard,
+            'seo' => [
+                'title' => 'ActionBoard — Live Cricket Scores & Grassroots Matches',
+                'description' => 'Follow live gully cricket scores, ball-by-ball commentary, local match scorecards, and district leaderboards on Haraan ActionBoard.',
+                'canonical' => route('site.gamehub.actionboard'),
+                'breadcrumbs' => [
+                    ['name' => 'Haraan', 'url' => url('/')],
+                    ['name' => 'Pulse', 'url' => route('site.gamehub')],
+                    ['name' => 'ActionBoard'],
+                ],
+            ],
         ]);
     }
 
@@ -928,6 +1301,60 @@ final class PublicWebController extends Controller
         $viewer = auth()->user();
 
         return app(LiveMatchController::class)->detailPayload($match, $viewer);
+    }
+
+    /**
+     * Search metadata for ActionBoard cricket and multisport match pages.
+     *
+     * @param array<string, mixed> $detail
+     * @return array<string, mixed>
+     */
+    private function matchSeo(LiveMatch $match, array $detail, string $tabLabel = 'Live Score'): array
+    {
+        $homeName = trim((string) ($detail['team1Full'] ?? '')) ?: trim((string) ($detail['team1'] ?? '')) ?: ($match->home_full ?: $match->home ?: 'Home');
+        $awayName = trim((string) ($detail['team2Full'] ?? '')) ?: trim((string) ($detail['team2'] ?? '')) ?: ($match->away_full ?: $match->away ?: 'Away');
+        $comp = trim((string) ($detail['formatLabel'] ?? $match->competition ?? ''));
+        $status = trim((string) ($detail['status'] ?? $match->status ?? ''));
+        $sport = ucfirst((string) ($match->sport ?: 'Cricket'));
+
+        $matchTitle = "{$homeName} vs {$awayName}";
+        $fullTitle = "{$matchTitle} — {$tabLabel}" . ($comp !== '' ? " · {$comp}" : '');
+
+        $desc = "Follow {$matchTitle} ({$sport}) on Haraan ActionBoard. "
+            . ($status !== '' ? "Status: {$status}. " : '')
+            . "Live ball-by-ball updates, commentary, scorecard, and match insights.";
+
+        $schema = array_filter([
+            '@context' => 'https://schema.org',
+            '@type' => 'SportsEvent',
+            'name' => $matchTitle . ($comp !== '' ? " — {$comp}" : ''),
+            'sport' => $sport,
+            'url' => route('site.gamehub.actionboard.match', ['id' => $match->id]),
+            'homeTeam' => [
+                '@type' => 'SportsTeam',
+                'name' => $homeName,
+            ],
+            'awayTeam' => [
+                '@type' => 'SportsTeam',
+                'name' => $awayName,
+            ],
+            'eventStatus' => $match->status === 'Live'
+                ? 'https://schema.org/EventScheduled'
+                : ($match->status === 'Finished' ? 'https://schema.org/EventCompleted' : 'https://schema.org/EventScheduled'),
+        ]);
+
+        return [
+            'title' => $fullTitle,
+            'description' => Str::limit($desc, 158),
+            'canonical' => route('site.gamehub.actionboard.match', ['id' => $match->id]),
+            'robots' => $match->is_private ? 'noindex,nofollow' : 'index,follow,max-image-preview:large',
+            'breadcrumbs' => [
+                ['name' => 'Haraan', 'url' => url('/')],
+                ['name' => 'ActionBoard', 'url' => route('site.gamehub.actionboard')],
+                ['name' => $matchTitle],
+            ],
+            'jsonld' => $schema,
+        ];
     }
 
     private function isCricket(LiveMatch $match): bool
@@ -968,8 +1395,13 @@ final class PublicWebController extends Controller
             }
         }
 
+        $homeName = $match->home_full ?: $match->home ?: 'Home';
+        $awayName = $match->away_full ?: $match->away ?: 'Away';
+        $sportTitle = "{$homeName} vs {$awayName}";
+        $sportName = ucfirst((string) ($match->sport ?: 'Match'));
+
         return view('site.sport-match', [
-            'title' => ($match->home_full ?: $match->home).' vs '.($match->away_full ?: $match->away),
+            'title' => $sportTitle,
             'match' => $match,
             'detail' => app(LiveMatchController::class)->detailPayload($match, $viewer instanceof User ? $viewer : null),
             'players' => $tab === 'players' || $tab === 'summary'
@@ -982,6 +1414,17 @@ final class PublicWebController extends Controller
             'matchAd' => $this->matchAd($match),
             'tab' => $tab,
             'tabs' => $tabs,
+            'seo' => [
+                'title' => "{$sportTitle} — {$sportName} Match",
+                'description' => "Follow {$sportTitle} on Haraan ActionBoard. Live {$sportName} scores, match stats, and player line-ups.",
+                'canonical' => route('site.gamehub.actionboard.match', ['id' => $match->id]),
+                'robots' => $match->is_private ? 'noindex,nofollow' : 'index,follow,max-image-preview:large',
+                'breadcrumbs' => [
+                    ['name' => 'Haraan', 'url' => url('/')],
+                    ['name' => 'ActionBoard', 'url' => route('site.gamehub.actionboard')],
+                    ['name' => $sportTitle],
+                ],
+            ],
         ]);
     }
 
@@ -998,7 +1441,16 @@ final class PublicWebController extends Controller
             return $this->sportMatchView($match, (string) $request->query('tab', 'summary'));
         }
 
-        return view('site.actionboard-match-live', ['title' => 'Live Match', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'live']);
+        $detail = $this->matchDetailFor($id);
+        $seo = $this->matchSeo($match, $detail, 'Live Score');
+
+        return view('site.actionboard-match-live', [
+            'title' => $seo['title'],
+            'detail' => $detail,
+            'id' => $id,
+            'activeTab' => 'live',
+            'seo' => $seo,
+        ]);
     }
 
     public function actionBoardMatchInfo(string $id): View|RedirectResponse
@@ -1008,7 +1460,16 @@ final class PublicWebController extends Controller
             return redirect()->route('site.gamehub.actionboard.match', ['id' => $id, 'tab' => 'summary']);
         }
 
-        return view('site.actionboard-match-info', ['title' => 'Match Info', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'info']);
+        $detail = $this->matchDetailFor($id);
+        $seo = $this->matchSeo($match, $detail, 'Match Info');
+
+        return view('site.actionboard-match-info', [
+            'title' => $seo['title'],
+            'detail' => $detail,
+            'id' => $id,
+            'activeTab' => 'info',
+            'seo' => $seo,
+        ]);
     }
 
     public function actionBoardMatchCommentary(string $id): View|RedirectResponse
@@ -1018,7 +1479,16 @@ final class PublicWebController extends Controller
             return redirect()->route('site.gamehub.actionboard.match', ['id' => $id, 'tab' => 'timeline']);
         }
 
-        return view('site.actionboard-match-commentary', ['title' => 'Commentary', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'commentary']);
+        $detail = $this->matchDetailFor($id);
+        $seo = $this->matchSeo($match, $detail, 'Commentary');
+
+        return view('site.actionboard-match-commentary', [
+            'title' => $seo['title'],
+            'detail' => $detail,
+            'id' => $id,
+            'activeTab' => 'commentary',
+            'seo' => $seo,
+        ]);
     }
 
     /**
@@ -1066,7 +1536,16 @@ final class PublicWebController extends Controller
             return redirect()->route('site.gamehub.actionboard.match', ['id' => $id, 'tab' => 'players']);
         }
 
-        return view('site.actionboard-match-mvp', ['title' => 'MVP', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'mvp']);
+        $detail = $this->matchDetailFor($id);
+        $seo = $this->matchSeo($match, $detail, 'MVP & Top Performers');
+
+        return view('site.actionboard-match-mvp', [
+            'title' => $seo['title'],
+            'detail' => $detail,
+            'id' => $id,
+            'activeTab' => 'mvp',
+            'seo' => $seo,
+        ]);
     }
 
     /**
@@ -1104,14 +1583,18 @@ final class PublicWebController extends Controller
             report($e);
         }
 
+        $detail = $this->matchDetailFor($id);
+        $seo = $this->matchSeo($match, $detail, 'Match Insights');
+
         return view('site.actionboard-match-insights', [
             'ground' => $ground,
-            'title' => 'Insights',
-            'detail' => $this->matchDetailFor($id),
+            'title' => $seo['title'],
+            'detail' => $detail,
             'id' => $id,
             'activeTab' => 'insights',
             'insights' => $facts,
             'insightsLock' => $lock,
+            'seo' => $seo,
         ]);
     }
 
@@ -1122,7 +1605,16 @@ final class PublicWebController extends Controller
             return redirect()->route('site.gamehub.actionboard.match', ['id' => $id, 'tab' => 'players']);
         }
 
-        return view('site.actionboard-match-scorecard', ['title' => 'Match Scorecard', 'detail' => $this->matchDetailFor($id), 'id' => $id, 'activeTab' => 'scorecard']);
+        $detail = $this->matchDetailFor($id);
+        $seo = $this->matchSeo($match, $detail, 'Full Scorecard');
+
+        return view('site.actionboard-match-scorecard', [
+            'title' => $seo['title'],
+            'detail' => $detail,
+            'id' => $id,
+            'activeTab' => 'scorecard',
+            'seo' => $seo,
+        ]);
     }
 
     public function login(): View
@@ -1180,10 +1672,43 @@ final class PublicWebController extends Controller
             }
         }
 
+        $playerRole = filled($player->player_role) ? (string) $player->player_role : 'Cricket Player';
+        $locationBits = array_filter([$player->district, $player->state]);
+        $locationStr = implode(', ', $locationBits);
+        $desc = "{$player->name} ({$playerRole})"
+            . ($locationStr !== '' ? " from {$locationStr}" : '')
+            . '. View career cricket stats, recent match performance, and rankings on Haraan.';
+
+        $avatarUrl = \App\Support\MediaUrl::resolve($player->avatar);
+
         return view('site.player-profile', [
-            'title' => $player->name.' - Player Profile',
+            'title' => $player->name.' — Cricket Profile',
             'player' => $player,
             'recentMatches' => $recentMatches,
+            'seo' => [
+                'title' => $player->name.' — Cricket Stats & Ranking',
+                'description' => Str::limit($desc, 158),
+                'canonical' => url('/player/'.$player->player_id),
+                'breadcrumbs' => [
+                    ['name' => 'Haraan', 'url' => url('/')],
+                    ['name' => 'Leaderboard', 'url' => url('/gamehub/leaderboard')],
+                    ['name' => $player->name],
+                ],
+                'jsonld' => array_filter([
+                    '@context' => 'https://schema.org',
+                    '@type' => 'Person',
+                    'name' => $player->name,
+                    'jobTitle' => $playerRole,
+                    'url' => url('/player/'.$player->player_id),
+                    'image' => $avatarUrl ?: null,
+                    'address' => $locationStr !== '' ? array_filter([
+                        '@type' => 'PostalAddress',
+                        'addressLocality' => $player->district ?: null,
+                        'addressRegion' => $player->state ?: null,
+                        'addressCountry' => 'IN',
+                    ]) : null,
+                ]),
+            ],
         ]);
     }
 
@@ -1284,7 +1809,7 @@ final class PublicWebController extends Controller
                 'id' => $e->id,
                 'title' => $e->title,
                 'meta' => trim(($e->category ?: 'Event').' · '.($e->venue ?: 'Mumbai'), ' ·'),
-                'url' => '/events/'.$e->id,
+                'url' => SeoUrl::event($e),
             ])->all();
 
         $venues = Venue::published()
@@ -1301,7 +1826,7 @@ final class PublicWebController extends Controller
                 'id' => $v->id,
                 'title' => $v->name,
                 'meta' => trim(($v->category ?: 'Venue').' · '.($v->location ?: 'Mumbai'), ' ·'),
-                'url' => '/gamehub/'.$v->id,
+                'url' => SeoUrl::venue($v),
             ])->all();
 
         return response()->json(['events' => $events, 'venues' => $venues]);

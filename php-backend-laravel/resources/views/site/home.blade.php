@@ -43,7 +43,7 @@
                         $venueLabel = trim((string) $ev->venue) ?: trim((string) $ev->location);
                     @endphp
                     <div class="mfy__page" data-mpager-card>
-                        <a class="mfy" href="/events/{{ $ev->id }}">
+                        <a class="mfy" href="{{ \App\Support\SeoUrl::event($ev) }}">
                             <img class="mfy__img" src="{{ $img }}" alt=""
                                  decoding="async"
                                  loading="{{ $loop->first ? 'eager' : 'lazy' }}"
@@ -74,7 +74,7 @@
     <div class="mhome__scroll mhome__scroll--sm">
         @foreach($mEvents->take(10) as $ev)
             @php $img = $ev->heroImageUrl() ?? '/bv-white.png'; @endphp
-            <a class="mtrend" href="/events/{{ $ev->id }}">
+            <a class="mtrend" href="{{ \App\Support\SeoUrl::event($ev) }}">
                 <span class="mtrend__rank" data-rank="{{ $loop->iteration }}">{{ $loop->iteration }}</span>
                 <div class="mtrend__img" style="background-image:url('{{ $img }}')">
                     <span class="mtrend__grad"></span>
@@ -138,7 +138,7 @@
     <div class="mhome__grid">
         @foreach($mEvents as $ev)
             @php $img = $ev->heroImageUrl() ?? '/bv-white.png'; @endphp
-            <a class="mcard" href="/events/{{ $ev->id }}">
+            <a class="mcard" href="{{ \App\Support\SeoUrl::event($ev) }}">
                 <div class="mcard__img" style="background-image:url('{{ $img }}')">
                     <span class="mcard__fast"><i>⚡</i>Fast filling</span>
                 </div>
@@ -220,7 +220,7 @@
                 : 'Free';
             $fvenue = trim((string) $featured->venue) ?: trim((string) $featured->location);
         @endphp
-        <a class="dfeat" href="/events/{{ $featured->id }}" style="background-image:url('{{ $fimg }}')">
+        <a class="dfeat" href="{{ \App\Support\SeoUrl::event($featured) }}" style="background-image:url('{{ $fimg }}')">
             <span class="dfeat__grad"></span>
             <span class="dfeat__cat">{{ $featured->category ?? 'Featured' }}</span>
             @if(!empty($featured->rating) && $featured->rating > 0)
