@@ -56,33 +56,49 @@
      a 1px top highlight on raised surfaces, and press states that sink. --}}
 <style>
     @media (max-width: 720px) {
-        /* Band: deeper, with depth from light (not a logo watermark), and a fine
-           grain so the blue reads as a material rather than a flat fill. */
+        /* Band: a light panel, not a coloured slab. White, with one fine blue
+           edge that follows its rounded bottom corners, and a soft drop so it sits
+           above the grey page. The blue lives in the edge and the active ink. */
         .mhub .mhub__hero {
-            background:
-                radial-gradient(120% 70% at 85% -10%, rgba(96, 165, 250, .28) 0%, rgba(96, 165, 250, 0) 60%),
-                linear-gradient(180deg, #14224D 0%, #1B3487 58%, #1E46C7 100%);
-            box-shadow: 0 1px 0 rgba(255, 255, 255, .06) inset;
+            background: #FFFFFF;
+            border: 1.5px solid #2563EB;
+            border-top: 0;
+            border-radius: 0 0 28px 28px;
+            padding-bottom: 18px;
+            box-shadow: 0 10px 24px -14px rgba(37, 99, 235, .45), 0 2px 4px -2px rgba(15, 23, 42, .08);
         }
-        .mhub .mhub__hero::before {
-            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .055 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-            background-size: 160px 160px;
-            opacity: 1;
+        .mhub .mhub__hero::before { display: none; }
+
+        /* Greeting on white: the light variant's own ink; the three utility icons
+           become outlined circles on a whisper of blue. */
+        .mhub .mhub__hero .app-greet__icon {
+            background: #F5F8FE; border: 1px solid #DCE6F8; color: #1E3A8A;
         }
+        .mhub .mhub__hero .app-greet__icon:active { background: #EAF1FE; }
+        .mhub .mhub__hero .app-greet__avatar { box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px #2563EB; }
+
+        /* Search: a recessed well on the white, edge turns blue on focus. */
         .mhub .mhub__search {
-            border: 0;
-            box-shadow: 0 1px 0 rgba(255, 255, 255, .9) inset, 0 6px 16px -6px rgba(8, 15, 40, .55), 0 1px 2px rgba(8, 15, 40, .25);
+            background: #F4F7FC; border: 1px solid #E1E8F3;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, .06) inset;
         }
-        /* Switch: a recessed track the thumb sits in. */
+        .mhub .mhub__search:focus-within { background: #fff; border-color: #2563EB; box-shadow: 0 0 0 3px rgba(37, 99, 235, .14); }
+        .mhub .mhub__search input::placeholder { color: #8A97AB; }
+
+        /* Switch: pale recessed track, white thumb with a crisp contact shadow. */
         .mhub .mhub__switch {
-            background: rgba(8, 15, 40, .28);
-            box-shadow: 0 1px 2px rgba(0, 0, 0, .28) inset, 0 1px 0 rgba(255, 255, 255, .08);
+            background: #EEF2F8;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, .08) inset;
         }
         .mhub .mhub__switch-thumb {
-            box-shadow: 0 1px 0 #fff inset, 0 1px 1px rgba(8, 15, 40, .22), 0 3px 8px -2px rgba(8, 15, 40, .35);
+            box-shadow: 0 0 0 1px #DCE6F8, 0 1px 1px rgba(15, 23, 42, .08), 0 3px 8px -3px rgba(37, 99, 235, .35);
         }
-        .mhub .mhub__switch-tab { color: rgba(255, 255, 255, .72); }
-        .mhub .mhub__switch-tab.is-on { color: #14224D; }
+        .mhub .mhub__switch-tab { color: #64748B; }
+        .mhub .mhub__switch-tab.is-on { color: #1E3A8A; }
+
+        /* The ActionBoard card sat 16px up into the old blue band; on a light
+           panel that overlap just hides its title, so it sits below instead. */
+        .mhub .mhub__ab { margin-top: 14px; }
 
         /* Chips: light, with a hairline and a contact shadow; selected = blue tint
            with a blue edge (a filter, not a second primary button). */
@@ -164,7 +180,7 @@
              band wants identity-as-texture, and a wordmark stretched to 210px is a
              squashed logo. --}}
 
-        @include('site.partials.app-greet', ['onDark' => true])
+        @include('site.partials.app-greet', ['onDark' => false])
 
         <form class="mhub__search" action="/search" method="GET" role="search">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="20" y1="20" x2="16.5" y2="16.5"></line></svg>
