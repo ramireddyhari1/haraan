@@ -499,7 +499,8 @@
         </div>
 
         <div class="gamehub-hero__art">
-            <img src="{{ asset('gamehub.png') }}" alt="Pulse artwork">
+            {{-- WebP at 1280px (~95 KB); the 2.2 MB PNG drew half-loaded for seconds. --}}
+            <img src="{{ asset('images/gamehub-hero.webp') }}" alt="Pulse artwork" width="1280" height="543" fetchpriority="high" decoding="async">
         </div>
     </section>
 
@@ -615,7 +616,7 @@
     </section>
 
     <a class="promo-banner" href="/partner/login">
-        <img src="{{ asset('gamehub.png') }}" alt="Promo banner">
+        <img src="{{ asset('images/gamehub-hero.webp') }}" alt="Promo banner" width="1280" height="543" loading="lazy" decoding="async">
         <div class="promo-banner__content">
             <span class="eyebrow eyebrow--soft">For ground owners</span>
             <h2>Run a turf or court? List it on Haraan.</h2>
