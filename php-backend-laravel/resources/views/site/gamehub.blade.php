@@ -84,28 +84,6 @@
         .mhub .mhub__switch-tab { color: rgba(255, 255, 255, .72); }
         .mhub .mhub__switch-tab.is-on { color: #14224D; }
 
-        /* Top player: a podium tile instead of a medal-in-a-circle, and a round
-           chevron button instead of a tinted pill. */
-        .mhub .mhub__top { gap: 14px; padding: 14px 14px 14px 14px; box-shadow: 0 1px 0 #fff inset, 0 8px 18px rgba(15, 23, 42, .08), 0 1px 3px rgba(15, 23, 42, .14); }
-        .mhub .mhub__top:active { transform: translateY(1px); box-shadow: 0 4px 10px rgba(15, 23, 42, .08), 0 1px 2px rgba(15, 23, 42, .14); }
-        .mhub .mhub__top-face {
-            position: relative; width: 52px; height: 52px; border-radius: 15px; overflow: visible;
-            background: linear-gradient(180deg, #F4F7FE 0%, #E8EFFC 100%);
-            box-shadow: 0 0 0 1px #DCE6F8 inset;
-        }
-        .mhub .mhub__top-face.has-img { border-radius: 50%; background: #E2E8F0; box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px #2563EB; }
-        .mhub .mhub__top-face.has-img img { border-radius: 50%; }
-        .mhub .mhub__top-pos {
-            position: absolute; right: -4px; bottom: -4px; display: grid; place-items: center; width: 20px; height: 20px;
-            border-radius: 50%; background: #2563EB; color: #fff; font-size: 11px; font-weight: 800; box-shadow: 0 0 0 2px #fff;
-        }
-        .mhub .mhub__top-copy strong { font-size: 15px; font-weight: 800; letter-spacing: -.01em; }
-        .mhub .mhub__top-line { font-size: 13px; color: #64748B; }
-        .mhub .mhub__top-cta {
-            display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border-radius: 50%;
-            background: #F1F5F9; color: #1E3A8A; box-shadow: 0 0 0 1px #E2E8F0 inset;
-        }
-
         /* Chips: light, with a hairline and a contact shadow; selected = blue tint
            with a blue edge (a filter, not a second primary button). */
         .mhub .mhub__chips { gap: 8px; padding-bottom: 4px; }
@@ -129,22 +107,21 @@
         }
         .mhub .mhub__arena:active, .mhub .mhub__vcard:active { transform: scale(.985); }
 
-        /* One empty state: a drawn turf, a line, and the one real action. */
+        /* Nothing listed near the viewer: a small map of their area — the pin
+           carries the real place name, the dashed ring is the search radius, and
+           the dashed plot inside it is where a ground would be. No button. */
         .mhub__none {
-            display: flex; align-items: center; gap: 12px; margin: 12px 16px 4px; padding: 12px 12px 12px 12px;
-            background: #fff; border-radius: 18px;
+            margin: 12px 16px 4px; padding: 12px 12px 18px; background: #fff; border-radius: 20px; text-align: center;
             box-shadow: 0 1px 0 #fff inset, 0 6px 14px rgba(15, 23, 42, .06), 0 1px 2px rgba(15, 23, 42, .12);
         }
-        .mhub__none-art { flex: none; width: 58px; height: 40px; border-radius: 6px; box-shadow: 0 1px 2px rgba(15, 23, 42, .25); }
-        .mhub__none-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-        .mhub__none-copy strong { font-size: 14px; font-weight: 800; color: #0F172A; }
-        .mhub__none-copy span { font-size: 12.5px; line-height: 1.35; color: #64748B; }
-        .mhub__none-cta {
-            flex: none; display: inline-flex; align-items: center; height: 32px; padding: 0 12px; border-radius: 10px;
-            background: #2563EB; color: #fff !important; font-size: 12.5px; font-weight: 700; text-decoration: none;
-            box-shadow: 0 1px 0 rgba(255, 255, 255, .2) inset, 0 2px 0 #1D4ED8;
+        .mhub__none-map { display: block; width: 100%; height: auto; border-radius: 14px; }
+        .mhub__none strong { display: block; text-wrap: balance; margin-top: 14px; font-size: 15.5px; font-weight: 800; letter-spacing: -.01em; color: #0F172A; }
+        .mhub__none p { text-wrap: balance; margin: 4px auto 0; max-width: 270px; font-size: 13px; line-height: 1.45; color: #64748B; }
+        .mhub__none-ring { transform-origin: 160px 74px; }
+        @media (prefers-reduced-motion: no-preference) {
+            .mhub__none-ring { animation: mhub-sweep 2.8s cubic-bezier(.2, .6, .3, 1) infinite; }
+            @keyframes mhub-sweep { 0% { transform: scale(.35); opacity: .55; } 80%, 100% { transform: scale(1); opacity: 0; } }
         }
-        .mhub__none-cta:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(255, 255, 255, .2) inset; }
     }
 
     /* Desktop finish: line icons on a tinted tile instead of clipart; quiet counts. */
@@ -248,41 +225,6 @@
         @endif
     </a>
 
-    {{-- 3. Top Player — the app's LeaderboardHomeWidget, on the same ranked-XP board. --}}
-    <a class="mhub__top" href="/gamehub/leaderboard">
-        <span class="mhub__top-face {{ !empty($topPlayer['avatar']) ? 'has-img' : '' }}">
-            @if(!empty($topPlayer['avatar']))
-                <img src="{{ $topPlayer['avatar'] }}" alt="" loading="lazy">
-                <b class="mhub__top-pos">1</b>
-            @else
-                {{-- A podium, #1 raised and in blue: the board this card opens. --}}
-                <svg viewBox="0 0 40 32" width="34" height="27" aria-hidden="true">
-                    <rect x="1.5" y="17" width="11" height="13" rx="1.5" fill="#fff" stroke="#BFD0F5" stroke-width="1.2"/>
-                    <rect x="14.5" y="9" width="11" height="21" rx="1.5" fill="#2563EB"/>
-                    <rect x="27.5" y="21" width="11" height="9" rx="1.5" fill="#fff" stroke="#BFD0F5" stroke-width="1.2"/>
-                    <text x="20" y="22.5" text-anchor="middle" font-family="Plus Jakarta Sans, system-ui, sans-serif" font-size="8.5" font-weight="800" fill="#fff">1</text>
-                    <circle cx="20" cy="4.5" r="3.2" fill="none" stroke="#2563EB" stroke-width="1.2" stroke-dasharray="2 1.6"/>
-                </svg>
-            @endif
-        </span>
-        <span class="mhub__top-copy">
-            <strong>Top Player</strong>
-            @if($topPlayer)
-                <span class="mhub__top-line">{{ $topPlayer['name'] }} &nbsp;•&nbsp; +{{ $topPlayer['xp'] }} XP</span>
-                <span class="mhub__top-rank">#{{ $topPlayer['rank'] }}{{ $selectedCity ? ' in ' . $selectedCity : '' }}</span>
-            @else
-                {{-- Two lines, as the app allows this state: it's a sentence, not a name,
-                     and one line ellipsises it to "Play a ranked matc…". --}}
-                <span class="mhub__top-line mhub__top-line--empty">
-                    {{ $selectedCity ? 'No ranked players in ' . $selectedCity . ' yet' : 'Play a ranked match to appear here' }}
-                </span>
-            @endif
-        </span>
-        <span class="mhub__top-cta" aria-label="View standings">
-            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
-        </span>
-    </a>
-
     {{-- 4. Sport chips — a global filter over the venues below AND the ActionBoard. --}}
     <div class="mhub__chips">
         @foreach($sportChips as $chip)
@@ -337,22 +279,43 @@
             @endforeach
         </div>
     @else
+        @php
+            $noneWhere = $selectedCity ?: null;
+            $noneLabel = $noneWhere ?: 'You';
+            $noneChipW = min(150, (int) round(mb_strlen($noneLabel) * 6.7 + 22));
+        @endphp
         <div class="mhub__none">
-            {{-- A turf drawn from above: the thing that will appear here. --}}
-            <svg class="mhub__none-art" viewBox="0 0 64 44" aria-hidden="true">
-                <rect x="1" y="1" width="62" height="42" rx="5" fill="#3F7D4E"/>
-                <rect x="1" y="1" width="12.4" height="42" fill="#fff" opacity=".06"/>
-                <rect x="25.8" y="1" width="12.4" height="42" fill="#fff" opacity=".06"/>
-                <rect x="50.6" y="1" width="12.4" height="42" fill="#fff" opacity=".06"/>
-                <rect x="6" y="6" width="52" height="32" rx="1" fill="none" stroke="#fff" stroke-width="1.4"/>
-                <line x1="32" y1="6" x2="32" y2="38" stroke="#fff" stroke-width="1.4"/>
-                <circle cx="32" cy="22" r="6" fill="none" stroke="#fff" stroke-width="1.4"/>
+            <svg class="mhub__none-map" viewBox="0 0 320 150" role="img" aria-label="No venues found around {{ $noneWhere ?: 'your area' }}">
+                {{-- the area: land, blocks, two roads --}}
+                <rect width="320" height="150" rx="14" fill="#EEF3FA"/>
+                <g fill="#E1E9F5">
+                    <rect x="14" y="14" width="46" height="30" rx="5"/><rect x="68" y="14" width="34" height="30" rx="5"/>
+                    <rect x="14" y="104" width="58" height="32" rx="5"/><rect x="242" y="12" width="64" height="26" rx="5"/>
+                    <rect x="256" y="100" width="50" height="36" rx="5"/><rect x="226" y="108" width="22" height="28" rx="5"/>
+                </g>
+                <path d="M-6 66 C 70 58, 110 92, 170 86 S 270 52, 330 60" fill="none" stroke="#fff" stroke-width="13" stroke-linecap="round"/>
+                <path d="M118 -6 C 126 40, 140 80, 132 156" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round"/>
+                <path d="M-6 66 C 70 58, 110 92, 170 86 S 270 52, 330 60" fill="none" stroke="#DCE5F2" stroke-width="1.2" stroke-dasharray="6 6"/>
+                {{-- the search radius, and its sweep --}}
+                <circle cx="160" cy="74" r="58" fill="rgba(37,99,235,.06)" stroke="#2563EB" stroke-opacity=".45" stroke-width="1.4" stroke-dasharray="4 5"/>
+                <circle class="mhub__none-ring" cx="160" cy="74" r="58" fill="none" stroke="#2563EB" stroke-width="1.6"/>
+                {{-- where a ground would be: an empty plot --}}
+                <g transform="translate(184 36)">
+                    <rect width="46" height="30" rx="4" fill="#F7F9FC" stroke="#94A3B8" stroke-width="1.3" stroke-dasharray="3.5 3"/>
+                    <line x1="23" y1="4" x2="23" y2="26" stroke="#CBD5E1" stroke-width="1.2" stroke-dasharray="2.5 2.5"/>
+                    <circle cx="23" cy="15" r="5" fill="none" stroke="#CBD5E1" stroke-width="1.2" stroke-dasharray="2.5 2.5"/>
+                </g>
+                {{-- the viewer's place --}}
+                <ellipse cx="160" cy="80" rx="9" ry="3" fill="rgba(15,23,42,.18)"/>
+                <path d="M160 80c-8-9.5-12-15.6-12-21a12 12 0 0 1 24 0c0 5.4-4 11.5-12 21z" fill="#2563EB"/>
+                <circle cx="160" cy="58.5" r="4.6" fill="#fff"/>
+                <rect x="{{ 160 - $noneChipW / 2 }}" y="90" width="{{ $noneChipW }}" height="22" rx="11" fill="#fff" stroke="#DCE5F2"/>
+                <text x="160" y="105" text-anchor="middle" font-family="Plus Jakarta Sans, system-ui, sans-serif" font-size="11.5" font-weight="700" fill="#0F172A">{{ $noneLabel }}</text>
             </svg>
-            <span class="mhub__none-copy">
-                <strong>{{ $selectedSport === 'All' ? 'No venues here yet' : 'No ' . strtolower($selectedSport) . ' venues yet' }}</strong>
-                <span>New grounds show up here as owners list them.</span>
-            </span>
-            <a class="mhub__none-cta" href="/partner/login">List yours</a>
+            <strong>
+                {{ $selectedSport === 'All' ? 'No venues' : 'No ' . strtolower($selectedSport) . ' venues' }}{{ $noneWhere ? ' near ' . $noneWhere : ' near you' }} yet
+            </strong>
+            <p>Grounds will show up here as soon as one opens nearby.</p>
         </div>
     @endif
 
