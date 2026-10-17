@@ -116,6 +116,17 @@ class TrackingScoreboardTest {
                 read(frames[k].line)
                 analysed += frames[k].first
                 called += chain.frame(y, u, frames[k].second.toLong())
+                if (System.getenv("BENCH_FRAMES") != null) {
+                    val l = chain.currentLock
+                    val c = chain.currentCorridor
+                    val t = chain.ballTrack().lastOrNull()
+                    val truth = clip.balls[frames[k].first]
+                    println(
+                        "[${clip.id} $rate] f${frames[k].first} lock=${l?.state}/${l?.isMeasurable} base=${l?.anchor?.base?.let { "%.3f,%.3f".format(it.x, it.y) }} " +
+                            "corr=${c?.joinToString(",") { "%.2f".format(it) }} track=${chain.ballTrack().size} last=${t?.let { "%.3f,%.3f@%d".format(it.x, it.y, it.timestampMs) }} " +
+                            "truth=${truth?.let { "%.3f,%.3f".format(it.first, it.second) }}",
+                    )
+                }
             }
             chain.finish()?.let { called += it }
         } finally {

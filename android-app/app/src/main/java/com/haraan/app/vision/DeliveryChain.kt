@@ -120,6 +120,13 @@ class DeliveryChain(
     /** The ball tracker's own rejection counts, for the scoreboard. */
     fun ballDiagnostics() = ball.diagnostics()
 
+    /** This frame's stumps lock and the corridor the ball is searched in, for the scoreboard. */
+    val currentLock: WicketLock? get() = lock
+    val currentCorridor: FloatArray? get() = corridor
+
+    /** The ball tracker's current track, for the scoreboard. */
+    fun ballTrack(): List<BallSighting> = ball.track()
+
     fun release() {
         stumps.release()
         ball.release()
