@@ -91,6 +91,9 @@ class NetReplayActivity : ComponentActivity() {
         val from = intent?.getIntExtra("from", 0) ?: 0
         val to = intent?.getIntExtra("to", Int.MAX_VALUE) ?: Int.MAX_VALUE
         val every = intent?.getIntExtra("every", 1) ?: 1
+        ClipDeliveryAnalyzer.forceSlowSampling = intent?.getBooleanExtra("slow", false) ?: false
+        VideoFrameStream.debugToneMap = intent?.getBooleanExtra("tonemap", false) ?: false
+        ClipDeliveryAnalyzer.debugMaxLayer = intent?.getIntExtra("layer", -1)?.takeIf { it >= 0 }
         // `--es show result|setup`: the live camera's own result overlay or setup boxes, over
         // this clip's frames and analysis, for checking them without a match to join.
         val show = intent?.getStringExtra("show")

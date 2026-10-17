@@ -49,11 +49,6 @@ data class ArPath(
         /** Half the shadow strip's width on the ground: about the stumps' own width. */
         const val SHADOW_HALF_WIDTH_M = 0.11
 
-        /** Off a pitch, a ball rises at about this share of how fast it came down. */
-        private const val PROJECTED_RESTITUTION = 0.5
-
-        private const val GRAVITY = 9.81
-
         /** How far past the stumps' line a missing flight is drawn; see [fromFlight]. */
         private const val PAST_STUMPS_M = 1.2
 
@@ -92,15 +87,8 @@ data class ArPath(
             val end = pastLine ?: atLine
                 ?: towardsStumps?.takeIf { !flight.hasOutLeg && it > start }
                 ?: flight.lastSeenMs
-            fun pos(ms: Double): Point3 {
-                val s = (ms - flight.bounceMs) / 1000.0
-                if (s <= 0 || flight.hasOutLeg) return flight.at(ms)
-                return Point3(
-                    flight.bounceX + flight.inVx * s,
-                    flight.bounceY + flight.inVy * s,
-                    (flight.inVzDown * PROJECTED_RESTITUTION * s - GRAVITY * s * s / 2).coerceAtLeast(0.0),
-                )
-            }
+            // The flight carries itself past the bounce, seen or projected: see [Flight3d.at].
+            fun pos(ms: Double): Point3 = flight.at(ms)
             val points = (0..SAMPLES).mapNotNull { i ->
                 val ms = start + (end - start) * i / SAMPLES
                 val at = pos(ms)

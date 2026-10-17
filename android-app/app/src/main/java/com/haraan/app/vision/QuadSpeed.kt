@@ -235,6 +235,11 @@ object QuadSpeed {
         camera: PitchCamera,
         bounce: Bounce?,
         frameAspect: Float,
+        /**
+         * When the ball was seen arriving AT the stumps (it entered their outline in the
+         * picture): it was on the stumps' line then. Null when it was not seen there.
+         */
+        reachedStumpsMs: Double? = null,
     ): FitResult {
         if (run.size < MIN_PRE_BOUNCE + 2) {
             return FitResult.Refused("needs ${MIN_PRE_BOUNCE + 2} sightings in one flight, have ${run.size}")
@@ -279,29 +284,43 @@ object QuadSpeed {
             ?: turn?.let { Triple(it - TURN_SEARCH_MS, it + TURN_SEARCH_MS, TB_STEP_MS) }
             ?: Triple(first, last + EXTRAPOLATE_BOUNCE_MS, TB_SCAN_STEP_MS)
 
-        var best: DoubleArray? = null
-        var bestTb = from
-        var bestError = Double.MAX_VALUE
-        fun scan(a: Double, b: Double, by: Double) {
-            var tb = a
-            while (tb <= b) {
-                val near = run.filter { abs(it.timestampMs - tb) <= MAX_LOOKBACK_MS }
-                val fit = fitFlight(near, camera, tb)?.takeIf { physical(it.first) }
-                if (fit != null && fit.second < bestError) {
-                    bestError = fit.second
-                    best = fit.first
-                    bestTb = tb
+        class Best(var v: DoubleArray? = null, var tb: Double = from, var error: Double = Double.MAX_VALUE)
+        fun search(atStumpsMs: Double?): Best {
+            val best = Best()
+            fun scan(a: Double, b: Double, by: Double) {
+                var tb = a
+                while (tb <= b) {
+                    val near = run.filter { abs(it.timestampMs - tb) <= MAX_LOOKBACK_MS }
+                    val fit = fitFlight(near, camera, tb, atStumpsMs)?.takeIf { physical(it.first) }
+                    if (fit != null && fit.second < best.error) {
+                        best.error = fit.second
+                        best.v = fit.first
+                        best.tb = tb
+                    }
+                    tb += by
                 }
-                tb += by
             }
+            scan(from, to, step)
+            // A coarse scan, then the frame either side of its answer at full resolution.
+            if (bounce?.atMs == null && turn == null && best.v != null) {
+                val coarse = best.tb
+                scan(coarse - TB_SCAN_STEP_MS, coarse + TB_SCAN_STEP_MS, TB_STEP_MS)
+            }
+            return best
         }
-        scan(from, to, step)
-        // A coarse scan, then the frame either side of its answer at full resolution.
-        if (bounce?.atMs == null && turn == null && best != null) {
-            val coarse = bestTb
-            scan(coarse - TB_SCAN_STEP_MS, coarse + TB_SCAN_STEP_MS, TB_STEP_MS)
-        }
-        val v = best ?: return FitResult.Refused("the sightings around the bounce are too few or too close together to fit")
+        /*
+         * THE STUMPS MOMENT IS CHECKED, NOT TRUSTED. It comes from the ball being inside the
+         * stumps' outline in the picture, and a ball a metre or two short of them, climbing
+         * off a good length, is inside that outline too: pinned to the line there, a simulated
+         * 90 km/h delivery read 114. So the flight is fitted both ways, and the pinned one is
+         * kept only when it explains the sightings nearly as well as the free one — where the
+         * free fit is undecided along the pitch, as on the 4K yorker, the pin costs nothing.
+         */
+        val free = search(null)
+        val pinned = reachedStumpsMs?.let { search(it) }
+        val chosen = if (pinned?.v != null && (free.v == null || pinned.error <= free.error * STUMPS_PIN_TOLERANCE)) pinned else free
+        val v = chosen.v ?: return FitResult.Refused("the sightings around the bounce are too few or too close together to fit")
+        val bestTb = chosen.tb
         val near = run.filter { abs(it.timestampMs - bestTb) <= MAX_LOOKBACK_MS }
 
         // Towards the striker is down the pitch's y.
@@ -379,7 +398,13 @@ object QuadSpeed {
     }
 
     /** The share of its pace along and across the pitch a ball keeps off the bounce. */
-    private const val PACE_KEPT_OFF_PITCH = 0.88
+    internal const val PACE_KEPT_OFF_PITCH = 0.88
+
+    /** How strongly "it was at the stumps then" counts against one sighting's miss, in metres. */
+    private const val STUMPS_WEIGHT = 12.0
+
+    /** How much worse the pinned fit may explain the sightings than the free one and still be kept. */
+    private const val STUMPS_PIN_TOLERANCE = 1.5
 
     /** Either side of the lowest point in the picture, when the ball is seen to climb after it. */
     private const val TURN_SEARCH_MS = 60.0
@@ -415,7 +440,7 @@ object QuadSpeed {
      * vx', vy', vz' (vz' positive = going up). Returns the unknowns and the mean squared
      * miss, or null when the before or after side is too thin to fit.
      */
-    private fun fitFlight(points: List<BallSighting>, camera: PitchCamera, tb: Double): Pair<DoubleArray, Double>? {
+    private fun fitFlight(points: List<BallSighting>, camera: PitchCamera, tb: Double, reachedStumpsMs: Double? = null): Pair<DoubleArray, Double>? {
         val before = points.count { it.timestampMs <= tb }
         val after = points.size - before
         if (before < MIN_PRE_BOUNCE) return null
@@ -463,6 +488,25 @@ object QuadSpeed {
                     atb[p] += coeff[p] * rhs[row]
                     for (q in 0 until n) ata[p][q] += coeff[p] * coeff[q]
                 }
+            }
+        }
+        /*
+         * THE BALL WAS AT THE STUMPS WHEN IT REACHED THEM. From behind the bowler the far end
+         * is depth, the axis one camera sees worst, and with the ball lost at the bounce a
+         * flight pitched 6 m short and slow fitted the sightings as well as one pitched at
+         * the stumps and quick: the same 4K delivery read 68, 95 and 99 km/h as the frames
+         * were shrunk three slightly different ways. Seen entering the stumps' outline, the
+         * ball was on their line (0 m) at that moment — one strong equation that pins the
+         * distance against the time, and with it both the speed and where it pitched.
+         */
+        // Scored on the sightings alone: the pin's own row is a condition, not a sighting.
+        if (reachedStumpsMs != null) {
+            val s = (reachedStumpsMs - tb) / 1000.0
+            val coeff = DoubleArray(n)
+            coeff[1] = STUMPS_WEIGHT
+            coeff[3] = STUMPS_WEIGHT * (if (s <= 0) s else PACE_KEPT_OFF_PITCH * s)
+            for (p in 0 until n) {
+                for (q in 0 until n) ata[p][q] += coeff[p] * coeff[q]
             }
         }
         val u = solve(ata, atb) ?: return null
@@ -532,15 +576,28 @@ data class Flight3d(
 
     /** Release speed — what a speed gun reads — for [ball]. Every readout shows this one. */
     val speedKmh: Double get() = releaseKmh(this)
+    /** Whether the leg after the bounce was SEEN and fitted (else it is projected). */
     val hasOutLeg: Boolean get() = outVx != null && outVy != null && outVzUp != null
+
+    /*
+     * OFF THE PITCH, SEEN OR PROJECTED. Filmed from behind the bowler the ball is often lost
+     * at the bounce — a yorker into the stumps gave two sightings after it on a real 4K clip —
+     * and with no leg after the bounce the delivery could not be judged at all: "not judged"
+     * in the 3D stadium for a ball that hit the stumps. Like ball-tracking systems, the
+     * flight is carried on as a ball comes off a pitch: same line, [QuadSpeed.PACE_KEPT_OFF_PITCH]
+     * of the pace, rising at [RESTITUTION] of the speed it came down at.
+     */
+    private val legVx: Double get() = outVx ?: QuadSpeed.PACE_KEPT_OFF_PITCH * inVx
+    private val legVy: Double get() = outVy ?: QuadSpeed.PACE_KEPT_OFF_PITCH * inVy
+    private val legVzUp: Double get() = outVzUp ?: RESTITUTION * inVzDown
 
     /** Where the ball was at [ms] on the sightings' clock. Height never below the grass. */
     fun at(ms: Double): Point3 {
         val s = (ms - bounceMs) / 1000.0
-        return if (s <= 0 || !hasOutLeg) {
+        return if (s <= 0) {
             Point3(bounceX + inVx * s, bounceY + inVy * s, (-inVzDown * s - G * s * s / 2).coerceAtLeast(0.0))
         } else {
-            Point3(bounceX + outVx!! * s, bounceY + outVy!! * s, (outVzUp!! * s - G * s * s / 2).coerceAtLeast(0.0))
+            Point3(bounceX + legVx * s, bounceY + legVy * s, (legVzUp * s - G * s * s / 2).coerceAtLeast(0.0))
         }
     }
 
@@ -554,10 +611,12 @@ data class Flight3d(
             return maxOf(bounceMs + back, firstSeenMs - MAX_BACKFILL_MS).coerceAtMost(firstSeenMs)
         }
 
-    /** When it reaches the stumps' line, or null when there is no out leg to carry it. */
+    /** When it reaches the stumps' line — on the seen leg, or the projected one. */
     val stumpsMs: Double?
         get() {
-            val vy = outVy ?: return null
+            // Pitched at or behind the line: it got there on the way down.
+            if (bounceY <= 0.0) return if (inVy < 0) bounceMs + (0.0 - bounceY) / inVy * 1000.0 else null
+            val vy = legVy
             if (vy >= 0) return null
             return bounceMs + (0.0 - bounceY) / vy * 1000.0
         }
@@ -565,7 +624,7 @@ data class Flight3d(
     /** Where it would have crossed the striker's stump line, in 3D. */
     val atStumps: Point3? get() = stumpsMs?.let(::at)
 
-    /** Whether that crossing is on the wicket, ball radius included. Null without an out leg. */
+    /** Whether that crossing is on the wicket, ball radius included. */
     val hitsStumps: Boolean?
         get() = atStumps?.let {
             abs(it.x) <= LbwProjector.HITTING_LIMIT_M && it.z <= LbwProjector.OVER_THE_TOP_M
@@ -575,5 +634,7 @@ data class Flight3d(
         const val G = 9.81
         const val RELEASE_Y_M = 18.4
         const val MAX_BACKFILL_MS = 400.0
+        /** How fast a ball climbs off a pitch, as a share of how fast it came down. */
+        const val RESTITUTION = 0.5
     }
 }

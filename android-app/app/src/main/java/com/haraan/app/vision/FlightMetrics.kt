@@ -164,6 +164,37 @@ data class FlightMetrics(
         const val SQUARE_ENOUGH_DEGREES = 30.0
 
         /**
+         * When the ball was at the stumps — its lowest sighting inside their outline in the picture, at
+         * any height up to the bails — or null when it never did. Seen from behind the bowler a
+         * ball there is AT the stumps; one passing wide or over never enters the outline.
+         */
+        internal fun reachedStumps(run: List<BallSighting>, wicket: WicketLock?, frameAspect: Float): Double? {
+            val lock = wicket?.takeIf { it.isMeasurable } ?: return null
+            val base = lock.anchor.base
+            val span = lock.anchor.span(frameAspect).toDouble()
+            if (span <= 0) return null
+            // Stumps 71 cm tall over a 23 cm span; picture y is in frame heights.
+            val tall = span * STUMPS_TALL_OVER_WIDE * frameAspect
+            // A ball clipping a stump has its centre a radius outside them (7 cm on a 23 cm
+            // span), and the sighting a little more; a real 4K yorker into the off stump sat
+            // 0.93 of a span from the middle.
+            val ballMargin = span * 0.35
+            val inside = run.filter { s ->
+                kotlin.math.abs(s.x - base.x) <= span * 1.1 &&
+                    s.y >= base.y - tall - ballMargin * frameAspect && s.y <= base.y + ballMargin * frameAspect
+            }
+            /*
+             * The LOWEST of them in the picture, not the first. A ball dipping at the stumps
+             * comes into their outline a metre or two short of the line, still in the air; it
+             * is lowest on the screen where it meets them. On a 4K yorker the first sighting in
+             * the outline put the line 80 ms early — a tenth off the speed.
+             */
+            return inside.maxByOrNull { it.y }?.timestampMs?.toDouble()
+        }
+
+        private const val STUMPS_TALL_OVER_WIDE = 0.711 / 0.2286
+
+        /**
          * Everything measurable about [track], and the reason for everything that is not.
          *
          * @param frameAspect the analysed frame's width divided by its height. Needed
@@ -209,7 +240,7 @@ data class FlightMetrics(
             val fromGround = quad == null && ground != null
             val fit = when {
                 quad != null -> QuadSpeed.fit(run, quad, roughBounce, frameAspect)
-                ground != null -> QuadSpeed.fit(run, ground, null, frameAspect)
+                ground != null -> QuadSpeed.fit(run, ground, null, frameAspect, reachedStumps(run, wicket, frameAspect))
                 else -> null
             }?.let { r -> if (r is QuadSpeed.FitResult.Ok) QuadSpeed.FitResult.Ok(r.flight.copy(ball = ball)) else r }
             val flight3d = (fit as? QuadSpeed.FitResult.Ok)?.flight

@@ -131,6 +131,9 @@ private sealed interface Stage {
 private fun ClipTrackScreen(initial: Uri?, onExit: () -> Unit) {
     val view = LocalView.current
     var clip by remember { mutableStateOf(initial) }
+    // Bumped on every pick: the SAME video picked again after a failure must run again, and a
+    // key of the clip alone would not change.
+    var attempt by remember { mutableStateOf(0) }
     var stage by remember { mutableStateOf<Stage>(Stage.Working(0f, 0, null)) }
     var playing by remember { mutableStateOf<ClipDelivery?>(null) }
     val ballPrefs = androidx.compose.ui.platform.LocalContext.current.getSharedPreferences("camera_ball", android.content.Context.MODE_PRIVATE)
@@ -141,13 +144,14 @@ private fun ClipTrackScreen(initial: Uri?, onExit: () -> Unit) {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
         if (uri != null) {
             clip = uri
+            attempt++
             stage = Stage.Working(0f, 0, null)
             autoPlayed = false
         }
     }
     val context = androidx.compose.ui.platform.LocalContext.current
 
-    LaunchedEffect(clip) {
+    LaunchedEffect(clip, attempt) {
         val uri = clip ?: run { stage = Stage.Failed("No clip was picked."); return@LaunchedEffect }
         // The Join sheet only opens this for a member whose plan includes it; asked again here
         // because a screen can be reached other ways.
@@ -178,6 +182,9 @@ private fun ClipTrackScreen(initial: Uri?, onExit: () -> Unit) {
         } catch (p: ClipProblem) {
             stage = Stage.Failed(p.message ?: "This clip couldn't be tracked.")
         } catch (t: Throwable) {
+            // Said plainly on screen; the cause goes to the log, where a failure on someone's
+            // phone can actually be diagnosed.
+            android.util.Log.w("ClipTrack", "clip analysis failed", t)
             stage = Stage.Failed("This clip couldn't be tracked.")
         }
     }
