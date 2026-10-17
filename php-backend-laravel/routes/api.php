@@ -634,6 +634,17 @@ Route::middleware(['auth.jwt', 'auth.partner'])
             Route::post('/payouts/account', 'savePayoutAccount');
         });
 
+        // Invoices: settlement statement, commission tax invoice, TDS/TCS certificate, Form 16A.
+        Route::middleware('partner.can:reports')
+            ->controller(\App\Http\Controllers\PartnerInvoicesController::class)
+            ->group(function (): void {
+                Route::get('/invoices', 'index');
+                Route::get('/invoices/quarter/{fy}/{q}', 'apiQuarter')->where('fy', '\d{4}-\d{2}')->whereNumber('q');
+                Route::get('/invoices/form16a/{id}', 'apiForm16a')->whereNumber('id');
+                Route::get('/invoices/{id}/{doc}', 'apiDocument')->whereNumber('id')->whereIn('doc', \App\Services\PartnerDocuments::BATCH_DOCS);
+                Route::post('/tax-profile', 'saveTaxProfile');
+            });
+
         // --- Staff management (owner-only; desk persons never hold 'staff') ---
         Route::middleware('partner.can:staff')->group(function (): void {
             Route::get('/staff', 'staff');

@@ -2306,6 +2306,7 @@ class PartnerController extends Controller
         $partnerId = $request->user()->effectivePartnerId();
         $settlement = app(PartnerSettlement::class);
         $s = $settlement->summary($partnerId);
+        $net = $settlement->netFigures($partnerId);
 
         $account = PartnerPayoutAccount::query()->where('partner_id', $partnerId)->first();
 
@@ -2317,6 +2318,8 @@ class PartnerController extends Controller
             ->map(fn (PayoutBatch $b): array => [
                 'id'        => $b->id,
                 'amount'    => round((float) $b->amount, 2),
+                'gross'     => round($b->gross(), 2),
+                'deducted'  => $b->totalDeductions(),
                 'status'    => $b->status,
                 'is_paid'   => $b->isPaid(),
                 'method'    => $b->method,
@@ -2328,8 +2331,10 @@ class PartnerController extends Controller
         return response()->json([
             'balance' => [
                 'available' => round($s['available'], 2),
-                'in_flight' => round($s['inFlight'], 2),
-                'settled'   => round($s['settled'], 2),
+                // What reaches the bank: net of commission, GST and tax held back.
+                'in_flight' => round($net['inFlightNet'], 2),
+                'settled'   => round($net['paidOut'], 2),
+                'withheld'  => round($net['withheld'], 2),
                 'collected' => round($s['collected'], 2),
             ],
             'account' => $account === null ? null : [

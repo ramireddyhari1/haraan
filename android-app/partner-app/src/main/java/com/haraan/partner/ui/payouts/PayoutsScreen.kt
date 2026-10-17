@@ -131,6 +131,11 @@ private sealed interface Load {
 fun PayoutsScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
     var reload by remember { mutableIntStateOf(0) }
     var editing by remember { mutableStateOf(false) }
+    var invoices by remember { mutableStateOf(false) }
+    if (invoices) {
+        InvoicesScreen(api, token, onBack = { invoices = false })
+        return
+    }
     val state by produceState<Load>(Load.Loading, reload) {
         // A live refresh keeps showing the page it had instead of flashing a spinner.
         val fresh = try { Load.Ready(api.payouts(token)) } catch (e: Exception) { Load.Failed(e.message ?: "Couldn't load payouts") }
@@ -175,6 +180,7 @@ fun PayoutsScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
                         verticalArrangement = Arrangement.spacedBy(14.dp),
                     ) {
                         item { MoneyPathCard(p) }
+                        item { InvoicesEntry { invoices = true } }
                         item { AccountSlip(p.account, p.canEdit, onEdit = { editing = true }) }
                         item { WhoCanChange(p) }
                         item { Transfers(p.batches) }
@@ -758,6 +764,59 @@ private fun DrawScope.passbook() {
         drawLine(ink.copy(alpha = 0.5f), Offset(w * 0.1f, y), Offset(spine - w * 0.06f, y), 1.dp.toPx())
         drawLine(if (k == 0) Brand else ink.copy(alpha = 0.5f), Offset(spine + w * 0.06f, y), Offset(w * 0.9f, y), if (k == 0) 1.8.dp.toPx() else 1.dp.toPx(), StrokeCap.Round)
     }
+}
+
+// ─── Invoices ───────────────────────────────────────────────────────────────
+
+/** The way into every settlement's paperwork: statement, tax invoice, TDS certificate. */
+@Composable
+private fun InvoicesEntry(onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val view = LocalView.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .pressScale(interaction, pressedScale = 0.985f)
+            .surface()
+            .clickable(interactionSource = interaction, indication = null) { Haptics.tick(view); onClick() }
+            .padding(horizontal = 18.dp, vertical = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Canvas(Modifier.size(width = 34.dp, height = 38.dp)) { invoiceLeaf() }
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text("Invoices", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ink)
+            Text("Statements, tax invoices and TDS certificates", fontSize = 12.5.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Canvas(Modifier.size(16.dp)) {
+            val st = Stroke(1.8.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+            drawPath(Path().apply { moveTo(size.width * 0.38f, size.height * 0.2f); lineTo(size.width * 0.68f, size.height * 0.5f); lineTo(size.width * 0.38f, size.height * 0.8f) }, Faint, style = st)
+        }
+    }
+}
+
+/** A receipt leaf with a torn foot and a ₹ total line. */
+private fun DrawScope.invoiceLeaf() {
+    val st = Stroke(1.6.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+    val w = size.width
+    val h = size.height
+    val teeth = 5
+    val leaf = Path().apply {
+        moveTo(w * 0.1f, h * 0.04f); lineTo(w * 0.9f, h * 0.04f); lineTo(w * 0.9f, h * 0.88f)
+        for (k in 0 until teeth) {
+            val x0 = w * 0.9f - (w * 0.8f / teeth) * k
+            lineTo(x0 - w * 0.8f / teeth / 2, h * 0.96f)
+            lineTo(x0 - w * 0.8f / teeth, h * 0.88f)
+        }
+        close()
+    }
+    drawPath(leaf, BrandWash)
+    drawPath(leaf, Brand, style = st)
+    for (k in 0 until 3) {
+        val y = h * (0.2f + k * 0.14f)
+        drawLine(Brand.copy(alpha = 0.55f), Offset(w * 0.24f, y), Offset(w * (if (k == 1) 0.56f else 0.76f), y), 1.3.dp.toPx(), StrokeCap.Round)
+    }
+    drawLine(Brand, Offset(w * 0.24f, h * 0.7f), Offset(w * 0.76f, h * 0.7f), 2.dp.toPx(), StrokeCap.Round)
 }
 
 // ─── Changing it ────────────────────────────────────────────────────────────

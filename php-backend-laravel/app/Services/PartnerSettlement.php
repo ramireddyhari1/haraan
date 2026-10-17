@@ -66,7 +66,11 @@ final class PartnerSettlement
             ->sum('host_deduction');
     }
 
-    /** Money that has actually reached the partner (both ledgers). */
+    /**
+     * Money no longer available for settlement. A batch's whole gross leaves the
+     * available balance — the net payout to the partner's bank plus everything it
+     * deducted (commission, its GST, TDS, TCS).
+     */
     public function settled(int $partnerId): float
     {
         $perBooking = (float) Payout::query()
@@ -77,7 +81,7 @@ final class PartnerSettlement
         $batched = (float) PayoutBatch::query()
             ->where('partner_id', $partnerId)
             ->whereIn(DB::raw('lower(status)'), PayoutBatch::PAID)
-            ->sum('amount');
+            ->sum(DB::raw('COALESCE(gross_amount, amount + commission_amount)'));
 
         return $perBooking + $batched;
     }
@@ -88,7 +92,30 @@ final class PartnerSettlement
         return (float) PayoutBatch::query()
             ->where('partner_id', $partnerId)
             ->whereIn(DB::raw('lower(status)'), ['processing', 'pending'])
+            ->sum(DB::raw('COALESCE(gross_amount, amount + commission_amount)'));
+    }
+
+    /**
+     * What actually reached (or is on its way to) the partner's bank, and what settlements
+     * kept back as commission, GST and tax. The balance maths above works on gross; these
+     * are the figures a partner should see as "in your bank" and "on the way".
+     *
+     * @return array{paidOut: float, inFlightNet: float, withheld: float}
+     */
+    public function netFigures(int $partnerId): array
+    {
+        $perBooking = (float) Payout::query()
+            ->whereIn('booking_id', $this->bookings($partnerId)->select('bookings.id'))
+            ->whereIn(DB::raw('lower(status)'), self::SETTLED_PAYOUT)
             ->sum('amount');
+        $paid = PayoutBatch::query()->where('partner_id', $partnerId)->whereIn(DB::raw('lower(status)'), PayoutBatch::PAID);
+        $open = PayoutBatch::query()->where('partner_id', $partnerId)->whereIn(DB::raw('lower(status)'), ['processing', 'pending']);
+
+        return [
+            'paidOut' => $perBooking + (float) (clone $paid)->sum('amount'),
+            'inFlightNet' => (float) (clone $open)->sum('amount'),
+            'withheld' => (float) (clone $paid)->sum(DB::raw('COALESCE(gross_amount, amount + commission_amount) - amount')),
+        ];
     }
 
     /** Collected, minus what's paid, minus what's already in a batch. */

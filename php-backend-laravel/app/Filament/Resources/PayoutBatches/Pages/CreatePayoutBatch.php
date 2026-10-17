@@ -16,6 +16,10 @@ class CreatePayoutBatch extends CreateRecord
     /** A batch created straight into "paid" still needs its timestamp. */
     protected function mutateFormDataBeforeCreate(array $data): array
     {
+        // Never trust a browser-supplied payout: every deduction and the net are
+        // re-derived on the server from the gross and the rates.
+        $data = array_merge($data, PayoutBatchResource::figuresFrom($data));
+
         if (strtolower((string) ($data['status'] ?? '')) === 'paid' && blank($data['processed_at'] ?? null)) {
             $data['processed_at'] = now();
         }
@@ -30,7 +34,10 @@ class CreatePayoutBatch extends CreateRecord
         AdminAction::log('payout_batch.created', [
             'batch_id' => $record->id,
             'partner_id' => $record->partner_id,
+            'gross' => $record->gross_amount,
             'amount' => $record->amount,
+            'deductions' => $record->totalDeductions(),
+            'invoice_number' => $record->invoice_number,
             'status' => $record->status,
         ]);
     }

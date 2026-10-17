@@ -7,7 +7,11 @@ namespace App\Filament\Resources\PayoutBatches\Tables;
 use App\Models\AdminAction;
 use App\Models\PartnerPayoutAccount;
 use App\Models\PayoutBatch;
+use App\Services\PartnerDocuments;
+use App\Services\PartnerSettlement;
+use App\Services\SettlementTax;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -44,9 +48,27 @@ class PayoutBatchesTable
                     ->copyMessage('Copied')
                     ->wrap(),
                 TextColumn::make('amount')
+                    ->label('Net payout')
                     ->money('INR')
                     ->weight('bold')
+                    ->description(fn (PayoutBatch $r): string => 'of ' . PartnerSettlement::inr($r->gross()))
                     ->sortable(),
+                TextColumn::make('deductions')
+                    ->label('Deducted')
+                    ->state(fn (PayoutBatch $r): float => $r->totalDeductions())
+                    ->money('INR')
+                    ->description(fn (PayoutBatch $r): string => collect([
+                        (float) $r->commission_amount > 0 ? 'Comm. ' . number_format((float) $r->commission_percent, 2) . '%' : null,
+                        (float) $r->commission_gst_amount > 0 ? 'GST' : null,
+                        (float) $r->tds_amount > 0 ? 'TDS' : null,
+                        (float) $r->tcs_amount > 0 ? 'TCS' : null,
+                    ])->filter()->implode(' · ') ?: 'Nothing'),
+                TextColumn::make('invoice_number')
+                    ->label('Invoice')
+                    ->placeholder('—')
+                    ->copyable()
+                    ->searchable()
+                    ->toggleable(),
                 TextColumn::make('status')
                     ->badge()
                     ->color(fn (string $state): string => match (strtolower($state)) {
@@ -152,6 +174,27 @@ class PayoutBatchesTable
 
                         Notification::make()->title('Settlement marked failed')->warning()->send();
                     }),
+
+                ActionGroup::make([
+                    ...collect(['settlement' => 'Settlement statement', 'invoice' => 'Tax invoice', 'tds' => 'TDS / TCS certificate', 'csv' => 'Bookings CSV'])
+                        ->map(fn (string $label, string $doc): Action => Action::make('doc_' . $doc)
+                            ->label($label)
+                            ->icon($doc === 'csv' ? 'heroicon-m-table-cells' : 'heroicon-m-document-text')
+                            ->url(fn (PayoutBatch $r): string => route('partner.docs.batch', ['id' => $r->id, 'doc' => $doc]))
+                            ->openUrlInNewTab()
+                            ->visible(fn (PayoutBatch $r): bool => in_array($doc, app(PartnerDocuments::class)->docsFor($r), true)))
+                        ->values()->all(),
+                    Action::make('restamp')
+                        ->label('Refresh billing details')
+                        ->icon('heroicon-m-arrow-path')
+                        ->requiresConfirmation()
+                        ->modalDescription('Re-reads Haraan’s details from Platform rules and the partner’s tax details onto this settlement’s documents. Amounts don’t change.')
+                        ->action(function (PayoutBatch $r): void {
+                            app(SettlementTax::class)->restamp($r);
+                            AdminAction::log('payout_batch.restamped', ['batch_id' => $r->id]);
+                            Notification::make()->title('Billing details refreshed')->success()->send();
+                        }),
+                ])->label('Documents')->icon('heroicon-m-document-duplicate')->button()->color('gray'),
 
                 EditAction::make(),
             ])

@@ -291,8 +291,9 @@ class CommandCenter extends Page
         $allPaid = $this->paid()->where(fn ($q) => $q->whereNotNull('event_id')->orWhereNotNull('venue_id'));
         $earned = (float) (clone $allPaid)->sum('total_amount') - (float) (clone $allPaid)->sum('host_deduction');
         $settled = (float) Payout::query()->whereIn(DB::raw('lower(status)'), PartnerSettlement::SETTLED_PAYOUT)->sum('amount')
-            + (float) PayoutBatch::query()->whereIn(DB::raw('lower(status)'), PayoutBatch::PAID)->sum('amount');
-        $inFlight = (float) PayoutBatch::query()->whereIn(DB::raw('lower(status)'), ['processing', 'pending'])->sum('amount');
+            // A settlement's gross leaves what partners are owed, including the commission and tax it held back.
+            + (float) PayoutBatch::query()->whereIn(DB::raw('lower(status)'), PayoutBatch::PAID)->sum(DB::raw('COALESCE(gross_amount, amount + commission_amount)'));
+        $inFlight = (float) PayoutBatch::query()->whereIn(DB::raw('lower(status)'), ['processing', 'pending'])->sum(DB::raw('COALESCE(gross_amount, amount + commission_amount)'));
         $paidToday = (float) PayoutBatch::query()
             ->whereIn(DB::raw('lower(status)'), PayoutBatch::PAID)
             ->where('updated_at', '>=', BusinessClock::now()->startOfDay()->setTimezone(config('app.timezone')))

@@ -22,6 +22,13 @@ class EditPayoutBatch extends EditRecord
     /** Flipping the status to paid by hand stamps the time too. */
     protected function mutateFormDataBeforeSave(array $data): array
     {
+        // Amounts are frozen once paid (the inputs are disabled and not sent); before
+        // that, an edit re-derives every deduction exactly like a new settlement.
+        if (! $this->getRecord()->isPaid() && array_key_exists('gross_amount', $data)) {
+            $data['partner_id'] ??= $this->getRecord()->partner_id;
+            $data = array_merge($data, PayoutBatchResource::figuresFrom($data));
+        }
+
         if (strtolower((string) ($data['status'] ?? '')) === 'paid' && blank($data['processed_at'] ?? null)) {
             $data['processed_at'] = now();
         }

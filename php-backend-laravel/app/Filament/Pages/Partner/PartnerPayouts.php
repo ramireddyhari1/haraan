@@ -174,12 +174,13 @@ class PartnerPayouts extends Page
         // to the owner (effectivePartnerId), not to a desk person's venue subset:
         // the money belongs to the account, however narrow the viewer's remit.
         $s = app(PartnerSettlement::class)->summary($this->partnerId());
+        $net = app(PartnerSettlement::class)->netFigures($this->partnerId());
 
         return [
             'available'   => $this->inr($s['available']),
-            'settled'     => $this->inr($s['settled']),
+            'settled'     => $this->inr($net['paidOut']),
             'collected'   => $this->inr($s['collected']),
-            'inFlight'    => $this->inr($s['inFlight']),
+            'inFlight'    => $this->inr($net['inFlightNet']),
             'hasInFlight' => $s['inFlight'] > 0,
             'hasAvail'    => $s['available'] > 0,
             'nextDate'    => $this->nextSettlementDate(),

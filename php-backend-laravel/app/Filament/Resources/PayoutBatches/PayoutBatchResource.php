@@ -73,6 +73,24 @@ class PayoutBatchResource extends Resource
         return 'warning';
     }
 
+    /**
+     * Server-side arithmetic for a submitted form.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, float>
+     */
+    public static function figuresFrom(array $data): array
+    {
+        return app(\App\Services\SettlementTax::class)->compute(
+            (int) ($data['partner_id'] ?? 0),
+            (float) ($data['gross_amount'] ?? $data['amount'] ?? 0),
+            (float) ($data['commission_percent'] ?? 0),
+            (float) ($data['commission_gst_percent'] ?? 0),
+            (float) ($data['tds_percent'] ?? 0),
+            (float) ($data['tcs_percent'] ?? 0),
+        );
+    }
+
     public static function getPages(): array
     {
         return [

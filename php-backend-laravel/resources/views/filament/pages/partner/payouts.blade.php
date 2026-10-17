@@ -49,6 +49,15 @@
             </div>
         </section>
 
+        {{-- ---------- Invoices ---------- --}}
+        @if (\App\Filament\Pages\Partner\PartnerInvoices::canAccess())
+            <a class="ppo-card ppo-inv" href="{{ \App\Filament\Pages\Partner\PartnerInvoices::getUrl() }}" wire:navigate>
+                <svg viewBox="0 0 34 38" width="30" height="34" aria-hidden="true"><path d="M3 2h28v31l-5.6-3-5.6 3-5.6-3-5.6 3L3 33z" fill="#eef3fe" stroke="#2563eb" stroke-width="1.6" stroke-linejoin="round"/><path d="M9 10h16M9 15h10M9 20h16" stroke="#2563eb" stroke-opacity=".55" stroke-width="1.4" stroke-linecap="round"/><path d="M9 26h16" stroke="#2563eb" stroke-width="2" stroke-linecap="round"/></svg>
+                <span class="ppo-inv-t"><b>Invoices</b><small>Statements, tax invoices and TDS certificates</small></span>
+                <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M6 3l5 5-5 5" fill="none" stroke="#94a3b8" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </a>
+        @endif
+
         {{-- ---------- Settlement destination ---------- --}}
         <section class="ppo-card">
             <div class="ppo-card-head">
@@ -206,6 +215,10 @@
 
     <style>
         .ppo{display:flex;flex-direction:column;gap:16px;}
+        .ppo-inv{display:flex;align-items:center;gap:14px;text-decoration:none;}
+        .ppo-inv-t{flex:1;display:flex;flex-direction:column;min-width:0;}
+        .ppo-inv-t b{font-size:15px;color:#0b1220;}
+        .ppo-inv-t small{font-size:12.5px;color:#64748b;}
 
         /* ---- hero ---- */
         .ppo-hero{position:relative;overflow:hidden;border-radius:20px;

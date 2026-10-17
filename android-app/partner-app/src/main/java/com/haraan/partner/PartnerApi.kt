@@ -791,6 +791,64 @@ data class PayoutBatchRow(
     val date: String?,
 )
 
+/** One settlement in the Invoices list, with the documents it has. */
+data class InvoiceSettlement(
+    val id: Long,
+    /** yyyy-MM-dd, business day it was issued. */
+    val date: String,
+    /** "Oct 2026", for grouping. */
+    val month: String,
+    val period: String?,
+    /** Paid | Processing | Cancelled */
+    val status: String,
+    val gross: Double,
+    val commission: Double,
+    val commissionGst: Double,
+    val tds: Double,
+    val tcs: Double,
+    val net: Double,
+    val invoiceNumber: String?,
+    val reference: String?,
+    /** Any of settlement, invoice, tds, csv. */
+    val docs: List<String>,
+) {
+    val deducted: Double get() = commission + commissionGst + tds + tcs
+}
+
+/** A financial-year quarter that withheld tax, and its Form 16A once finance uploads it. */
+data class InvoiceQuarter(
+    val financialYear: String,
+    val quarter: Int,
+    val label: String,
+    val settlements: Int,
+    val tds: Double,
+    val tcs: Double,
+    val form16aId: Long?,
+    val form16aNo: String?,
+)
+
+/** Who the partner's invoices are billed to. */
+data class TaxProfile(
+    val legalName: String? = null,
+    val gstin: String? = null,
+    val pan: String? = null,
+    val address: String? = null,
+    val stateCode: String? = null,
+    val state: String? = null,
+)
+
+data class GstState(val code: String, val name: String)
+
+data class InvoicesPage(
+    val enabled: Boolean,
+    val settlements: List<InvoiceSettlement>,
+    val quarters: List<InvoiceQuarter>,
+    val taxProfile: TaxProfile,
+    val states: List<GstState>,
+    /** Only the owner changes tax details; desk staff with Reports read them. */
+    val canEditTax: Boolean,
+)
+
 /** The settlement home: what's owed, where it goes, and what's already gone. */
 data class PayoutsPage(
     val available: Double,
@@ -1968,6 +2026,96 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 )
             },
         )
+    }
+
+    /** GET /api/partner/invoices — statements, tax invoices, TDS certificates and tax details. */
+    suspend fun invoices(token: String): InvoicesPage = withContext(Dispatchers.IO) {
+        val o = JSONObject(get("/api/partner/invoices", token))
+        val tp = o.optJSONObject("tax_profile")
+        InvoicesPage(
+            enabled = o.optBoolean("enabled", true),
+            settlements = o.optJSONArray("settlements").let { a ->
+                if (a == null) emptyList() else (0 until a.length()).map { i ->
+                    val x = a.getJSONObject(i)
+                    InvoiceSettlement(
+                        id = x.optLong("id"),
+                        date = x.optString("date"),
+                        month = x.optString("month"),
+                        period = x.optStringOrNull("period"),
+                        status = x.optString("status"),
+                        gross = x.optDouble("gross", 0.0),
+                        commission = x.optDouble("commission", 0.0),
+                        commissionGst = x.optDouble("commission_gst", 0.0),
+                        tds = x.optDouble("tds", 0.0),
+                        tcs = x.optDouble("tcs", 0.0),
+                        net = x.optDouble("net", 0.0),
+                        invoiceNumber = x.optStringOrNull("invoice_number"),
+                        reference = x.optStringOrNull("reference"),
+                        docs = x.optJSONArray("docs").toStringList(),
+                    )
+                }
+            },
+            quarters = o.optJSONArray("quarters").let { a ->
+                if (a == null) emptyList() else (0 until a.length()).map { i ->
+                    val x = a.getJSONObject(i)
+                    val cert = x.optJSONObject("form16a")
+                    InvoiceQuarter(
+                        financialYear = x.optString("financial_year"),
+                        quarter = x.optInt("quarter"),
+                        label = x.optString("label"),
+                        settlements = x.optInt("settlements"),
+                        tds = x.optDouble("tds", 0.0),
+                        tcs = x.optDouble("tcs", 0.0),
+                        form16aId = cert?.optLong("id"),
+                        form16aNo = cert?.optStringOrNull("certificate_no"),
+                    )
+                }
+            },
+            taxProfile = TaxProfile(
+                legalName = tp?.optStringOrNull("legal_name"),
+                gstin = tp?.optStringOrNull("gstin"),
+                pan = tp?.optStringOrNull("pan"),
+                address = tp?.optStringOrNull("address"),
+                stateCode = tp?.optStringOrNull("state_code"),
+                state = tp?.optStringOrNull("state"),
+            ),
+            states = o.optJSONArray("states").let { a ->
+                if (a == null) emptyList() else (0 until a.length()).map { i -> a.getJSONObject(i).let { GstState(it.optString("code"), it.optString("name")) } }
+            },
+            canEditTax = o.optBoolean("can_edit_tax", false),
+        )
+    }
+
+    /** Owner only. Validation errors come back as the server's own sentence. */
+    suspend fun saveTaxProfile(token: String, p: TaxProfile) = withContext(Dispatchers.IO) {
+        val payload = JSONObject()
+            .put("legal_name", p.legalName ?: "")
+            .put("gstin", p.gstin ?: "")
+            .put("pan", p.pan ?: "")
+            .put("address", p.address ?: "")
+            .put("state_code", p.stateCode ?: "")
+        post("/api/partner/tax-profile", payload.toString(), token)
+        Unit
+    }
+
+    /** A full URL on this server, for documents the app opens in a WebView. */
+    fun absoluteUrl(path: String): String = baseUrl + path
+
+    /** Raw bytes of a download (CSV, Form 16A), with the bearer token. */
+    suspend fun download(token: String, path: String): ByteArray = withContext(Dispatchers.IO) {
+        val conn = (URL(baseUrl + path).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 15000
+            readTimeout = 30000
+            setRequestProperty("X-Partner-App-Version", BuildConfig.VERSION_NAME)
+            setRequestProperty("Authorization", "Bearer $token")
+        }
+        try {
+            val code = conn.responseCode
+            if (code !in 200..299) throw ApiException(code, defaultError(code), "")
+            conn.inputStream.use { it.readBytes() }
+        } finally {
+            conn.disconnect()
+        }
     }
 
     /** Set where settlements are sent. Saving always clears verification. */

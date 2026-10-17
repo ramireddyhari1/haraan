@@ -433,6 +433,7 @@ class PartnerPanelProvider extends PanelProvider
                 \App\Filament\Pages\Partner\PartnerAcademyPage::class,
                 \App\Filament\Pages\Partner\PartnerEarnings::class,
                 \App\Filament\Pages\Partner\PartnerPayouts::class,
+                \App\Filament\Pages\Partner\PartnerInvoices::class,
                 \App\Filament\Pages\Partner\PartnerReviews::class,
                 \App\Filament\Pages\Partner\PartnerPlanPage::class,
                 \App\Filament\Pages\Partner\PartnerPublicProfile::class,

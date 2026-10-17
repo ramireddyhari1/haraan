@@ -359,6 +359,14 @@ Route::post('/partner/branch', function (Request $request) {
     return back();
 })->middleware(['web', 'auth'])->name('partner.branch.switch');
 
+// Partner invoice documents for the web console (and finance staff from /control).
+// Not under /partner/{page}: Filament owns that prefix (same-URI shadowing).
+Route::middleware(['web', 'auth'])->prefix('partner-docs')->controller(\App\Http\Controllers\PartnerInvoicesController::class)->group(function (): void {
+    Route::get('/settlement/{id}/{doc}', 'webDocument')->whereNumber('id')->whereIn('doc', \App\Services\PartnerDocuments::BATCH_DOCS)->name('partner.docs.batch');
+    Route::get('/quarter/{partner}/{fy}/{q}', 'webQuarter')->whereNumber('partner')->where('fy', '\d{4}-\d{2}')->whereNumber('q')->name('partner.docs.quarter');
+    Route::get('/form16a/{id}', 'webForm16a')->whereNumber('id')->name('partner.docs.form16a');
+});
+
 // A fresh app token for the phone shell (PartnerAppShell): the console session vouches
 // for the partner, and the shell's screens then read /api/partner/* like the Android app.
 Route::post('/partner/app/token', function () {
