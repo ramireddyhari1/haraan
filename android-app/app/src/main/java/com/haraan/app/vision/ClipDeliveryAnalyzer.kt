@@ -111,6 +111,8 @@ object ClipDeliveryAnalyzer {
         toFrame: Int = Int.MAX_VALUE,
         every: Int = 0,
     ): ClipAnalysis {
+        // Said plainly rather than crashing: everything below needs OpenCV's natives.
+        if (!OpenCvBallTracker.ensureLoaded()) throw ClipProblem("This phone can't run the ball tracker.")
         val meta = { key: Int -> runCatching { retriever.extractMetadata(key) }.getOrNull() }
         val count = meta(MediaMetadataRetriever.METADATA_KEY_VIDEO_FRAME_COUNT)?.toIntOrNull() ?: 0
         val durationMs = meta(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L

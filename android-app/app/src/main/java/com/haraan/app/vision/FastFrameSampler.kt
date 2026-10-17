@@ -23,6 +23,15 @@ import org.opencv.imgproc.Imgproc
  * are stretched to full range, as the live camera's are.
  */
 internal class FastFrameSampler {
+    /*
+     * OpenCV's natives before the first Mat below. The detectors load them as they are made,
+     * but the clip analysis makes this first: in a fresh process — Track a clip opened before
+     * the camera ever was — every Mat threw UnsatisfiedLinkError and the app closed.
+     */
+    init {
+        check(OpenCvBallTracker.ensureLoaded()) { "OpenCV native library unavailable" }
+    }
+
     private val small = Mat()
     private val channel = Mat()
     private val narrowed = Mat()
