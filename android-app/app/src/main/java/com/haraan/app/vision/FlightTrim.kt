@@ -30,6 +30,8 @@ object FlightTrim {
          * to x 0.89, high up, and the fit read a 67 km/h ball as 43. Cut there.
          */
         var reachedStumps = false
+        // The track's own spacing between sightings, for judging a gap at the stumps.
+        val usualGap = run.zipWithNext { p, q -> q.timestampMs - p.timestampMs }.sorted().let { it[it.size / 2] }.coerceAtLeast(1L)
         for (i in 1 until run.size) {
             val p = run[i - 1]
             val q = run[i]
@@ -44,6 +46,16 @@ object FlightTrim {
                 if (tooFast || turnedBack || roseTooFar) return run.subList(0, i)
             }
             if (stumps != null) {
+                /*
+                 * ...AND A BALL AT THE STUMPS DOES NOT VANISH AND COME BACK. A 4K yorker
+                 * (IMG_6056) was followed frame by frame to the stumps' foot, lost for eight
+                 * frames, and picked up again on the pads a stump's width away — close enough
+                 * to pass the side and height checks below — and the fit read 102 km/h as 55.
+                 */
+                val gap = q.timestampMs - p.timestampMs
+                if (reachedStumps && i >= MIN_KEPT && gap > maxOf(usualGap * MAX_GAP_AT_STUMPS, MIN_GAP_AT_STUMPS_MS)) {
+                    return run.subList(0, i)
+                }
                 if (reachedStumps && i >= MIN_KEPT &&
                     (abs(q.x - stumps.x) > AWAY_FROM_STUMPS_ACROSS || stumps.y - q.y > AWAY_FROM_STUMPS_UP)
                 ) {
@@ -80,4 +92,8 @@ object FlightTrim {
     /** After arriving, this far off to a side, or this far up the picture, is not the ball. */
     private const val AWAY_FROM_STUMPS_ACROSS = 0.09
     private const val AWAY_FROM_STUMPS_UP = 0.08
+
+    /** After arriving, a gap this many times the track's usual spacing (and at least this long) ends it. */
+    private const val MAX_GAP_AT_STUMPS = 4L
+    private const val MIN_GAP_AT_STUMPS_MS = 50L
 }

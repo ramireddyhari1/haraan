@@ -189,7 +189,16 @@ data class FlightMetrics(
              * is lowest on the screen where it meets them. On a 4K yorker the first sighting in
              * the outline put the line 80 ms early — a tenth off the speed.
              */
-            return inside.maxByOrNull { it.y }?.timestampMs?.toDouble()
+            val at = inside.maxByOrNull { it.y } ?: return null
+            /*
+             * ...AND IT CAME DOWN TO THERE. A ball rising off a good length comes into the
+             * outline from BELOW it in the picture, metres short of the line: pinned there, a
+             * simulated 90 km/h delivery read 114. At the stumps the ball arrives from above,
+             * coming down onto them, as a real 4K yorker did.
+             */
+            val before = run.getOrNull(run.indexOf(at) - 1) ?: return null
+            if (before.y > at.y) return null
+            return at.timestampMs.toDouble()
         }
 
         private const val STUMPS_TALL_OVER_WIDE = 0.711 / 0.2286

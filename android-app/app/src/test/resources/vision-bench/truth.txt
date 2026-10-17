@@ -1,0 +1,219 @@
+# GROUND TRUTH FOR THE TRACKING SCOREBOARD (TrackingScoreboardTest).
+#
+# Everything here was checked by eye, frame by frame, on 2026-10-17 — never taken from the
+# app's own tracker. Frame numbers are the clip's own decoded frame index.
+#
+#   clip <id> raw=<file in VISION_BENCH_DIR> [from=N to=N] [fps=F] source=<original video>
+#   delivery release=N stumps=N stumpsTol=N [bounce=N bounceTol=N]   — or —   delivery somewhere
+#   ball <frame> <x> <y>      ball centre, normalised to the upright 720x1280 analysis frame
+#   cut <frame>               the camera itself moved here: anything called after it is false
+#
+# release  first frame the ball is clear of the bowler's fingers.
+# stumps   frame the ball is at the batter's stump line (yorker: at the base; else passing them).
+# bounce   lowest ball position in the picture, from the ball labels.
+# ball     proposed by background-and-motion difference (scripts/vision-bench), then every
+#          frame checked on a contact sheet with the proposal circled. Frames where the
+#          proposal was not on the ball were re-run until it was; none were kept wrong.
+#
+# Speed truth is geometry-free: 18.5 m +/- 0.5 m release-to-stumps over (stumps - release)
+# frames. It is the AVERAGE speed over the flight, so it is compared with the fit's
+# groundKmh, not the release figure.
+#
+# The net windows are a 464x832 WhatsApp re-encode: the far ball is not visible to the eye
+# past mid-pitch, so they carry only "a delivery was bowled in this window".
+
+clip img6056 raw=img6056.raw source=IMG_6056.MOV  (iPhone 4K 120 fps, yorker at the crease, ball lost at the foot)
+delivery release=153 stumps=231 stumpsTol=1
+ball 156 0.3647 0.2603
+ball 157 0.3780 0.2686
+ball 158 0.3906 0.2760
+ball 159 0.4015 0.2832
+ball 160 0.4117 0.2901
+ball 161 0.4211 0.2959
+ball 162 0.4308 0.3024
+ball 163 0.4387 0.3080
+ball 164 0.4463 0.3134
+ball 165 0.4537 0.3185
+ball 166 0.4601 0.3235
+ball 167 0.4668 0.3282
+ball 168 0.4726 0.3327
+ball 169 0.4778 0.3370
+ball 170 0.4831 0.3410
+ball 171 0.4885 0.3451
+ball 172 0.4946 0.3483
+ball 173 0.4981 0.3513
+ball 174 0.5033 0.3550
+ball 175 0.5061 0.3587
+ball 176 0.5103 0.3611
+ball 177 0.5144 0.3656
+ball 178 0.5169 0.3703
+ball 179 0.5197 0.3731
+ball 180 0.5247 0.3753
+ball 181 0.5276 0.3766
+ball 182 0.5308 0.3803
+ball 183 0.5336 0.3837
+ball 184 0.5363 0.3856
+ball 185 0.5381 0.3889
+ball 186 0.5409 0.3919
+ball 187 0.5432 0.3945
+ball 188 0.5455 0.3970
+ball 189 0.5481 0.3999
+ball 190 0.5500 0.4024
+ball 191 0.5516 0.4048
+ball 192 0.5536 0.4072
+ball 193 0.5565 0.4096
+ball 194 0.5576 0.4125
+ball 195 0.5592 0.4146
+ball 196 0.5605 0.4180
+ball 197 0.5623 0.4201
+ball 198 0.5636 0.4226
+ball 199 0.5651 0.4248
+ball 200 0.5660 0.4273
+ball 201 0.5674 0.4291
+ball 202 0.5688 0.4314
+ball 203 0.5703 0.4339
+ball 204 0.5711 0.4362
+ball 205 0.5722 0.4381
+ball 206 0.5738 0.4406
+ball 207 0.5748 0.4428
+ball 208 0.5757 0.4451
+ball 209 0.5764 0.4473
+ball 210 0.5770 0.4492
+ball 211 0.5785 0.4516
+ball 212 0.5793 0.4528
+ball 213 0.5799 0.4547
+ball 214 0.5806 0.4572
+ball 215 0.5826 0.4594
+ball 216 0.5833 0.4609
+ball 217 0.5834 0.4632
+ball 218 0.5840 0.4652
+ball 219 0.5851 0.4673
+ball 220 0.5847 0.4691
+ball 221 0.5870 0.4717
+ball 222 0.5882 0.4734
+ball 223 0.5889 0.4754
+ball 224 0.5889 0.4773
+ball 225 0.5894 0.4792
+ball 226 0.5893 0.4809
+ball 227 0.5899 0.4827
+ball 228 0.5907 0.4848
+ball 229 0.5908 0.4860
+ball 230 0.5910 0.4879
+ball 231 0.5916 0.4904
+ball 232 0.5929 0.4923
+ball 233 0.5931 0.4938
+ball 234 0.6174 0.4863
+
+clip img6053 raw=img6053.raw source=IMG_6053.MOV  (iPhone 4K 120 fps, full length, passes the stumps into the batter's hands)
+delivery release=45 stumps=117 stumpsTol=3 bounce=97 bounceTol=1
+ball 46 0.3249 0.2769
+ball 47 0.3414 0.2899
+ball 48 0.3556 0.3028
+ball 49 0.3687 0.3141
+ball 50 0.3810 0.3245
+ball 51 0.3922 0.3341
+ball 52 0.4029 0.3431
+ball 53 0.4122 0.3520
+ball 54 0.4209 0.3597
+ball 55 0.4283 0.3671
+ball 56 0.4368 0.3762
+ball 57 0.4446 0.3827
+ball 58 0.4521 0.3843
+ball 59 0.4592 0.3900
+ball 60 0.4645 0.3963
+ball 61 0.4694 0.4017
+ball 62 0.4754 0.4065
+ball 63 0.4804 0.4123
+ball 64 0.4849 0.4168
+ball 65 0.4891 0.4218
+ball 66 0.4930 0.4266
+ball 67 0.4976 0.4309
+ball 68 0.5015 0.4352
+ball 69 0.5046 0.4394
+ball 70 0.5076 0.4432
+ball 71 0.5113 0.4471
+ball 72 0.5147 0.4510
+ball 73 0.5175 0.4545
+ball 74 0.5202 0.4583
+ball 75 0.5216 0.4640
+ball 76 0.5250 0.4676
+ball 77 0.5280 0.4684
+ball 78 0.5302 0.4707
+ball 79 0.5325 0.4741
+ball 80 0.5350 0.4773
+ball 81 0.5370 0.4801
+ball 82 0.5388 0.4837
+ball 83 0.5411 0.4865
+ball 84 0.5430 0.4893
+ball 85 0.5449 0.4917
+ball 86 0.5465 0.4938
+ball 87 0.5476 0.4973
+ball 88 0.5496 0.4999
+ball 89 0.5511 0.5022
+ball 90 0.5530 0.5049
+ball 91 0.5542 0.5074
+ball 92 0.5555 0.5101
+ball 93 0.5570 0.5123
+ball 94 0.5582 0.5146
+ball 95 0.5595 0.5170
+ball 96 0.5604 0.5195
+ball 97 0.5611 0.5207
+ball 98 0.5630 0.5158
+ball 99 0.5639 0.5122
+ball 100 0.5646 0.5094
+ball 101 0.5655 0.5066
+ball 102 0.5658 0.5038
+ball 103 0.5672 0.5014
+ball 104 0.5681 0.4988
+ball 105 0.5694 0.4967
+ball 106 0.5696 0.4938
+ball 107 0.5706 0.4924
+ball 108 0.5717 0.4899
+ball 109 0.5715 0.4879
+ball 110 0.5729 0.4857
+ball 111 0.5748 0.4841
+ball 112 0.5748 0.4821
+ball 113 0.5755 0.4805
+ball 114 0.5757 0.4783
+ball 115 0.5778 0.4762
+ball 116 0.5771 0.4750
+ball 117 0.5785 0.4736
+ball 118 0.5792 0.4723
+ball 119 0.5792 0.4707
+ball 120 0.5799 0.4691
+ball 121 0.5806 0.4680
+ball 122 0.5819 0.4668
+ball 123 0.5832 0.4658
+ball 124 0.5841 0.4648
+
+clip net01 raw=net120.raw from=1300 to=1499 fps=119.946 source=WhatsApp Video 2026-10-11 at 11.46.06 AM.mp4  (464x832 120 fps net session)
+delivery somewhere
+
+clip net02 raw=net120.raw from=2150 to=2349 fps=119.946 source=WhatsApp Video 2026-10-11 at 11.46.06 AM.mp4  (464x832 120 fps net session)
+delivery somewhere
+
+clip net03 raw=net120.raw from=2820 to=2999 fps=119.946 source=WhatsApp Video 2026-10-11 at 11.46.06 AM.mp4  (464x832 120 fps net session)
+delivery somewhere
+
+clip net04 raw=net120.raw from=3170 to=3329 fps=119.946 source=WhatsApp Video 2026-10-11 at 11.46.06 AM.mp4  (464x832 120 fps net session)
+delivery somewhere
+
+clip net05 raw=net120.raw from=3560 to=3759 fps=119.946 source=WhatsApp Video 2026-10-11 at 11.46.06 AM.mp4  (464x832 120 fps net session)
+delivery somewhere
+
+clip net06 raw=net120.raw from=4300 to=4479 fps=119.946 source=WhatsApp Video 2026-10-11 at 11.46.06 AM.mp4  (464x832 120 fps net session)
+delivery somewhere
+
+clip net07 raw=net120.raw from=4840 to=5059 fps=119.946 source=WhatsApp Video 2026-10-11 at 11.46.06 AM.mp4  (464x832 120 fps net session)
+delivery somewhere
+
+clip net08 raw=net120.raw from=5370 to=5719 fps=119.946 source=WhatsApp Video 2026-10-11 at 11.46.06 AM.mp4  (464x832 120 fps net session)
+delivery somewhere
+cut 5672
+
+clip net09 raw=net120.raw from=6000 to=6239 fps=119.946 source=WhatsApp Video 2026-10-11 at 11.46.06 AM.mp4  (464x832 120 fps net session)
+delivery somewhere
+
+clip net10 raw=net120.raw from=6640 to=6879 fps=119.946 source=WhatsApp Video 2026-10-11 at 11.46.06 AM.mp4  (464x832 120 fps net session)
+delivery somewhere
+

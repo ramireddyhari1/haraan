@@ -284,43 +284,29 @@ object QuadSpeed {
             ?: turn?.let { Triple(it - TURN_SEARCH_MS, it + TURN_SEARCH_MS, TB_STEP_MS) }
             ?: Triple(first, last + EXTRAPOLATE_BOUNCE_MS, TB_SCAN_STEP_MS)
 
-        class Best(var v: DoubleArray? = null, var tb: Double = from, var error: Double = Double.MAX_VALUE)
-        fun search(atStumpsMs: Double?): Best {
-            val best = Best()
-            fun scan(a: Double, b: Double, by: Double) {
-                var tb = a
-                while (tb <= b) {
-                    val near = run.filter { abs(it.timestampMs - tb) <= MAX_LOOKBACK_MS }
-                    val fit = fitFlight(near, camera, tb, atStumpsMs)?.takeIf { physical(it.first) }
-                    if (fit != null && fit.second < best.error) {
-                        best.error = fit.second
-                        best.v = fit.first
-                        best.tb = tb
-                    }
-                    tb += by
+        var best: DoubleArray? = null
+        var bestTb = from
+        var bestError = Double.MAX_VALUE
+        fun scan(a: Double, b: Double, by: Double) {
+            var tb = a
+            while (tb <= b) {
+                val near = run.filter { abs(it.timestampMs - tb) <= MAX_LOOKBACK_MS }
+                val fit = fitFlight(near, camera, tb, reachedStumpsMs)?.takeIf { physical(it.first) }
+                if (fit != null && fit.second < bestError) {
+                    bestError = fit.second
+                    best = fit.first
+                    bestTb = tb
                 }
+                tb += by
             }
-            scan(from, to, step)
-            // A coarse scan, then the frame either side of its answer at full resolution.
-            if (bounce?.atMs == null && turn == null && best.v != null) {
-                val coarse = best.tb
-                scan(coarse - TB_SCAN_STEP_MS, coarse + TB_SCAN_STEP_MS, TB_STEP_MS)
-            }
-            return best
         }
-        /*
-         * THE STUMPS MOMENT IS CHECKED, NOT TRUSTED. It comes from the ball being inside the
-         * stumps' outline in the picture, and a ball a metre or two short of them, climbing
-         * off a good length, is inside that outline too: pinned to the line there, a simulated
-         * 90 km/h delivery read 114. So the flight is fitted both ways, and the pinned one is
-         * kept only when it explains the sightings nearly as well as the free one — where the
-         * free fit is undecided along the pitch, as on the 4K yorker, the pin costs nothing.
-         */
-        val free = search(null)
-        val pinned = reachedStumpsMs?.let { search(it) }
-        val chosen = if (pinned?.v != null && (free.v == null || pinned.error <= free.error * STUMPS_PIN_TOLERANCE)) pinned else free
-        val v = chosen.v ?: return FitResult.Refused("the sightings around the bounce are too few or too close together to fit")
-        val bestTb = chosen.tb
+        scan(from, to, step)
+        // A coarse scan, then the frame either side of its answer at full resolution.
+        if (bounce?.atMs == null && turn == null && best != null) {
+            val coarse = bestTb
+            scan(coarse - TB_SCAN_STEP_MS, coarse + TB_SCAN_STEP_MS, TB_STEP_MS)
+        }
+        val v = best ?: return FitResult.Refused("the sightings around the bounce are too few or too close together to fit")
         val near = run.filter { abs(it.timestampMs - bestTb) <= MAX_LOOKBACK_MS }
 
         // Towards the striker is down the pitch's y.
@@ -402,9 +388,6 @@ object QuadSpeed {
 
     /** How strongly "it was at the stumps then" counts against one sighting's miss, in metres. */
     private const val STUMPS_WEIGHT = 12.0
-
-    /** How much worse the pinned fit may explain the sightings than the free one and still be kept. */
-    private const val STUMPS_PIN_TOLERANCE = 1.5
 
     /** Either side of the lowest point in the picture, when the ball is seen to climb after it. */
     private const val TURN_SEARCH_MS = 60.0
@@ -499,13 +482,15 @@ object QuadSpeed {
          * ball was on their line (0 m) at that moment — one strong equation that pins the
          * distance against the time, and with it both the speed and where it pitched.
          */
-        // Scored on the sightings alone: the pin's own row is a condition, not a sighting.
         if (reachedStumpsMs != null) {
             val s = (reachedStumpsMs - tb) / 1000.0
             val coeff = DoubleArray(n)
             coeff[1] = STUMPS_WEIGHT
             coeff[3] = STUMPS_WEIGHT * (if (s <= 0) s else PACE_KEPT_OFF_PITCH * s)
+            val rhs = 0.0
+            rows.add(coeff to rhs)
             for (p in 0 until n) {
+                atb[p] += coeff[p] * rhs
                 for (q in 0 until n) ata[p][q] += coeff[p] * coeff[q]
             }
         }

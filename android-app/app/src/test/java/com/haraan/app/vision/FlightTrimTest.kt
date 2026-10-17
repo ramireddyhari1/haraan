@@ -49,6 +49,30 @@ class FlightTrimTest {
         val run = receding(4)
         assertEquals(run, FlightTrim.receding(run, aspect))
     }
+    /** IMG_6056's real tail: followed to the stumps' foot, lost eight frames, then the pads. */
+    @Test
+    fun cutsWhereTheTrackComesBackAfterAGapAtTheStumps() {
+        val stumps = Point2(0.603, 0.497)
+        val toStumps = (0 until 20).map { i ->
+            BallSighting(timestampMs = 1775L + i * 8, x = 0.575f + i * 0.00075f, y = 0.455f + i * 0.0019f, trackingConfidence = 0.9f, areaPx = 12)
+        }
+        val pads = listOf(
+            BallSighting(2000L, 0.614f, 0.465f, 0.5f, 10),
+            BallSighting(2075L, 0.617f, 0.486f, 0.5f, 10),
+        )
+        assertEquals(toStumps, FlightTrim.receding(toStumps + pads, aspect, stumps))
+    }
+
+    /** Thirty a second, every sighting is 33 ms apart: that spacing is not a gap. */
+    @Test
+    fun keepsAThirtyFpsTrackThroughTheStumps() {
+        val stumps = Point2(0.603, 0.497)
+        val run = (0 until 10).map { i ->
+            BallSighting(timestampMs = 1700L + i * 33, x = 0.585f + i * 0.002f, y = 0.47f + i * 0.003f, trackingConfidence = 0.9f, areaPx = 12)
+        }
+        assertEquals(run, FlightTrim.receding(run, aspect, stumps))
+    }
+
 }
 
 class BowlersEndFilterTest {
@@ -79,4 +103,5 @@ class BowlersEndFilterTest {
         repeat(BowlersEndFilter.MOVED_RUN) { f.add(s(0.54, 0.78)) }
         assertEquals(0.54, f.value()!!.base.x, 1e-9)
     }
+
 }

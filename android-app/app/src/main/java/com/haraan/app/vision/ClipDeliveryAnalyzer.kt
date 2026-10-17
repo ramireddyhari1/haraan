@@ -5,9 +5,6 @@ import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
-import com.haraan.app.camera.battersEndOnly
-import com.haraan.app.camera.bowlersEndOf
-import com.haraan.app.camera.deliveryCorridor
 import kotlinx.coroutines.ensureActive
 import java.io.ByteArrayOutputStream
 import kotlin.coroutines.coroutineContext
@@ -146,31 +143,16 @@ object ClipDeliveryAnalyzer {
         val params = MediaMetadataRetriever.BitmapParams().apply { preferredConfig = Bitmap.Config.RGB_565 }
         val aspect = ClipFrames.UPRIGHT_W.toFloat() / ClipFrames.UPRIGHT_H
 
-        val stumps = ColourStumpDetector()
-        val wickets = WicketTracker()
-        val ball = OpenCvBallTracker()
-        val camera = CameraIntrinsics(ASSUMED_FOCAL_FW, "assumed")
-        val still = FrameMotion(0f, 0f, 1f, 0f, 30, 32)
         val y = ByteArray(ClipFrames.SENSOR_W * ClipFrames.SENSOR_H)
         val u = ByteArray(ClipFrames.SENSOR_W / 2 * (ClipFrames.SENSOR_H / 2))
         val pixels = IntArray(ClipFrames.UPRIGHT_W * ClipFrames.UPRIGHT_H)
-        var lock: WicketLock? = null
-        var bowlersEnd: BowlersEnd? = null
-        val nearEnd = BowlersEndFilter()
-        var corridor: FloatArray? = null
-        val steadyLock = SteadyWicket()
         val recentFrames = ArrayDeque<Pair<Double, ByteArray>>()
-        var lastStumpsMs = Long.MIN_VALUE / 2
-        var lastCorridorMs = Long.MIN_VALUE / 2
         val deliveries = ArrayList<ClipDelivery>()
         var analysed = 0
         val tStart = System.nanoTime()
         var tYuv = 0L
         var tJpeg = 0L
-        var tStumps = 0L
-        var tBall = 0L
         var tWarm = 0L
-        var stumpsChecks = 0
 
         fun upright(raw: Bitmap): Bitmap {
             val up = ClipFrames.upright(raw, rotation, aspect)
@@ -188,14 +170,14 @@ object ClipDeliveryAnalyzer {
          */
         var streaming = stream != null
         val job = coroutineContext[kotlinx.coroutines.Job]
-        // The far stumps measured in full-size frames on the decoding thread: where to look
-        // (from the steady lock), and what was found. See FastFrameSampler.measureFarStumps.
-        val farStumpsAt = java.util.concurrent.atomic.AtomicReference<DoubleArray?>(null)
+        // The far stumps measured in full-size frames on the decoding thread, where the chain's
+        // steady lock says they stand. See FastFrameSampler.measureFarStumps.
         val farSpans = java.util.concurrent.ConcurrentLinkedQueue<Double>()
         val farMeter = FastFrameSampler()
+        val chain = DeliveryChain(farSpans = { farSpans }, log = { line -> runCatching { android.util.Log.i(TAG, line) } })
         val pictures = java.util.concurrent.Executors.newFixedThreadPool(PICTURE_THREADS)
         fun measureFar(stream: VideoFrameStream, index: Int, image: android.media.Image) {
-            val at = farStumpsAt.get() ?: return
+            val at = chain.farStumpsAt ?: return
             if (farSpans.size >= FAR_SPAN_SAMPLES || index % FAR_SPAN_EVERY != 0) return
             runCatching { farMeter.measureFarStumps(image, stream.rotation, at[0], at[1], at[2]) }
                 .getOrNull()?.let { farSpans.add(it) }
@@ -345,21 +327,6 @@ object ClipDeliveryAnalyzer {
         // The replay plays at normal speed: sixty pictures a second is all it can show.
         val thumbEvery = maxOf(1, Math.round(fps / REPLAY_FPS).toInt())
 
-        fun feedStumps(ts: Long) {
-            stumpsChecks++
-            val seen = stumps.detectCandidates(
-                y, ClipFrames.SENSOR_W, ClipFrames.SENSOR_H, ClipFrames.SENSOR_W, 90, u, ClipFrames.SENSOR_W / 2, 1,
-                focus = wickets.focus(),
-                allowSearch = searchAllowed(lock, bowlersEnd != null, stumpsChecks),
-            )
-            bowlersEndOf(seen, camera)?.let { bowlersEnd = nearEnd.add(it) ?: bowlersEnd }
-            lock = wickets.onFrame(battersEndOnly(seen, camera, bowlersEnd), still, aspect, ts)
-            steadyLock.add(lock, ts)
-            steadyLock.value()?.takeIf { it.isMeasurable }?.let { l ->
-                farStumpsAt.set(doubleArrayOf(l.anchor.base.x, l.anchor.base.y, l.anchor.span(aspect).toDouble()))
-            }
-        }
-
         // How far along the wait is, for the progress bar.
         val shareOf: (Int) -> Float = { index ->
             WARM_UP_SHARE + (1f - WARM_UP_SHARE) * (index - first).toFloat() / (last - first + 1).coerceAtLeast(1)
@@ -393,45 +360,11 @@ object ClipDeliveryAnalyzer {
                         for (d in deliveries) if (ts > d.calledMs && ts <= d.tailUntilMs) d.frames += ts.toDouble() to thumb
                     }
 
-                    // Stumps thirty a second until confirmed, then ten a second. Stumps do not
-                    // move: every frame of a 120 fps clip was a fifth of the whole wait.
-                    if (ts - lastStumpsMs >= if (lock?.state == WicketTrackState.CONFIRMED) STUMPS_EVERY_MS else STUMPS_SEARCH_EVERY_MS) {
-                        lastStumpsMs = ts
-                        t0 = System.nanoTime()
-                        feedStumps(ts)
-                        tStumps += System.nanoTime() - t0
-                    }
-                    // Re-derived until there is one, then once a second; built on the steadied
-                    // stumps, which outlive the live lock the run-up knocks out.
-                    if (corridor == null || ts - lastCorridorMs >= 1_000L) {
-                        lastCorridorMs = ts
-                        val steady = steadyLock.value()
-                        val c = deliveryCorridor(steady ?: lock, camera, ClipFrames.UPRIGHT_W, aspect)
-                        if (c != null) {
-                            corridor = c
-                            ball.setCorridor(c[0], c[1], c[2], c[3], Point2(c[4].toDouble(), c[5].toDouble()))
-                        } else if (lock == null && steady == null) {
-                            corridor = null
-                            ball.setCorridor(null, null, null, null, null)
-                        }
-                    }
-                    t0 = System.nanoTime()
-                    ball.onFrame(y, ClipFrames.SENSOR_W, ClipFrames.SENSOR_H, ClipFrames.SENSOR_W, 90, ts)
-                    tBall += System.nanoTime() - t0
-                    val l = lock
-                    // A flight a newer track replaced before it went quiet is finished now.
-                    val replaced = ball.takeFinished()?.takeIf { fin ->
-                        l != null && FlightEnd.check(fin, fin.last().timestampMs + FlightEnd.QUIET_MS, aspect, l) != null
-                    }
-                    val track = replaced ?: ball.track()
-                    if (l != null && (replaced != null || FlightEnd.check(track, ts, aspect, l) != null)) {
-                        // Measured from the steadied stumps, not this frame's: see [SteadyWicket].
-                        deliveryOf(track, (steadyLock.value() ?: l).withFarSpan(farSpans, aspect), bowlersEnd, camera, aspect, ts)?.let { d ->
+                    for (called in chain.frame(y, u, ts)) {
+                        deliveryOf(called)?.let { d ->
                             d.frames += recentFrames.filter { it.first >= d.startMs - REPLAY_LEAD_MS }
                             deliveries += d
                         }
-                        // A fresh start for the next ball, as an Auto segment does.
-                        if (replaced == null) ball.reset()
                     }
                     analysed++
                     val share = shareOf(index)
@@ -442,13 +375,9 @@ object ClipDeliveryAnalyzer {
                     }
             }
             // A flight still in the air when the clip ends is called as it stands.
-            val l = steadyLock.value() ?: lock
-            val tail = ball.track()
-            if (l != null && tail.size >= FlightEnd.MIN_FLIGHT_POINTS) {
-                deliveryOf(tail, l.withFarSpan(farSpans, aspect), bowlersEnd, camera, aspect, tail.last().timestampMs)?.let { d ->
-                    d.frames += recentFrames.filter { it.first >= d.startMs - REPLAY_LEAD_MS }
-                    deliveries += d
-                }
+            chain.finish()?.let(::deliveryOf)?.let { d ->
+                d.frames += recentFrames.filter { it.first >= d.startMs - REPLAY_LEAD_MS }
+                deliveries += d
             }
         }
 
@@ -466,14 +395,13 @@ object ClipDeliveryAnalyzer {
             // decoded, and every frame of it taken.
             val warmLayers = layered?.takeIf { warmStride >= 4 }?.let { VideoFrameStream.Layers(fps, Int.MAX_VALUE, 0) }
             eachFrame(first, warmEnd, if (warmLayers != null) 1 else warmStride, layers = warmLayers) { index, _, _ ->
-                feedStumps((index * 1000.0 / fps).toLong())
+                chain.warm(y, u, (index * 1000.0 / fps).toLong())
                 progress.update(WARM_UP_SHARE * (index - first + 1).toFloat() / (warmEnd - first + 1).coerceAtLeast(1), 0, null)
             }
             tWarm = System.nanoTime() - warm0
             analyseRange(first, last, layered?.let { VideoFrameStream.Layers(fps, first, debugMaxLayer ?: LAYERED_MAX_LAYER) })
         } finally {
-            stumps.release()
-            ball.release()
+            chain.release()
             fast.release()
             farMeter.release()
             pictures.shutdownNow()
@@ -484,7 +412,7 @@ object ClipDeliveryAnalyzer {
                 TAG,
                 "timing total ${ms(System.nanoTime() - tStart)}ms frames=$analysed streaming=$streaming " +
                     "decodeWait=${stream?.let { ms(it.waitNs) }} sample=${stream?.let { ms(it.sampleNs) }} " +
-                    "stumps=${ms(tStumps)} ball=${ms(tBall)} warm=${ms(tWarm)}",
+                    "stumps=${ms(chain.stumpsNs)} ball=${ms(chain.ballNs)} warm=${ms(tWarm)}",
             )
         }
         progress.update(1f, deliveries.size, null)
@@ -492,73 +420,18 @@ object ClipDeliveryAnalyzer {
             deliveries = deliveries.filter { it.frames.size > 1 },
             fps = fps,
             durationMs = durationMs,
-            stumpsFound = steadyLock.value() != null,
-            farBase = (steadyLock.value() ?: lock)?.anchor?.base,
-            nearBase = bowlersEnd?.base,
+            stumpsFound = chain.stumpsFound,
+            farBase = chain.measuringLock?.anchor?.base,
+            nearBase = chain.bowlersEnd?.base,
         )
     }
 
-    /**
-     * Whether a frame may search the whole picture for stumps, or only look where they are
-     * held — the live camera's rule. The search is most of a 40 ms detection; a held place
-     * is checked in a few. Searched until the lock is sure and the bowler's end has been
-     * seen, and one call in four while the lock is lost.
-     */
-    private fun searchAllowed(lock: WicketLock?, nearEndSeen: Boolean, call: Int): Boolean = when {
-        lock == null || !nearEndSeen -> true
-        lock.source == WicketLockSource.MANUAL -> false
-        lock.state == WicketTrackState.TENTATIVE -> true
-        lock.state == WicketTrackState.TEMPORARILY_LOST -> call % 4 == 0
-        else -> false
-    }
-
-    /**
-     * The lock with its span set to the full-resolution measurement — the median, once at
-     * least [FAR_SPAN_MIN] frames gave one — about the same centre.
-     */
-    private fun WicketLock.withFarSpan(spans: Collection<Double>, aspect: Float): WicketLock {
-        val list = spans.toList()
-        if (list.size < FAR_SPAN_MIN) return this
-        val span = list.sorted()[list.size / 2]
-        val now = anchor.span(aspect).toDouble()
-        if (now <= 0.0) return this
-        val k = span / now
-        val c = anchor.base
-        fun scaled(p: Point2) = Point2(c.x + (p.x - c.x) * k, c.y + (p.y - c.y) * k)
-        runCatching { android.util.Log.i(TAG, "far stumps %.5f -> %.5f from %d full-size frames".format(now, span, list.size)) }
-        return copy(anchor = anchor.copy(baseLeft = scaled(anchor.baseLeft), baseRight = scaled(anchor.baseRight)))
-    }
-
-    /** A called delivery: fitted in 3D through the ground the stumps give, else nothing. */
-    private fun deliveryOf(
-        track: List<BallSighting>,
-        lock: WicketLock,
-        bowlersEnd: BowlersEnd?,
-        camera: CameraIntrinsics,
-        aspect: Float,
-        calledMs: Long,
-    ): ClipDelivery? {
-        if (track.size < FlightEnd.MIN_FLIGHT_POINTS) return null
-        val ground = PitchGround.best(lock, camera, ClipFrames.UPRIGHT_W, ClipFrames.UPRIGHT_H, tilt = null, bowlersEnd = bowlersEnd)
-            ?.pitchCamera(ClipFrames.UPRIGHT_W, ClipFrames.UPRIGHT_H) ?: return null
-        val m = FlightMetrics.of(track, aspect, quad = null, wicket = lock, ground = ground)
-        runCatching {
-            val f = m.flight3d
-            android.util.Log.i(
-                TAG,
-                "called ${track.size} pts ${track.first().timestampMs}..${track.last().timestampMs}ms y ${"%.3f".format(track.first().y)}..${"%.3f".format(track.maxOf { it.y })} " +
-                    "lock=${"%.3f,%.3f".format(lock.anchor.base.x, lock.anchor.base.y)} near=${bowlersEnd?.base} " +
-                    "fit=${f?.let { "bounce %.2f out=${it.hasOutLeg} hits=${it.hitsStumps} ground %.1f".format(it.bounceY, it.groundKmh) }} " +
-                    "atStumps=${FlightMetrics.reachedStumps(FlightTrim.receding(track, aspect, lock.anchor.base), lock, aspect)} span=${"%.4f".format(lock.anchor.span(aspect))} measurable=${lock.isMeasurable} " +
-                    "tail=" + track.takeLast(8).joinToString(";") { "%d,%.3f,%.3f".format(it.timestampMs, it.x, it.y) },
-            )
-        }
-        // Only a delivery the 3D fit accepts is shown: a track the fit refuses — something
-        // crossing behind the net, a fielder — is not a ball bowled.
-        val f3 = m.flight3d ?: return null
-        val path = ArPath.fromFlight(f3, ground) ?: return null
-        if (path.isEmpty) return null
-        return ClipDelivery(calledMs.toDouble(), track.first().timestampMs.toDouble(), path, f3.speedKmh, f3)
+    /** Only a delivery the 3D fit accepts is shown: a track the fit refuses — something
+     *  crossing behind the net, a fielder — is not a ball bowled. */
+    private fun deliveryOf(called: CalledDelivery): ClipDelivery? {
+        val f3 = called.flight ?: return null
+        val path = called.path ?: return null
+        return ClipDelivery(called.calledMs.toDouble(), called.track.first().timestampMs.toDouble(), path, f3.speedKmh, f3)
     }
 
     private fun jpegOf(up: Bitmap): ByteArray {
@@ -584,21 +457,16 @@ object ClipDeliveryAnalyzer {
     const val REPLAY_W = 360
     const val REPLAY_H = 640
     private const val RECENT_FRAMES_MS = 4_000L
-    private const val STUMPS_EVERY_MS = 100L
     private const val WARM_UP_FRAMES = 30
     private const val WARM_UP_SHARE = 0.12f
-    private const val ASSUMED_FOCAL_FW = 1.4
     private const val MAX_BATCH = 16
     private const val BATCH_BUDGET_BYTES = 48L * 1024 * 1024
     private const val PREVIEW_EVERY = 6
     /** Replay pictures kept per second of clip: the replay plays at normal speed. */
     private const val REPLAY_FPS = 60.0
-    /** Stumps looked for this often until the lock is confirmed. */
-    private const val STUMPS_SEARCH_EVERY_MS = 33L
-    /** Full-size measurements of the far stumps: at most this many, this many frames apart, and the fewest used. */
+    /** Full-size measurements of the far stumps: at most this many, this many frames apart. */
     private const val FAR_SPAN_SAMPLES = 15
     private const val FAR_SPAN_EVERY = 8
-    private const val FAR_SPAN_MIN = 3
 
     /** Clips above this rate are read by layer, when their frames come in layers. */
     private const val LAYERED_ABOVE_FPS = 50.0
