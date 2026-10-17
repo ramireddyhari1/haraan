@@ -383,20 +383,32 @@ object ClipDeliveryAnalyzer {
 
         try {
             /*
-             * WARM-UP, as a real setup has one: the stumps are watched over the opening second
-             * first, 30 a second, then the clip is analysed from its start with that lock in
-             * place. A clip cut mid run-up otherwise starts cold, with the bowler running
-             * through the picture, and the lock still flickering at the release.
+             * WARM-UP, as a real setup has one: the stumps are watched first, 30 a second, then
+             * the clip is analysed from its start with that lock in place. A clip cut mid
+             * run-up otherwise starts cold, with the bowler running through the picture, and
+             * the lock still flickering at the release.
+             *
+             * UNTIL THE LOCK IS READY, NOT FOR A SECOND. The ball is only looked for inside a
+             * corridor, and a corridor needs a lock held for a second and a half; on a 2.5 s
+             * clip (IMG_6053) a lock confirmed on the first frames was still not old enough
+             * when the ball was bowled, and the tracker followed the bowler. Stumps do not
+             * move, so a filmed clip can be watched for them as long as that takes — up to
+             * [WARM_UP_MAX_FRAMES], stopping as soon as the corridor can be built.
              */
             val warmStride = maxOf(1, Math.round(fps / 30.0).toInt())
-            val warmEnd = minOf(last, first + WARM_UP_FRAMES * warmStride)
+            val warmEnd = minOf(last, first + WARM_UP_MAX_FRAMES * warmStride)
             val warm0 = System.nanoTime()
             // Every fourth frame of a 120 fps clip is its bottom layer: that layer alone is
             // decoded, and every frame of it taken.
             val warmLayers = layered?.takeIf { warmStride >= 4 }?.let { VideoFrameStream.Layers(fps, Int.MAX_VALUE, 0) }
-            eachFrame(first, warmEnd, if (warmLayers != null) 1 else warmStride, layers = warmLayers) { index, _, _ ->
-                chain.warm(y, u, (index * 1000.0 / fps).toLong())
-                progress.update(WARM_UP_SHARE * (index - first + 1).toFloat() / (warmEnd - first + 1).coerceAtLeast(1), 0, null)
+            try {
+                eachFrame(first, warmEnd, if (warmLayers != null) 1 else warmStride, layers = warmLayers) { index, _, _ ->
+                    chain.warm(y, u, (index * 1000.0 / fps).toLong())
+                    progress.update(WARM_UP_SHARE * (index - first + 1).toFloat() / (warmEnd - first + 1).coerceAtLeast(1), 0, null)
+                    if (chain.readyToTrack()) throw WarmedUp()
+                }
+            } catch (_: WarmedUp) {
+                // The corridor can be built: the rest of the clip need not be watched first.
             }
             tWarm = System.nanoTime() - warm0
             analyseRange(first, last, layered?.let { VideoFrameStream.Layers(fps, first, debugMaxLayer ?: LAYERED_MAX_LAYER) })
@@ -457,7 +469,11 @@ object ClipDeliveryAnalyzer {
     const val REPLAY_W = 360
     const val REPLAY_H = 640
     private const val RECENT_FRAMES_MS = 4_000L
-    private const val WARM_UP_FRAMES = 30
+    /** At 30 a second: at most this long watching the stumps before the ball. */
+    private const val WARM_UP_MAX_FRAMES = 150
+
+    /** Ends the warm-up early. A cancellation, so the decoder's error handling passes it through. */
+    private class WarmedUp : kotlinx.coroutines.CancellationException("warmed up")
     private const val WARM_UP_SHARE = 0.12f
     private const val MAX_BATCH = 16
     private const val BATCH_BUDGET_BYTES = 48L * 1024 * 1024

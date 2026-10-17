@@ -106,11 +106,12 @@ class TrackingScoreboardTest {
         val called = ArrayList<CalledDelivery>()
         val analysed = HashSet<Int>()
         try {
-            // Warm-up as the clip screen does: the opening frames, thirty a second, stumps only.
+            // Warm-up as the clip screen does: thirty a second, stumps only, until the corridor can be built.
             val warmStep = maxOf(1, (frames.size / ((frames.last().second - frames.first().second) / 1000.0) / 30.0).roundToInt())
-            for (k in 0 until minOf(frames.size, WARM_UP_FRAMES * warmStep) step warmStep) {
+            for (k in 0 until minOf(frames.size, WARM_UP_MAX_FRAMES * warmStep) step warmStep) {
                 read(frames[k].line)
                 chain.warm(y, u, frames[k].second.toLong())
+                if (chain.readyToTrack()) break
             }
             for (k in frames.indices step step) {
                 read(frames[k].line)
@@ -122,7 +123,7 @@ class TrackingScoreboardTest {
                     val t = chain.ballTrack().lastOrNull()
                     val truth = clip.balls[frames[k].first]
                     println(
-                        "[${clip.id} $rate] f${frames[k].first} lock=${l?.state}/${l?.isMeasurable} base=${l?.anchor?.base?.let { "%.3f,%.3f".format(it.x, it.y) }} " +
+                        "[${clip.id} $rate] f${frames[k].first} lock=${l?.state}/${l?.isMeasurable} held=${l?.heldFrames} jit=${l?.let { "%.4f/%.4f sub=${it.subPixel} m=${it.method}".format(it.jitter, WicketTracker.measurableJitter(it.span)) }} steady=${chain.measuringLock?.let { "%s/%s %.4f/%.4f span=%.4f".format(it.state, it.isMeasurable, it.jitter, WicketTracker.measurableJitter(it.span), it.span) }} base=${l?.anchor?.base?.let { "%.3f,%.3f".format(it.x, it.y) }} " +
                             "corr=${c?.joinToString(",") { "%.2f".format(it) }} track=${chain.ballTrack().size} last=${t?.let { "%.3f,%.3f@%d".format(it.x, it.y, it.timestampMs) }} " +
                             "truth=${truth?.let { "%.3f,%.3f".format(it.first, it.second) }}",
                     )
@@ -293,7 +294,7 @@ class TrackingScoreboardTest {
     }
 
     private companion object {
-        const val WARM_UP_FRAMES = 30
+        const val WARM_UP_MAX_FRAMES = 150
         /** Release to the batter's stumps: the pitch less the bowler's stride past the crease. */
         const val RELEASE_TO_STUMPS_M = 18.5
         const val RELEASE_TO_STUMPS_TOL_M = 0.5

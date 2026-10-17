@@ -42,6 +42,7 @@ class DeliveryChain(
     private val still = FrameMotion(0f, 0f, 1f, 0f, 30, 32)
     private val nearEnd = BowlersEndFilter()
     private val steadyLock = SteadyWicket()
+    private val farSearch = FarWicketSearch(ASSUMED_FOCAL_FW)
     private var lock: WicketLock? = null
     private var corridor: FloatArray? = null
     private var lastStumpsMs = Long.MIN_VALUE / 2
@@ -69,6 +70,9 @@ class DeliveryChain(
 
     /** A warm-up frame: the stumps alone, every one, before the ball is looked for. */
     fun warm(y: ByteArray, u: ByteArray, ts: Long) = feedStumps(y, u, ts)
+
+    /** Whether the stumps are held well enough to build the corridor the ball is searched in. */
+    fun readyToTrack(): Boolean = deliveryCorridor(steadyLock.value() ?: lock, camera, ClipFrames.UPRIGHT_W, aspect) != null
 
     /** One analysed frame. Returns the deliveries called on it (usually none, at most two). */
     fun frame(y: ByteArray, u: ByteArray, ts: Long): List<CalledDelivery> {
@@ -140,8 +144,24 @@ class DeliveryChain(
             focus = wickets.focus(),
             allowSearch = searchAllowed(lock, bowlersEnd != null, stumpsChecks),
         )
-        bowlersEndOf(seen, camera)?.let { bowlersEnd = nearEnd.add(it) ?: bowlersEnd }
-        lock = wickets.onFrame(battersEndOnly(seen, camera, bowlersEnd), still, aspect, ts)
+        val nearNow = bowlersEndOf(seen, camera)
+        nearNow?.let { bowlersEnd = nearEnd.add(it) ?: bowlersEnd }
+        var far = battersEndOnly(seen, camera, bowlersEnd)
+        /*
+         * NOTHING CONFIRMED, BUT THE BOWLER'S STUMPS ARE IN VIEW: look where they say the
+         * batter's must be, and offer what is found beside whatever else this frame gave — the
+         * tracker weighs rivals. Once one is confirmed the tracker looks at its place itself
+         * every frame. Only from a near set actually seen: the steadied one, or this frame's
+         * before it has settled.
+         */
+        val held = lock?.state
+        if (held == null || held == WicketTrackState.LOST || held == WicketTrackState.TENTATIVE) {
+            (bowlersEnd ?: nearNow)?.let { near ->
+                farSearch.next(y, ClipFrames.SENSOR_W, ClipFrames.SENSOR_H, ClipFrames.SENSOR_W, 90, near, aspect)
+                    ?.let { far = far + battersEndOnly(listOf(WicketSighting.Stumps(it)), camera, near) }
+            }
+        }
+        lock = wickets.onFrame(far, still, aspect, ts)
         steadyLock.add(lock, ts)
         steadyLock.value()?.takeIf { it.isMeasurable }?.let { l ->
             farStumpsAt = doubleArrayOf(l.anchor.base.x, l.anchor.base.y, l.anchor.span(aspect).toDouble())

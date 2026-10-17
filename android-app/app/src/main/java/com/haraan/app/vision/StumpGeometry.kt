@@ -40,6 +40,9 @@ enum class StumpMethod(val label: String) {
     /** Re-found at the held place, comb only, no whole-frame search. */
     FOCUS_COMB("focus comb"),
 
+    /** Found by sweeping where the bowler's stumps say the batter's must stand. */
+    PREDICTED_COMB("predicted + comb"),
+
     /** Tapped by the operator. */
     MANUAL("by hand"),
 }

@@ -85,6 +85,12 @@ data class CombProbe(
     val baseY: Double,
     /** Largest |shear| to try. 0.13 is about 7.5°. */
     val maxShear: Double = StumpProfile.DEFAULT_MAX_SHEAR,
+    /**
+     * Bar contrast over the ground's spread, at least: [StumpProfile.MIN_CONTRAST_OVER_CLUTTER]
+     * for a search that has only the shape to go on, lower where the place, the spacing and
+     * the stumps' colour were all predicted (see [FarWicketSearch]).
+     */
+    val minContrastOverClutter: Double = StumpProfile.MIN_CONTRAST_OVER_CLUTTER,
 )
 
 object StumpProfile {
@@ -288,7 +294,7 @@ object StumpProfile {
          * against the profile OUTSIDE the wicket, not against sensor noise.
          */
         val clutter = backgroundSpread(profile, c, g)
-        if (clutter != null && abs(amp) < MIN_CONTRAST_OVER_CLUTTER * clutter) {
+        if (clutter != null && abs(amp) < probe.minContrastOverClutter * clutter) {
             return reject("clutter: contrast %.1f vs ground %.1f".format(amp, clutter))
         }
 
@@ -587,6 +593,7 @@ object StumpProfile {
         tolerance: Double = 0.3,
         searchHalfSpans: Double = 1.5,
         maxShear: Double = DEFAULT_MAX_SHEAR,
+        minContrastOverClutter: Double = MIN_CONTRAST_OVER_CLUTTER,
     ): Pair<StumpSet, CombFit>? {
         if (halfSpanFw <= 0.0 || baseY <= topY) return null
         val turn = ((rotationDegrees % 360) + 360) % 360
@@ -618,6 +625,7 @@ object StumpProfile {
             topY = roi.fromFrameY(topY),
             baseY = roi.fromFrameY(baseY),
             maxShear = maxShear,
+            minContrastOverClutter = minContrastOverClutter,
         )
         val fit = fit(roi, probe) ?: return null
         return toStumpSet(fit, roi) to fit

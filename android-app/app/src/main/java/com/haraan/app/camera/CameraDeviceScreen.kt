@@ -5236,7 +5236,15 @@ internal fun deliveryCorridor(
     val cam = camera ?: return null
     if (uprightWidthPx <= 0 || uprightAspect <= 0f) return null
     val h = (uprightWidthPx / uprightAspect).toInt()
-    val distance = com.haraan.app.vision.PitchGround.best(l, cam, uprightWidthPx, h)?.stumpsDistanceM ?: return null
+    /*
+     * A search box, not a measurement: when the lock is too unsteady to measure from — the
+     * foot of stumps with a batter's legs right behind them wanders a few pixels frame to
+     * frame (IMG_6053) — its width and the lens still say roughly how far it is, which is all
+     * the box needs. Speed and the 3D fit keep demanding a measurable lock.
+     */
+    val distance = com.haraan.app.vision.PitchGround.best(l, cam, uprightWidthPx, h)?.stumpsDistanceM
+        ?: l.span.takeIf { it > 0f }?.let { cam.focalFw * com.haraan.app.vision.PitchGeometry.STUMP_CENTRES_SPAN_M / it }
+        ?: return null
     if (distance < CORRIDOR_MIN_DISTANCE_M) return null
     fun snap(v: Double) = (Math.round(v / 0.02) * 0.02).toFloat()
     val bx = snap(l.anchor.base.x)
