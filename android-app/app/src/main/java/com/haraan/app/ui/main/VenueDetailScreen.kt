@@ -105,6 +105,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import coil.compose.AsyncImage
+import androidx.compose.animation.animateContentSize
+import com.haraan.app.ui.util.VenueMap
 import com.haraan.app.ui.Feel
 import com.haraan.app.ui.components.AutoRefresh
 import com.haraan.app.ui.pressable
@@ -220,13 +222,16 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
           .verticalScroll(scroll)
       ) {
         // ── 1. Hero gallery ────────────────────────────────────────────────────────
+        // Same layout as the website's phone page (gamehub-detail.blade.php, `.mven`):
+        // the photo stays clean — just the controls and the page dots — and the venue's
+        // identity opens the white sheet below it.
         // Parallax: the hero rides up at ~0.6× the scroll speed so the content sheet
-        // laps over a still-visible image instead of a hard cut. translationY partially
-        // cancels the column's own upward shift.
+        // laps over a still-visible image instead of a hard cut.
         Box(
           modifier = Modifier
             .fillMaxWidth()
             .height(280.dp)
+            .background(Color(0xFFE2E8F0))
             .graphicsLayer { translationY = scroll.value * 0.4f }
         ) {
           // One pager for every venue, even a single-photo one: swapping a plain image for a
@@ -250,94 +255,29 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
               modifier = Modifier.fillMaxSize()
             )
           }
-          // Scrim. Heavier at the bottom than it used to be because the venue's identity
-          // now sits ON the photograph — the type has to hold at any brightness, including
-          // a floodlit white court.
+          // Top + bottom scrims so the controls and dots stay legible on any photo.
           Box(
             modifier = Modifier
               .fillMaxSize()
               .background(
                 Brush.verticalGradient(
                   colorStops = arrayOf(
-                    0f to Color.Black.copy(alpha = 0.42f),
-                    0.34f to Color.Transparent,
-                    0.62f to Color.Black.copy(alpha = 0.38f),
-                    1f to Color.Black.copy(alpha = 0.78f),
+                    0f to Color.Black.copy(alpha = 0.35f),
+                    0.35f to Color.Transparent,
+                    0.65f to Color.Transparent,
+                    1f to Color.Black.copy(alpha = 0.25f),
                   )
                 )
               )
           )
-
-          // ── Identity, over the photo ──────────────────────────────────────────────
-          // Playo (and the old version of this screen) prints the name on a white sheet
-          // below the image, so the photo is decoration and the page opens on a form.
-          // Putting the name, rating and distance on the picture makes the venue itself
-          // the first thing you see, and buys back a whole block of vertical space.
-          Column(
-            modifier = Modifier
-              .align(Alignment.BottomStart)
-              .fillMaxWidth()
-              .padding(start = 16.dp, end = 16.dp, bottom = 34.dp)
-          ) {
-            Text(
-              text = name,
-              color = Color.White,
-              fontWeight = FontWeight.ExtraBold,
-              fontSize = 26.sp,
-              lineHeight = 30.sp,
-              letterSpacing = (-0.5).sp,
-              maxLines = 2,
-              overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(7.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-              rating.toFloatOrNull()?.takeIf { it > 0f }?.let { score ->
-                Icon(Icons.Default.Star, null, tint = HaraanColors.RatingGold, modifier = Modifier.size(15.dp))
-                Spacer(Modifier.width(4.dp))
-                Text(
-                  "%.1f".format(score),
-                  color = Color.White,
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 14.sp,
-                )
-                (detail?.ratingsCount)?.takeIf { it > 0 }?.let { c ->
-                  Spacer(Modifier.width(4.dp))
-                  Text("($c)", color = Color.White.copy(alpha = 0.75f), fontSize = 13.sp)
-                }
-                Spacer(Modifier.width(10.dp))
-                Box(Modifier.size(3.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.5f)))
-                Spacer(Modifier.width(10.dp))
-              }
-              // The one number that decides whether they'll actually go.
-              val heroDist = liveDistance ?: detail?.distance?.takeIf { it.isNotBlank() }
-                ?: venue.distance.takeIf { it.isNotBlank() }
-              if (heroDist != null) {
-                Icon(
-                  Icons.Default.LocationOn, null,
-                  tint = Color.White.copy(alpha = 0.85f),
-                  modifier = Modifier.size(14.dp),
-                )
-                Spacer(Modifier.width(3.dp))
-                Text(
-                  "$heroDist away",
-                  color = Color.White.copy(alpha = 0.9f),
-                  fontWeight = FontWeight.Medium,
-                  fontSize = 13.sp,
-                )
-              }
-            }
-          }
-
-          // Photo position — only when there's more than one to swipe to. Sits on the rating
-          // line's right edge: the bottom 24dp of the hero is under the content sheet, which
-          // is where the old dots were hiding.
+          // Centred dots, clear of the sheet that laps 24dp up over the hero.
           if (images.size > 1) {
             HeroPhotoDots(
               count = images.size,
               current = heroPager.currentPage,
               modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 16.dp, bottom = 41.dp),
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 38.dp),
             )
           }
         }
@@ -351,119 +291,148 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
             .background(Color.White)
             .padding(16.dp)
         ) {
-          // The name, rating and distance now live on the hero — repeating them here is
-          // what made the top of this page a wall of restated facts.
-          //
-          // What leads instead is the one question a player actually opens a venue page
-          // to answer: when can I play, and what does it cost. See [TodaySlotRail].
-          detail?.let { d ->
-            TodaySlotRail(
-              venue = d,
-              // Highlight the chip the booking sheet is open on (or parked behind sign-in).
-              selectedSlotId = (pendingBooking?.slot ?: pickedSlot)?.takeIf { showBooking || showLoginGate }?.id,
-              selectedDate = pendingBooking?.date ?: pickedDate,
-              sheetOpen = showBooking || showLoginGate,
-              onPickSlot = { slot, date ->
-                // Carry the choice into the sheet — see BookingSheet's initialSlot.
-                pickedSlot = slot
-                pickedDate = date
-                showBooking = true
-              },
+          // Name + score.
+          Row(verticalAlignment = Alignment.Top) {
+            Text(
+              text = name,
+              color = HaraanColors.TextPrimary,
+              fontWeight = FontWeight.ExtraBold,
+              fontSize = 22.sp,
+              lineHeight = 27.sp,
+              letterSpacing = (-0.4).sp,
+              modifier = Modifier.weight(1f),
             )
+            rating.toFloatOrNull()?.takeIf { it > 0f }?.let { score ->
+              Spacer(Modifier.width(12.dp))
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 4.dp),
+              ) {
+                Icon(Icons.Default.Star, null, tint = HaraanColors.RatingGold, modifier = Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("%.1f".format(score), color = HaraanColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                (detail?.ratingsCount)?.takeIf { it > 0 }?.let { c ->
+                  Spacer(Modifier.width(4.dp))
+                  Text("($c)", color = HaraanColors.TextSecondary, fontSize = 12.sp)
+                }
+              }
+            }
           }
-
-          // Courts, said concretely. "Available Sports → View pricing ›" was a chevron
-          // hiding the answer; the venue's own court names and real rate span are the
-          // answer, and no generic listing page can print them.
-          detail?.let { d -> CourtsLine(d, onOpenPriceChart) }
 
           // Operating hours, verbatim from the venue. NOT parsed into "Open now": the
           // column is free text authored per venue, and a mis-parse would confidently
           // tell someone a closed court is open.
           (detail?.hours)?.takeIf { it.isNotBlank() }?.let { hours ->
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(8.dp))
             Row(verticalAlignment = Alignment.Top) {
               Icon(
                 Icons.Default.Schedule, null,
-                tint = HaraanColors.TextMuted,
+                tint = HaraanColors.TextSecondary,
                 modifier = Modifier.size(14.dp).padding(top = 2.dp),
               )
-              Spacer(Modifier.width(6.dp))
+              Spacer(Modifier.width(4.dp))
               Text(
                 hours,
-                color = HaraanColors.TextSecondary,
+                color = HaraanColors.TextPrimary,
                 fontWeight = FontWeight.Medium,
                 fontSize = 13.sp,
-                lineHeight = 19.sp,
+                lineHeight = 18.sp,
               )
             }
           }
-          // Full address (falls back to the short area label), shown under the timing,
-          // with the "Show in Map" pill pulled up beside it.
-          Spacer(Modifier.height(10.dp))
-          Row(verticalAlignment = Alignment.CenterVertically) {
+
+          // Full address (falls back to the short area label) with the "Show in Map" pill.
+          val address = detail?.address?.takeIf { it.isNotBlank() } ?: detail?.location ?: venue.location
+          val openVenueMap = {
+            val lat = detail?.latitude; val lng = detail?.longitude
+            val q = if (lat != null && lng != null) "$lat,$lng($name)" else "$name $address"
+            openMap(ctx, detail?.mapLink, q)
+          }
+          Spacer(Modifier.height(6.dp))
+          Row(verticalAlignment = Alignment.Top) {
             Icon(
               Icons.Default.LocationOn, null,
               tint = HaraanColors.TextSecondary,
-              modifier = Modifier.size(14.dp).align(Alignment.Top).padding(top = 2.dp)
+              modifier = Modifier.size(14.dp).padding(top = 2.dp)
             )
             Spacer(Modifier.width(4.dp))
-            Column(Modifier.weight(1f)) {
-              Text(
-                detail?.address?.takeIf { it.isNotBlank() } ?: detail?.location ?: venue.location,
-                color = HaraanColors.TextSecondary, fontSize = 13.sp, lineHeight = 18.sp
-              )
-              // Distance deliberately omitted — the hero already carries it. It used to
-              // appear here, in the Location section AND on the card that got you here.
-            }
+            Text(
+              address,
+              color = HaraanColors.TextSecondary, fontSize = 13.sp, lineHeight = 18.sp,
+              modifier = Modifier.weight(1f),
+            )
             Spacer(Modifier.width(10.dp))
-            // Prominent "Show in Map" pill (mirrors Playo), beside the address.
             Row(
               verticalAlignment = Alignment.CenterVertically,
               modifier = Modifier
                 .clip(RoundedCornerShape(50))
                 .border(BorderStroke(1.dp, HaraanColors.BorderLight), RoundedCornerShape(50))
-                .clickable {
-                  val lat = detail?.latitude; val lng = detail?.longitude
-                  val addr = detail?.address?.takeIf { it.isNotBlank() } ?: detail?.location ?: venue.location
-                  val q = if (lat != null && lng != null) "$lat,$lng($name)"
-                  else "$name $addr"
-                  openMap(ctx, detail?.mapLink, q)
-                }
+                .clickable { openVenueMap() }
                 .padding(horizontal = 12.dp, vertical = 8.dp)
             ) {
-              Icon(Icons.Default.Place, null, tint = HaraanColors.GameHubGreen, modifier = Modifier.size(16.dp))
+              Icon(Icons.Default.Place, null, tint = HaraanColors.EventsBlue, modifier = Modifier.size(16.dp))
               Spacer(Modifier.width(6.dp))
               Text("Show in Map", color = HaraanColors.TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1, softWrap = false)
             }
           }
 
+          // The website's embedded map, as a Static Maps image (no Maps SDK). Only with
+          // real coordinates — the web embeds one only when the venue has them too.
+          val mapCoords = detail?.let { d ->
+            if (d.latitude != null && d.longitude != null) d.latitude to d.longitude
+            else VenueMap.coordsFromMapLink(d.mapLink)
+          }
+          if (mapCoords != null && VenueMap.hasKey) {
+            Spacer(Modifier.height(12.dp))
+            AsyncImage(
+              model = VenueMap.staticMapUrl(mapCoords.first, mapCoords.second, heightPx = 300),
+              contentDescription = "$name location map",
+              contentScale = ContentScale.Crop,
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(200.dp)
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color(0xFFF1F5F9))
+                .border(1.dp, Color(0xFFECECF1), RoundedCornerShape(16.dp))
+                .clickable { openVenueMap() },
+            )
+          }
+
           if (loading) {
             Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
-              CircularProgressIndicator(color = HaraanColors.GameHubGreen)
+              CircularProgressIndicator(color = HaraanColors.EventsBlue)
             }
           }
 
           detail?.let { d ->
-            // The rating summary card that used to sit here printed 4.9 a second time,
-            // directly under a 4.9 — the score now lives once, on the hero, and rating
-            // the venue belongs with the reviews it produces (see the Reviews section).
+            // ── 3. Rating summary + RATE VENUE ──────────────────────────────────
+            RatingCard(d, onRate = { showRating = true })
 
-            // ── Amenities ───────────────────────────────────────────────────────
-            if (d.amenities.isNotEmpty()) {
-              SectionCard(title = "What's here") {
-                AmenityPills(d.amenities)
+            // ── 4. Available Sports → price chart ───────────────────────────────
+            val sports = d.sports.filter { it.isNotBlank() }.ifEmpty { listOfNotNull(d.category.takeIf { it.isNotBlank() }) }
+            if (sports.isNotEmpty()) {
+              SectionCard(title = "Available Sports") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                  sports.forEach { sport -> SportTile(sport, onClick = onOpenPriceChart) }
+                }
               }
             }
 
-            // ── 5. About ────────────────────────────────────────────────────────
+            // ── 5. Amenities ────────────────────────────────────────────────────
+            if (d.amenities.isNotEmpty()) {
+              SectionCard(title = "Amenities") {
+                AmenityGrid(d.amenities)
+              }
+            }
+
+            // ── 6. About ────────────────────────────────────────────────────────
             if (d.about.isNotBlank()) {
               SectionCard(title = "About this venue") {
                 Text(d.about, color = HaraanColors.TextSecondary, fontSize = 13.sp, lineHeight = 20.sp)
               }
             }
 
-            // ── 5b. Rules & policies (cancellation policy + admin-authored checklist) ──
+            // ── 7. Good to know (cancellation policy + admin-authored checklist) ──
             val goodToKnow = remember(d) {
               buildList {
                 if (d.cancellation.isNotBlank()) add(d.cancellation)
@@ -477,7 +446,7 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
                     Row(verticalAlignment = Alignment.Top) {
                       Icon(
                         Icons.Default.Check, null,
-                        tint = HaraanColors.GameHubGreen,
+                        tint = HaraanColors.EventsBlue,
                         modifier = Modifier.size(16.dp).padding(top = 2.dp)
                       )
                       Spacer(Modifier.width(8.dp))
@@ -488,62 +457,43 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
               }
             }
 
-            // ── 6. Location ─────────────────────────────────────────────────────
+            // ── 8. Location ─────────────────────────────────────────────────────
             SectionCard(title = "Location") {
               Column {
                 Text(
                   buildString {
                     append(d.address.takeIf { it.isNotBlank() } ?: d.location)
+                    // The web can't show this (no GPS fix); the app has a real one.
                     val dist = liveDistance ?: d.distance.takeIf { it.isNotBlank() }
                     if (!dist.isNullOrBlank()) append("  ·  $dist away")
                   },
-                  color = HaraanColors.TextSecondary, fontSize = 13.sp, lineHeight = 18.sp
+                  color = HaraanColors.TextSecondary, fontSize = 13.sp, lineHeight = 20.sp
                 )
                 Spacer(Modifier.height(10.dp))
                 Text(
                   "Get directions",
-                  color = HaraanColors.GameHubGreen,
+                  color = HaraanColors.EventsBlue,
                   fontWeight = FontWeight.Bold,
                   fontSize = 13.sp,
-                  modifier = Modifier.clickable {
-                    val q = if (d.latitude != null && d.longitude != null) "${d.latitude},${d.longitude}(${d.name})"
-                    else "${d.name} ${d.location}"
-                    openMap(ctx, d.mapLink, q)
-                  }
+                  modifier = Modifier.clickable { openVenueMap() }
                 )
               }
             }
 
-            // ── 7. Reviews ──────────────────────────────────────────────────────
-            // Always rendered, even with no reviews: this is where "Rate venue" lives
-            // now, and a venue nobody has reviewed is exactly the one that needs the ask.
-            SectionCard(title = if (d.reviewsCount > 0) "Reviews (${d.reviewsCount})" else "Reviews") {
-              Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                if (d.reviews.isEmpty()) {
-                  Text(
-                    "No reviews yet — if you've played here, you'd be the first.",
-                    color = HaraanColors.TextMuted, fontSize = 13.sp, lineHeight = 19.sp,
-                  )
-                } else {
+            // ── 9. Reviews ──────────────────────────────────────────────────────
+            if (d.reviews.isNotEmpty()) {
+              SectionCard(title = "Reviews (${d.reviewsCount.coerceAtLeast(d.reviews.size)})") {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                   d.reviews.forEach { ReviewRow(it) }
                 }
-                Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .border(BorderStroke(1.dp, HaraanColors.EventsBlue.copy(alpha = 0.45f)), RoundedCornerShape(50))
-                    .pressable { showRating = true }
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                ) {
-                  Icon(Icons.Default.Star, null, tint = HaraanColors.EventsBlue, modifier = Modifier.size(15.dp))
-                  Spacer(Modifier.width(7.dp))
-                  Text(
-                    "Rate this venue",
-                    color = HaraanColors.EventsBlue,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
-                  )
-                }
+              }
+            }
+
+            // ── 9b. FAQ — answered from this venue's own data, same as the web ──
+            val faqs = remember(d) { venueFaqs(d) }
+            if (faqs.isNotEmpty()) {
+              SectionCard(title = "Questions about ${d.name}") {
+                VenueFaqList(faqs)
               }
             }
           }
@@ -631,12 +581,20 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
         Button(
           onClick = { showBooking = true },
           enabled = canBook,
-          colors = ButtonDefaults.buttonColors(containerColor = HaraanColors.GameHubGreen),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = HaraanColors.EventsBlue,
+            disabledContainerColor = Color(0xFFCBD5E1),
+          ),
           shape = RoundedCornerShape(50),
           modifier = Modifier.height(48.dp)
         ) {
           Text(
-            if (!hasSlotsOrCourts && detail != null) "No slots available" else "Book Now",
+            when {
+              detail == null -> "Book Now"
+              detail?.isBookable != true -> "Not bookable"
+              !hasSlotsOrCourts -> "No slots available"
+              else -> "Book Now"
+            },
             color = Color.White,
             fontWeight = FontWeight.Bold,
             fontSize = 15.sp,
@@ -706,7 +664,7 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
   }
 }
 
-/** Hero page indicator: the current photo stretches into a short pill, the rest stay dots. */
+/** Hero page indicator — the web's dots: 6dp each, the current photo's a solid 8dp. */
 @Composable
 private fun HeroPhotoDots(count: Int, current: Int, modifier: Modifier = Modifier) {
   // A 12-photo gallery shouldn't grow a bar across the photo; the last dot stands for the rest.
@@ -714,22 +672,21 @@ private fun HeroPhotoDots(count: Int, current: Int, modifier: Modifier = Modifie
   val active = current.coerceAtMost(shown - 1)
   Row(
     modifier = modifier,
-    horizontalArrangement = Arrangement.spacedBy(4.dp),
+    horizontalArrangement = Arrangement.spacedBy(6.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
     repeat(shown) { i ->
       val selected = i == active
-      val width by androidx.compose.animation.core.animateDpAsState(
-        targetValue = if (selected) 14.dp else 5.dp,
+      val size by androidx.compose.animation.core.animateDpAsState(
+        targetValue = if (selected) 8.dp else 6.dp,
         animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.8f, stiffness = 500f),
-        label = "heroDotWidth",
+        label = "heroDotSize",
       )
       Box(
         modifier = Modifier
-          .height(5.dp)
-          .width(width)
-          .clip(RoundedCornerShape(50))
-          .background(Color.White.copy(alpha = if (selected) 1f else 0.55f))
+          .size(size)
+          .clip(CircleShape)
+          .background(Color.White.copy(alpha = if (selected) 1f else 0.5f))
       )
     }
   }
@@ -759,312 +716,160 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
   }
 }
 
-/**
- * Today's slots, on the page instead of behind the Book Now modal.
- *
- * The venue's own start times and per-slot prices answer the only question a player came
- * with: can I play tonight, and what does it cost.
- *
- * **Availability is real.** Each chip's state comes from GET /api/venues/{id}/availability,
- * which checks occupying bookings, live checkout holds and court blocks with the same rules
- * checkout enforces — so "Booked" means checkout would refuse the hour, and an open chip means
- * it would take it. It stays current three ways: a `venue.{id}` WebSocket nudge the moment a
- * booking/hold/block changes, a 20s poll while the page is visible (socket down, or a hold
- * quietly expiring), and a refetch whenever the booking sheet closes.
- *
- * Until that answer arrives — or if it can't be fetched — chips fall back to the template's
- * own open/closed switch and claim nothing about bookings, rather than guessing.
- */
+/** One "Available Sports" tile — the web's `.mven__sport`: glyph, sport, "View pricing", chevron. */
 @Composable
-private fun TodaySlotRail(
-  venue: VenueDetailData,
-  selectedSlotId: Int?,
-  selectedDate: LocalDate?,
-  sheetOpen: Boolean,
-  onPickSlot: (VenueSlotItem, LocalDate) -> Unit,
-) {
-  fun slotsFor(date: LocalDate): List<VenueSlotItem> = slotsForDay(venue.slots, date)
-
-  // Drop the hours that have already gone. A rail headed "today" that opens on 6:00 AM
-  // at midday reads as canned sample data. Slots whose time can't be parsed are kept:
-  // hiding a real bookable slot is worse than showing one that may have passed.
-  // Keyed on the venue so the on-resume refresh (AutoRefresh) re-reads the clock; an
-  // unkeyed remember would freeze the cutoff at whenever the page first opened.
-  val nowMinutes = remember(venue) { LocalTime.now().let { it.hour * 60 + it.minute } }
-  val todayRemaining = remember(venue, nowMinutes) {
-    slotsFor(LocalDate.now()).filter { (timeToMinutes(it.time) ?: Int.MAX_VALUE) >= nowMinutes }
-  }
-  // Everything today is behind us — roll the rail forward rather than showing an empty
-  // shelf or, worse, this morning's times.
-  val showingTomorrow = todayRemaining.isEmpty()
-  val railDate = if (showingTomorrow) LocalDate.now().plusDays(1) else LocalDate.now()
-  val slots = if (showingTomorrow) slotsFor(railDate) else todayRemaining
-
-  // ── Live availability ────────────────────────────────────────────────────────────
-  val repo = remember { VenueRepository() }
-  val railContext = LocalContext.current
-  // Keyed by venue + day: a rail rolling over to tomorrow must never paint today's answer.
-  var availability by remember(venue.id, railDate) { mutableStateOf<Map<Int, SlotAvailability>?>(null) }
-  val loadAvailability: suspend () -> Unit = {
-    // A failed refresh keeps the last good answer instead of wiping chips back to "unknown".
-    repo.getSlotAvailability(venue.id, railDate, TokenStore.getSignedInToken(railContext))?.let { availability = it }
-  }
-  // First load, and again every time the booking sheet closes — whatever happened in there
-  // (booked, abandoned, refused because someone beat them to it) changed what's free.
-  LaunchedEffect(venue.id, railDate, sheetOpen) {
-    if (!sheetOpen) loadAvailability()
-  }
-  if (venue.id.isNotBlank()) {
-    androidx.compose.runtime.DisposableEffect(venue.id) {
-      com.haraan.app.data.RealtimeClient.subscribe("venue.${venue.id}")
-      onDispose { com.haraan.app.data.RealtimeClient.unsubscribe("venue.${venue.id}") }
-    }
-    LaunchedEffect(venue.id, railDate) {
-      kotlinx.coroutines.flow.merge(
-        com.haraan.app.data.VenueRealtimeBus.updates,
-        // Nudges sent while the socket was down are gone; resync on reconnect.
-        com.haraan.app.data.RealtimeBus.updates,
-      ).collect { signal ->
-        if (signal == venue.id || signal == com.haraan.app.data.RealtimeBus.RECONNECTED) loadAvailability()
-      }
-    }
-  }
-  // Fallback when the socket isn't connected, and the thing that notices a checkout hold
-  // expiring (an expiry is a clock passing, not a write, so nothing broadcasts it).
-  AutoRefresh(intervalMs = 20_000L) { loadAvailability() }
-
-  if (slots.isEmpty()) return
-
-  val live = availability
-  fun stateOf(slot: VenueSlotItem): SlotAvailability.State? = when {
-    !slot.available -> SlotAvailability.State.CLOSED
-    live == null -> null
-    else -> live[slot.id]?.state
-  }
-  val openCount = slots.count { stateOf(it).let { s -> s == null || s == SlotAvailability.State.OPEN } }
-
-  Spacer(Modifier.height(18.dp))
-  Row(verticalAlignment = Alignment.CenterVertically) {
-    Text(
-      if (showingTomorrow) "Playing tomorrow" else "Playing today",
-      color = HaraanColors.TextPrimary,
-      fontWeight = FontWeight.Bold,
-      fontSize = 16.sp,
-    )
-    Spacer(Modifier.width(8.dp))
-    Text(
-      when {
-        // Only claim "booked" once the server has actually said so.
-        live != null && openCount == 0 && slots.any { stateOf(it) == SlotAvailability.State.BOOKED } -> "fully booked"
-        openCount == 0 -> "none open"
-        live == null -> if (showingTomorrow) "$openCount slot${if (openCount == 1) "" else "s"} listed" else "$openCount still to come"
-        else -> "$openCount open"
-      },
-      color = HaraanColors.TextMuted,
-      fontSize = 12.sp,
-    )
-  }
-  Spacer(Modifier.height(10.dp))
+private fun SportTile(sport: String, onClick: () -> Unit) {
   Row(
     modifier = Modifier
       .fillMaxWidth()
-      .horizontalScroll(rememberScrollState()),
-    horizontalArrangement = Arrangement.spacedBy(9.dp),
-  ) {
-    slots.forEach { slot ->
-      SlotChip(
-        slot = slot,
-        venuePrice = venue.price,
-        availability = live?.get(slot.id),
-        state = stateOf(slot),
-        // Slot ids are day-agnostic templates, so the day has to match too.
-        selected = slot.id == selectedSlotId && selectedDate == railDate,
-      ) { onPickSlot(slot, railDate) }
-    }
-  }
-}
-
-/**
- * One start time. Four honest states:
- * - open: white, blue hairline, the price; "1 LEFT" when it's the venue's last free court;
- * - selected: the time the booking sheet is open on — blue tint, blue ring, check mark;
- * - booked: someone holds every court that can run it — muted, struck through, not tappable;
- * - closed: the venue isn't selling it (switched off, blocked, closed day) — muted, not tappable.
- * State changes cross-fade so a slot being taken live reads as a change, not a flicker.
- */
-@Composable
-private fun SlotChip(
-  slot: VenueSlotItem,
-  venuePrice: Int,
-  availability: SlotAvailability?,
-  state: SlotAvailability.State?,
-  selected: Boolean,
-  onClick: () -> Unit,
-) {
-  val booked = state == SlotAvailability.State.BOOKED
-  val closed = state == SlotAvailability.State.CLOSED
-  val unavailable = booked || closed
-  val showSelected = selected && !unavailable
-  val rate = slot.price.takeIf { it > 0 } ?: venuePrice
-  val lastCourt = !unavailable && availability != null &&
-    availability.courtsTotal > 1 && availability.courtsFree == 1
-  val blue = HaraanColors.EventsBlue
-  val shape = RoundedCornerShape(14.dp)
-  val colorTween = androidx.compose.animation.core.tween<Color>(220)
-
-  val bg by androidx.compose.animation.animateColorAsState(
-    when {
-      unavailable -> Color(0xFFF3F5F8)
-      showSelected -> blue.copy(alpha = 0.08f)
-      else -> Color.White
-    }, colorTween, label = "slotBg",
-  )
-  val borderColor by androidx.compose.animation.animateColorAsState(
-    when {
-      unavailable -> HaraanColors.BorderLight
-      showSelected -> blue
-      lastCourt || slot.fillingFast -> HaraanColors.RatingGold.copy(alpha = 0.55f)
-      else -> blue.copy(alpha = 0.35f)
-    }, colorTween, label = "slotBorder",
-  )
-  val timeColor by androidx.compose.animation.animateColorAsState(
-    when {
-      unavailable -> HaraanColors.TextMuted
-      showSelected -> blue
-      else -> HaraanColors.TextPrimary
-    }, colorTween, label = "slotTime",
-  )
-
-  Column(
-    modifier = Modifier
-      .then(if (unavailable) Modifier else Modifier.pressable { onClick() })
-      .clip(shape)
-      .background(bg)
-      .border(if (showSelected) 1.5.dp else 1.dp, borderColor, shape)
-      .semantics {
-        stateDescription = when {
-          booked -> "Booked"
-          closed -> "Closed"
-          showSelected -> "Selected"
-          else -> "Available"
-        }
-      }
-      .padding(horizontal = 14.dp, vertical = 10.dp),
-    horizontalAlignment = Alignment.Start,
-  ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-      Text(
-        slot.time,
-        color = timeColor,
-        fontWeight = FontWeight.Bold,
-        fontSize = 14.sp,
-        maxLines = 1,
-        textDecoration = if (booked) androidx.compose.ui.text.style.TextDecoration.LineThrough else null,
-      )
-      if (showSelected) {
-        Spacer(Modifier.width(5.dp))
-        Icon(Icons.Default.Check, null, tint = blue, modifier = Modifier.size(14.dp))
-      }
-    }
-    Spacer(Modifier.height(3.dp))
-    Text(
-      when {
-        booked -> "Booked"
-        closed -> "Closed"
-        rate > 0 -> "₹$rate"
-        else -> "Tap to book"
-      },
-      color = when {
-        unavailable -> HaraanColors.TextMuted
-        showSelected -> blue.copy(alpha = 0.85f)
-        else -> HaraanColors.TextSecondary
-      },
-      fontSize = 12.sp,
-      fontWeight = if (booked) FontWeight.SemiBold else FontWeight.Medium,
-      maxLines = 1,
-    )
-    // The real "last court" wins over the venue's hand-set flag; both stay a quiet amber.
-    if (!unavailable && (lastCourt || slot.fillingFast)) {
-      Spacer(Modifier.height(5.dp))
-      Text(
-        if (lastCourt) "1 LEFT" else "FILLING FAST",
-        color = Color(0xFF9A6700),
-        fontSize = 8.5.sp,
-        fontWeight = FontWeight.ExtraBold,
-        letterSpacing = 0.5.sp,
-        maxLines = 1,
-      )
-    }
-  }
-}
-
-/**
- * The courts line — replaces the "Available Sports ▸ View pricing" row.
- *
- * A chevron promising to reveal a price is worse than the price. This prints what the
- * venue actually has (its real court names and count) and the true rate span across
- * them, and still opens the full chart for peak/off-peak detail.
- */
-@Composable
-private fun CourtsLine(d: VenueDetailData, onOpenPriceChart: () -> Unit) {
-  if (d.courts.isEmpty() && d.sports.isEmpty()) return
-
-  val rates = d.courts.flatMap { listOfNotNull(it.price.takeIf { p -> p > 0 }, it.peakPrice?.takeIf { p -> p > 0 }) }
-  val span = when {
-    rates.isEmpty() -> d.price.takeIf { it > 0 }?.let { "₹$it/hr" }
-    rates.min() == rates.max() -> "₹${rates.min()}/hr"
-    else -> "₹${rates.min()}–${rates.max()}/hr"
-  }
-  val courtNames = d.courts.map { it.name }.filter { it.isNotBlank() }
-  val sportsLine = d.sports.filter { it.isNotBlank() }.ifEmpty { listOf(d.category) }.joinToString(" · ")
-
-  Spacer(Modifier.height(18.dp))
-  Row(
-    modifier = Modifier
-      .fillMaxWidth()
-      .pressable { onOpenPriceChart() }
       .clip(RoundedCornerShape(14.dp))
-      .background(HaraanColors.EventsBlue.copy(alpha = 0.05f))
-      .padding(horizontal = 14.dp, vertical = 12.dp),
+      .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(14.dp))
+      .pressable { onClick() }
+      .padding(16.dp),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    Icon(sportIcon(d.category), null, tint = HaraanColors.EventsBlue, modifier = Modifier.size(22.dp))
-    Spacer(Modifier.width(12.dp))
+    Icon(sportIcon(sport), null, tint = HaraanColors.GameHubDeep, modifier = Modifier.size(28.dp))
+    Spacer(Modifier.width(14.dp))
     Column(Modifier.weight(1f)) {
-      Text(
-        buildString {
-          if (courtNames.isNotEmpty()) {
-            append(courtNames.size)
-            append(if (courtNames.size == 1) " court" else " courts")
-          } else {
-            append(sportsLine)
-          }
-          span?.let { append("  ·  ").append(it) }
-        },
-        color = HaraanColors.TextPrimary,
-        fontWeight = FontWeight.Bold,
-        fontSize = 14.sp,
-      )
+      Text(sport, color = HaraanColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
       Spacer(Modifier.height(2.dp))
-      Text(
-        // Name the actual courts. "Court 1 · Court 2" is dull; "Wooden A · Synthetic B"
-        // is the kind of detail a player chooses on, and only the venue can supply it.
-        courtNames.take(3).joinToString(" · ").ifBlank { sportsLine }
-          .let { if (courtNames.size > 3) "$it +${courtNames.size - 3}" else it },
-        color = HaraanColors.TextSecondary,
-        fontSize = 12.sp,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-      )
+      Text("View pricing", color = HaraanColors.TextSecondary, fontSize = 12.sp)
     }
-    Spacer(Modifier.width(10.dp))
-    Text(
-      "Rates",
-      color = HaraanColors.EventsBlue,
-      fontWeight = FontWeight.Bold,
-      fontSize = 13.sp,
+    Icon(Icons.Default.KeyboardArrowRight, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(22.dp))
+  }
+}
+
+/**
+ * Amenities two per row, each with its own tinted icon plate — the web's `.mven__amenities`
+ * grid, so the app and the site read as one product.
+ */
+@Composable
+private fun AmenityGrid(amenities: List<String>) {
+  Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+    amenities.chunked(2).forEach { pair ->
+      Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        pair.forEach { a ->
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f),
+          ) {
+            Box(
+              modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(HaraanColors.EventsBlue.copy(alpha = 0.10f)),
+              contentAlignment = Alignment.Center,
+            ) {
+              Icon(amenityIcon(a), null, tint = HaraanColors.GameHubDeep, modifier = Modifier.size(18.dp))
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(
+              a,
+              color = HaraanColors.TextPrimary,
+              fontSize = 13.sp,
+              maxLines = 2,
+              overflow = TextOverflow.Ellipsis,
+            )
+          }
+        }
+        if (pair.size == 1) Spacer(Modifier.weight(1f))
+      }
+    }
+  }
+}
+
+private data class VenueFaq(val question: String, val answer: String)
+
+/**
+ * The venue's FAQ, answered only from its own data — a port of the website's
+ * PublicWebController::venueFaqs so both surfaces ask and answer the same things.
+ */
+private fun venueFaqs(d: VenueDetailData): List<VenueFaq> {
+  val name = d.name
+  val faqs = mutableListOf<VenueFaq>()
+
+  val sports = d.sports.filter { it.isNotBlank() }
+  if (sports.isNotEmpty()) {
+    val list = if (sports.size == 1) sports[0]
+      else sports.dropLast(1).joinToString(", ") + " and " + sports.last()
+    val courts = if (d.courts.size > 1) " across ${d.courts.size} courts" else ""
+    faqs += VenueFaq(
+      "Which sports can I play at $name?",
+      "$name hosts $list$courts. Pick the sport when you book a slot on Haraan.",
     )
-    Icon(Icons.Default.KeyboardArrowRight, null, tint = HaraanColors.EventsBlue, modifier = Modifier.size(20.dp))
+  }
+
+  val from = d.courts.map { it.price }.filter { it > 0 }.minOrNull() ?: d.price
+  if (from > 0) {
+    val peak = if (d.courts.any { it.peakPrice != null }) "; peak hours cost more" else ""
+    faqs += VenueFaq(
+      "How much does it cost to book $name?",
+      "Slots at $name start from ₹${"%,d".format(from)} per hour$peak. Haraan shows the exact price for your court and time before you pay.",
+    )
+  }
+
+  if (d.hours.isNotBlank()) {
+    faqs += VenueFaq(
+      "What are the timings of $name?",
+      "$name is open ${d.hours}. Tap Book Now to see open slots for the next 7 days.",
+    )
+  }
+
+  val address = d.address.ifBlank { d.location }.trim()
+  if (address.isNotEmpty()) {
+    faqs += VenueFaq(
+      "Where is $name located?",
+      "$name is at $address. Use \"Get directions\" on this page to open it in Google Maps.",
+    )
+  }
+
+  if (d.isBookable) {
+    faqs += VenueFaq(
+      "How do I book $name online?",
+      "Tap Book Now, choose a date, court and slot, then pay online. Your booking is confirmed instantly on Haraan.",
+    )
+  }
+  return faqs
+}
+
+/** Expandable FAQ rows — first one open, blue +/– — like the web's `<details>` list. */
+@Composable
+private fun VenueFaqList(faqs: List<VenueFaq>) {
+  var open by remember(faqs) { mutableStateOf(setOf(0)) }
+  Column {
+    faqs.forEachIndexed { i, faq ->
+      val expanded = i in open
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clickable { open = if (expanded) open - i else open + i }
+          .padding(vertical = 12.dp)
+          .animateContentSize()
+      ) {
+        Row(verticalAlignment = Alignment.Top) {
+          Text(
+            faq.question,
+            color = HaraanColors.TextPrimary,
+            fontWeight = FontWeight.Bold,
+            fontSize = 14.sp,
+            lineHeight = 19.sp,
+            modifier = Modifier.weight(1f),
+          )
+          Spacer(Modifier.width(12.dp))
+          Text(
+            if (expanded) "–" else "+",
+            color = HaraanColors.EventsBlue,
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 15.sp,
+          )
+        }
+        if (expanded) {
+          Spacer(Modifier.height(8.dp))
+          Text(faq.answer, color = Color(0xFF475569), fontSize = 14.sp, lineHeight = 21.sp)
+        }
+      }
+      SectionDivider()
+    }
   }
 }
 
@@ -1357,48 +1162,6 @@ private fun RatingDialog(venue: VenueDetailData, onDismiss: () -> Unit, onSubmit
             Text("Submit rating", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
           }
         }
-      }
-    }
-  }
-}
-
-/**
- * Amenities as pills that wrap, not as equal boxed tiles in a rigid grid.
- *
- * The grid version forced every amenity into the same 140dp cell with its own tinted
- * icon plate, so "Parking" and "Floodlights" got the visual weight of a feature card and
- * the block ended up looking generated. A facility list is a list of small facts — let
- * each one take exactly the width of its own name.
- */
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun AmenityPills(amenities: List<String>) {
-  FlowRow(
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
-    verticalArrangement = Arrangement.spacedBy(8.dp),
-  ) {
-    amenities.forEach { a ->
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-          .clip(RoundedCornerShape(50))
-          .background(Color(0xFFF4F7FB))
-          .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(50))
-          .padding(start = 10.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
-      ) {
-        Icon(
-          amenityIcon(a), null,
-          tint = HaraanColors.EventsBlue,
-          modifier = Modifier.size(15.dp),
-        )
-        Spacer(Modifier.width(6.dp))
-        Text(
-          a,
-          color = HaraanColors.TextPrimary,
-          fontSize = 12.5.sp,
-          fontWeight = FontWeight.Medium,
-          maxLines = 1,
-        )
       }
     }
   }
