@@ -32,6 +32,8 @@ class DeliveryChain(
     /** Full-resolution measurements of the far stumps' span, when the caller makes them. */
     private val farSpans: () -> Collection<Double> = { emptyList() },
     private val log: (String) -> Unit = {},
+    /** Look for the batter's stumps where the bowler's say ([FarWicketSearch]). Off only to compare on the bench. */
+    private val predictFar: Boolean = true,
 ) {
     val aspect = ClipFrames.UPRIGHT_W.toFloat() / ClipFrames.UPRIGHT_H
 
@@ -146,20 +148,15 @@ class DeliveryChain(
         )
         val nearNow = bowlersEndOf(seen, camera)
         nearNow?.let { bowlersEnd = nearEnd.add(it) ?: bowlersEnd }
-        var far = battersEndOnly(seen, camera, bowlersEnd)
         /*
          * NOTHING CONFIRMED, BUT THE BOWLER'S STUMPS ARE IN VIEW: look where they say the
-         * batter's must be, and offer what is found beside whatever else this frame gave — the
-         * tracker weighs rivals. Once one is confirmed the tracker looks at its place itself
-         * every frame. Only from a near set actually seen: the steadied one, or this frame's
-         * before it has settled.
+         * batter's must be. See [FarWicketSearch.offer]; [predictFar] off is for the bench.
          */
-        val held = lock?.state
-        if (held == null || held == WicketTrackState.LOST || held == WicketTrackState.TENTATIVE) {
-            (bowlersEnd ?: nearNow)?.let { near ->
-                farSearch.next(y, ClipFrames.SENSOR_W, ClipFrames.SENSOR_H, ClipFrames.SENSOR_W, 90, near, aspect)
-                    ?.let { far = far + battersEndOnly(listOf(WicketSighting.Stumps(it)), camera, near) }
-            }
+        val far = battersEndOnly(seen, camera, bowlersEnd).let { found ->
+            if (!predictFar) found else farSearch.offer(
+                found, lock, bowlersEnd ?: nearNow,
+                y, ClipFrames.SENSOR_W, ClipFrames.SENSOR_H, ClipFrames.SENSOR_W, 90, aspect,
+            ) { s, near -> battersEndOnly(s, camera, near) }
         }
         lock = wickets.onFrame(far, still, aspect, ts)
         steadyLock.add(lock, ts)

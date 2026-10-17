@@ -86,7 +86,50 @@ class TrackingScoreboardTest {
                 rows += run(File(dir, clip.raw), clip, frames, step, "${(nativeFps / step).roundToInt()} fps")
             }
         }
-        report(rows)
+        val cold = ArrayList<ColdRow>()
+        for (clip in clips) {
+            if (only != null && clip.id !in only) continue
+            val frames = indexOf(File(dir, clip.raw + ".idx"), clip)
+            cold += ColdRow(clip.id, coldStart(File(dir, clip.raw), frames, predictFar = false), coldStart(File(dir, clip.raw), frames, predictFar = true))
+        }
+        report(rows, cold)
+    }
+
+    /** When, from a cold start, the batter's stumps were confirmed and the corridor could be built. */
+    private class ColdStart(val confirmedMs: Double?, val readyMs: Double?, val base: Point2?)
+
+    private class ColdRow(val clip: String, val without: ColdStart, val with: ColdStart)
+
+    /*
+     * THE LIVE CAMERA FROM COLD. The live screen cannot run on a desk, but its stumps step is
+     * the one shared here: thirty frames a second, every one checked while nothing is held.
+     * From the clip's first frame, how long until the batter's stumps are confirmed, and
+     * until the ball's corridor can be built — with and without [FarWicketSearch].
+     */
+    private fun coldStart(raw: File, frames: List<Frame>, predictFar: Boolean): ColdStart {
+        val y = ByteArray(ClipFrames.SENSOR_W * ClipFrames.SENSOR_H)
+        val u = ByteArray(ClipFrames.SENSOR_W / 2 * (ClipFrames.SENSOR_H / 2))
+        val f = RandomAccessFile(raw, "r")
+        val chain = DeliveryChain(predictFar = predictFar)
+        val step = maxOf(1, (frames.size / ((frames.last().second - frames.first().second) / 1000.0) / 30.0).roundToInt())
+        var confirmed: Double? = null
+        var ready: Double? = null
+        try {
+            for (k in frames.indices step step) {
+                f.seek(frames[k].line * (y.size + u.size).toLong())
+                f.readFully(y)
+                f.readFully(u)
+                chain.warm(y, u, frames[k].second.toLong())
+                val since = frames[k].second - frames.first().second
+                if (confirmed == null && chain.currentLock?.state == WicketTrackState.CONFIRMED) confirmed = since
+                if (ready == null && chain.readyToTrack()) ready = since
+                if (ready != null) break
+            }
+        } finally {
+            chain.release()
+            f.close()
+        }
+        return ColdStart(confirmed, ready, chain.currentLock?.base)
     }
 
     /** One clip through the chain, every [step]-th frame, scored against its truth. */
@@ -200,7 +243,7 @@ class TrackingScoreboardTest {
         return rows
     }
 
-    private fun report(rows: List<Row>) {
+    private fun report(rows: List<Row>, cold: List<ColdRow> = emptyList()) {
         val sb = StringBuilder()
         sb.appendLine("# Tracking scoreboard")
         sb.appendLine()
@@ -231,6 +274,19 @@ class TrackingScoreboardTest {
                 "| ~$rate fps | ${rs.count { it.shown }}/${rs.size} | ${if (recalls.isEmpty()) "–" else "%.0f%%".format(recalls.average() * 100)} | " +
                     "${px.getOrNull(px.size / 2)?.let { "%.1f".format(it) } ?: "–"} | ${speed.getOrNull(speed.size / 2)?.let { "%.1f".format(it) } ?: "–"} | ${rs.sumOf { it.falseShown }} |",
             )
+        }
+        if (cold.isNotEmpty()) {
+            sb.appendLine()
+            sb.appendLine("## Live camera from cold (30 fps, stumps only)")
+            sb.appendLine()
+            sb.appendLine("Seconds from the clip's first frame. \"–\" = not within the clip. Corridor = the ball can be searched for.")
+            sb.appendLine()
+            sb.appendLine("| clip | confirmed, no prediction | corridor, no prediction | confirmed, predicted | corridor, predicted | held at |")
+            sb.appendLine("|---|---|---|---|---|---|")
+            fun t(v: Double?) = v?.let { "%.2f".format(it / 1000) } ?: "–"
+            for (c in cold) {
+                sb.appendLine("| ${c.clip} | ${t(c.without.confirmedMs)} | ${t(c.without.readyMs)} | ${t(c.with.confirmedMs)} | ${t(c.with.readyMs)} | ${c.with.base?.let { "%.3f,%.3f".format(it.x, it.y) } ?: "–"} |")
+            }
         }
         val out = File("build/reports/vision-bench").apply { mkdirs() }
         File(out, "scoreboard.md").writeText(sb.toString())

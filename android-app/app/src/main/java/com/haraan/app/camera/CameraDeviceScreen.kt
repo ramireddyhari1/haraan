@@ -968,6 +968,8 @@ private fun CameraMode(
     val bowlersEndFilter = remember { com.haraan.app.vision.BowlersEndFilter() }
     // The stumps steadied over many frames, for measuring the flight: see SteadyWicket.
     val steadyWicket = remember { com.haraan.app.vision.SteadyWicket() }
+    // The batter's stumps looked for where the bowler's say: see FarWicketSearch.
+    val farWicketSearch = remember { com.haraan.app.vision.FarWicketSearch() }
     // The corridor the live tracker was last given, for tracking the saved clip the same way.
     val corridorRef = remember { java.util.concurrent.atomic.AtomicReference<FloatArray?>(null) }
     // Bumped each time a clip is armed: a clip analysis finishing after the next ball is
@@ -1144,6 +1146,7 @@ private fun CameraMode(
          */
         if (wicketLock?.source != com.haraan.app.vision.WicketLockSource.MANUAL) {
             wicketTracker.reset()
+            farWicketSearch.reset()
             wicketLock = null
             wicketDiagnostics = wicketTracker.diagnostics()
         }
@@ -1426,8 +1429,15 @@ private fun CameraMode(
                                 focus = wicketTracker.focus(),
                                 allowSearch = wicketLock == null || idleAnalysisFrame % 16 == 0,
                             )
-                            bowlersEndOf(sightings, cameraIntrinsics)?.let { bowlersEndBase = bowlersEndFilter.add(it) ?: bowlersEndBase }
-                            wicketLock = wicketTracker.onFrame(battersEndOnly(sightings, cameraIntrinsics, bowlersEndBase), cameraMove, uprightAspect, frameMs)
+                            val nearNow = bowlersEndOf(sightings, cameraIntrinsics)
+                            nearNow?.let { bowlersEndBase = bowlersEndFilter.add(it) ?: bowlersEndBase }
+                            wicketLock = wicketTracker.onFrame(
+                                battersEndWithPredicted(
+                                    farWicketSearch, sightings, wicketLock, bowlersEndBase ?: nearNow, cameraIntrinsics,
+                                    bytes, image.width, image.height, plane.rowStride, image.imageInfo.rotationDegrees, uprightAspect,
+                                ),
+                                cameraMove, uprightAspect, frameMs,
+                            )
                             steadyWicket.add(wicketLock, frameMs)
                         }
                         // From behind the bowler, look only along the delivery's corridor and
@@ -1581,9 +1591,13 @@ private fun CameraMode(
                                     allowSearch = allowSearch,
                                 )
                                 if (sightings.isNotEmpty()) lastSightingMs = frameClockMs
-                                bowlersEndOf(sightings, cameraIntrinsics)?.let { bowlersEndBase = bowlersEndFilter.add(it) ?: bowlersEndBase }
+                                val nearNow = bowlersEndOf(sightings, cameraIntrinsics)
+                                nearNow?.let { bowlersEndBase = bowlersEndFilter.add(it) ?: bowlersEndBase }
                                 wicketLock = wicketTracker.onFrame(
-                                    sightings = battersEndOnly(sightings, cameraIntrinsics, bowlersEndBase),
+                                    sightings = battersEndWithPredicted(
+                                        farWicketSearch, sightings, held, bowlersEndBase ?: nearNow, cameraIntrinsics,
+                                        bytes, image.width, image.height, plane.rowStride, image.imageInfo.rotationDegrees, uprightAspect,
+                                    ),
                                     motion = cameraMove,
                                     frameAspect = uprightAspect,
                                     timestampMs = frameClockMs,
@@ -5179,6 +5193,32 @@ internal fun battersEndOnly(
             // bowler's; something nearly as wide is a nearer thing, not the other wicket.
             near.spanFw < span * BATTERS_MIN_NARROWER
     }
+}
+
+/**
+ * [battersEndOnly], plus the batter's stumps looked for where the bowler's stumps say they
+ * must be while nothing is confirmed — the same rule the clip analysis uses (see
+ * [com.haraan.app.vision.FarWicketSearch.offer]). On a ground where the batter stands in
+ * light trousers right behind the stumps, the whole-frame search almost never finds them.
+ */
+internal fun battersEndWithPredicted(
+    search: com.haraan.app.vision.FarWicketSearch,
+    sightings: List<com.haraan.app.vision.WicketSighting>,
+    held: com.haraan.app.vision.WicketLock?,
+    near: com.haraan.app.vision.BowlersEnd?,
+    camera: com.haraan.app.vision.CameraIntrinsics?,
+    luma: ByteArray,
+    width: Int,
+    height: Int,
+    rowStride: Int,
+    rotationDegrees: Int,
+    uprightAspect: Float,
+): List<com.haraan.app.vision.WicketSighting> {
+    search.focalFw = camera?.focalFw ?: ASSUMED_FOCAL_FW
+    return search.offer(
+        battersEndOnly(sightings, camera, near), held, near,
+        luma, width, height, rowStride, rotationDegrees, uprightAspect,
+    ) { s, n -> battersEndOnly(s, camera, n) }
 }
 
 /** The batter's stumps sit at least this much higher in the picture than the bowler's. */

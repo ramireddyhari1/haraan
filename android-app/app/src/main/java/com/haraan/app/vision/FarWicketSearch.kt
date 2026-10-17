@@ -19,7 +19,10 @@ package com.haraan.app.vision
  *
  * Pure Kotlin over the luma plane, like [StumpProfile] itself.
  */
-class FarWicketSearch(private val focalFw: Double = ASSUMED_FOCAL_FW) {
+class FarWicketSearch(
+    /** The lens, frame widths; the live camera sets it once Camera2 has said. */
+    var focalFw: Double = ASSUMED_FOCAL_FW,
+) {
 
     private var cell = 0
 
@@ -155,10 +158,40 @@ class FarWicketSearch(private val focalFw: Double = ASSUMED_FOCAL_FW) {
         return if (fitted.second.bright == nearBright) set.copy(method = StumpMethod.PREDICTED_COMB) else null
     }
 
-    /** Start the sweep again, for a phone that was moved. */
+    /**
+     * The batter's-end sightings for the tracker: [far] as the detector gave them, plus this
+     * call's find while nothing is confirmed — the tracker weighs rivals, and once one is
+     * confirmed it looks at its place itself every frame. [near] is the bowler's stumps
+     * (steadied, else this frame's); [keep] is the batter's-end filter the detector's own
+     * sightings went through. Shared by the clip chain and the live camera so they cannot
+     * drift apart.
+     */
+    fun offer(
+        far: List<WicketSighting>,
+        held: WicketLock?,
+        near: BowlersEnd?,
+        luma: ByteArray,
+        width: Int,
+        height: Int,
+        rowStride: Int,
+        rotationDegrees: Int,
+        aspect: Float,
+        keep: (List<WicketSighting>, BowlersEnd) -> List<WicketSighting>,
+    ): List<WicketSighting> {
+        val state = held?.state
+        if (state != null && state != WicketTrackState.LOST && state != WicketTrackState.TENTATIVE) return far
+        if (held?.source == WicketLockSource.MANUAL) return far
+        val n = near ?: return far
+        val found = next(luma, width, height, rowStride, rotationDegrees, n, aspect) ?: return far
+        return far + keep(listOf(WicketSighting.Stumps(found)), n)
+    }
+
+    /** Start again, for a phone that was moved or turned. */
     fun reset() {
         cell = 0
         found = null
+        polarityOf = null
+        polarity = null
     }
 
     companion object {
