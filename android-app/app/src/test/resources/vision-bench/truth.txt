@@ -1,12 +1,13 @@
 # GROUND TRUTH FOR THE TRACKING SCOREBOARD (TrackingScoreboardTest).
 #
-# Everything here was checked by eye, frame by frame, on 2026-10-17 — never taken from the
+# Everything here was checked by eye, frame by frame, on 2026-10-17 â€” never taken from the
 # app's own tracker. Frame numbers are the clip's own decoded frame index.
 #
 #   clip <id> raw=<file in VISION_BENCH_DIR> [from=N to=N] [fps=F] source=<original video>
-#   delivery release=N stumps=N stumpsTol=N [bounce=N bounceTol=N]   — or —   delivery somewhere
+#   delivery release=N stumps=N stumpsTol=N [bounce=N bounceTol=N]   â€” or â€”   delivery somewhere
 #   ball <frame> <x> <y>      ball centre, normalised to the upright 720x1280 analysis frame
 #   cut <frame>               the camera itself moved here: anything called after it is false
+#   quiet <from> <to>         both sets standing and the bowler's clear of them: a wait between balls
 #
 # release  first frame the ball is clear of the bowler's fingers.
 # stumps   frame the ball is at the batter's stump line (yorker: at the base; else passing them).
@@ -24,6 +25,7 @@
 
 clip img6056 raw=img6056.raw source=IMG_6056.MOV  (iPhone 4K 120 fps, yorker at the crease, ball lost at the foot)
 delivery release=153 stumps=231 stumpsTol=1
+quiet 0 60
 ball 156 0.3647 0.2603
 ball 157 0.3780 0.2686
 ball 158 0.3906 0.2760
@@ -106,6 +108,7 @@ ball 234 0.6174 0.4863
 
 clip img6053 raw=img6053.raw source=IMG_6053.MOV  (iPhone 4K 120 fps, full length, passes the stumps into the batter's hands)
 delivery release=45 stumps=117 stumpsTol=3 bounce=97 bounceTol=1
+quiet 190 295
 ball 46 0.3249 0.2769
 ball 47 0.3414 0.2899
 ball 48 0.3556 0.3028

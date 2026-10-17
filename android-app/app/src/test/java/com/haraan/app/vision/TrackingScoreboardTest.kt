@@ -45,6 +45,8 @@ class TrackingScoreboardTest {
         val deliveries: List<TruthDelivery>,
         val cutFrame: Int?,
         val balls: Map<Int, Pair<Float, Float>>,
+        /** A wait between balls: both sets standing, the bowler's clear. */
+        val quiet: IntRange? = null,
     )
 
     private class Row(
@@ -92,7 +94,91 @@ class TrackingScoreboardTest {
             val frames = indexOf(File(dir, clip.raw + ".idx"), clip)
             cold += ColdRow(clip.id, coldStart(File(dir, clip.raw), frames, predictFar = false), coldStart(File(dir, clip.raw), frames, predictFar = true))
         }
-        report(rows, cold)
+        val hidden = ArrayList<HiddenRow>()
+        for (clip in clips) {
+            if (only != null && clip.id !in only) continue
+            if (clip.deliveries.none { it.releaseFrame != null } || clip.quiet == null) continue
+            val frames = indexOf(File(dir, clip.raw + ".idx"), clip)
+            for (seconds in listOf(0, 8, 15, 30)) hidden += batterInFront(File(dir, clip.raw), clip, frames, seconds)
+        }
+        report(rows, cold, hidden)
+    }
+
+    private class HiddenRow(val clip: String, val seconds: Int, val stateAfter: String, val steadyKept: Boolean, val shown: Boolean, val kmh: Double?)
+
+    /*
+     * A BATTER STANDING IN FRONT OF THE STUMPS. Set up on the clip's quiet stretch (replayed),
+     * then the batter's stumps covered by a body-dark box for [seconds], then the delivery
+     * itself. Live-like: thirty frames a second while waiting.
+     */
+    private fun batterInFront(raw: File, clip: Clip, frames: List<Frame>, seconds: Int): HiddenRow {
+        val y = ByteArray(ClipFrames.SENSOR_W * ClipFrames.SENSOR_H)
+        val u = ByteArray(ClipFrames.SENSOR_W / 2 * (ClipFrames.SENSOR_H / 2))
+        val f = RandomAccessFile(raw, "r")
+        fun read(fr: Frame) {
+            f.seek(fr.line * (y.size + u.size).toLong())
+            f.readFully(y)
+            f.readFully(u)
+        }
+        val chain = DeliveryChain()
+        // A wait between balls, marked in the truth file: both sets standing, the bowler's clear.
+        val still = frames.filter { it.first in clip.quiet!! }
+        val stride = maxOf(1, (still.size / ((still.last().second - still.first().second) / 1000.0) / 30.0).roundToInt())
+        var ts = 0L
+        val called = ArrayList<CalledDelivery>()
+        var box: IntArray? = null
+        fun cover() {
+            val b = box ?: return
+            // Upright (col, row) -> sensor (row = 719 - col, col = row): see to_bench_raw.py.
+            for (row in b[1]..b[3]) for (col in b[0]..b[2]) {
+                val sr = ClipFrames.SENSOR_H - 1 - col
+                y[sr * ClipFrames.SENSOR_W + row] = 55
+                u[(sr / 2) * (ClipFrames.SENSOR_W / 2) + row / 2] = 128.toByte()
+            }
+        }
+        try {
+            // Set up on a clear view: three seconds.
+            var k = 0
+            while (ts < 3_000) {
+                read(still[k % still.size]); k += stride
+                called += chain.frame(y, u, ts); ts += 33
+            }
+            val lock = chain.measuringLock
+            if (lock != null) {
+                val a = lock.anchor
+                val span = a.span(chain.aspect).toDouble()
+                val tall = span * 3.7 * chain.aspect
+                fun px(v: Double, n: Int) = (v * n).toInt().coerceIn(0, n - 1)
+                box = intArrayOf(
+                    px(a.base.x - span * 1.3, ClipFrames.UPRIGHT_W), px(a.base.y - tall * 1.4, ClipFrames.UPRIGHT_H),
+                    px(a.base.x + span * 1.3, ClipFrames.UPRIGHT_W), px(a.base.y + 0.01, ClipFrames.UPRIGHT_H),
+                )
+            }
+            // The batter in front.
+            val until = ts + seconds * 1000L
+            while (ts < until) {
+                read(still[k % still.size]); k += stride
+                cover()
+                called += chain.frame(y, u, ts); ts += 33
+            }
+            val stateAfter = "${chain.currentLock?.state ?: "none"}"
+            val steadyKept = chain.measuringLock != null
+            called.clear()
+            // The delivery, at the clip's own rate; the batter has stepped to his stance.
+            val start = ts
+            for (fr in frames) {
+                read(fr)
+                called += chain.frame(y, u, start + (fr.second - frames.first().second).toLong())
+            }
+            chain.finish()?.let { called += it }
+            val truth = clip.deliveries.first { it.releaseFrame != null }
+            val release = start + (frames.first { it.first == truth.releaseFrame }.second - frames.first().second)
+            val d = called.filter { it.track.last().timestampMs >= release }.maxByOrNull { (if (it.path != null) 1000 else 0) + it.track.size }
+            return HiddenRow(clip.id, seconds, stateAfter, steadyKept, d?.path != null, d?.flight?.groundKmh)
+        } finally {
+            chain.release()
+            f.close()
+        }
     }
 
     /** When, from a cold start, the batter's stumps were confirmed and the corridor could be built. */
@@ -243,7 +329,7 @@ class TrackingScoreboardTest {
         return rows
     }
 
-    private fun report(rows: List<Row>, cold: List<ColdRow> = emptyList()) {
+    private fun report(rows: List<Row>, cold: List<ColdRow> = emptyList(), hidden: List<HiddenRow> = emptyList()) {
         val sb = StringBuilder()
         sb.appendLine("# Tracking scoreboard")
         sb.appendLine()
@@ -288,6 +374,18 @@ class TrackingScoreboardTest {
                 sb.appendLine("| ${c.clip} | ${t(c.without.confirmedMs)} | ${t(c.without.readyMs)} | ${t(c.with.confirmedMs)} | ${t(c.with.readyMs)} | ${c.with.base?.let { "%.3f,%.3f".format(it.x, it.y) } ?: "–"} |")
             }
         }
+        if (hidden.isNotEmpty()) {
+            sb.appendLine()
+            sb.appendLine("## Batter in front of the stumps")
+            sb.appendLine()
+            sb.appendLine("Set up on a clear view, stumps covered for N seconds, then the delivery.")
+            sb.appendLine()
+            sb.appendLine("| clip | covered s | lock after | stumps kept for measuring | delivery shown | fit km/h |")
+            sb.appendLine("|---|---|---|---|---|---|")
+            for (h in hidden) {
+                sb.appendLine("| ${h.clip} | ${h.seconds} | ${h.stateAfter} | ${if (h.steadyKept) "yes" else "**no**"} | ${if (h.shown) "yes" else "**no**"} | ${h.kmh?.let { "%.1f".format(it) } ?: "–"} |")
+            }
+        }
         val out = File("build/reports/vision-bench").apply { mkdirs() }
         File(out, "scoreboard.md").writeText(sb.toString())
         println(sb)
@@ -321,13 +419,14 @@ class TrackingScoreboardTest {
         val deliveries = ArrayList<TruthDelivery>()
         val balls = HashMap<Int, Pair<Float, Float>>()
         var cut: Int? = null
+        var quiet: IntRange? = null
         fun flush() {
             val h = head ?: return
             clips += Clip(
                 id, h.getValue("raw"), h["from"]?.toInt() ?: 0, h["to"]?.toInt() ?: Int.MAX_VALUE, h["fps"]?.toDouble(),
-                deliveries.toList(), cut, balls.toMap(),
+                deliveries.toList(), cut, balls.toMap(), quiet,
             )
-            deliveries.clear(); balls.clear(); cut = null
+            deliveries.clear(); balls.clear(); cut = null; quiet = null
         }
         fun keys(words: List<String>) = words.filter { '=' in it }.associate { it.substringBefore('=') to it.substringAfter('=') }
         for (line in text.lines()) {
@@ -343,6 +442,7 @@ class TrackingScoreboardTest {
                 }
                 "ball" -> balls[words[1].toInt()] = words[2].toFloat() to words[3].toFloat()
                 "cut" -> cut = words[1].toInt()
+                "quiet" -> quiet = words[1].toInt()..words[2].toInt()
             }
         }
         flush()

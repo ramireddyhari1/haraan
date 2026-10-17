@@ -159,7 +159,7 @@ class DeliveryChain(
             ) { s, near -> battersEndOnly(s, camera, near) }
         }
         lock = wickets.onFrame(far, still, aspect, ts)
-        steadyLock.add(lock, ts)
+        steadyLock.add(lock, ts, nearNow)
         steadyLock.value()?.takeIf { it.isMeasurable }?.let { l ->
             farStumpsAt = doubleArrayOf(l.anchor.base.x, l.anchor.base.y, l.anchor.span(aspect).toDouble())
         }

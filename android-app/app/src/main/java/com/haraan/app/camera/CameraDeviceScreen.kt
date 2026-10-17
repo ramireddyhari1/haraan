@@ -1438,7 +1438,7 @@ private fun CameraMode(
                                 ),
                                 cameraMove, uprightAspect, frameMs,
                             )
-                            steadyWicket.add(wicketLock, frameMs)
+                            steadyWicket.add(wicketLock, frameMs, nearNow)
                         }
                         // From behind the bowler, look only along the delivery's corridor and
                         // expect the ball to head for the batter's stumps. See setCorridor.
@@ -1602,7 +1602,7 @@ private fun CameraMode(
                                     frameAspect = uprightAspect,
                                     timestampMs = frameClockMs,
                                 )
-                                steadyWicket.add(wicketLock, frameClockMs)
+                                steadyWicket.add(wicketLock, frameClockMs, nearNow)
                             }
                             val now = System.currentTimeMillis()
                             if (now < validationUntilMs) {

@@ -23,12 +23,43 @@ class SteadyWicket(private val keep: Int = KEEP) {
 
     private var lastConfirmedMs = Long.MIN_VALUE
 
+    /** Where the bowler's stumps stood while these were held, and when they were last seen there. */
+    private var nearRef: BowlersEnd? = null
+    /** Null until they are seen: Long.MIN_VALUE here overflowed `now - it` and nothing was ever forgotten. */
+    private var nearSameMs: Long? = null
+    private var nearMovedStreak = 0
+
     /**
      * Folds in this frame's lock (checked at [nowMs] on the camera's clock); returns the steady
      * one to measure with, or null. No lock at all for [STALE_MS] — the phone picked up, the
-     * stumps carried off — lets the steady one go too.
+     * stumps carried off — lets the steady one go too, unless [near], the bowler's stumps as
+     * seen THIS frame (null when not seen), is still where it stood.
      */
-    fun add(lock: WicketLock?, nowMs: Long): WicketLock? {
+    fun add(lock: WicketLock?, nowMs: Long, near: BowlersEnd? = null): WicketLock? {
+        /*
+         * THE BOWLER'S STUMPS SAY WHETHER THE PHONE HAS MOVED. A batter standing right in
+         * front of his stumps hides them completely, and for longer than [STALE_MS] while he
+         * takes guard: the batter's stumps were forgotten and the next ball was not tracked
+         * (bench, IMG_6053 covered 8 s). While the bowler's set is still where it was, the
+         * phone has not moved and nothing has carried the batter's set off, so it is kept for
+         * as long as he stands there. If the bowler's set has shifted, the phone moved: the
+         * held place is wrong now, and is dropped at once rather than after the wait.
+         */
+        if (near != null && latest != null) {
+            val ref = nearRef
+            if (ref == null) {
+                nearRef = near
+                nearSameMs = nowMs
+            } else if (abs(near.base.x - ref.base.x) > ref.spanFw * NEAR_MOVED_SPANS ||
+                abs(near.base.y - ref.base.y) > ref.spanFw * NEAR_MOVED_SPANS
+            ) {
+                // One sighting off can be the bowler's leg across them; several in a row is the phone.
+                if (++nearMovedStreak >= NEAR_MOVED_SIGHTINGS) clear()
+            } else {
+                nearMovedStreak = 0
+                nearSameMs = nowMs
+            }
+        }
         if (lock != null && lock.kind == WicketKind.STUMPS && lock.state == WicketTrackState.CONFIRMED &&
             lock.heldFrames >= MIN_HELD_FRAMES
         ) {
@@ -41,7 +72,7 @@ class SteadyWicket(private val keep: Int = KEEP) {
             seen.addLast(lock.anchor)
             while (seen.size > keep) seen.removeFirst()
             moved()
-        } else if (lock == null && latest != null && nowMs - lastConfirmedMs > STALE_MS) {
+        } else if (lock == null && latest != null && nowMs - lastConfirmedMs > STALE_MS && nearSameMs.let { it == null || nowMs - it > STALE_MS }) {
             // Gone, not just hidden: a batter standing in front keeps the lock coasting for
             // as long as they stand there, and that is no reason to forget the stumps.
             clear()
@@ -58,6 +89,9 @@ class SteadyWicket(private val keep: Int = KEEP) {
     fun clear() {
         seen.clear()
         latest = null
+        nearRef = null
+        nearSameMs = null
+        nearMovedStreak = 0
     }
 
     /** The phone was moved: the latest anchors agree with each other and not with the rest. */
@@ -105,6 +139,9 @@ class SteadyWicket(private val keep: Int = KEEP) {
         const val MIN_HELD_FRAMES = 15
         const val MOVED_RUN = 8
         const val STALE_MS = 10_000L
+        /** The bowler's stumps this far off where they stood (in their own spans): the phone moved. */
+        const val NEAR_MOVED_SPANS = 0.5
+        const val NEAR_MOVED_SIGHTINGS = 5
         /** A width this far (as a share) from the usual is another object, not these stumps. */
         const val MAX_SPAN_CHANGE = 0.25f
     }
