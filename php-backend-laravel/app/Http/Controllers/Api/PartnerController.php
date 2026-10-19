@@ -19,6 +19,10 @@ use App\Models\PartnerPayoutAccount;
 use App\Support\PayoutAccountEditor;
 use App\Models\PayoutBatch;
 use App\Models\User;
+use App\Filament\Resources\PartnerStaff\PartnerStaffResource;
+use Illuminate\Support\Str;
+use App\Support\JwtService;
+use App\Models\ShiftSession;
 use App\Models\Venue;
 use App\Models\VenueBatch;
 use App\Models\VenueBlock;
@@ -1654,21 +1658,41 @@ class PartnerController extends Controller
         return response()->json(['status' => 'unblocked', 'id' => (int) $blockId]);
     }
 
-    /** GET /api/partner/staff — the owner's desk persons. Owner-only. */
+    /**
+     * GET /api/partner/staff — the owner's desk team, with what each person did
+     * today, plus everything the add/edit sheet needs (role presets, the places a
+     * person can be assigned to). Owner-only.
+     */
     public function staff(Request $request): JsonResponse
     {
         $ownerId = $request->user()->effectivePartnerId();
 
-        $staff = User::query()->where('parent_partner_id', $ownerId)->orderBy('name')->get()
-            ->map(fn (User $u): array => $this->staffRow($u));
+        $people = User::query()->where('parent_partner_id', $ownerId)
+            ->with(['assignedVenues:id,name', 'assignedEvents:id,title'])
+            ->orderBy('name')->get();
+
+        $today = $this->staffTodayStats($people->pluck('id')->all());
 
         return response()->json([
-            'data'        => $staff,
+            'data'        => $people->map(fn (User $u): array => $this->staffRow($u, $today))->values(),
             'permissions' => User::STAFF_PERMISSIONS,
+            'presets'     => collect(User::STAFF_ROLE_PRESETS)
+                ->map(fn (array $p, string $key): array => ['key' => $key, 'label' => $p['label'], 'permissions' => $p['permissions']])
+                ->values(),
+            'venues'      => Venue::query()->where('partner_id', $ownerId)->orderBy('name')->get(['id', 'name'])
+                ->map(fn (Venue $v): array => ['id' => $v->id, 'name' => $v->name])->values(),
+            'events'      => Event::query()->where('partner_id', $ownerId)
+                ->orderByDesc('id')->limit(60)->get(['id', 'title'])
+                ->map(fn (Event $e): array => ['id' => $e->id, 'name' => $e->title])->values(),
         ]);
     }
 
-    /** POST /api/partner/staff — create a desk person. Owner-only. */
+    /**
+     * POST /api/partner/staff — add a desk person. Owner-only.
+     *
+     * With no password the person is emailed a link to set their own, so the
+     * owner never has to say a password out loud across the counter.
+     */
     public function createStaff(Request $request): JsonResponse
     {
         $ownerId = $request->user()->effectivePartnerId();
@@ -1676,17 +1700,24 @@ class PartnerController extends Controller
         $data = $request->validate([
             'name'          => ['required', 'string', 'max:120'],
             'email'         => ['required', 'email', 'max:190', 'unique:users,email'],
-            'password'      => ['required', 'string', 'min:6'],
+            'password'      => ['nullable', 'string', 'min:6'],
             'permissions'   => ['array'],
             'permissions.*' => ['string', 'in:'.implode(',', User::STAFF_PERMISSIONS)],
+            'venue_ids'     => ['array'],
+            'venue_ids.*'   => ['integer'],
+            'event_ids'     => ['array'],
+            'event_ids.*'   => ['integer'],
+        ], [
+            'email.unique' => 'That email already has a Haraan account. Use a different one for this desk login.',
         ]);
 
         $owner = User::query()->find($ownerId);
+        $invite = empty($data['password']);
 
         $staff = User::query()->create([
             'name'              => $data['name'],
             'email'             => $data['email'],
-            'password'          => Hash::make($data['password']),
+            'password'          => Hash::make($invite ? Str::random(40) : $data['password']),
             'role'              => 'PARTNER',
             'status'            => 'ACTIVE',
             'partner_type'      => $owner?->partner_type,
@@ -1694,31 +1725,94 @@ class PartnerController extends Controller
             'staff_permissions' => $this->cleanPermissions($data['permissions'] ?? []),
         ]);
 
-        return response()->json(['status' => 'ok', 'staff' => $this->staffRow($staff)], 201);
+        $this->syncStaffPlaces($staff, $ownerId, $data);
+
+        $invited = $invite && $this->sendStaffInvite($staff, $owner);
+
+        return response()->json([
+            'status'  => 'ok',
+            'invited' => $invited,
+            'staff'   => $this->staffRow($staff->load(['assignedVenues:id,name', 'assignedEvents:id,title']), []),
+        ], 201);
     }
 
-    /** POST /api/partner/staff/{id} — update a desk person's permissions. Owner-only. */
+    /** POST /api/partner/staff/{id} — change a desk person's name, access or places. Owner-only. */
     public function updateStaff(Request $request, string $id): JsonResponse
     {
         $ownerId = $request->user()->effectivePartnerId();
         $staff = User::query()->where('parent_partner_id', $ownerId)->findOrFail($id);
 
         $data = $request->validate([
-            'permissions'   => ['array'],
+            'name'          => ['sometimes', 'string', 'max:120'],
+            'permissions'   => ['sometimes', 'array'],
             'permissions.*' => ['string', 'in:'.implode(',', User::STAFF_PERMISSIONS)],
+            'venue_ids'     => ['sometimes', 'array'],
+            'venue_ids.*'   => ['integer'],
+            'event_ids'     => ['sometimes', 'array'],
+            'event_ids.*'   => ['integer'],
         ]);
 
-        $staff->staff_permissions = $this->cleanPermissions($data['permissions'] ?? []);
+        if (array_key_exists('name', $data)) {
+            $staff->name = $data['name'];
+        }
+        if (array_key_exists('permissions', $data)) {
+            $staff->staff_permissions = $this->cleanPermissions($data['permissions']);
+        }
         $staff->save();
+        $this->syncStaffPlaces($staff, $ownerId, $data);
 
-        return response()->json(['status' => 'ok', 'staff' => $this->staffRow($staff)]);
+        return response()->json([
+            'status' => 'ok',
+            'staff'  => $this->staffRow($staff->load(['assignedVenues:id,name', 'assignedEvents:id,title']), $this->staffTodayStats([$staff->id])),
+        ]);
+    }
+
+    /**
+     * POST /api/partner/staff/{id}/suspend {suspended: bool} — pause or restore a
+     * desk person. Pausing also signs them out of every device at once; a pause
+     * that left the phone logged in would not be a pause.
+     */
+    public function suspendStaff(Request $request, string $id): JsonResponse
+    {
+        $ownerId = $request->user()->effectivePartnerId();
+        $staff = User::query()->where('parent_partner_id', $ownerId)->findOrFail($id);
+        $suspend = $request->boolean('suspended', true);
+
+        $staff->status = $suspend ? 'SUSPENDED' : 'ACTIVE';
+        $staff->save();
+        if ($suspend) {
+            JwtService::revokeAllFor($staff);
+        }
+
+        return response()->json([
+            'status' => 'ok',
+            'staff'  => $this->staffRow($staff->load(['assignedVenues:id,name', 'assignedEvents:id,title']), $this->staffTodayStats([$staff->id])),
+        ]);
+    }
+
+    /** POST /api/partner/staff/{id}/invite — email the set-your-password link again. Owner-only. */
+    public function inviteStaff(Request $request, string $id): JsonResponse
+    {
+        $ownerId = $request->user()->effectivePartnerId();
+        $staff = User::query()->where('parent_partner_id', $ownerId)->findOrFail($id);
+
+        if (! $this->sendStaffInvite($staff, User::query()->find($ownerId))) {
+            return response()->json(['error' => 'The invite email could not be sent. Try again in a minute.'], 502);
+        }
+
+        return response()->json(['status' => 'sent', 'email' => $staff->email]);
     }
 
     /** DELETE /api/partner/staff/{id} — remove a desk person. Owner-only. */
     public function deleteStaff(Request $request, string $id): JsonResponse
     {
         $ownerId = $request->user()->effectivePartnerId();
-        User::query()->where('parent_partner_id', $ownerId)->where('id', $id)->delete();
+        $staff = User::query()->where('parent_partner_id', $ownerId)->where('id', $id)->first();
+
+        if ($staff !== null) {
+            JwtService::revokeAllFor($staff);
+            $staff->delete();
+        }
 
         return response()->json(['status' => 'deleted']);
     }
@@ -1729,14 +1823,108 @@ class PartnerController extends Controller
         return array_values(array_intersect($perms, User::STAFF_PERMISSIONS));
     }
 
-    /** @return array<string, mixed> */
-    private function staffRow(User $u): array
+    /**
+     * Assign the person to places — only ever ones the owner owns, so a crafted
+     * id can't hand a desk person someone else's venue. Empty = everywhere.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function syncStaffPlaces(User $staff, int $ownerId, array $data): void
     {
+        if (array_key_exists('venue_ids', $data)) {
+            $ids = Venue::query()->where('partner_id', $ownerId)->whereIn('id', $data['venue_ids'])->pluck('id')->all();
+            $staff->assignedVenues()->sync($ids);
+        }
+        if (array_key_exists('event_ids', $data)) {
+            $ids = Event::query()->where('partner_id', $ownerId)->whereIn('id', $data['event_ids'])->pluck('id')->all();
+            $staff->assignedEvents()->sync($ids);
+        }
+    }
+
+    private function sendStaffInvite(User $staff, ?User $owner): bool
+    {
+        try {
+            return PartnerStaffResource::sendInvite($staff, $owner?->name);
+        } catch (\Throwable $e) {
+            Log::warning('Staff invite failed', ['staff' => $staff->id, 'error' => $e->getMessage()]);
+
+            return false;
+        }
+    }
+
+    /**
+     * What each person did at the desk today: money they physically took (net of
+     * refunds they gave) and the shift they have open right now, if any.
+     *
+     * @param array<int, int> $ids
+     * @return array<int, array{collected: float, payments: int, shift: ?array}>
+     */
+    private function staffTodayStats(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+
+        [$from, $to] = BusinessClock::dayBoundsUtc();
+        $out = [];
+
+        BookingPayment::query()
+            ->whereIn('collected_by', $ids)
+            ->whereBetween('collected_at', [$from, $to])
+            ->selectRaw('collected_by, SUM(amount) as total, SUM(CASE WHEN amount > 0 THEN 1 ELSE 0 END) as n')
+            ->groupBy('collected_by')
+            ->get()
+            ->each(function ($row) use (&$out): void {
+                $out[(int) $row->collected_by] = ['collected' => round((float) $row->total, 2), 'payments' => (int) $row->n, 'shift' => null];
+            });
+
+        ShiftSession::query()
+            ->whereIn('user_id', $ids)
+            ->whereNull('closed_at')
+            ->with('venue:id,name')
+            ->orderByDesc('opened_at')
+            ->get()
+            ->each(function (ShiftSession $s) use (&$out): void {
+                $uid = (int) $s->user_id;
+                $out[$uid] ??= ['collected' => 0.0, 'payments' => 0, 'shift' => null];
+                $out[$uid]['shift'] ??= [
+                    'venue'     => $s->venue?->name,
+                    'opened_at' => $s->opened_at ? Carbon::parse($s->opened_at)->toIso8601String() : null,
+                ];
+            });
+
+        return $out;
+    }
+
+    /**
+     * @param array<int, array{collected: float, payments: int, shift: ?array}> $today
+     * @return array<string, mixed>
+     */
+    private function staffRow(User $u, array $today): array
+    {
+        $suspended = strtoupper((string) $u->status) === 'SUSPENDED';
+        $preset = $u->staffRolePreset();
+        $stats = $today[$u->id] ?? ['collected' => 0.0, 'payments' => 0, 'shift' => null];
+
         return [
-            'id'          => $u->id,
-            'name'        => $u->name,
-            'email'       => $u->email,
-            'permissions' => $u->staff_permissions ?? [],
+            'id'           => $u->id,
+            'name'         => $u->name,
+            'email'        => $u->email,
+            'permissions'  => $u->staff_permissions ?? [],
+            'role'         => $preset,
+            'role_label'   => User::STAFF_ROLE_PRESETS[$preset]['label'] ?? 'Custom',
+            // pending = invited, never signed in yet
+            'state'        => $suspended ? 'suspended' : ($u->last_seen_at === null ? 'pending' : 'active'),
+            'last_seen_at' => $u->last_seen_at?->toIso8601String(),
+            'venues'       => $u->relationLoaded('assignedVenues')
+                ? $u->assignedVenues->map(fn ($v): array => ['id' => $v->id, 'name' => $v->name])->values()->all() : [],
+            'events'       => $u->relationLoaded('assignedEvents')
+                ? $u->assignedEvents->map(fn ($e): array => ['id' => $e->id, 'name' => $e->title])->values()->all() : [],
+            'today'        => [
+                'collected' => $stats['collected'],
+                'payments'  => $stats['payments'],
+            ],
+            'on_shift'     => $stats['shift'],
         ];
     }
 

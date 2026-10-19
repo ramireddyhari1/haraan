@@ -899,8 +899,45 @@ data class PartnerUpdatesPage(
     val realtime: PartnerRealtimeInfo?,
 )
 
-/** A desk person under a partner owner. */
-data class StaffMember(val id: Long, val name: String, val email: String, val permissions: List<String>)
+/** A desk person under a partner owner, with what they did at the desk today. */
+data class StaffMember(
+    val id: Long,
+    val name: String,
+    val email: String,
+    val permissions: List<String>,
+    /** Role preset key (manager/box_office/gate/finance) or "custom". */
+    val role: String = "custom",
+    val roleLabel: String = "Custom",
+    /** active | pending (invited, never signed in) | suspended */
+    val state: String = "active",
+    /** ISO-8601, null until they first sign in. */
+    val lastSeenAt: String? = null,
+    /** Places they're limited to. Both empty = every venue and event. */
+    val venues: List<StaffPlace> = emptyList(),
+    val events: List<StaffPlace> = emptyList(),
+    /** Net money they physically took at the desk today. */
+    val collectedToday: Double = 0.0,
+    val paymentsToday: Int = 0,
+    /** The shift they have open right now, if any. */
+    val onShiftVenue: String? = null,
+    val onShiftSince: String? = null,
+) {
+    val isSuspended get() = state == "suspended"
+    val isPending get() = state == "pending"
+    val isOnShift get() = onShiftSince != null && !isSuspended
+}
+
+data class StaffPlace(val id: Long, val name: String)
+
+data class StaffPreset(val key: String, val label: String, val permissions: List<String>)
+
+/** Everything the Desk staff screen needs in one call. */
+data class StaffRoster(
+    val members: List<StaffMember>,
+    val presets: List<StaffPreset>,
+    val venues: List<StaffPlace>,
+    val events: List<StaffPlace>,
+)
 
 /** All capabilities an owner can grant a desk person. */
 val STAFF_PERMISSIONS = listOf("bookings", "checkin", "pricing", "reports")
@@ -1548,24 +1585,91 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         )
     }
 
-    suspend fun staff(token: String): List<StaffMember> = withContext(Dispatchers.IO) {
-        parseArray(get("/api/partner/staff", token)) { o ->
-            val permsArr = o.optJSONArray("permissions")
-            val perms = if (permsArr == null) emptyList() else (0 until permsArr.length()).map { permsArr.optString(it) }
-            StaffMember(o.optLong("id"), o.optString("name"), o.optString("email"), perms)
-        }
+    suspend fun staffRoster(token: String): StaffRoster = withContext(Dispatchers.IO) {
+        val root = JSONObject(get("/api/partner/staff", token))
+        fun places(arr: JSONArray?): List<StaffPlace> =
+            if (arr == null) emptyList() else (0 until arr.length()).map { i ->
+                arr.getJSONObject(i).let { StaffPlace(it.optLong("id"), it.optString("name")) }
+            }
+        val members = root.optJSONArray("data")?.let { arr -> (0 until arr.length()).map { parseStaff(arr.getJSONObject(it)) } } ?: emptyList()
+        val presets = root.optJSONArray("presets")?.let { arr ->
+            (0 until arr.length()).map { i ->
+                arr.getJSONObject(i).let { StaffPreset(it.optString("key"), it.optString("label"), it.optJSONArray("permissions").toStringList()) }
+            }
+        } ?: emptyList()
+        StaffRoster(members, presets, places(root.optJSONArray("venues")), places(root.optJSONArray("events")))
     }
 
-    suspend fun createStaff(token: String, name: String, email: String, password: String, permissions: List<String>) = withContext(Dispatchers.IO) {
-        val payload = JSONObject().put("name", name).put("email", email).put("password", password)
-            .put("permissions", org.json.JSONArray(permissions))
-        post("/api/partner/staff", payload.toString(), token)
-        Unit
+    private fun parseStaff(o: JSONObject): StaffMember {
+        fun places(arr: JSONArray?): List<StaffPlace> =
+            if (arr == null) emptyList() else (0 until arr.length()).map { i ->
+                arr.getJSONObject(i).let { StaffPlace(it.optLong("id"), it.optString("name")) }
+            }
+        val today = o.optJSONObject("today")
+        val shift = o.optJSONObject("on_shift")
+        return StaffMember(
+            id = o.optLong("id"),
+            name = o.optString("name"),
+            email = o.optString("email"),
+            permissions = o.optJSONArray("permissions").toStringList(),
+            role = o.optStringOrNull("role") ?: "custom",
+            roleLabel = o.optStringOrNull("role_label") ?: "Custom",
+            state = o.optStringOrNull("state") ?: "active",
+            lastSeenAt = o.optStringOrNull("last_seen_at"),
+            venues = places(o.optJSONArray("venues")),
+            events = places(o.optJSONArray("events")),
+            collectedToday = today?.optDouble("collected", 0.0) ?: 0.0,
+            paymentsToday = today?.optInt("payments", 0) ?: 0,
+            onShiftVenue = shift?.optStringOrNull("venue"),
+            onShiftSince = shift?.optStringOrNull("opened_at"),
+        )
     }
 
-    suspend fun updateStaff(token: String, id: Long, permissions: List<String>) = withContext(Dispatchers.IO) {
-        val payload = JSONObject().put("permissions", org.json.JSONArray(permissions))
-        post("/api/partner/staff/$id", payload.toString(), token)
+    /**
+     * Add a desk person. A null [password] emails them a set-your-password link
+     * instead; returns whether that invite actually went out.
+     */
+    suspend fun createStaff(
+        token: String,
+        name: String,
+        email: String,
+        password: String?,
+        permissions: List<String>,
+        venueIds: List<Long>,
+        eventIds: List<Long>,
+    ): Boolean = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("name", name).put("email", email)
+            .put("permissions", JSONArray(permissions))
+            .put("venue_ids", JSONArray(venueIds))
+            .put("event_ids", JSONArray(eventIds))
+        if (!password.isNullOrEmpty()) payload.put("password", password)
+        JSONObject(post("/api/partner/staff", payload.toString(), token)).optBoolean("invited", false)
+    }
+
+    suspend fun updateStaff(
+        token: String,
+        id: Long,
+        name: String,
+        permissions: List<String>,
+        venueIds: List<Long>,
+        eventIds: List<Long>,
+    ): StaffMember = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("name", name)
+            .put("permissions", JSONArray(permissions))
+            .put("venue_ids", JSONArray(venueIds))
+            .put("event_ids", JSONArray(eventIds))
+        parseStaff(JSONObject(post("/api/partner/staff/$id", payload.toString(), token)).getJSONObject("staff"))
+    }
+
+    /** Pause (and sign out everywhere) or restore a desk person. */
+    suspend fun suspendStaff(token: String, id: Long, suspended: Boolean): StaffMember = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("suspended", suspended)
+        parseStaff(JSONObject(post("/api/partner/staff/$id/suspend", payload.toString(), token)).getJSONObject("staff"))
+    }
+
+    /** Email the set-your-password link again. */
+    suspend fun inviteStaff(token: String, id: Long) = withContext(Dispatchers.IO) {
+        post("/api/partner/staff/$id/invite", "{}", token)
         Unit
     }
 

@@ -396,13 +396,13 @@ class PartnerStaffResource extends Resource
      * password broker token (same table the website reset uses) and sends through
      * the admin-managed sender pool, so no extra infrastructure.
      */
-    public static function sendInvite(User $user): void
+    public static function sendInvite(User $user, ?string $orgName = null): bool
     {
         $token = Password::broker()->createToken($user);
         $url = url(route('site.password.reset', ['token' => $token], false)) . '?email=' . urlencode($user->email);
-        $org = auth()->user()?->name ?? 'Your organiser';
+        $org = $orgName ?? auth()->user()?->name ?? 'Your organiser';
 
-        app(EmailOtpService::class)->send(
+        return app(EmailOtpService::class)->send(
             $user->email,
             'You’ve been added to Haraan Partner',
             "Hi {$user->name},\n\n{$org} added you to their team on Haraan Partner. "

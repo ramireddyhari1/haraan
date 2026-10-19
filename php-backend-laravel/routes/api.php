@@ -651,6 +651,8 @@ Route::middleware(['auth.jwt', 'auth.partner'])
             Route::post('/staff', 'createStaff');
             Route::post('/staff/{id}', 'updateStaff')->whereNumber('id');
             Route::delete('/staff/{id}', 'deleteStaff')->whereNumber('id');
+            Route::post('/staff/{id}/suspend', 'suspendStaff')->whereNumber('id');
+            Route::post('/staff/{id}/invite', 'inviteStaff')->whereNumber('id');
         });
     });
 
