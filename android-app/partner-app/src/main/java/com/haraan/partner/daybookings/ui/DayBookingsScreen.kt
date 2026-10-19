@@ -389,8 +389,10 @@ fun DayBookingsScreen(
             date = state.selectedDate,
             isSubmitting = state.isSubmittingWalkIn,
             onDismiss = { viewModel.closeWalkInModal() },
-            onSubmit = { slotId, courtId, date, name, phone, method ->
-                viewModel.submitWalkIn(slotId, courtId, date, name, phone, method)
+            passes = state.walkInPasses,
+            onPhoneComplete = { phone -> viewModel.lookupPasses(phone) },
+            onSubmit = { slotId, courtId, date, name, phone, method, passId ->
+                viewModel.submitWalkIn(slotId, courtId, date, name, phone, method, passId)
             },
             onBlock = if (canBookings) { req ->
                 viewModel.blockCourt(req.courtId, req.date, req.start, req.end, req.kind, req.note, req.summary)

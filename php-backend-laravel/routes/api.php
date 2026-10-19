@@ -602,11 +602,9 @@ Route::middleware(['auth.jwt', 'auth.partner'])
             Route::delete('/venues/{id}/slots/{slotId}', 'deleteSlot')->whereNumber('id')->whereNumber('slotId');
             Route::post('/venues/{id}/courts/{courtId}', 'saveCourt')->whereNumber('id')->whereNumber('courtId');
             Route::post('/academy', 'saveBatch');
-            Route::post('/academy/{id}/enroll', 'enrollStudent')->whereNumber('id');
-            Route::post('/academy/attendance', 'markAttendance');
+            Route::post('/academy/{id}', 'saveBatch')->whereNumber('id');
             Route::post('/packages', 'savePackage');
             Route::post('/packages/{id}', 'savePackage')->whereNumber('id');
-            Route::post('/packages/{id}/sell', 'sellPackage')->whereNumber('id');
         });
         Route::middleware('partner.can:bookings')->group(function (): void {
             Route::post('/venues/{id}/bookings', 'storeOfflineBooking')->whereNumber('id');
@@ -620,16 +618,31 @@ Route::middleware(['auth.jwt', 'auth.partner'])
             Route::post('/bookings/{id}/payment-request', 'paymentRequest')->whereNumber('id');
             Route::post('/bookings/{id}/collect', 'collectAtDesk')->whereNumber('id');
         });
+        // Academy + packages are desk work: the front desk marks attendance, takes
+        // fees, sells passes and looks a customer's pass up. Defining a batch or an
+        // offer (prices) stays under 'pricing' above. Finance can still read.
+        Route::middleware('partner.can:bookings|reports')->group(function (): void {
+            Route::get('/academy', 'academy');
+            Route::get('/academy/{id}/roster', 'batchRoster')->whereNumber('id');
+            Route::get('/academy/enrollments/{id}', 'enrollmentDetail')->whereNumber('id');
+            Route::get('/packages', 'packages');
+            Route::get('/packages/holder', 'packageHolder');
+            Route::get('/packages/holders/{id}', 'packageHolderDetail')->whereNumber('id');
+        });
+        Route::middleware('partner.can:bookings')->group(function (): void {
+            Route::post('/academy/{id}/enroll', 'enrollStudent')->whereNumber('id');
+            Route::post('/academy/attendance', 'markAttendance');
+            Route::post('/academy/{id}/attendance/all', 'markAllAttendance')->whereNumber('id');
+            Route::post('/academy/enrollments/{id}/fee', 'collectBatchFee')->whereNumber('id');
+            Route::post('/academy/enrollments/{id}/remove', 'removeStudent')->whereNumber('id');
+            Route::post('/packages/{id}/sell', 'sellPackage')->whereNumber('id');
+        });
         Route::middleware('partner.can:checkin')->post('/check-in', 'checkInByCode');
         Route::middleware('partner.can:reports')->group(function (): void {
             Route::get('/reports/bookings', 'bookingsReport');
             // Settlement is money-sensitive: same 'reports' gate as Earnings, and
             // the destination itself is only ever returned masked.
             Route::get('/customers', 'customers');
-            Route::get('/academy', 'academy');
-            Route::get('/academy/{id}/roster', 'batchRoster')->whereNumber('id');
-            Route::get('/packages', 'packages');
-            Route::get('/packages/holder', 'packageHolder');
             Route::get('/payouts', 'payouts');
             Route::post('/payouts/account', 'savePayoutAccount');
         });

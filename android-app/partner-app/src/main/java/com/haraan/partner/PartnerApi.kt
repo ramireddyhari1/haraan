@@ -680,7 +680,7 @@ data class NotificationsPage(val unread: Int, val items: List<NotificationRow>)
 /** One message in the partner↔admin support thread. */
 data class SupportMessage(val id: Long, val body: String, val fromAdmin: Boolean, val createdAt: String?)
 
-/** A coaching batch: coach, weekdays, time, monthly fee, roster health. */
+/** A coaching batch: coach, weekdays, time, monthly fee, roster and fee health. */
 data class BatchRow(
     val id: Long,
     val name: String,
@@ -695,6 +695,26 @@ data class BatchRow(
     val overdue: Int,
     val runsToday: Boolean,
     val isActive: Boolean,
+    val dueSoon: Int = 0,
+    val presentToday: Int = 0,
+    val venueId: Long? = null,
+    val venue: String? = null,
+)
+
+/** The Academy screen's headline: today, and money in this month. */
+data class AcademySummary(
+    val batchesToday: Int,
+    val students: Int,
+    val presentToday: Int,
+    val overdue: Int,
+    val dueSoon: Int,
+    val collectedMonth: Int,
+)
+
+data class AcademyPage(
+    val batches: List<BatchRow>,
+    val summary: AcademySummary,
+    val venues: List<StaffPlace>,
 )
 
 /** One student on a batch, for the roster + attendance sheet. */
@@ -706,14 +726,39 @@ data class StudentRow(
     val overdue: Boolean,
     val present: Boolean,
     val attended: Int,
+    /** Positive = days past due; zero or negative = still covered. Null = never paid. */
+    val daysOverdue: Int? = null,
+    val dueSoon: Boolean = false,
+    /** The batch's last few sessions, oldest first: did they come? */
+    val recent: List<Boolean> = emptyList(),
+    val amountPaid: Int = 0,
 )
 
 data class RosterPage(
-    val batchName: String,
-    val coach: String?,
+    val batch: BatchRow,
     val date: String,
     val runsToday: Boolean,
     val students: List<StudentRow>,
+)
+
+/** One academy fee collected at the desk. */
+data class FeePayment(
+    val id: Long,
+    val amount: Int,
+    val method: String,
+    val months: Int,
+    val paidUntil: String?,
+    val collectedAt: String?,
+    val collectedBy: String?,
+)
+
+data class StudentDetail(
+    val student: StudentRow,
+    val batchName: String,
+    val monthlyFee: Int,
+    val payments: List<FeePayment>,
+    /** The batch's last sessions, oldest first. */
+    val attendance: List<Pair<String, Boolean>>,
 )
 
 /** An offer the venue sells: "10 sessions for ₹4,000". */
@@ -725,6 +770,10 @@ data class VenuePackageRow(
     val perSession: Int,
     val validityDays: Int?,
     val isActive: Boolean,
+    val venueId: Long? = null,
+    val venue: String? = null,
+    val sold: Int = 0,
+    val soldMonth: Int = 0,
 )
 
 /** A customer who holds a pass, and what's left on it. */
@@ -739,9 +788,36 @@ data class PackageHolder(
     val expiresAt: String?,
     val expired: Boolean,
     val usable: Boolean,
+    val expiresInDays: Int? = null,
+    val expiringSoon: Boolean = false,
+    val soldOn: String? = null,
+    /** Null = valid at every branch. */
+    val validAtVenueId: Long? = null,
 )
 
-data class PackagesPage(val packages: List<VenuePackageRow>, val holders: List<PackageHolder>)
+data class PackagesSummary(
+    val activeHolders: Int,
+    val expiringSoon: Int,
+    val soldMonth: Int,
+    val soldMonthAmount: Int,
+)
+
+data class PackagesPage(
+    val packages: List<VenuePackageRow>,
+    val holders: List<PackageHolder>,
+    val summary: PackagesSummary = PackagesSummary(0, 0, 0, 0),
+)
+
+/** One session spent from a pass. */
+data class PassUse(val id: Long, val at: String?, val date: String?, val slot: String?, val venue: String?)
+
+data class PassDetail(
+    val holder: PackageHolder,
+    val soldOn: String?,
+    val amountPaid: Int,
+    val paymentMethod: String?,
+    val uses: List<PassUse>,
+)
 
 /** One customer of this venue, identified by phone across online + walk-in bookings. */
 data class CustomerRow(
@@ -1838,6 +1914,10 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         expiresAt = o.optStringOrNull("expires_at"),
         expired = o.optBoolean("expired", false),
         usable = o.optBoolean("usable", false),
+        expiresInDays = if (o.isNull("expires_in_days")) null else o.optInt("expires_in_days"),
+        expiringSoon = o.optBoolean("expiring_soon", false),
+        soldOn = o.optStringOrNull("sold_on"),
+        validAtVenueId = if (o.isNull("valid_at_venue_id")) null else o.optLong("valid_at_venue_id").takeIf { it > 0 },
     )
 
     private fun parseStudent(o: JSONObject) = StudentRow(
@@ -1848,6 +1928,10 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         overdue = o.optBoolean("overdue", false),
         present = o.optBoolean("present", false),
         attended = o.optInt("attended"),
+        daysOverdue = if (!o.has("days_overdue") || o.isNull("days_overdue")) null else o.optInt("days_overdue"),
+        dueSoon = o.optBoolean("due_soon", false),
+        recent = o.optJSONArray("recent")?.let { r -> (0 until r.length()).map { r.optBoolean(it) } } ?: emptyList(),
+        amountPaid = o.optInt("amount_paid"),
     )
 
     /**
@@ -1899,64 +1983,100 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         Unit
     }
 
-    /** GET /api/partner/academy — coaching batches with roster + fee health. */
-    suspend fun academy(token: String): List<BatchRow> = withContext(Dispatchers.IO) {
-        parseArray(get("/api/partner/academy", token)) { o ->
-            val d = o.optJSONArray("days")
-            BatchRow(
-                id = o.optLong("id"),
-                name = o.optString("name"),
-                coach = o.optStringOrNull("coach"),
-                sport = o.optStringOrNull("sport"),
-                days = if (d == null) emptyList() else (0 until d.length()).map { d.optString(it) },
-                startTime = o.optStringOrNull("start_time"),
-                endTime = o.optStringOrNull("end_time"),
-                monthlyFee = o.optInt("monthly_fee"),
-                capacity = if (o.isNull("capacity")) null else o.optInt("capacity"),
-                students = o.optInt("students"),
-                overdue = o.optInt("overdue"),
-                runsToday = o.optBoolean("runs_today", false),
-                isActive = o.optBoolean("is_active", true),
-            )
-        }
+    private fun parseBatch(o: JSONObject): BatchRow {
+        val d = o.optJSONArray("days")
+        return BatchRow(
+            id = o.optLong("id"),
+            name = o.optString("name"),
+            coach = o.optStringOrNull("coach"),
+            sport = o.optStringOrNull("sport"),
+            days = if (d == null) emptyList() else (0 until d.length()).map { d.optString(it) },
+            startTime = o.optStringOrNull("start_time"),
+            endTime = o.optStringOrNull("end_time"),
+            monthlyFee = o.optInt("monthly_fee"),
+            capacity = if (o.isNull("capacity")) null else o.optInt("capacity"),
+            students = o.optInt("students"),
+            overdue = o.optInt("overdue"),
+            runsToday = o.optBoolean("runs_today", false),
+            isActive = o.optBoolean("is_active", true),
+            dueSoon = o.optInt("due_soon"),
+            presentToday = o.optInt("present_today"),
+            venueId = if (o.isNull("venue_id")) null else o.optLong("venue_id").takeIf { it > 0 },
+            venue = o.optStringOrNull("venue"),
+        )
     }
 
+    /** GET /api/partner/academy — batches, today's summary, and the branches a batch can sit at. */
+    suspend fun academy(token: String): AcademyPage = withContext(Dispatchers.IO) {
+        val root = JSONObject(get("/api/partner/academy", token))
+        val s = root.optJSONObject("summary")
+        val vs = root.optJSONArray("venues")
+        AcademyPage(
+            batches = root.optJSONArray("data")?.let { a -> (0 until a.length()).map { parseBatch(a.getJSONObject(it)) } } ?: emptyList(),
+            summary = AcademySummary(
+                batchesToday = s?.optInt("batches_today") ?: 0,
+                students = s?.optInt("students") ?: 0,
+                presentToday = s?.optInt("present_today") ?: 0,
+                overdue = s?.optInt("overdue") ?: 0,
+                dueSoon = s?.optInt("due_soon") ?: 0,
+                collectedMonth = s?.optInt("collected_month") ?: 0,
+            ),
+            venues = if (vs == null) emptyList() else (0 until vs.length()).map { i ->
+                vs.getJSONObject(i).let { StaffPlace(it.optLong("id"), it.optString("name")) }
+            },
+        )
+    }
+
+    /** Create ([id] null) or edit a batch; [isActive] false pauses it. */
     suspend fun saveBatch(
         token: String,
+        id: Long?,
         name: String,
         coach: String?,
+        sport: String?,
         days: List<String>,
         startTime: String?,
         endTime: String?,
         monthlyFee: Int,
         capacity: Int?,
+        venueId: Long?,
+        isActive: Boolean = true,
     ) = withContext(Dispatchers.IO) {
         val payload = JSONObject()
             .put("name", name)
             .put("coachName", coach ?: JSONObject.NULL)
+            .put("sport", sport ?: JSONObject.NULL)
             .put("days", JSONArray(days))
             .put("startTime", startTime ?: JSONObject.NULL)
             .put("endTime", endTime ?: JSONObject.NULL)
             .put("monthlyFee", monthlyFee)
             .put("capacity", capacity ?: JSONObject.NULL)
-        post("/api/partner/academy", payload.toString(), token)
+            .put("venueId", venueId ?: JSONObject.NULL)
+            .put("isActive", isActive)
+        post(if (id == null) "/api/partner/academy" else "/api/partner/academy/$id", payload.toString(), token)
         Unit
     }
 
-    /** Enrol a student. Re-enrolling the same number extends their seat. */
-    suspend fun enrollStudent(token: String, batchId: Long, name: String, phone: String, months: Int) = withContext(Dispatchers.IO) {
-        val payload = JSONObject().put("studentName", name).put("studentPhone", phone).put("months", months)
+    /** Enrol a student and take their first fees. Re-enrolling the same number extends their seat. */
+    suspend fun enrollStudent(
+        token: String,
+        batchId: Long,
+        name: String,
+        phone: String,
+        months: Int,
+        method: String,
+    ) = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("studentName", name).put("studentPhone", phone)
+            .put("months", months).put("paymentMethod", method)
         post("/api/partner/academy/$batchId/enroll", payload.toString(), token)
         Unit
     }
 
     suspend fun batchRoster(token: String, batchId: Long, date: String): RosterPage = withContext(Dispatchers.IO) {
         val o = JSONObject(get("/api/partner/academy/$batchId/roster?date=$date", token))
-        val b = o.optJSONObject("batch")
         val arr = o.optJSONArray("data")
         RosterPage(
-            batchName = b?.optString("name") ?: "Batch",
-            coach = b?.optStringOrNull("coach"),
+            batch = parseBatch(o.optJSONObject("batch") ?: JSONObject()),
             date = o.optString("date"),
             runsToday = o.optBoolean("runs_today", false),
             students = if (arr == null) emptyList() else (0 until arr.length()).map { parseStudent(arr.getJSONObject(it)) },
@@ -1970,11 +2090,59 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         Unit
     }
 
-    /** GET /api/partner/packages — offers this venue sells + who holds a pass. */
+    /** Everyone on the batch present (or absent) for [date] in one go. */
+    suspend fun markAllAttendance(token: String, batchId: Long, date: String, present: Boolean) = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("date", date).put("present", present)
+        post("/api/partner/academy/$batchId/attendance/all", payload.toString(), token)
+        Unit
+    }
+
+    /** Collect [months] of fees for a student already on a batch. */
+    suspend fun collectBatchFee(token: String, enrollmentId: Long, months: Int, method: String) = withContext(Dispatchers.IO) {
+        val payload = JSONObject().put("months", months).put("paymentMethod", method)
+        post("/api/partner/academy/enrollments/$enrollmentId/fee", payload.toString(), token)
+        Unit
+    }
+
+    suspend fun studentDetail(token: String, enrollmentId: Long): StudentDetail = withContext(Dispatchers.IO) {
+        val o = JSONObject(get("/api/partner/academy/enrollments/$enrollmentId", token))
+        val b = o.optJSONObject("batch")
+        val pays = o.optJSONArray("payments")
+        val att = o.optJSONArray("attendance")
+        StudentDetail(
+            student = parseStudent(o.getJSONObject("student")),
+            batchName = b?.optString("name") ?: "Batch",
+            monthlyFee = b?.optInt("monthly_fee") ?: 0,
+            payments = if (pays == null) emptyList() else (0 until pays.length()).map { i ->
+                val p = pays.getJSONObject(i)
+                FeePayment(
+                    id = p.optLong("id"),
+                    amount = p.optInt("amount"),
+                    method = p.optString("method"),
+                    months = p.optInt("months"),
+                    paidUntil = p.optStringOrNull("paid_until"),
+                    collectedAt = p.optStringOrNull("collected_at"),
+                    collectedBy = p.optStringOrNull("collected_by"),
+                )
+            },
+            attendance = if (att == null) emptyList() else (0 until att.length()).map { i ->
+                att.getJSONObject(i).let { it.optString("date") to it.optBoolean("present") }
+            },
+        )
+    }
+
+    /** Take a student off the batch. Their history stays; re-enrolling brings it back. */
+    suspend fun removeStudent(token: String, enrollmentId: Long) = withContext(Dispatchers.IO) {
+        post("/api/partner/academy/enrollments/$enrollmentId/remove", "{}", token)
+        Unit
+    }
+
+    /** GET /api/partner/packages — offers this venue sells, who holds a pass, and this month's sales. */
     suspend fun packages(token: String, venueId: Long? = null): PackagesPage = withContext(Dispatchers.IO) {
         val o = JSONObject(get("/api/partner/packages" + branchParam(venueId), token))
         val pk = o.optJSONArray("data")
         val hd = o.optJSONArray("holders")
+        val s = o.optJSONObject("summary")
         PackagesPage(
             packages = if (pk == null) emptyList() else (0 until pk.length()).map { i ->
                 val p = pk.getJSONObject(i)
@@ -1986,16 +2154,38 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                     perSession = p.optInt("per_session"),
                     validityDays = if (p.isNull("validity_days")) null else p.optInt("validity_days"),
                     isActive = p.optBoolean("is_active", true),
+                    venueId = if (p.isNull("venue_id")) null else p.optLong("venue_id").takeIf { it > 0 },
+                    venue = p.optStringOrNull("venue"),
+                    sold = p.optInt("sold"),
+                    soldMonth = p.optInt("sold_month"),
                 )
             },
             holders = if (hd == null) emptyList() else (0 until hd.length()).map { parseHolder(hd.getJSONObject(it)) },
+            summary = PackagesSummary(
+                activeHolders = s?.optInt("active_holders") ?: 0,
+                expiringSoon = s?.optInt("expiring_soon") ?: 0,
+                soldMonth = s?.optInt("sold_month") ?: 0,
+                soldMonthAmount = s?.optInt("sold_month_amount") ?: 0,
+            ),
         )
     }
 
-    suspend fun savePackage(token: String, name: String, price: Int, sessions: Int, validityDays: Int?) = withContext(Dispatchers.IO) {
+    /** Create ([id] null) or edit an offer; [isActive] false pauses it. Passes already sold keep their terms. */
+    suspend fun savePackage(
+        token: String,
+        id: Long?,
+        name: String,
+        price: Int,
+        sessions: Int,
+        validityDays: Int?,
+        venueId: Long?,
+        isActive: Boolean = true,
+    ) = withContext(Dispatchers.IO) {
         val payload = JSONObject().put("name", name).put("price", price).put("sessions", sessions)
             .put("validityDays", validityDays ?: JSONObject.NULL)
-        post("/api/partner/packages", payload.toString(), token)
+            .put("venueId", venueId ?: JSONObject.NULL)
+            .put("isActive", isActive)
+        post(if (id == null) "/api/partner/packages" else "/api/partner/packages/$id", payload.toString(), token)
         Unit
     }
 
@@ -2025,6 +2215,23 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         val o = JSONObject(get("/api/partner/packages/holder?phone=$phone" + branchParam(venueId, "&"), token))
         val arr = o.optJSONArray("data")
         if (arr == null) emptyList() else (0 until arr.length()).map { parseHolder(arr.getJSONObject(it)) }
+    }
+
+    /** One pass: every session spent from it, where and when. */
+    suspend fun passDetail(token: String, holderId: Long): PassDetail = withContext(Dispatchers.IO) {
+        val o = JSONObject(get("/api/partner/packages/holders/$holderId", token))
+        val h = o.getJSONObject("holder")
+        val uses = o.optJSONArray("uses")
+        PassDetail(
+            holder = parseHolder(h),
+            soldOn = h.optStringOrNull("sold_on"),
+            amountPaid = h.optInt("amount_paid"),
+            paymentMethod = h.optStringOrNull("payment_method"),
+            uses = if (uses == null) emptyList() else (0 until uses.length()).map { i ->
+                val u = uses.getJSONObject(i)
+                PassUse(u.optLong("id"), u.optStringOrNull("at"), u.optStringOrNull("date"), u.optStringOrNull("slot"), u.optStringOrNull("venue"))
+            },
+        )
     }
 
     /** GET /api/partner/customers — who books here, keyed on phone. */

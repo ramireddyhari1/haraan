@@ -45,6 +45,8 @@ data class DayBookingsUiState(
     val selectedBookingForDetails: DayBookingItem? = null,
     val walkInTarget: WalkInTarget? = null,
     val isSubmittingWalkIn: Boolean = false,
+    /** Passes the walk-in's mobile number holds here, found when the 10th digit lands. */
+    val walkInPasses: List<com.haraan.partner.PackageHolder> = emptyList(),
     /** A blocked grid cell the desk tapped: why it's blocked, and Unblock. */
     val blockTarget: BlockTarget? = null,
     val errorMessage: String? = null,
@@ -286,7 +288,26 @@ class DayBookingsViewModel(
     }
 
     fun closeWalkInModal() {
-        _uiState.update { it.copy(walkInTarget = null, isSubmittingWalkIn = false) }
+        _uiState.update { it.copy(walkInTarget = null, isSubmittingWalkIn = false, walkInPasses = emptyList()) }
+    }
+
+    private var passLookup: kotlinx.coroutines.Job? = null
+
+    /**
+     * Look up the passes a walk-in's number holds at this venue, so the desk can
+     * spend a session instead of taking money. A failed lookup just shows none:
+     * the desk can still take payment the normal way.
+     */
+    fun lookupPasses(phone: String) {
+        passLookup?.cancel()
+        if (phone.length != 10) {
+            _uiState.update { it.copy(walkInPasses = emptyList()) }
+            return
+        }
+        passLookup = viewModelScope.launch {
+            val found = repository.passesFor(token, phone, _uiState.value.venueId).getOrNull().orEmpty()
+            _uiState.update { it.copy(walkInPasses = found.filter { p -> p.usable }) }
+        }
     }
 
     fun submitWalkIn(
@@ -327,8 +348,10 @@ class DayBookingsViewModel(
                         it.copy(
                             walkInTarget = null,
                             isSubmittingWalkIn = false,
-                            successSnackbarMessage = "Walk-in booked successfully for $name",
-                            successIsMoney = true,
+                            walkInPasses = emptyList(),
+                            successSnackbarMessage = if (method == PayMethod.PACKAGE) "1 session used from $name's pass" else "Walk-in booked successfully for $name",
+                            // Spending a pass is a booking, not money coming in.
+                            successIsMoney = method != PayMethod.PACKAGE,
                         )
                     }
                     loadData(forceRefresh = true)

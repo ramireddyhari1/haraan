@@ -21,6 +21,7 @@ final class CustomerPackage extends Model
     protected $fillable = [
         'venue_package_id', 'partner_id', 'sold_at_venue_id', 'customer_phone', 'customer_name',
         'sessions_total', 'amount_paid', 'payment_method', 'expires_at',
+        'collected_by', 'shift_session_id',
     ];
 
     protected $casts = [

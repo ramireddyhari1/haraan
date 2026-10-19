@@ -113,6 +113,7 @@ import com.haraan.partner.CourtCol
 import com.haraan.partner.DayGrid
 import com.haraan.partner.DaySlot
 import com.haraan.partner.PayMethod
+import com.haraan.partner.ui.components.pressableTile
 import com.haraan.partner.daybookings.model.WalkInTarget
 import com.haraan.partner.ui.Haptics
 import com.haraan.partner.ui.home.CourtKind
@@ -175,9 +176,13 @@ fun WalkInBookingSheet(
     date: String,
     isSubmitting: Boolean,
     onDismiss: () -> Unit,
-    onSubmit: (slotId: Long, courtId: Long?, date: String, name: String, phone: String, method: PayMethod) -> Unit,
+    onSubmit: (slotId: Long, courtId: Long?, date: String, name: String, phone: String, method: PayMethod, passId: Long?) -> Unit,
     /** Block mode: take the picked court off sale. Null hides the Walk-in / Block switch. */
     onBlock: ((BlockRequest) -> Unit)? = null,
+    /** Passes the entered number holds here; the desk can spend a session instead of taking money. */
+    passes: List<com.haraan.partner.PackageHolder> = emptyList(),
+    /** Called with the number once all ten digits are in (and with "" to clear). */
+    onPhoneComplete: (String) -> Unit = {},
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val view = LocalView.current
@@ -189,6 +194,9 @@ fun WalkInBookingSheet(
     var selectedSlotId by remember { mutableStateOf(target.slotId) }
     var selectedCourtId by remember { mutableStateOf(target.courtId) }
     var selectedMethod by remember { mutableStateOf(PayMethod.CASH) }
+    // The pass to spend a session from, when the desk picks one instead of taking money.
+    var passId by remember { mutableStateOf<Long?>(null) }
+    if (passId != null && passes.none { it.id == passId }) passId = null
     // Errors show only once the desk has tried to book, not while they're still typing.
     var triedSubmit by remember { mutableStateOf(false) }
     // Block mode: the same time and court, taken off sale instead of sold.
@@ -245,6 +253,7 @@ fun WalkInBookingSheet(
 
     val nameValid = guestName.isNotBlank()
     val phoneValid = guestPhone.length == 10
+    LaunchedEffect(phoneValid) { onPhoneComplete(if (phoneValid) guestPhone else "") }
 
     LaunchedEffect(Unit) {
         // Let the sheet finish rising first, or the keyboard fights the animation.
@@ -262,7 +271,8 @@ fun WalkInBookingSheet(
             return
         }
         focus.clearFocus()
-        onSubmit(selectedSlotId, selectedCourtId, date, guestName.trim(), guestPhone, selectedMethod)
+        if (passId != null) onSubmit(selectedSlotId, selectedCourtId, date, guestName.trim(), guestPhone, PayMethod.PACKAGE, passId)
+        else onSubmit(selectedSlotId, selectedCourtId, date, guestName.trim(), guestPhone, selectedMethod, null)
     }
 
     fun commitBlock() {
@@ -425,6 +435,32 @@ fun WalkInBookingSheet(
                         },
                     )
 
+                    if (passes.isNotEmpty()) {
+                        Spacer(Modifier.height(16.dp))
+                        passes.forEach { pass ->
+                            PassOffer(
+                                pass = pass,
+                                selected = passId == pass.id,
+                                onClick = {
+                                    if (passId == pass.id) {
+                                        Haptics.tick(view); passId = null
+                                    } else {
+                                        Haptics.confirm(view); passId = pass.id
+                                        if (guestName.isBlank() && pass.name.isNotBlank() && pass.name != "Guest") guestName = pass.name
+                                    }
+                                },
+                            )
+                            Spacer(Modifier.height(8.dp))
+                        }
+                    }
+
+                    if (passId != null) {
+                        Spacer(Modifier.height(10.dp))
+                        Text(
+                            "One session comes off their pass. No money is taken.",
+                            fontSize = 12.5.sp, color = Muted, lineHeight = 17.sp, modifier = Modifier.padding(horizontal = 2.dp),
+                        )
+                    } else Column {
                     Spacer(Modifier.height(24.dp))
                     SectionLabel("Payment")
                     Spacer(Modifier.height(10.dp))
@@ -450,6 +486,7 @@ fun WalkInBookingSheet(
                             modifier = Modifier.padding(horizontal = 2.dp),
                         )
                     }
+                    }
                 }
             }
 
@@ -465,12 +502,14 @@ fun WalkInBookingSheet(
                 onCommit = ::commitBlock,
                 modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 12.dp, bottom = 14.dp),
             ) else PrimaryCta(
-                label = when (selectedMethod) {
-                    PayMethod.UPI_QR -> "Book & show QR"
-                    PayMethod.LINK -> "Book & send link"
+                label = when {
+                    passId != null -> "Use a session"
+                    selectedMethod == PayMethod.UPI_QR -> "Book & show QR"
+                    selectedMethod == PayMethod.LINK -> "Book & send link"
                     else -> "Collect cash"
                 },
                 amount = effectivePrice,
+                amountText = passId?.let { id -> passes.firstOrNull { it.id == id }?.let { "${it.remaining - 1} left" } },
                 loading = isSubmitting,
                 onClick = ::submit,
                 modifier = Modifier.padding(start = 22.dp, end = 22.dp, top = 12.dp, bottom = 14.dp),
@@ -1161,7 +1200,7 @@ private fun SegmentOption(label: String, icon: ImageVector, selected: Boolean, m
  * different court or hour changes it: up when it rises, down when it falls.
  */
 @Composable
-private fun PrimaryCta(label: String, amount: Double, loading: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun PrimaryCta(label: String, amount: Double, loading: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, amountText: String? = null) {
     val interaction = remember { MutableInteractionSource() }
     val bg by animateColorAsState(if (loading) Blue.copy(alpha = 0.82f) else Blue, tween(160), label = "cta-bg")
     Row(
@@ -1192,7 +1231,9 @@ private fun PrimaryCta(label: String, amount: Double, loading: Boolean, onClick:
             ) { l -> Text(l, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White) }
             Box(Modifier.width(1.dp).height(22.dp).background(Color.White.copy(alpha = 0.28f)))
             Spacer(Modifier.width(16.dp))
-            AnimatedContent(
+            if (amountText != null) {
+                Text(amountText, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, color = Color.White, style = Tabular)
+            } else AnimatedContent(
                 targetState = amount,
                 transitionSpec = { rollTransition(targetState >= initialState) },
                 label = "cta-amount",
@@ -1202,6 +1243,74 @@ private fun PrimaryCta(label: String, amount: Double, loading: Boolean, onClick:
         }
     }
 }
+
+/**
+ * A pass the walk-in's number holds: a strip of sessions with the used ones
+ * punched out. Picking it turns this booking into "use one session".
+ */
+@Composable
+private fun PassOffer(pass: com.haraan.partner.PackageHolder, selected: Boolean, onClick: () -> Unit) {
+    val border by animateColorAsState(if (selected) Blue else Hairline, tween(160), label = "pass-border")
+    val bg by animateColorAsState(if (selected) BlueSoft else Color.White, tween(160), label = "pass-bg")
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .pressableTile(16.dp, pressedScale = 0.97f, onClick = onClick)
+            .clip(RoundedCornerShape(16.dp))
+            .background(bg)
+            .border(if (selected) 1.6.dp else 1.dp, border, RoundedCornerShape(16.dp))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (selected) "Using ${pass.packageName}" else "Has a ${pass.packageName}",
+                    fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = if (selected) BlueInk else Ink,
+                )
+                Text(
+                    "${pass.remaining} of ${pass.total} sessions left" + (pass.expiresAt?.let { " · till ${friendlyShort(it)}" } ?: ""),
+                    fontSize = 12.5.sp, color = Muted,
+                )
+            }
+            Canvas(Modifier.size(22.dp)) {
+                if (selected) {
+                    drawCircle(Blue)
+                    val p = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(size.width * 0.28f, size.height * 0.52f)
+                        lineTo(size.width * 0.44f, size.height * 0.68f)
+                        lineTo(size.width * 0.74f, size.height * 0.36f)
+                    }
+                    drawPath(p, Color.White, style = Stroke(2.2.dp.toPx(), cap = StrokeCap.Round))
+                } else drawCircle(Hairline, style = Stroke(1.6.dp.toPx()))
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Canvas(Modifier.fillMaxWidth().height(12.dp)) {
+            val n = pass.total.coerceIn(1, 40)
+            val gap = 3.dp.toPx()
+            val w = ((size.width - gap * (n - 1)) / n).coerceAtLeast(2f)
+            val usedShown = ((pass.used.toFloat() / pass.total.coerceAtLeast(1)) * n).toInt()
+            // The session this booking will spend is drawn half-punched.
+            for (i in 0 until n) {
+                val x = i * (w + gap)
+                val c = when {
+                    i < usedShown -> Taken
+                    i == usedShown && selected -> Blue.copy(alpha = 0.35f)
+                    else -> Blue
+                }
+                drawRoundRect(
+                    c, androidx.compose.ui.geometry.Offset(x, 0f), androidx.compose.ui.geometry.Size(w, size.height),
+                    androidx.compose.ui.geometry.CornerRadius(minOf(w, size.height) / 2),
+                )
+            }
+        }
+    }
+}
+
+private fun friendlyShort(iso: String): String = runCatching {
+    val d = java.text.SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(iso.take(10))!!
+    java.text.SimpleDateFormat("d MMM", Locale.ENGLISH).format(d)
+}.getOrDefault(iso)
 
 // ---- Helpers ---------------------------------------------------------------------
 

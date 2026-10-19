@@ -28,6 +28,18 @@ final class VenueBatch extends Model
         return $this->belongsTo(Venue::class);
     }
 
+    /** The venue owner this batch belongs to. */
+    public function partner(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'partner_id');
+    }
+
+    /** Every fee collected for any student on this batch. */
+    public function feePayments(): \Illuminate\Database\Eloquent\Relations\HasManyThrough
+    {
+        return $this->hasManyThrough(AcademyFeePayment::class, BatchEnrollment::class, 'venue_batch_id', 'batch_enrollment_id');
+    }
+
     public function enrollments(): HasMany
     {
         return $this->hasMany(BatchEnrollment::class);

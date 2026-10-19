@@ -32,6 +32,12 @@ final class BatchEnrollment extends Model
         return $this->hasMany(BatchAttendance::class);
     }
 
+    /** Fees collected, newest first. */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(AcademyFeePayment::class)->latest('collected_at');
+    }
+
     /** Fees lapsed — the desk's "who to chase" signal. */
     public function isOverdue(): bool
     {

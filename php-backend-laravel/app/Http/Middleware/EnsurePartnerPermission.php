@@ -13,6 +13,7 @@ use Symfony\Component\HttpFoundation\Response;
  * Gate a partner API action to users holding a given capability. Owners hold
  * every capability; desk persons only those in their staff_permissions.
  * Usage: ->middleware('partner.can:pricing')
+ *        ->middleware('partner.can:bookings|reports')  // either one is enough
  */
 final class EnsurePartnerPermission
 {
@@ -20,7 +21,10 @@ final class EnsurePartnerPermission
     {
         $user = $request->user();
 
-        if ($user === null || ($permission !== '' && ! $user->hasPartnerPermission($permission))) {
+        $allowed = $permission === ''
+            || collect(explode('|', $permission))->contains(fn (string $p): bool => $user?->hasPartnerPermission(trim($p)) === true);
+
+        if ($user === null || ! $allowed) {
             return new JsonResponse(['error' => 'Your role does not allow this action'], 403);
         }
 

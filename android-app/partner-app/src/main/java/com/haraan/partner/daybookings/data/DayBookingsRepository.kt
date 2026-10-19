@@ -48,6 +48,8 @@ interface DayBookingsRepository {
         customerPackageId: Long? = null,
     ): Result<WalkInResult>
     suspend fun cancelBooking(token: String, bookingId: Long, venueId: Long, date: String): Result<Unit>
+    /** Online only: a pass's balance is only true on the server. */
+    suspend fun passesFor(token: String, phone: String, venueId: Long): Result<List<com.haraan.partner.PackageHolder>>
     suspend fun checkInTicket(token: String, ticketCode: String, venueId: Long, date: String): Result<CheckInResult>
     suspend fun setDateClosed(token: String, venueId: Long, date: String, closed: Boolean): Result<Unit>
     /** Online only: a block decided offline could land on top of a booking made meanwhile. */
@@ -64,6 +66,9 @@ class DayBookingsRepositoryImpl(
     private val localDataSource: DayBookingsLocalDataSource,
     private val remoteDataSource: DayBookingsRemoteDataSource,
 ) : DayBookingsRepository {
+
+    override suspend fun passesFor(token: String, phone: String, venueId: Long): Result<List<com.haraan.partner.PackageHolder>> =
+        runCatching { remoteDataSource.passesFor(token, phone, venueId) }
 
     override fun getDayGrid(
         token: String,
@@ -185,9 +190,13 @@ class DayBookingsRepositoryImpl(
             }
         }
 
-        // If bookings list gave higher expected revenue than grid, ensure consistency
-        if (collectedRevenue + pendingDue > expectedRevenue && bookings.isNotEmpty()) {
-            expectedRevenue = collectedRevenue + pendingDue
+        // The day's own bookings say what each one is actually worth: a session
+        // spent from a pass is ₹0, a discounted walk-in is its discounted price.
+        // The grid's booked-cells × list-price is only the fallback for when the
+        // bookings haven't loaded.
+        val live = bookings.filter { !it.isCancelled }
+        if (live.isNotEmpty()) {
+            expectedRevenue = live.sumOf { it.totalAmount }
         }
 
         val occupancy = if (totalSlots > 0) (bookedSlots.toFloat() / totalSlots.toFloat()).coerceIn(0f, 1f) else 0f

@@ -81,6 +81,32 @@ class ShiftSession extends Model
         return $this->hasMany(BookingPayment::class, 'shift_session_id');
     }
 
+    /** Packages sold over this shift's counter. */
+    public function packageSales(): HasMany
+    {
+        return $this->hasMany(CustomerPackage::class, 'shift_session_id');
+    }
+
+    /** Academy fees taken over this shift's counter. */
+    public function feePayments(): HasMany
+    {
+        return $this->hasMany(AcademyFeePayment::class, 'shift_session_id');
+    }
+
+    /**
+     * Everything taken at this counter by the given methods: walk-in payments
+     * (refunds are negative rows), package sales and academy fees. The drawer
+     * doesn't care what the money was for, only that it came in.
+     *
+     * @param  array<int, string>  $methods
+     */
+    public function methodTotal(array $methods): float
+    {
+        return (float) $this->payments()->whereIn('method', $methods)->sum('amount')
+            + (float) $this->packageSales()->whereIn('payment_method', $methods)->sum('amount_paid')
+            + (float) $this->feePayments()->whereIn('method', $methods)->sum('amount');
+    }
+
     public function drops(): HasMany
     {
         return $this->hasMany(ShiftDrop::class, 'shift_session_id');
@@ -107,9 +133,7 @@ class ShiftSession extends Model
      */
     public function cashMovement(): float
     {
-        return (float) $this->payments()
-            ->whereIn('method', self::DRAWER_METHODS)
-            ->sum('amount');
+        return $this->methodTotal(self::DRAWER_METHODS);
     }
 
     /** What should physically be in the drawer right now (float + cash in - cash drops). */
@@ -121,9 +145,7 @@ class ShiftSession extends Model
     /** UPI + card taken at the counter — reconciled against statements, not counted. */
     public function digitalMovement(): float
     {
-        return (float) $this->payments()
-            ->whereIn('method', self::DIGITAL_METHODS)
-            ->sum('amount');
+        return $this->methodTotal(self::DIGITAL_METHODS);
     }
 
     /**

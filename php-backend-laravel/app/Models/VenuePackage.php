@@ -29,6 +29,18 @@ final class VenuePackage extends Model
         return $this->belongsTo(Venue::class);
     }
 
+    /** The venue owner selling it. */
+    public function partner(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'partner_id');
+    }
+
+    /** Every pass sold from this offer. */
+    public function sales(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(CustomerPackage::class, 'venue_package_id');
+    }
+
     /** Per-session value, for showing the saving against the walk-in rate. */
     public function perSession(): int
     {

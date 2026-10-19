@@ -20,6 +20,10 @@ class DayBookingsRemoteDataSource(private val api: PartnerApi) {
         return api.bookings(token, venueId, date)
     }
 
+    /** Passes this mobile number holds that can be spent at this venue. */
+    suspend fun passesFor(token: String, phone: String, venueId: Long): List<com.haraan.partner.PackageHolder> =
+        api.packageHolder(token, phone, venueId)
+
     suspend fun createWalkIn(
         token: String,
         venueId: Long,

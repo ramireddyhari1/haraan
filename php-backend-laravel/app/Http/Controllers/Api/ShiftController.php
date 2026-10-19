@@ -251,8 +251,36 @@ class ShiftController extends Controller
                     'method'        => $p->method,
                     'customer_name' => $customerName,
                     'time'          => $p->collected_at?->format('H:i') ?? '',
+                    'at'            => $p->collected_at,
                 ];
             });
+
+        // Package sales and academy fees went into the same drawer, so the list
+        // the desk reconciles against has to show them too, or the totals above
+        // can't be explained line by line.
+        $packageSales = $shift->packageSales()->with('package:id,name')->latest()->take(50)->get()
+            ->map(fn (\App\Models\CustomerPackage $c): array => [
+                'id'            => 'pkg-' . $c->id,
+                'amount'        => (float) $c->amount_paid,
+                'method'        => $c->payment_method ?? 'cash',
+                'customer_name' => ($c->customer_name ?: 'Guest') . ' · ' . ($c->package?->name ?? 'Package'),
+                'time'          => $c->created_at?->format('H:i') ?? '',
+                'at'            => $c->created_at,
+            ]);
+        $fees = $shift->feePayments()->with('enrollment:id,student_name')->latest('collected_at')->take(50)->get()
+            ->map(fn (\App\Models\AcademyFeePayment $f): array => [
+                'id'            => 'fee-' . $f->id,
+                'amount'        => (float) $f->amount,
+                'method'        => $f->method,
+                'customer_name' => ($f->enrollment?->student_name ?? 'Student') . ' · academy fee',
+                'time'          => $f->collected_at?->format('H:i') ?? '',
+                'at'            => $f->collected_at,
+            ]);
+        $payments = $payments->concat($packageSales)->concat($fees)
+            ->sortByDesc(fn (array $r) => $r['at']?->getTimestamp() ?? 0)
+            ->take(50)
+            ->map(function (array $r): array { unset($r['at']); return $r; })
+            ->values();
 
         $drops = $shift->drops()
             ->with('staff:id,name')
@@ -280,8 +308,8 @@ class ShiftController extends Controller
             'closed_at'      => $shift->closed_at?->toIso8601String(),
             'opening_float'  => (float) $shift->opening_float,
             'cash_collected' => (float) $shift->cashMovement(),
-            'upi_collected'  => (float) $shift->payments()->where('method', 'upi')->sum('amount'),
-            'card_collected' => (float) $shift->payments()->where('method', 'card')->sum('amount'),
+            'upi_collected'  => $shift->methodTotal(['upi']),
+            'card_collected' => $shift->methodTotal(['card']),
             'total_drops'    => (float) $shift->totalDrops(),
             'expected_cash'  => (float) $shift->expectedCash(),
             'counted_cash'   => $shift->counted_cash !== null ? (float) $shift->counted_cash : null,

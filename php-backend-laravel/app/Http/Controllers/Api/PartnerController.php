@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AcademyFeePayment;
 use App\Models\Booking;
 use App\Models\BookingPayment;
 use App\Models\Event;
@@ -63,6 +64,12 @@ class PartnerController extends Controller
 
     /** Case-insensitive money statuses, matching the web analytics widgets. */
     private const PAID_STATUSES = ['confirmed', 'paid', 'completed'];
+
+    /** A fee falling due within this many days shows as "due soon". */
+    private const FEE_DUE_SOON_DAYS = 5;
+
+    /** A pass expiring within this many days shows as "expiring soon". */
+    private const PASS_EXPIRY_SOON_DAYS = 7;
 
     public function __construct(
         private readonly BookingService $bookings,
@@ -1878,6 +1885,23 @@ class PartnerController extends Controller
                 $out[(int) $row->collected_by] = ['collected' => round((float) $row->total, 2), 'payments' => (int) $row->n, 'shift' => null];
             });
 
+        // Package sales and academy fees are desk money too.
+        $extra = function (string $who, $rows) use (&$out): void {
+            foreach ($rows as $row) {
+                $uid = (int) $row->{$who};
+                $out[$uid] ??= ['collected' => 0.0, 'payments' => 0, 'shift' => null];
+                $out[$uid]['collected'] = round($out[$uid]['collected'] + (float) $row->total, 2);
+                $out[$uid]['payments'] += (int) $row->n;
+            }
+        };
+        $extra('collected_by', CustomerPackage::query()
+            ->whereIn('collected_by', $ids)->whereBetween('created_at', [$from, $to])
+            ->selectRaw('collected_by, SUM(amount_paid) as total, COUNT(*) as n')->groupBy('collected_by')->get());
+        $extra('collected_by', AcademyFeePayment::query()
+            ->whereIn('collected_by', $ids)->whereIn('method', AcademyFeePayment::DESK_METHODS)
+            ->whereBetween('collected_at', [$from, $to])
+            ->selectRaw('collected_by, SUM(amount) as total, COUNT(*) as n')->groupBy('collected_by')->get());
+
         ShiftSession::query()
             ->whereIn('user_id', $ids)
             ->whereNull('closed_at')
@@ -1968,44 +1992,84 @@ class PartnerController extends Controller
         ]);
     }
 
-    /** GET /api/partner/academy — coaching batches with roster + fee health. */
+    /**
+     * GET /api/partner/academy — coaching batches with roster, attendance and fee
+     * health, plus the day's summary the Academy screen opens on.
+     */
     public function academy(Request $request): JsonResponse
     {
         $partnerId = $request->user()->effectivePartnerId();
         $today = BusinessClock::todayDate();
+        $soon = $today->copy()->addDays(self::FEE_DUE_SOON_DAYS);
 
-        $batches = VenueBatch::query()
-            ->where('partner_id', $partnerId)
+        $batches = $this->batchQuery($request)
+            ->with('venue:id,name')
             ->withCount(['enrollments' => fn ($q) => $q->where('is_active', true)])
-            ->orderByDesc('is_active')->orderBy('name')
-            ->get()
-            ->map(function (VenueBatch $b) use ($today): array {
-                $overdue = BatchEnrollment::query()
-                    ->where('venue_batch_id', $b->id)->where('is_active', true)
-                    ->whereNotNull('paid_until')->whereDate('paid_until', '<', $today)
-                    ->count();
+            ->orderByDesc('is_active')->orderBy('start_time')->orderBy('name')
+            ->get();
 
-                return [
-                    'id'          => $b->id,
-                    'name'        => $b->name,
-                    'coach'       => $b->coach_name,
-                    'sport'       => $b->sport,
-                    'days'        => $b->daysList(),
-                    'start_time'  => $b->start_time,
-                    'end_time'    => $b->end_time,
-                    'monthly_fee' => $b->monthly_fee,
-                    'capacity'    => $b->capacity,
-                    'students'    => (int) $b->enrollments_count,
-                    'overdue'     => $overdue,
-                    'runs_today'  => $b->runsOn($today),
-                    'is_active'   => $b->is_active,
-                ];
-            });
+        $ids = $batches->pluck('id')->all();
+        $active = BatchEnrollment::query()->whereIn('venue_batch_id', $ids)->where('is_active', true);
 
-        return response()->json(['data' => $batches]);
+        $overdue = (clone $active)->whereNotNull('paid_until')->whereDate('paid_until', '<', $today)
+            ->selectRaw('venue_batch_id, count(*) as n')->groupBy('venue_batch_id')->pluck('n', 'venue_batch_id');
+        $dueSoon = (clone $active)->whereNotNull('paid_until')
+            ->whereDate('paid_until', '>=', $today)->whereDate('paid_until', '<=', $soon)
+            ->selectRaw('venue_batch_id, count(*) as n')->groupBy('venue_batch_id')->pluck('n', 'venue_batch_id');
+        $presentToday = BatchAttendance::query()
+            ->join('batch_enrollments', 'batch_enrollments.id', '=', 'batch_attendance.batch_enrollment_id')
+            ->whereIn('batch_enrollments.venue_batch_id', $ids)
+            ->where('batch_enrollments.is_active', true)
+            ->whereDate('batch_attendance.date', $today->toDateString())
+            ->selectRaw('batch_enrollments.venue_batch_id as b, count(*) as n')
+            ->groupBy('batch_enrollments.venue_batch_id')->pluck('n', 'b');
+
+        $rows = $batches->map(fn (VenueBatch $b): array => [
+            'id'            => $b->id,
+            'name'          => $b->name,
+            'coach'         => $b->coach_name,
+            'sport'         => $b->sport,
+            'days'          => $b->daysList(),
+            'start_time'    => $b->start_time,
+            'end_time'      => $b->end_time,
+            'monthly_fee'   => $b->monthly_fee,
+            'capacity'      => $b->capacity,
+            'students'      => (int) $b->enrollments_count,
+            'overdue'       => (int) ($overdue[$b->id] ?? 0),
+            'due_soon'      => (int) ($dueSoon[$b->id] ?? 0),
+            'present_today' => (int) ($presentToday[$b->id] ?? 0),
+            'runs_today'    => $b->runsOn($today),
+            'is_active'     => (bool) $b->is_active,
+            'venue_id'      => $b->venue_id,
+            'venue'         => $b->venue?->name,
+        ]);
+
+        [$monthFrom] = BusinessClock::dayBoundsUtc($today->copy()->startOfMonth()->toDateString());
+        $collectedMonth = (int) AcademyFeePayment::query()
+            ->where('partner_id', $partnerId)
+            ->whereIn('method', AcademyFeePayment::DESK_METHODS)
+            ->whereHas('enrollment', fn ($q) => $q->whereIn('venue_batch_id', $ids))
+            ->where('collected_at', '>=', $monthFrom)
+            ->sum('amount');
+
+        $live = $rows->where('is_active', true);
+
+        return response()->json([
+            'data'    => $rows->values(),
+            'summary' => [
+                'batches_today'   => $live->where('runs_today', true)->count(),
+                'students'        => $live->sum('students'),
+                'present_today'   => $live->sum('present_today'),
+                'overdue'         => $live->sum('overdue'),
+                'due_soon'        => $live->sum('due_soon'),
+                'collected_month' => $collectedMonth,
+            ],
+            'venues'  => $request->user()->branches()->orderBy('name')->get(['venues.id', 'venues.name'])
+                ->map(fn (Venue $v): array => ['id' => $v->id, 'name' => $v->name])->values(),
+        ]);
     }
 
-    /** POST /api/partner/academy — create a batch. */
+    /** POST /api/partner/academy[/{id}] — create or edit a batch (and pause/resume it). */
     public function saveBatch(Request $request, ?string $id = null): JsonResponse
     {
         $data = $request->validate([
@@ -2019,13 +2083,15 @@ class PartnerController extends Controller
             'monthlyFee' => ['required', 'integer', 'min:0'],
             'capacity'   => ['nullable', 'integer', 'min:1', 'max:500'],
             'venueId'    => ['nullable', 'integer'],
+            'isActive'   => ['nullable', 'boolean'],
         ]);
 
         $partnerId = $request->user()->effectivePartnerId();
 
+        // A batch can only sit at a branch this person may act on.
         $venueId = null;
         if (! empty($data['venueId'])) {
-            $venueId = (int) Venue::query()->where('partner_id', $partnerId)->findOrFail($data['venueId'])->id;
+            $venueId = (int) $this->branch($request, (string) $data['venueId'])->id;
         }
 
         $days = array_values(array_filter(array_map(
@@ -2045,82 +2111,194 @@ class PartnerController extends Controller
             'monthly_fee' => $data['monthlyFee'],
             'capacity'    => $data['capacity'] ?? null,
         ];
+        if (array_key_exists('isActive', $data) && $data['isActive'] !== null) {
+            $attrs['is_active'] = (bool) $data['isActive'];
+        }
 
         $batch = $id === null
             ? VenueBatch::query()->create($attrs)
-            : tap(VenueBatch::query()->where('partner_id', $partnerId)->findOrFail($id))->update($attrs);
+            : tap($this->batchQuery($request)->findOrFail($id))->update($attrs);
 
         return response()->json(['status' => 'ok', 'id' => $batch->id], $id === null ? 201 : 200);
     }
 
     /**
-     * POST /api/partner/academy/{id}/enroll — put a student on a batch.
+     * POST /api/partner/academy/{id}/enroll — put a student on a batch and take
+     * their first fees.
      *
      * Re-enrolling the same number EXTENDS the existing seat rather than adding a
      * second one: a roster that counts one child twice is wrong in both directions
-     * (capacity and fees owed).
+     * (capacity and fees owed). A full batch refuses a NEW student.
      */
     public function enrollStudent(Request $request, string $id): JsonResponse
     {
         $data = $request->validate([
-            'studentName'  => ['required', 'string', 'max:120'],
-            'studentPhone' => ['required', 'string', 'max:20'],
-            'amountPaid'   => ['nullable', 'integer', 'min:0'],
-            'months'       => ['nullable', 'integer', 'min:1', 'max:24'],
+            'studentName'   => ['required', 'string', 'max:120'],
+            'studentPhone'  => ['required', 'string', 'max:20'],
+            'amountPaid'    => ['nullable', 'integer', 'min:0'],
+            'months'        => ['nullable', 'integer', 'min:1', 'max:24'],
+            'paymentMethod' => ['nullable', 'string', 'in:cash,upi,card'],
         ]);
 
-        $partnerId = $request->user()->effectivePartnerId();
-        $batch = VenueBatch::query()->where('partner_id', $partnerId)->findOrFail($id);
-
+        $batch = $this->batchQuery($request)->findOrFail($id);
         $phone = $this->digits($data['studentPhone']);
 
         if ($phone === null) {
             return response()->json(['error' => 'A valid phone number is required.'], 422);
         }
 
-        $months = $data['months'] ?? 1;
         $existing = BatchEnrollment::query()
             ->where('venue_batch_id', $batch->id)->where('student_phone', $phone)->first();
+        $isNewSeat = $existing === null || ! $existing->is_active;
 
-        // Extend from whichever is later: today, or the date they're already paid to.
-        $base = $existing !== null && $existing->paid_until !== null && $existing->paid_until->isFuture()
-            ? $existing->paid_until->copy()
-            : BusinessClock::todayDate();
+        if ($isNewSeat && $batch->capacity !== null) {
+            $taken = BatchEnrollment::query()->where('venue_batch_id', $batch->id)->where('is_active', true)->count();
+            if ($taken >= $batch->capacity) {
+                return response()->json([
+                    'error' => "{$batch->name} is full ({$taken} of {$batch->capacity}). Raise the capacity or pick another batch.",
+                ], 422);
+            }
+        }
 
-        $enrollment = BatchEnrollment::query()->updateOrCreate(
-            ['venue_batch_id' => $batch->id, 'student_phone' => $phone],
-            [
-                'partner_id'   => $partnerId,
+        $enrollment = DB::transaction(function () use ($request, $batch, $existing, $phone, $data): BatchEnrollment {
+            $enrollment = $existing ?? new BatchEnrollment([
+                'venue_batch_id' => $batch->id,
+                'student_phone'  => $phone,
+            ]);
+            $enrollment->fill([
+                'partner_id'   => $batch->partner_id,
                 'student_name' => $data['studentName'],
-                'amount_paid'  => ($existing->amount_paid ?? 0) + ($data['amountPaid'] ?? $batch->monthly_fee * $months),
-                'paid_until'   => $base->addMonths($months),
                 'is_active'    => true,
-            ],
-        );
+            ]);
+            $enrollment->amount_paid = (int) ($enrollment->amount_paid ?? 0);
+            $enrollment->save();
 
-        return response()->json(['status' => 'ok', 'enrollment' => $this->enrollmentRow($enrollment, BusinessClock::todayDate())], 201);
+            $this->collectFee(
+                $request,
+                $enrollment,
+                $batch,
+                (int) ($data['months'] ?? 1),
+                $data['amountPaid'] ?? null,
+                $data['paymentMethod'] ?? 'cash',
+            );
+
+            return $enrollment->refresh();
+        });
+
+        return response()->json([
+            'status'     => 'ok',
+            'enrollment' => $this->enrollmentRow($enrollment, BusinessClock::todayDate()),
+        ], 201);
     }
 
-    /** GET /api/partner/academy/{id}/roster?date= — students + who's marked present. */
+    /**
+     * POST /api/partner/academy/enrollments/{id}/fee — collect fees for a student
+     * already on the batch. Extends their cover from whichever is later: today, or
+     * the date they're already paid to.
+     */
+    public function collectBatchFee(Request $request, string $id): JsonResponse
+    {
+        $data = $request->validate([
+            'months'        => ['required', 'integer', 'min:1', 'max:24'],
+            'amount'        => ['nullable', 'integer', 'min:0'],
+            'paymentMethod' => ['required', 'string', 'in:cash,upi,card'],
+        ]);
+
+        $enrollment = $this->enrollmentQuery($request)->findOrFail($id);
+        $batch = $enrollment->batch;
+
+        $payment = DB::transaction(fn (): AcademyFeePayment => $this->collectFee(
+            $request, $enrollment, $batch, (int) $data['months'], $data['amount'] ?? null, $data['paymentMethod'],
+        ));
+
+        return response()->json([
+            'status'  => 'ok',
+            'payment' => $this->feeRow($payment),
+            'student' => $this->enrollmentRow($enrollment->refresh(), BusinessClock::todayDate()),
+        ], 201);
+    }
+
+    /** GET /api/partner/academy/enrollments/{id} — one student: fees paid and recent attendance. */
+    public function enrollmentDetail(Request $request, string $id): JsonResponse
+    {
+        $enrollment = $this->enrollmentQuery($request)->with('batch')->findOrFail($id);
+        $today = BusinessClock::todayDate();
+
+        $payments = $enrollment->payments()->with('collector:id,name')->limit(60)->get()
+            ->map(fn (AcademyFeePayment $p): array => $this->feeRow($p));
+
+        // The last 12 days this batch ran, newest last, with whether they came.
+        $runs = $this->recentRuns($enrollment->batch, $today, 12);
+        $came = BatchAttendance::query()->where('batch_enrollment_id', $enrollment->id)
+            ->whereDate('date', '>=', $runs[0] ?? $today->toDateString())
+            ->pluck('date')->map(fn ($d): string => Carbon::parse($d)->toDateString())->all();
+
+        return response()->json([
+            'student'    => $this->enrollmentRow($enrollment, $today),
+            'batch'      => [
+                'id' => $enrollment->batch->id, 'name' => $enrollment->batch->name,
+                'monthly_fee' => $enrollment->batch->monthly_fee,
+            ],
+            'payments'   => $payments,
+            'attendance' => array_map(fn (string $d): array => ['date' => $d, 'present' => in_array($d, $came, true)], $runs),
+        ]);
+    }
+
+    /**
+     * POST /api/partner/academy/enrollments/{id}/remove — take a student off the
+     * batch. The seat frees up; their fee and attendance history stays, and
+     * enrolling the same number again brings it back.
+     */
+    public function removeStudent(Request $request, string $id): JsonResponse
+    {
+        $enrollment = $this->enrollmentQuery($request)->findOrFail($id);
+        $enrollment->forceFill(['is_active' => false])->save();
+
+        return response()->json(['status' => 'removed']);
+    }
+
+    /** GET /api/partner/academy/{id}/roster?date= — students, who's in today, and their last few sessions. */
     public function batchRoster(Request $request, string $id): JsonResponse
     {
-        $partnerId = $request->user()->effectivePartnerId();
-        $batch = VenueBatch::query()->where('partner_id', $partnerId)->findOrFail($id);
+        $batch = $this->batchQuery($request)->findOrFail($id);
 
         $date = $request->query('date');
         $date = is_string($date) && strtotime($date) ? Carbon::parse($date) : BusinessClock::todayDate();
 
-        $rows = BatchEnrollment::query()
+        $enrollments = BatchEnrollment::query()
             ->where('venue_batch_id', $batch->id)->where('is_active', true)
             ->orderBy('student_name')
-            ->get()
-            ->map(fn (BatchEnrollment $e): array => $this->enrollmentRow($e, $date));
+            ->get();
+
+        // Recent sessions for the dots under each name — one query for the batch.
+        $runs = $this->recentRuns($batch, $date, 8);
+        $marks = BatchAttendance::query()
+            ->whereIn('batch_enrollment_id', $enrollments->pluck('id'))
+            ->whereDate('date', '>=', $runs[0] ?? $date->toDateString())
+            ->whereDate('date', '<=', $date->toDateString())
+            ->get(['batch_enrollment_id', 'date'])
+            ->groupBy('batch_enrollment_id')
+            ->map(fn ($rows) => $rows->map(fn ($r): string => Carbon::parse($r->date)->toDateString())->all());
+
+        $rows = $enrollments->map(function (BatchEnrollment $e) use ($date, $runs, $marks): array {
+            $mine = $marks[$e->id] ?? [];
+
+            return $this->enrollmentRow($e, $date) + [
+                'recent' => array_map(fn (string $d): bool => in_array($d, $mine, true), $runs),
+            ];
+        });
 
         return response()->json([
-            'batch' => ['id' => $batch->id, 'name' => $batch->name, 'coach' => $batch->coach_name],
-            'date'  => $date->toDateString(),
+            'batch'      => [
+                'id' => $batch->id, 'name' => $batch->name, 'coach' => $batch->coach_name,
+                'monthly_fee' => $batch->monthly_fee, 'capacity' => $batch->capacity,
+                'start_time' => $batch->start_time, 'end_time' => $batch->end_time,
+                'days' => $batch->daysList(), 'sport' => $batch->sport, 'is_active' => (bool) $batch->is_active,
+                'venue_id' => $batch->venue_id,
+            ],
+            'date'       => $date->toDateString(),
             'runs_today' => $batch->runsOn($date),
-            'data'  => $rows,
+            'data'       => $rows,
         ]);
     }
 
@@ -2139,61 +2317,198 @@ class PartnerController extends Controller
             'present'      => ['required', 'boolean'],
         ]);
 
-        $partnerId = $request->user()->effectivePartnerId();
-        $enrollment = BatchEnrollment::query()
-            ->where('partner_id', $partnerId)->findOrFail($data['enrollmentId']);
+        $enrollment = $this->enrollmentQuery($request)->findOrFail($data['enrollmentId']);
+        $date = Carbon::parse($data['date'])->toDateString();
+        $this->setPresent($enrollment->id, $date, (bool) $data['present']);
 
+        return response()->json(['status' => 'ok', 'student' => $this->enrollmentRow($enrollment, Carbon::parse($date))]);
+    }
+
+    /** POST /api/partner/academy/{id}/attendance/all — everyone on the batch in (or out) at once. */
+    public function markAllAttendance(Request $request, string $id): JsonResponse
+    {
+        $data = $request->validate([
+            'date'    => ['required', 'date'],
+            'present' => ['required', 'boolean'],
+        ]);
+
+        $batch = $this->batchQuery($request)->findOrFail($id);
         $date = Carbon::parse($data['date'])->toDateString();
 
-        if ($data['present']) {
+        $ids = BatchEnrollment::query()->where('venue_batch_id', $batch->id)->where('is_active', true)->pluck('id');
+        DB::transaction(function () use ($ids, $date, $data): void {
+            foreach ($ids as $eid) {
+                $this->setPresent((int) $eid, $date, (bool) $data['present']);
+            }
+        });
+
+        return response()->json(['status' => 'ok', 'marked' => $ids->count()]);
+    }
+
+    private function setPresent(int $enrollmentId, string $date, bool $present): void
+    {
+        if ($present) {
             // whereDate, not firstOrCreate: the column is cast to a date and can be
             // stored with a time component, so an exact-match lookup misses the row
             // that's already there and the insert then trips the unique index — a
             // 500 for what is simply "already marked". The index still guards the
             // data; this makes the double-tap a no-op instead of an error.
             $already = BatchAttendance::query()
-                ->where('batch_enrollment_id', $enrollment->id)
+                ->where('batch_enrollment_id', $enrollmentId)
                 ->whereDate('date', $date)
                 ->exists();
 
             if (! $already) {
-                BatchAttendance::query()->create([
-                    'batch_enrollment_id' => $enrollment->id,
-                    'date'                => $date,
-                ]);
+                BatchAttendance::query()->create(['batch_enrollment_id' => $enrollmentId, 'date' => $date]);
             }
-        } else {
-            BatchAttendance::query()
-                ->where('batch_enrollment_id', $enrollment->id)
-                ->whereDate('date', $date)
-                ->delete();
+
+            return;
         }
 
-        return response()->json(['status' => 'ok', 'student' => $this->enrollmentRow($enrollment, Carbon::parse($date))]);
+        BatchAttendance::query()->where('batch_enrollment_id', $enrollmentId)->whereDate('date', $date)->delete();
+    }
+
+    /**
+     * Record one fee payment and extend the student's cover. The enrolment's
+     * `amount_paid` is kept as the ledger's sum so older readers stay correct.
+     */
+    private function collectFee(
+        Request $request,
+        BatchEnrollment $enrollment,
+        VenueBatch $batch,
+        int $months,
+        ?int $amount,
+        string $method,
+    ): AcademyFeePayment {
+        $today = BusinessClock::todayDate();
+        $base = $enrollment->paid_until !== null && $enrollment->paid_until->gte($today)
+            ? $enrollment->paid_until->copy()
+            : $today->copy();
+        $until = $base->addMonths($months);
+        $collector = $request->user();
+
+        $payment = AcademyFeePayment::query()->create([
+            'batch_enrollment_id' => $enrollment->id,
+            'partner_id'          => $batch->partner_id,
+            'venue_id'            => $batch->venue_id,
+            'amount'              => $amount ?? $batch->monthly_fee * $months,
+            'method'              => $method,
+            'months'              => $months,
+            'paid_until'          => $until->toDateString(),
+            'collected_by'        => $collector?->id,
+            'shift_session_id'    => $this->deskShiftFor($collector, $batch->venue_id, $method),
+            'collected_at'        => now(),
+        ]);
+
+        $enrollment->forceFill([
+            'paid_until'  => $until->toDateString(),
+            'amount_paid' => (int) AcademyFeePayment::query()->where('batch_enrollment_id', $enrollment->id)->sum('amount'),
+        ])->save();
+
+        return $payment;
+    }
+
+    /**
+     * The drawer this money goes into, the same way a walk-in's does: the
+     * collector's open shift at that branch, opened if they hadn't started one.
+     * Money taken where there is no branch joins no drawer.
+     */
+    private function deskShiftFor(?User $collector, ?int $venueId, string $method): ?int
+    {
+        if ($collector === null || $venueId === null) {
+            return null;
+        }
+        if (! in_array($method, AcademyFeePayment::DESK_METHODS, true)) {
+            return null;
+        }
+
+        return app(\App\Services\ShiftService::class)->current($collector, $venueId)->id;
+    }
+
+    /** The last [$n] dates this batch ran, up to and including [$until], oldest first. */
+    private function recentRuns(VenueBatch $batch, Carbon $until, int $n): array
+    {
+        $out = [];
+        $d = $until->copy();
+        // No dots for days before the batch existed (in the venue's own day).
+        $born = BusinessClock::local($batch->created_at ?? now())->startOfDay();
+        for ($i = 0; $i < 90 && count($out) < $n; $i++) {
+            if ($batch->runsOn($d) && $d->gte($born)) {
+                $out[] = $d->toDateString();
+            }
+            $d->subDay();
+        }
+
+        return array_reverse($out);
+    }
+
+    /** Batches this caller may see: their owner's, narrowed to assigned branches for desk staff. */
+    private function batchQuery(Request $request): \Illuminate\Database\Eloquent\Builder
+    {
+        $user = $request->user();
+        $scoped = $user->scopedVenueIds();
+
+        return VenueBatch::query()
+            ->where('partner_id', $user->effectivePartnerId())
+            ->when($scoped !== null, fn ($q) => $q->where(fn ($w) => $w->whereNull('venue_id')->orWhereIn('venue_id', $scoped)));
+    }
+
+    private function enrollmentQuery(Request $request): \Illuminate\Database\Eloquent\Builder
+    {
+        $batchIds = $this->batchQuery($request)->select('id');
+
+        return BatchEnrollment::query()->whereIn('venue_batch_id', $batchIds);
     }
 
     /** @return array<string, mixed> */
     private function enrollmentRow(BatchEnrollment $e, Carbon $date): array
     {
+        $today = BusinessClock::todayDate();
+        $until = $e->paid_until;
+
         return [
-            'id'          => $e->id,
-            'name'        => $e->student_name,
-            'phone'       => $e->student_phone,
-            'paid_until'  => optional($e->paid_until)->toDateString(),
-            'overdue'     => $e->isOverdue(),
-            'present'     => BatchAttendance::query()
+            'id'           => $e->id,
+            'name'         => $e->student_name,
+            'phone'        => $e->student_phone,
+            'paid_until'   => optional($until)->toDateString(),
+            'overdue'      => $until !== null && $until->lt($today),
+            // Days past due (positive) or days of cover left (negative = still paid).
+            'days_overdue' => $until !== null ? (int) $until->diffInDays($today, false) : null,
+            'due_soon'     => $until !== null && $until->gte($today) && $until->lte($today->copy()->addDays(self::FEE_DUE_SOON_DAYS)),
+            'present'      => BatchAttendance::query()
                 ->where('batch_enrollment_id', $e->id)->whereDate('date', $date->toDateString())->exists(),
-            'attended'    => $e->attendance()->count(),
+            'attended'     => $e->attendance()->count(),
+            'amount_paid'  => (int) $e->amount_paid,
         ];
     }
 
-    /** GET /api/partner/packages — the offers this venue sells, plus who's on one. */
+    /** @return array<string, mixed> */
+    private function feeRow(AcademyFeePayment $p): array
+    {
+        return [
+            'id'           => $p->id,
+            'amount'       => $p->amount,
+            'method'       => $p->method,
+            'months'       => $p->months,
+            'paid_until'   => optional($p->paid_until)->toDateString(),
+            'collected_at' => $p->collected_at?->toIso8601String(),
+            'collected_by' => $p->relationLoaded('collector') ? $p->collector?->name : null,
+        ];
+    }
+
+    /** GET /api/partner/packages — the offers this venue sells, who's on one, and how sales are going. */
     public function packages(Request $request): JsonResponse
     {
         $partnerId = $request->user()->effectivePartnerId();
+        [$monthFrom] = BusinessClock::dayBoundsUtc(BusinessClock::todayDate()->startOfMonth()->toDateString());
+
+        $sales = CustomerPackage::query()->where('partner_id', $partnerId)
+            ->selectRaw('venue_package_id, count(*) as sold, sum(case when created_at >= ? then amount_paid else 0 end) as month_amount, sum(case when created_at >= ? then 1 else 0 end) as month_sold', [$monthFrom, $monthFrom])
+            ->groupBy('venue_package_id')->get()->keyBy('venue_package_id');
 
         $packages = VenuePackage::query()
             ->where('partner_id', $partnerId)
+            ->with('venue:id,name')
             ->orderByDesc('is_active')->orderBy('price')
             ->get()
             ->map(fn (VenuePackage $p): array => [
@@ -2203,9 +2518,12 @@ class PartnerController extends Controller
                 'sessions'      => $p->sessions,
                 'per_session'   => $p->perSession(),
                 'validity_days' => $p->validity_days,
-                'is_active'     => $p->is_active,
+                'is_active'     => (bool) $p->is_active,
                 // Null = sellable and spendable at every branch.
                 'venue_id'      => $p->venue_id,
+                'venue'         => $p->venue?->name,
+                'sold'          => (int) ($sales[$p->id]->sold ?? 0),
+                'sold_month'    => (int) ($sales[$p->id]->month_sold ?? 0),
             ]);
 
         // Active holders — the desk's "who's on a pass" list, narrowed to passes
@@ -2222,10 +2540,19 @@ class PartnerController extends Controller
             ->filter(fn (array $r): bool => $r['remaining'] > 0)
             ->values();
 
-        return response()->json(['data' => $packages, 'holders' => $holders]);
+        return response()->json([
+            'data'    => $packages,
+            'holders' => $holders,
+            'summary' => [
+                'active_holders' => $holders->where('usable', true)->count(),
+                'expiring_soon'  => $holders->where('expiring_soon', true)->count(),
+                'sold_month'     => (int) $sales->sum('month_sold'),
+                'sold_month_amount' => (int) $sales->sum('month_amount'),
+            ],
+        ]);
     }
 
-    /** POST /api/partner/packages — create or update an offer. */
+    /** POST /api/partner/packages[/{id}] — create or update an offer (and pause/resume it). */
     public function savePackage(Request $request, ?string $id = null): JsonResponse
     {
         $data = $request->validate([
@@ -2246,6 +2573,8 @@ class PartnerController extends Controller
             $venueId = (int) $this->branch($request, (string) $data['venueId'])->id;
         }
 
+        // Editing an offer never rewrites passes already sold: each sale copied its
+        // own sessions, price and expiry when it was made.
         $attrs = [
             'partner_id'    => $partnerId,
             'venue_id'      => $venueId,
@@ -2266,8 +2595,8 @@ class PartnerController extends Controller
     /**
      * POST /api/partner/packages/{id}/sell — sell a package to a customer.
      *
-     * Money is recorded the same way a walk-in's is, so package sales show up in
-     * the same takings the desk closes out against.
+     * The sale joins the collector's drawer like a walk-in's money does, so the
+     * close-out expects it.
      */
     public function sellPackage(Request $request, string $id): JsonResponse
     {
@@ -2282,6 +2611,10 @@ class PartnerController extends Controller
 
         $partnerId = $request->user()->effectivePartnerId();
         $package = VenuePackage::query()->where('partner_id', $partnerId)->findOrFail($id);
+
+        if (! $package->is_active) {
+            return response()->json(['error' => "{$package->name} is paused. Resume it before selling."], 422);
+        }
 
         $phone = $this->digits($data['customerPhone']);
 
@@ -2299,6 +2632,9 @@ class PartnerController extends Controller
             ? (int) $this->branch($request, (string) $soldAt)->id
             : $package->venue_id;
 
+        $method = $data['paymentMethod'] ?? 'cash';
+        $collector = $request->user();
+
         $sold = CustomerPackage::query()->create([
             'venue_package_id' => $package->id,
             'partner_id'       => $partnerId,
@@ -2307,7 +2643,9 @@ class PartnerController extends Controller
             'customer_name'    => $data['customerName'] ?? null,
             'sessions_total'   => $package->sessions,
             'amount_paid'      => $package->price,
-            'payment_method'   => $data['paymentMethod'] ?? 'cash',
+            'payment_method'   => $method,
+            'collected_by'     => $collector?->id,
+            'shift_session_id' => $this->deskShiftFor($collector, $soldAt, $method),
             'expires_at'       => $package->validity_days !== null
                 ? now()->addDays($package->validity_days)
                 : null,
@@ -2317,6 +2655,35 @@ class PartnerController extends Controller
             'status' => 'ok',
             'holder' => $this->holderRow($sold->fresh(['package'])->loadCount('redemptions')),
         ], 201);
+    }
+
+    /** GET /api/partner/packages/holders/{id} — one pass: every session spent, where and when. */
+    public function packageHolderDetail(Request $request, string $id): JsonResponse
+    {
+        $partnerId = $request->user()->effectivePartnerId();
+        $pass = CustomerPackage::query()->where('partner_id', $partnerId)
+            ->with('package:id,name,venue_id')->withCount('redemptions')->findOrFail($id);
+
+        $venueNames = Venue::query()->where('partner_id', $partnerId)->pluck('name', 'id');
+
+        $uses = $pass->redemptions()->with('booking:id,slot_date,slot_label,start_time,venue_court_id')
+            ->latest()->get()
+            ->map(fn (PackageRedemption $r): array => [
+                'id'      => $r->id,
+                'at'      => $r->created_at?->toIso8601String(),
+                'date'    => $r->booking?->slot_date ? Carbon::parse($r->booking->slot_date)->toDateString() : null,
+                'slot'    => $r->booking?->slot_label,
+                'venue'   => $r->redeemed_at_venue_id !== null ? ($venueNames[$r->redeemed_at_venue_id] ?? null) : null,
+            ]);
+
+        return response()->json([
+            'holder' => $this->holderRow($pass) + [
+                'sold_on'        => $pass->created_at?->toDateString(),
+                'amount_paid'    => (int) $pass->amount_paid,
+                'payment_method' => $pass->payment_method,
+            ],
+            'uses'   => $uses,
+        ]);
     }
 
     /**
@@ -2369,6 +2736,14 @@ class PartnerController extends Controller
             'remaining'  => max($c->sessions_total - $used, 0),
             'expires_at' => optional($c->expires_at)->toDateString(),
             'expired'    => $c->isExpired(),
+            // Days of validity left (null = never expires); the desk nudges a
+            // customer to use or renew before the pass lapses.
+            'expires_in_days' => $c->expires_at !== null && ! $c->isExpired()
+                ? (int) BusinessClock::todayDate()->diffInDays(BusinessClock::local($c->expires_at)->startOfDay(), false)
+                : null,
+            'expiring_soon' => $c->expires_at !== null && ! $c->isExpired()
+                && BusinessClock::local($c->expires_at)->lte(BusinessClock::now()->addDays(self::PASS_EXPIRY_SOON_DAYS)),
+            'sold_on'    => $c->created_at?->toDateString(),
             'usable'     => max($c->sessions_total - $used, 0) > 0 && ! $c->isExpired(),
             // Null = valid at every branch. The desk needs to see this before it
             // promises a customer their pass works somewhere it doesn't.
