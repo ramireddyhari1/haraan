@@ -46,7 +46,10 @@ class MemberPlansTable
 
                         return $labels === [] ? 'No prices' : implode(' · ', $labels);
                     })
-                    ->color('gray')
+                    // A paid plan shown in the app with no active price has no buy button
+                    // behind it — members see it and can't take it.
+                    ->description(fn (MemberPlan $r): ?string => self::unbuyable($r) ? 'Shown in the app but cannot be bought — add an active price' : null)
+                    ->color(fn (MemberPlan $r): string => self::unbuyable($r) ? 'danger' : 'gray')
                     ->wrap(),
 
                 TextColumn::make('live_count')
@@ -59,5 +62,10 @@ class MemberPlansTable
             ->recordActions([EditAction::make()])
             ->emptyStateHeading('No member plans')
             ->emptyStateDescription('Without a default plan, members get no entitlements at all.');
+    }
+
+    private static function unbuyable(MemberPlan $r): bool
+    {
+        return ! $r->is_default && $r->is_active && $r->prices->where('is_active', true)->isEmpty();
     }
 }

@@ -13,6 +13,28 @@ class CreatePayoutBatch extends CreateRecord
 {
     protected static string $resource = PayoutBatchResource::class;
 
+    /**
+     * Opened from Finance Overview's "Owed the most" list (?partner=ID): choose that partner
+     * and run the select's own side-effects, so the gross, the tax rates and the payout
+     * method fill exactly as if the partner had been picked by hand.
+     */
+    protected function afterFill(): void
+    {
+        $partnerId = (int) request()->query('partner', 0);
+        if ($partnerId <= 0) {
+            return;
+        }
+
+        $this->data['partner_id'] = (string) $partnerId;
+
+        foreach ($this->form->getFlatComponents() as $component) {
+            if ($component instanceof \Filament\Forms\Components\Select && $component->getName() === 'partner_id') {
+                $component->callAfterStateUpdated();
+                break;
+            }
+        }
+    }
+
     /** A batch created straight into "paid" still needs its timestamp. */
     protected function mutateFormDataBeforeCreate(array $data): array
     {
