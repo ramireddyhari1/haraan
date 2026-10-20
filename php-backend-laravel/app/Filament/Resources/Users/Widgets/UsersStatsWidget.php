@@ -23,7 +23,7 @@ class UsersStatsWidget extends StatsOverviewWidget
 {
     use \App\Filament\Concerns\RefreshesOnContentUpdate;
 
-    public const CACHE_KEY = 'admin:users_stats_kpis';
+    public const CACHE_KEY = 'admin:users_stats_kpis:v2';
     public const CACHE_TTL_SECONDS = 60;
 
     public static function invalidateCache(): void
@@ -39,29 +39,33 @@ class UsersStatsWidget extends StatsOverviewWidget
 
     protected function getStats(): array
     {
-        /** @var array{total: int, thisWeekCount: int, prevWeekCount: int, signupSpark: list<int>, onlineNow: int, wau: int, mau: int, staff: int, partners: int} $data */
+        /** @var array{total: int, thisWeekCount: int, prevWeekCount: int, signupSpark: list<int>, onlineNow: int, wau: int, mau: int, neverOpened: int} $data */
         $data = Cache::remember(self::CACHE_KEY, self::CACHE_TTL_SECONDS, function (): array {
             $now = Carbon::now();
             $weekStart = $now->copy()->subDays(6)->startOfDay();  // last 7 days inclusive
             $prevStart = $now->copy()->subDays(13)->startOfDay();
             $prevEnd = $now->copy()->subDays(7)->endOfDay();
 
-            $total = User::count();
+            // The same people as the list under it (AppUserResource): app users only. It
+            // counted every account, so staff, partners and HR employees inflated "users".
+            $people = fn () => User::query()->where(fn ($q) => $q->whereNull('role')
+                ->orWhereNotIn('role', \App\Filament\Resources\AppUsers\AppUserResource::NON_USER_ROLES));
+
+            $total = $people()->count();
 
             // Signups over the last 14 days, split in PHP so one query serves both the
             // week-over-week trend and the sparkline.
-            $recent = User::query()->where('created_at', '>=', $prevStart)->get(['created_at']);
+            $recent = $people()->where('created_at', '>=', $prevStart)->get(['created_at']);
             $thisWeek = $recent->filter(fn ($u) => $u->created_at >= $weekStart);
             $prevWeek = $recent->filter(fn ($u) => $u->created_at >= $prevStart && $u->created_at <= $prevEnd);
             $signupSpark = self::calculateDailyCounts($thisWeek, $weekStart, $now);
 
-            $onlineNow = User::where('last_seen_at', '>=', $now->copy()->subMinutes(5))->count();
-            $wau = User::where('last_seen_at', '>=', $now->copy()->subDays(7))->count();
-            $mau = User::where('last_seen_at', '>=', $now->copy()->subDays(30))->count();
+            $onlineNow = $people()->where('last_seen_at', '>=', $now->copy()->subMinutes(5))->count();
+            $wau = $people()->where('last_seen_at', '>=', $now->copy()->subDays(7))->count();
+            $mau = $people()->where('last_seen_at', '>=', $now->copy()->subDays(30))->count();
 
-            // Roles are normalized uppercase and indexed.
-            $staff = User::whereIn('role', ['ADMIN', 'COADMIN'])->count();
-            $partners = User::where('role', 'PARTNER')->count();
+            // Signed up (often at a desk or by OTP on the site) but never opened the app.
+            $neverOpened = $people()->whereNull('last_seen_at')->count();
 
             return [
                 'total'         => $total,
@@ -71,14 +75,13 @@ class UsersStatsWidget extends StatsOverviewWidget
                 'onlineNow'     => $onlineNow,
                 'wau'           => $wau,
                 'mau'           => $mau,
-                'staff'         => $staff,
-                'partners'      => $partners,
+                'neverOpened'   => $neverOpened,
             ];
         });
 
         return [
             Stat::make('Total users', number_format($data['total']))
-                ->description($data['total'] > 0 ? "{$data['staff']} staff · {$data['partners']} partners" : 'No accounts yet')
+                ->description($data['total'] > 0 ? 'people using Haraan' : 'No players yet')
                 ->descriptionIcon('heroicon-m-users')
                 ->color('primary'),
 
@@ -89,10 +92,10 @@ class UsersStatsWidget extends StatsOverviewWidget
                 ->descriptionIcon('heroicon-m-signal')
                 ->color($data['wau'] > 0 ? 'success' : 'gray'),
 
-            Stat::make('Staff & partners', number_format($data['staff'] + $data['partners']))
-                ->description('accounts with elevated access')
-                ->descriptionIcon('heroicon-m-shield-check')
-                ->color('info'),
+            Stat::make('Never opened the app', number_format($data['neverOpened']))
+                ->description($data['total'] > 0 ? round($data['neverOpened'] / $data['total'] * 100) . '% of users — a welcome nudge candidate' : 'nobody yet')
+                ->descriptionIcon('heroicon-m-device-phone-mobile')
+                ->color($data['neverOpened'] > 0 ? 'warning' : 'gray'),
         ];
     }
 

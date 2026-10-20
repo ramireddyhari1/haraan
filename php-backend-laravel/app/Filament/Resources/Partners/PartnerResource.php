@@ -297,7 +297,12 @@ class PartnerResource extends Resource
 
     public static function table(Table $table): Table
     {
+        $settlement = app(\App\Services\PartnerSettlement::class);
+
         return $table
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query
+                ->with(['parentPartner:id,name', 'payoutAccount'])
+                ->withCount(['venues', 'events']))
             ->columns([
                 AvatarColumn::make(
                     'avatar',
@@ -306,32 +311,68 @@ class PartnerResource extends Resource
                 ),
                 TextColumn::make('name')
                     ->weight('bold')
-                    ->description(fn (User $r): ?string => ContactPrefill::isRealEmail($r->email)
-                        ? $r->email
-                        : (trim((string) $r->phone) ?: null))
-                    ->searchable(),
-                TextColumn::make('phone')->placeholder('—')->toggleable(),
+                    ->description(fn (User $r): ?string => $r->parent_partner_id
+                        ? 'Desk staff of ' . ($r->parentPartner?->name ?? 'a partner')
+                        : (ContactPrefill::isRealEmail($r->email) ? $r->email : (trim((string) $r->phone) ?: null)))
+                    ->searchable(['name', 'email', 'phone']),
+                TextColumn::make('phone')->placeholder('—')->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('partner_type')
                     ->label('Type')
                     ->badge()
                     ->color('info')
                     ->formatStateUsing(fn (?string $state): string => \App\Support\PartnerLane::typeLabel($state))
                     ->placeholder('—'),
+                // What they actually run — a partner with nothing listed can't earn.
+                TextColumn::make('runs')
+                    ->label('Runs')
+                    ->state(fn (User $r): string => $r->parent_partner_id ? '—' : (collect([
+                        $r->venues_count ? $r->venues_count . ' ' . str('venue')->plural($r->venues_count) : null,
+                        $r->events_count ? $r->events_count . ' ' . str('event')->plural($r->events_count) : null,
+                    ])->filter()->join(' · ') ?: 'Nothing listed yet'))
+                    ->color(fn (User $r): string => ! $r->parent_partner_id && ! $r->venues_count && ! $r->events_count ? 'warning' : 'gray'),
+                // Balance from PartnerSettlement (the payout batch maths), and whether it can be paid.
+                TextColumn::make('owed')
+                    ->label('Owed')
+                    ->state(fn (User $r): string => $r->parent_partner_id ? '—' : \App\Services\PartnerSettlement::inr($settlement->available($r->id)))
+                    ->description(fn (User $r): ?string => match (true) {
+                        (bool) $r->parent_partner_id => null,
+                        $r->payoutAccount === null => 'no payout account',
+                        $r->payoutAccount->verified_at === null => 'account not verified',
+                        default => 'payable · ' . strtoupper((string) $r->payoutAccount->method),
+                    })
+                    ->alignRight(),
                 TextColumn::make('partnerManager.manager.name')
                     ->label('Haraan manager')
                     ->placeholder('—')
                     ->toggleable(),
+                // Status casing is mixed in the DB (ACTIVE / active): it compared to lowercase
+                // only, so every active partner showed red.
                 TextColumn::make('status')
                     ->badge()
-                    ->color(fn (?string $state): string => $state === 'active' ? 'success' : 'danger'),
-                TextColumn::make('created_at')->dateTime()->sortable(),
+                    ->formatStateUsing(fn (?string $state): string => ucfirst(strtolower((string) $state)) ?: '—')
+                    ->color(fn (?string $state): string => strtolower((string) $state) === 'active' ? 'success' : 'danger'),
+                TextColumn::make('created_at')->label('Joined')->date('j M Y')->sortable(),
             ])
             ->defaultSort('created_at', 'desc')
             ->filters([
+                // Desk staff share the PARTNER role. Owners are the default view; their team
+                // is one switch away, since /control has no other list of them.
+                SelectFilter::make('account')
+                    ->label('Accounts')
+                    ->options(['owners' => 'Partners (owners)', 'staff' => 'Desk staff'])
+                    ->default('owners')
+                    ->query(fn (Builder $query, array $data): Builder => match ($data['value'] ?? null) {
+                        'owners' => $query->whereNull('parent_partner_id'),
+                        'staff' => $query->whereNotNull('parent_partner_id'),
+                        default => $query,
+                    }),
                 SelectFilter::make('partner_type')
                     ->options(\App\Support\PartnerLane::TYPE_LABELS),
                 SelectFilter::make('status')
-                    ->options(['active' => 'Active', 'suspended' => 'Suspended']),
+                    ->options(['active' => 'Active', 'suspended' => 'Suspended'])
+                    ->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
+                        ? $query->whereRaw('lower(status) = ?', [$data['value']])
+                        : $query),
             ])
             ->recordActions([
                 ViewAction::make(),

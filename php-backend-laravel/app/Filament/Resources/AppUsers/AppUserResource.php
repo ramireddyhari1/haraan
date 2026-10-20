@@ -40,8 +40,12 @@ class AppUserResource extends Resource
         getEloquentQuery as protected scopedOrgQuery;
     }
 
-    /** Roles that are NOT app users (internal staff + partners have their own lists). */
-    public const NON_USER_ROLES = ['ADMIN', 'COADMIN', 'OPS', 'FINANCE', 'MARKETING', 'PARTNER'];
+    /**
+     * Roles that are NOT app users: internal staff, partners (and their desk staff), and HR
+     * employees — each has its own list. EMPLOYEE was missing, so the workforce showed up
+     * here as players.
+     */
+    public const NON_USER_ROLES = ['ADMIN', 'COADMIN', 'OPS', 'FINANCE', 'MARKETING', 'PARTNER', 'EMPLOYEE'];
 
     protected static ?string $model = User::class;
 
@@ -60,8 +64,9 @@ class AppUserResource extends Resource
     /** Everyone who isn't internal staff or a partner — treats a null role as a user. */
     public static function getEloquentQuery(): Builder
     {
+        // SQL `NOT IN` is never true for NULL, so a user with no role vanished from every list.
         return static::scopedOrgQuery()
-            ->whereNotIn('role', self::NON_USER_ROLES);
+            ->where(fn (Builder $q): Builder => $q->whereNull('role')->orWhereNotIn('role', self::NON_USER_ROLES));
     }
 
     /** Super-admins and Operations manage the people lists. */

@@ -470,6 +470,18 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
      * The frontend branch switcher is a convenience. This is the boundary.
      */
     /** The Haraan employee assigned to this partner in /control (one per partner). */
+    /** The owner a desk-staff account works for (null for owners and everyone else). */
+    public function parentPartner(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_partner_id');
+    }
+
+    /** Where this partner's settlements are paid. */
+    public function payoutAccount(): \Illuminate\Database\Eloquent\Relations\HasOne
+    {
+        return $this->hasOne(PartnerPayoutAccount::class, 'partner_id');
+    }
+
     public function partnerManager(): \Illuminate\Database\Eloquent\Relations\HasOne
     {
         return $this->hasOne(PartnerManager::class, 'partner_id');

@@ -249,8 +249,9 @@ class UsersTable
 
     private static function presenceLabel(?Carbon $seen): string
     {
+        // Never seen is not "Away": they have never opened the app.
         if ($seen === null) {
-            return 'Away';
+            return 'Never opened';
         }
         if ($seen->gt(now()->subMinutes(5))) {
             return 'Online';

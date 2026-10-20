@@ -160,6 +160,6 @@ final class EmployeeProfile extends Model
     /** Is this employee an active worker */
     public function isActive(): bool
     {
-        return $this->employment_status === 'active';
+        return strtolower((string) $this->employment_status) === 'active';
     }
 }

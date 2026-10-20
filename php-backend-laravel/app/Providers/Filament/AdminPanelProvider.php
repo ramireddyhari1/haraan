@@ -120,6 +120,8 @@ class AdminPanelProvider extends PanelProvider
                 \App\Filament\Pages\AppUpdatesPage::class,
                 \App\Filament\Pages\ServerStatus::class,
                 \App\Filament\Pages\WhatsAppConnection::class,
+                // Workforce & HR → Today: who's in, who's off, what's waiting on a manager.
+                \App\Filament\Pages\WorkforceToday::class,
             ])
             ->widgets([
                 \App\Filament\Widgets\ActiveUsersTrendWidget::class,

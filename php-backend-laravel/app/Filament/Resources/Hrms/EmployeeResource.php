@@ -96,11 +96,14 @@ class EmployeeResource extends Resource
                 TextColumn::make('department.name')->label('Department')->badge()->color('gray'),
                 TextColumn::make('designation.name')->label('Designation'),
                 TextColumn::make('venue.name')->label('Branch / Venue')->placeholder('HQ'),
+                // Casing is mixed in the data (ACTIVE / active); compared raw, every
+                // active employee showed red.
                 TextColumn::make('employment_status')
                     ->badge()
-                    ->color(fn (string $state): string => match ($state) {
+                    ->formatStateUsing(fn (?string $state): string => ucfirst(str_replace('_', ' ', strtolower((string) $state))))
+                    ->color(fn (?string $state): string => match (strtolower((string) $state)) {
                         'active' => 'success',
-                        'on_leave' => 'warning',
+                        'on_leave', 'probation' => 'warning',
                         default => 'danger',
                     }),
                 TextColumn::make('base_salary')->money('INR')->sortable(),
