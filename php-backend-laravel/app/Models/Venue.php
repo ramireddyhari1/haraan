@@ -689,6 +689,53 @@ final class Venue extends Model
             && $this->isReadyForPublish();
     }
 
+    /**
+     * Why a customer can't book this venue on a date, in the order the customer side checks:
+     * the listing state, then the same readiness rules {@see scopePublished()} filters by, then
+     * that day's hours and blocked dates. Empty means it is on sale that day.
+     *
+     * Admin screens read this rather than the raw is_active / is_bookable switches, which
+     * stay on for a draft and so called a venue "on sale" that the app was hiding.
+     *
+     * @return list<string>
+     */
+    public function sellBlockers(?\Carbon\CarbonInterface $on = null): array
+    {
+        $on ??= now();
+        $blockers = [];
+
+        $state = $this->visibilityState();
+        if ($state === self::STATE_DRAFT) {
+            $blockers[] = 'It is a draft — hidden from the app, the site and search. Set Status to Live in Go live.';
+        } elseif ($state === self::STATE_PAUSED) {
+            $blockers[] = 'Bookings are paused — the listing is visible but the book button is not.';
+        }
+
+        foreach ($this->readinessErrors() as $error) {
+            $blockers[] = $error;
+        }
+
+        if (! $this->isOpenOn($on)) {
+            $blockers[] = 'Closed ' . ($on->isToday() ? 'today' : $on->format('l')) . ' under the operating hours.';
+        }
+
+        if ($this->blockedDates()->whereDate('date', $on->toDateString())->exists()) {
+            $blockers[] = ($on->isToday() ? 'Today' : $on->format('j M')) . ' is a blocked date.';
+        }
+
+        if ($this->partner_id === null) {
+            $blockers[] = 'No owner assigned — nobody can run this venue from the partner console.';
+        }
+
+        return $blockers;
+    }
+
+    /** Listed, bookable and passing every readiness rule — what the customer side sells. */
+    public function isOnSale(): bool
+    {
+        return $this->visibilityState() === self::STATE_LIVE && $this->isReadyForPublish();
+    }
+
     /** Publish and activate the venue if ready; throws DomainException if setup is incomplete. */
     public function publish(): void
     {

@@ -68,6 +68,7 @@ class GameHubStaff extends Page
                     'trailing' => $s->opened_at ? 'since ' . $s->opened_at->format('g:i A') : '',
                 ])->all(),
                 'empty' => 'Nobody has a shift open right now.',
+                'illo' => 'whistle',
             ],
         ]];
     }

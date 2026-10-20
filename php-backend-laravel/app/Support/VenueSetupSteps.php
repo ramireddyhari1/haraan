@@ -49,7 +49,9 @@ final class VenueSetupSteps
             'extras' => [$amenities !== [] || $rules !== [], 'Optional — helps players choose'],
         ];
         $ready = $state['basics'][0] && $state['location'][0] && $state['hours'][0] && $state['courts'][0] && $state['pricing'][0] && $state['photos'][0];
-        $state['live'] = [self::isLive($v), $ready ? self::goLiveHint() : 'Finish the steps above first'];
+        // Live only counts once setup is finished too: a venue set to Live but missing a photo is
+        // hidden by the customer side (Venue::scopePublished), so the journey mustn't say "live".
+        $state['live'] = [$ready && self::isLive($v), $ready ? self::goLiveHint() : 'Finish the steps above first'];
 
         $out = [];
         $n = 1;

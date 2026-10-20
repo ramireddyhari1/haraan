@@ -88,7 +88,11 @@ class Venue360Test extends TestCase
             'status'   => 'ACTIVE',
         ]);
 
-        $venue = $this->venue(['partner_id' => $owner->id]);
+        $venue = $this->venue([
+            'partner_id' => $owner->id,
+            'status'     => 'published',
+            'images'     => ['https://cdn.haraan.test/arena.jpg'],
+        ]);
         $venue->regenerateSlotsFromHours();
 
         VenueCourt::create([
@@ -157,12 +161,43 @@ class Venue360Test extends TestCase
         $blockers = VenueInfolist::blockers($venue);
 
         $this->assertNotEmpty($blockers);
-        $this->assertTrue(collect($blockers)->contains(fn (string $b): bool => str_contains($b, 'Bookings are switched off')));
-        $this->assertTrue(collect($blockers)->contains(fn (string $b): bool => str_contains($b, 'No active courts')));
+        $this->assertTrue(collect($blockers)->contains(fn (string $b): bool => str_contains($b, 'It is a draft')));
+        $this->assertTrue(collect($blockers)->contains(fn (string $b): bool => str_contains($b, 'active court')));
         $this->assertTrue(collect($blockers)->contains(fn (string $b): bool => str_contains($b, 'No owner assigned')));
 
         // A fully configured venue reports nothing.
         $this->assertSame([], VenueInfolist::blockers($this->sellableVenue()));
+    }
+
+    public function test_a_live_venue_without_a_photo_is_not_called_on_sale(): void
+    {
+        // The switches are all on, but the customer side (scopePublished) hides a venue
+        // with no photo — the 360 used to call this "On sale" and "Live · Bookable".
+        $venue = $this->sellableVenue();
+        $venue->update(['images' => []]);
+        $venue = $venue->fresh();
+
+        $this->assertFalse($venue->isOnSale());
+        $this->assertFalse(Venue::published()->whereKey($venue->id)->exists());
+        $this->assertTrue(collect(VenueInfolist::blockers($venue))->contains(fn (string $b): bool => str_contains($b, 'photo')));
+
+        $hero = new \App\Filament\Resources\Venues\Widgets\VenueCommandHeroWidget();
+        $hero->record = $venue;
+        $t = $hero->getTelemetry();
+        $this->assertFalse($t['onSale']);
+        $this->assertSame(1, $t['setupLeft']);
+        $this->assertStringContainsString('hidden', $t['statusLabel']);
+
+        $this->assertStringStartsWith('Setup 5/6', \App\Filament\Resources\Venues\Tables\VenuesTable::stateLabel($venue));
+    }
+
+    public function test_a_sellable_venue_reads_live_everywhere(): void
+    {
+        $venue = $this->sellableVenue();
+
+        $this->assertTrue($venue->isOnSale());
+        $this->assertTrue(Venue::published()->whereKey($venue->id)->exists());
+        $this->assertSame('Live', \App\Filament\Resources\Venues\Tables\VenuesTable::stateLabel($venue));
     }
 
     public function test_hero_counts_occupancy_and_ledger_money_not_order_totals(): void

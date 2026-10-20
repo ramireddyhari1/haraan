@@ -38,7 +38,8 @@ class VenuesTable
                     ImageColumn::make('image')
                         ->label('')
                         ->extraImgAttributes(['style' => 'width:72px;height:72px;object-fit:cover;border-radius:14px;box-shadow:0 6px 16px -8px rgba(11,18,32,.45);'])
-                        ->getStateUsing(fn (Venue $r): string => $r->images[0] ?? self::venuePlaceholder())
+                        ->getStateUsing(fn (Venue $r): string => (is_array($r->images) ? collect($r->images)->first(fn ($i) => trim((string) $i) !== '') : null)
+                            ?? self::venuePlaceholder((string) $r->category))
                         ->grow(false),
 
                     Stack::make([
@@ -64,22 +65,18 @@ class VenuesTable
                                     default => 'gray',
                                 }),
 
+                            // What a customer gets today, and if nothing, how far setup has to go:
+                            // "Setup 5/6 · Photos" says what to do; "Setup Incomplete" didn't.
                             TextColumn::make('lifecycle_status')
                                 ->label('')
                                 ->badge()
-                                ->getStateUsing(fn (Venue $r): string => $r->lifecycleLabel())
-                                ->color(fn (string $state): string => match ($state) {
-                                    'Live / Published' => 'success',
-                                    'Ready to Publish' => 'warning',
-                                    'Setup Incomplete (Draft)' => 'danger',
-                                    default => 'gray',
+                                ->getStateUsing(fn (Venue $r): string => self::stateLabel($r))
+                                ->icon(fn (Venue $r): string => $r->isOnSale() ? 'heroicon-m-check-circle' : ($r->isReadyForPublish() ? 'heroicon-m-rocket-launch' : 'heroicon-m-wrench-screwdriver'))
+                                ->color(fn (Venue $r): string => match (true) {
+                                    $r->isOnSale() => 'success',
+                                    $r->isReadyForPublish() => 'info',
+                                    default => 'warning',
                                 }),
-
-                            TextColumn::make('is_bookable')
-                                ->label('')
-                                ->badge()
-                                ->formatStateUsing(fn (bool $state): string => $state ? 'Bookable' : 'Info only')
-                                ->color(fn (bool $state): string => $state ? 'info' : 'gray'),
                         ])->grow(false),
 
                         TextColumn::make('location')
@@ -149,11 +146,19 @@ class VenuesTable
                     ->label('Venue 360')
                     ->icon('heroicon-m-squares-2x2'),
                 EditAction::make(),
+                // An unfinished venue opens its form at the setup steps; Publish only shows
+                // when it will succeed, instead of always answering with an error list.
+                Action::make('finishSetup')
+                    ->label('Finish setup')
+                    ->icon('heroicon-m-wrench-screwdriver')
+                    ->color('primary')
+                    ->visible(fn (Venue $r): bool => ! $r->isReadyForPublish() && VenueResource::canEdit($r))
+                    ->url(fn (Venue $r): string => VenueResource::getUrl('edit', ['record' => $r])),
                 Action::make('publish')
                     ->label('Publish')
                     ->icon('heroicon-m-globe-alt')
                     ->color('success')
-                    ->visible(fn (Venue $r): bool => ! $r->isPublished())
+                    ->visible(fn (Venue $r): bool => ! $r->isPublished() && $r->isReadyForPublish())
                     ->action(function (Venue $r): void {
                         $errors = $r->readinessErrors();
                         if (! empty($errors)) {
@@ -210,14 +215,49 @@ class VenuesTable
             ]);
     }
 
-    /** A neutral rounded placeholder for venues without a photo (self-contained). */
-    private static function venuePlaceholder(): string
+    /** "Live", "Paused", "Ready to publish" or "Setup 5/6 · Photos" — see VenueSetupSteps. */
+    public static function stateLabel(Venue $r): string
     {
-        $svg = "<svg xmlns='http://www.w3.org/2000/svg' width='72' height='72'>"
-            . "<rect width='72' height='72' rx='14' fill='#e8ecf3'/>"
-            . "<path d='M20 50V30l16-10 16 10v20z' fill='none' stroke='#b6c0d0' stroke-width='3' stroke-linejoin='round'/>"
-            . "<rect x='32' y='38' width='8' height='12' fill='#b6c0d0'/></svg>";
+        if ($r->isOnSale()) {
+            return 'Live';
+        }
+        if ($r->isReadyForPublish()) {
+            return $r->visibilityState() === Venue::STATE_PAUSED ? 'Bookings paused' : 'Ready to publish';
+        }
 
-        return 'data:image/svg+xml;base64,' . base64_encode($svg);
+        $required = collect(\App\Support\VenueSetupSteps::forVenue($r))->where('required', true);
+        $next = $required->firstWhere('done', false);
+
+        return 'Setup ' . $required->where('done', true)->count() . '/' . $required->count()
+            . ($next ? ' · ' . $next['label'] : '');
+    }
+
+    /**
+     * No photo yet: the venue's own court, drawn (filament/venue/court-pitch) on a soft tile,
+     * so the list still tells a cricket box from a badminton hall at a glance.
+     */
+    private static function venuePlaceholder(string $sport = ''): string
+    {
+        static $cache = [];
+        $key = strtolower(trim($sport));
+
+        return $cache[$key] ??= (static function () use ($sport): string {
+            $court = view('filament.venue.court-pitch', ['sport' => $sport, 'kind' => null])->render();
+            // A data-URI image can't read the page's CSS variables, so pin the light palette.
+            $court = str_replace(
+                ['var(--cc-ink)', 'var(--cc-blue-soft)', 'var(--cc-surface)', 'class="cb-pitch" viewBox'],
+                ['#4b5b78', '#e1eaff', '#ffffff', 'x="6" y="16" width="60" height="40" viewBox'],
+                $court,
+            );
+            $court = preg_replace('/\s(role|aria-label)="[^"]*"/', '', $court);
+
+            $svg = "<svg xmlns='http://www.w3.org/2000/svg' width='72' height='72' viewBox='0 0 72 72'>"
+                . "<rect width='72' height='72' rx='14' fill='#f4f7fe'/>"
+                . "<ellipse cx='36' cy='60' rx='24' ry='3' fill='#dfe7fb'/>"
+                . $court
+                . '</svg>';
+
+            return 'data:image/svg+xml;base64,' . base64_encode($svg);
+        })();
     }
 }

@@ -77,6 +77,7 @@ class GameHubTournaments extends Page
                         : 'on till ' . $t->end_date?->format('j M'),
                 ])->all(),
                 'empty' => 'No tournaments running or coming up.',
+                'illo' => 'trophy',
             ],
         ]];
     }

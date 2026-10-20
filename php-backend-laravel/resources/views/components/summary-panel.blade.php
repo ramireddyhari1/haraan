@@ -3,7 +3,8 @@
  summary widgets (ListSummaryWidget) and the GameHub pages. Every value is
  computed from the database by the caller; this only draws it.
 
- Props: s — see ListSummaryWidget::getSummary() for the shape. --}}
+ Props: s — see ListSummaryWidget::getSummary() for the shape. A list may name
+ an 'illo' (x-hrn-illo) to draw when it has no rows. --}}
 @props(['s'])
 @php
 $split = $s['split'] ?? null;
@@ -56,12 +57,18 @@ $palette = ['#2563eb', '#0f9d63', '#e8a33d', '#7c3aed', '#64748b', '#0ea5e9'];
             @if ($list)
                 <div class="hls-list">
                     <div class="hls-sub-title">{{ $list['title'] }}</div>
-                    @if ($list['rows'] === [])
+                    @if ($list['rows'] === [] && ! empty($list['illo']))
+                        <div class="hls-empty-art">
+                            <x-hrn-illo :name="$list['illo']" :size="112" />
+                            <p>{{ $list['empty'] }}</p>
+                        </div>
+                    @elseif ($list['rows'] === [])
                         <p class="hls-empty">{{ $list['empty'] }}</p>
                     @else
                         <ul>
                             @foreach ($list['rows'] as $row)
-                                <li>
+                                <li @class(['is-link' => ! empty($row['url'])])>
+                                    @if (! empty($row['url']))<a href="{{ $row['url'] }}" class="hls-row-link" aria-label="Open {{ $row['primary'] }}"></a>@endif
                                     <div>
                                         <span class="hls-row-main">{{ $row['primary'] }}</span>
                                         @if (! empty($row['secondary']))<span class="hls-row-sub">{{ $row['secondary'] }}</span>@endif
@@ -95,6 +102,9 @@ $palette = ['#2563eb', '#0f9d63', '#e8a33d', '#7c3aed', '#64748b', '#0ea5e9'];
     .hls-lower > div + div{border-left:1px solid #eef1f6;}
     .hls-sub-title{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#64748b;margin-bottom:10px;}
     .hls-empty{font-size:13px;color:#94a3b8;margin:0;}
+    .hls-empty-art{display:flex;flex-direction:column;align-items:center;gap:6px;padding:6px 8px 4px;text-align:center;}
+    .hls-empty-art p{margin:0;max-width:280px;font-size:13px;line-height:1.45;color:#64748b;}
+    .dark .hls-empty-art p{color:#94a3b8;}
     .hls-bar{display:flex;height:8px;border-radius:99px;overflow:hidden;background:#f1f4f9;gap:2px;}
     .hls-bar i{display:block;height:100%;}
     .hls-legend{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:6px;}
@@ -105,6 +115,9 @@ $palette = ['#2563eb', '#0f9d63', '#e8a33d', '#7c3aed', '#64748b', '#0ea5e9'];
     .hls-list li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0;}
     .hls-list li + li{border-top:1px solid #f1f4f9;}
     .hls-list li > div{min-width:0;}
+    .hls-list li.is-link{position:relative;border-radius:8px;}
+    .hls-list li.is-link:hover .hls-row-main{color:#2563eb;}
+    .hls-row-link{position:absolute;inset:0;z-index:1;}
     .hls-row-main{display:block;font-size:13px;font-weight:600;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .hls-row-sub{display:block;font-size:12px;color:#64748b;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
     .hls-row-end{font-size:12.5px;font-weight:650;color:#334155;white-space:nowrap;font-variant-numeric:tabular-nums;}

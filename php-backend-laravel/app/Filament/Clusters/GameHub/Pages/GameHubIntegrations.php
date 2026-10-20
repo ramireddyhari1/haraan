@@ -113,6 +113,7 @@ class GameHubIntegrations extends Page
                     'trailing' => ucfirst((string) $c->status),
                 ])->all(),
                 'empty' => 'No channels connected yet. Instagram and WhatsApp can be linked from your Haraan admin.',
+                'illo' => 'plug',
             ],
         ];
     }

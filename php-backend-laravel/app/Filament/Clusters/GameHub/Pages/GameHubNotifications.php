@@ -93,6 +93,7 @@ class GameHubNotifications extends Page
                     'trailing' => $m->created_at?->diffForHumans(short: true) ?? '',
                 ])->all(),
                 'empty' => 'Every message in the last 7 days went out.',
+                'illo' => 'paper-plane',
             ],
         ]];
     }

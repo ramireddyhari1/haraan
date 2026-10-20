@@ -107,8 +107,11 @@ class VenueCommandHeroWidget extends Widget
             'branch'         => $venue->branchName(),
             'city'           => (string) ($venue->city ?: $venue->location ?: ''),
             'sports'         => $venue->sportsList(),
-            'onSale'         => $venue->is_active && $venue->is_bookable,
+            'onSale'         => $venue->isOnSale(),
             'statusLabel'    => $this->statusLabel($venue),
+            'setupLeft'      => count($venue->readinessErrors()),
+            'mainSport'      => (string) ($venue->category ?: ($venue->sportsList()[0] ?? '')),
+            'hasPhoto'       => is_array($venue->images) && array_filter($venue->images, fn ($i) => trim((string) $i) !== '') !== [],
             'courtsActive'   => (int) $venue->courts()->where('is_active', true)->count(),
             'courtsTotal'    => (int) $venue->courts()->count(),
             'todayBookings'  => $todayBookings,
@@ -147,16 +150,17 @@ class VenueCommandHeroWidget extends Widget
         return $courts * $slots;
     }
 
+    /** Matches what the customer side shows, not the raw switches (a draft keeps them on). */
     private function statusLabel(Venue $venue): string
     {
-        if (! $venue->is_active) {
-            return 'Listing hidden';
+        if ($venue->isOnSale()) {
+            return 'On sale';
         }
 
-        if (! $venue->is_bookable) {
-            return 'Visible, not bookable';
-        }
-
-        return 'On sale';
+        return match ($venue->visibilityState()) {
+            Venue::STATE_PAUSED => 'Visible, bookings paused',
+            Venue::STATE_LIVE   => 'Set live — hidden until setup is finished',
+            default             => 'Draft — hidden from customers',
+        };
     }
 }

@@ -7,6 +7,7 @@ namespace App\Filament\Clusters\GameHub\Pages;
 use App\Filament\Clusters\GameHub\Concerns\SummarisesVenues;
 use App\Filament\Clusters\GameHub\GameHubCluster;
 use App\Models\LiveMatch;
+use App\Filament\Resources\Venues\VenueResource;
 use App\Models\Venue;
 use App\Models\VenueCourt;
 use BackedEnum;
@@ -95,6 +96,7 @@ class GameHubOverview extends Page
                     'trailing' => substr((string) $b->start_time, 0, 5),
                 ])->all(),
                 'empty' => 'Nobody else is booked in for today.',
+                'illo' => 'court-empty',
             ],
         ];
     }
@@ -131,7 +133,9 @@ class GameHubOverview extends Page
     private function venues(): array
     {
         $venues = fn () => static::ownVenues(Venue::query(), 'id');
-        $live = $venues()->where('is_active', true)->where('status', 'published')->count();
+        // The customer side's own filter (published + every readiness rule), so this
+        // never counts a venue the app is hiding for want of a photo or a court.
+        $live = $venues()->published()->count();
         $courts = static::ownVenues(VenueCourt::query()->where('is_active', true))->count();
 
         $stats = [
@@ -147,6 +151,29 @@ class GameHubOverview extends Page
             )];
         }
 
-        return ['title' => 'Venues', 'stats' => $stats];
+        // Venues someone meant to sell (set live, or a draft that has courts or slots)
+        // but customers can't book — with the first thing stopping each one.
+        $stuck = $venues()->get()
+            ->reject(fn (Venue $v): bool => $v->isOnSale())
+            ->filter(fn (Venue $v): bool => $v->visibilityState() !== Venue::STATE_DRAFT
+                || $v->courts()->exists() || $v->slots()->exists())
+            ->map(fn (Venue $v): array => ['venue' => $v, 'why' => $v->sellBlockers()])
+            ->filter(fn (array $r): bool => $r['why'] !== []);
+
+        return [
+            'title' => 'Venues',
+            'stats' => $stats,
+            'list' => [
+                'title' => 'Not taking bookings',
+                'rows' => $stuck->take(6)->map(fn (array $r): array => [
+                    'primary' => $r['venue']->name,
+                    'secondary' => str($r['why'][0])->before(' — ')->rtrim('.')->toString(),
+                    'trailing' => count($r['why']) > 1 ? '+' . (count($r['why']) - 1) . ' more' : '',
+                    'url' => VenueResource::getUrl('view', ['record' => $r['venue']]),
+                ])->values()->all(),
+                'empty' => 'Every venue that is set up is on sale.',
+                'illo' => 'stadium-lights',
+            ],
+        ];
     }
 }

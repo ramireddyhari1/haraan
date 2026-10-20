@@ -43,7 +43,9 @@ class ViewVenue extends ViewRecord
         /** @var Venue $record */
         $record = $this->getRecord();
 
-        return $record->branchName() . ' · Venue 360';
+        // The venue's own name. branchName() falls back to the area, so a venue
+        // without a branch label used to be titled "Kadapa · Venue 360".
+        return $record->name ?: $record->branchName();
     }
 
     public function getSubheading(): ?string
@@ -51,8 +53,11 @@ class ViewVenue extends ViewRecord
         /** @var Venue $record */
         $record = $this->getRecord();
 
+        $branch = trim((string) $record->branch_label);
+
         return implode(' · ', array_filter([
-            $record->name,
+            'Venue 360',
+            $branch !== '' && strcasecmp($branch, (string) $record->name) !== 0 ? $branch : null,
             $record->city ?: $record->location,
             $record->displayHours() ?: null,
         ])) ?: null;
@@ -77,6 +82,7 @@ class ViewVenue extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            $this->finishSetupAction(),
             $this->publishAction(),
             $this->unpublishAction(),
 
@@ -121,13 +127,30 @@ class ViewVenue extends ViewRecord
     //  Routine actions
     // -------------------------------------------------------------------------
 
+    /** An unfinished venue: say how many setup steps are left and open the form at them. */
+    private function finishSetupAction(): Action
+    {
+        return Action::make('finishSetup')
+            ->label(function (): string {
+                $left = count($this->getRecord()->readinessErrors());
+
+                return 'Finish setup · ' . $left . ' ' . str('step')->plural($left) . ' left';
+            })
+            ->icon('heroicon-m-wrench-screwdriver')
+            ->color('primary')
+            ->visible(fn (): bool => ! $this->getRecord()->isReadyForPublish() && VenueResource::canEdit($this->getRecord()))
+            ->url(fn (): string => VenueResource::getUrl('edit', ['record' => $this->getRecord()]));
+    }
+
     private function publishAction(): Action
     {
         return Action::make('publish')
             ->label('Publish / Go Live')
             ->icon('heroicon-m-globe-alt')
             ->color('success')
-            ->visible(fn (): bool => ! $this->getRecord()->isPublished())
+            // Only offered when it will work; an unfinished venue gets "Finish setup" instead
+            // of a button that always answers with an error.
+            ->visible(fn (): bool => ! $this->getRecord()->isPublished() && $this->getRecord()->isReadyForPublish())
             ->action(function (): void {
                 /** @var Venue $record */
                 $record = $this->getRecord();

@@ -77,37 +77,7 @@ class VenueInfolist
      */
     public static function blockers(Venue $record): array
     {
-        $blockers = [];
-
-        if (! $record->is_active) {
-            $blockers[] = 'Listing is switched off — it is hidden from the app, the site and search.';
-        }
-
-        if (! $record->is_bookable) {
-            $blockers[] = 'Bookings are switched off — the listing is visible but the book button is not.';
-        }
-
-        if ($record->courts()->where('is_active', true)->doesntExist()) {
-            $blockers[] = 'No active courts. Bookings are taken against a court, so there is nothing to sell.';
-        }
-
-        if ($record->slots()->where('is_available', true)->doesntExist()) {
-            $blockers[] = 'No available slots. Set operating hours and save — slots regenerate from them.';
-        }
-
-        if (! $record->isOpenOn(now())) {
-            $blockers[] = 'Closed today under the configured operating hours.';
-        }
-
-        if ($record->blockedDates()->whereDate('date', now()->toDateString())->exists()) {
-            $blockers[] = 'Today is a blocked date.';
-        }
-
-        if ($record->partner_id === null) {
-            $blockers[] = 'No owner assigned. Nobody can manage this venue from the partner console.';
-        }
-
-        return $blockers;
+        return $record->sellBlockers();
     }
 
     // -------------------------------------------------------------------------
@@ -156,19 +126,37 @@ class VenueInfolist
                 TextEntry::make('visibility')
                     ->label('Visibility')
                     ->state(fn (Venue $record): string => implode(' · ', array_filter([
-                        $record->is_active ? 'Live' : 'Hidden',
-                        $record->is_bookable ? 'Bookable' : 'Not bookable',
+                        match (true) {
+                            $record->isOnSale() => 'Live · Bookable',
+                            $record->visibilityState() === Venue::STATE_PAUSED => 'Visible · Bookings paused',
+                            $record->visibilityState() === Venue::STATE_LIVE => 'Set live · Hidden until setup is finished',
+                            default => 'Draft · Hidden',
+                        },
                         $record->is_featured ? 'Featured' : null,
                     ])))
                     ->badge()
-                    ->color(fn (Venue $record): string => $record->is_active && $record->is_bookable ? 'success' : 'danger'),
+                    ->color(fn (Venue $record): string => match (true) {
+                        $record->isOnSale() => 'success',
+                        $record->visibilityState() === Venue::STATE_DRAFT => 'gray',
+                        default => 'warning',
+                    }),
 
                 TextEntry::make('address')
                     ->label('Address')
                     ->icon('heroicon-m-map-pin')
-                    ->state(fn (Venue $record): string => implode(', ', array_filter([
-                        $record->address, $record->location, $record->city,
-                    ])) ?: '—')
+                    // Area and city are added only when the street address doesn't already
+                    // say them — "…, Kadapa, Kadapa, Kadapa" read like a data bug.
+                    ->state(function (Venue $record): string {
+                        $parts = [];
+                        foreach ([$record->address, $record->location, $record->city] as $part) {
+                            $part = trim((string) $part);
+                            if ($part !== '' && ! str_contains(strtolower(implode(', ', $parts)), strtolower($part))) {
+                                $parts[] = $part;
+                            }
+                        }
+
+                        return implode(', ', $parts) ?: '—';
+                    })
                     ->columnSpan(['default' => 1, 'md' => 2]),
 
                 TextEntry::make('coordinates')
@@ -317,7 +305,7 @@ class VenueInfolist
                         $peak = $record->courts()->whereNotNull('peak_price')->count();
 
                         return $peak > 0
-                            ? $peak . ' ' . str('unit')->plural($peak) . ' carry a peak rate'
+                            ? $peak . ' ' . str('unit')->plural($peak) . ($peak === 1 ? ' carries' : ' carry') . ' a peak rate'
                             : 'None configured';
                     })
                     ->badge()
@@ -374,8 +362,12 @@ class VenueInfolist
                         $base = (float) $record->price;
                         $fee = $record->convenienceFeeFor($base);
 
-                        return '₹' . number_format($base) . ' + ₹' . number_format($fee, 2)
-                            . ' fee = ₹' . number_format($base + $fee, 2) . ' collected';
+                        // Paise only when there are any: "₹300 + ₹0 fee", not "₹0.00".
+                        $inr = static fn (float $n): string => '₹' . number_format($n, fmod($n, 1.0) === 0.0 ? 0 : 2);
+
+                        return $fee > 0
+                            ? $inr($base) . ' + ' . $inr($fee) . ' fee = ' . $inr($base + $fee) . ' collected'
+                            : $inr($base) . ' collected — no booking fee on top';
                     })
                     ->columnSpan(['default' => 1, 'md' => 2]),
 

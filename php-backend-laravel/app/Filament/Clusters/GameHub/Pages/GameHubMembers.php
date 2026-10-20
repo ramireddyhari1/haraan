@@ -89,6 +89,7 @@ class GameHubMembers extends Page
                     'trailing' => self::inr((float) $p->spent),
                 ])->values()->all(),
                 'empty' => 'No bookings in the last 90 days.',
+                'illo' => 'players',
             ],
         ]];
     }

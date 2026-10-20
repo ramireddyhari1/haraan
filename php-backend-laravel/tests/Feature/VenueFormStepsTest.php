@@ -84,7 +84,7 @@ final class VenueFormStepsTest extends TestCase
 
         Livewire::test(EditVenue::class, ['record' => $this->venue->getRouteKey()])
             ->assertOk()
-            ->assertSee('steps done')
+            ->assertSee('left before it can go live')
             ->assertSee('Hours &amp; slots', escape: false)
             ->assertSee('Open <b>1</b> day', escape: false)
             // Base ₹0 → the bill prices the cheapest court.
@@ -99,6 +99,6 @@ final class VenueFormStepsTest extends TestCase
     {
         Livewire::test(CreateVenue::class)
             ->assertOk()
-            ->assertSee('0 of 6 steps done');
+            ->assertSee('6 steps left before it can go live');
     }
 }

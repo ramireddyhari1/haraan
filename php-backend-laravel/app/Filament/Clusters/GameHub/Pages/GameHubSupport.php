@@ -82,6 +82,7 @@ class GameHubSupport extends Page
                     'trailing' => $t->last_message_at?->diffForHumans(short: true) ?? '',
                 ])->all(),
                 'empty' => 'No open support threads.',
+                'illo' => 'chat',
             ],
         ]];
     }

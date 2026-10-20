@@ -76,6 +76,7 @@ class GameHubPricingRules extends Page
                     'trailing' => $this->change($r),
                 ])->values()->all(),
                 'empty' => 'No pricing rules are switched on — every court sells at its base (or peak) price.',
+                'illo' => 'price-tag',
             ],
         ]];
     }

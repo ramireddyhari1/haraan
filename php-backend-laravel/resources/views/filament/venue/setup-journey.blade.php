@@ -6,7 +6,7 @@
     $ready = $doneReq === $required->count();
     [$pillClass, $pillText] = $live ? ['live', 'Live — taking bookings'] : ($ready ? ['ready', 'Ready to go live'] : ['draft', 'Not live yet']);
     $paused = \App\Support\VenueSetupSteps::isPaused($venue);
-    if ($paused) { [$pillClass, $pillText] = ['ready', 'Live — bookings paused']; }
+    if ($paused && $ready) { [$pillClass, $pillText] = ['ready', 'Live — bookings paused']; }
     $next = collect($steps)->first(fn ($s) => $s['required'] && ! $s['done']);
 @endphp
 
@@ -21,7 +21,8 @@
                 @elseif ($ready)
                     Everything is set — one switch left
                 @else
-                    {{ $doneReq }} of {{ $required->count() }} steps done
+                    @php $left = $required->count() - $doneReq; @endphp
+                    {{ $left === 1 ? 'One step left before it can go live' : $left . ' steps left before it can go live' }}
                 @endif
             </div>
             <div class="vf-j-sub">

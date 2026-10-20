@@ -1,179 +1,170 @@
 @php
     $t = $this->getTelemetry();
     $money = static fn ($n): string => '₹' . number_format((float) $n);
+    $peak = collect($t['days'] ?? [])->max('booked') ?: 0;
 @endphp
 
 <x-filament-widgets::widget>
     @if (($t['ready'] ?? false) === true)
+        {{-- Self-contained styles: this blade isn't scanned by the compiled panel theme, so
+             Tailwind responsive classes here (sm:grid-cols-7 …) never existed and the week
+             strip stacked into seven full-width rows. --}}
         <style>
-            .vn360-root {
-                background: #ffffff;
-                border-radius: 16px;
-                box-shadow: 0 1px 3px rgba(11, 18, 32, 0.05), 0 0 0 1px rgba(226, 232, 240, 0.8);
-                padding: 22px;
-                display: flex;
-                flex-direction: column;
-                gap: 18px;
-                margin-bottom: 12px;
-                font-family: inherit;
+            .vn360 { --v-ink: #0f172a; --v-ink-2: #475569; --v-mute: #94a3b8; --v-line: #e8edf4; --v-sunk: #f6f8fc;
+                --v-surface: #fff; --v-blue: #2563eb; --v-blue-soft: #e8efff; --v-good: #0f9d63; --v-warn: #b45309; --v-bad: #be123c;
+                position: relative; overflow: hidden; background: var(--v-surface); border-radius: 18px;
+                box-shadow: 0 1px 2px rgba(15, 23, 42, .05), 0 0 0 1px var(--v-line); padding: 20px 22px 22px;
+                display: grid; gap: 18px; margin-bottom: 12px; }
+            .dark .vn360 { --v-ink: #f1f5f9; --v-ink-2: #cbd5e1; --v-mute: #64748b; --v-line: #1f2937; --v-sunk: #0b1220;
+                --v-surface: #111827; --v-blue: #6f9bff; --v-blue-soft: #16213a; --v-good: #34d399; --v-warn: #fbbf24; --v-bad: #fb7185; }
+
+            .vn360-id { display: flex; gap: 16px; align-items: center; padding-bottom: 16px; border-bottom: 1px solid var(--v-line); }
+            .vn360-art { width: 96px; flex: none; border-radius: 14px; padding: 8px; background: var(--v-blue-soft);
+                --cc-ink: var(--v-ink-2); --cc-blue-soft: var(--v-surface); --cc-surface: var(--v-blue-soft); }
+            .vn360-art .cb-pitch { width: 100%; height: auto; display: block; }
+            .vn360-name { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+            .vn360-name h2 { margin: 0; font-size: 18px; font-weight: 720; letter-spacing: -.015em; color: var(--v-ink); }
+            .vn360-sub { margin: 4px 0 0; font-size: 12.5px; color: var(--v-ink-2); line-height: 1.5; }
+            .vn360-pill { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 3px 10px;
+                font-size: 12px; font-weight: 650; border: 1px solid; }
+            .vn360-pill i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+            .vn360-pill.on { color: var(--v-good); border-color: color-mix(in srgb, var(--v-good) 35%, transparent); background: color-mix(in srgb, var(--v-good) 9%, transparent); }
+            .vn360-pill.on i { animation: vn360-pulse 1.8s ease-in-out infinite; }
+            .vn360-pill.off { color: var(--v-warn); border-color: color-mix(in srgb, var(--v-warn) 35%, transparent); background: color-mix(in srgb, var(--v-warn) 9%, transparent); }
+            @keyframes vn360-pulse { 50% { opacity: .35; } }
+            @media (prefers-reduced-motion: reduce) { .vn360-pill.on i { animation: none; } }
+            .vn360-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+            .vn360-chip { font-size: 11.5px; font-weight: 600; color: var(--v-ink-2); background: var(--v-sunk);
+                border: 1px solid var(--v-line); border-radius: 999px; padding: 2px 9px; }
+
+            .vn360-figs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+            .vn360-fig { background: var(--v-sunk); border: 1px solid var(--v-line); border-radius: 12px; padding: 14px 15px; min-width: 0; }
+            .vn360-fig dt { font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--v-mute); }
+            .vn360-fig dd { margin: 6px 0 0; font-size: 23px; font-weight: 740; letter-spacing: -.03em; color: var(--v-ink); font-variant-numeric: tabular-nums; }
+            .vn360-fig dd.good { color: var(--v-good); } .vn360-fig dd.warn { color: var(--v-warn); }
+            .vn360-fig p { margin: 3px 0 0; font-size: 12px; color: var(--v-mute); line-height: 1.4; }
+            .vn360-track { height: 5px; border-radius: 99px; background: var(--v-line); overflow: hidden; margin-top: 10px; }
+            .vn360-track b { display: block; height: 100%; border-radius: 99px; background: var(--v-blue); }
+
+            .vn360-wk-h { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
+            .vn360-wk-h span:first-child { font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--v-mute); }
+            .vn360-wk-h span:last-child { font-size: 12px; color: var(--v-mute); }
+            .vn360-wk { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+            .vn360-day { border: 1px solid var(--v-line); border-radius: 12px; padding: 10px 8px 9px; text-align: center; background: var(--v-surface); }
+            .vn360-day.today { border-color: color-mix(in srgb, var(--v-blue) 45%, var(--v-line)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--v-blue) 25%, transparent); }
+            .vn360-day.closed { background: repeating-linear-gradient(135deg, var(--v-sunk) 0 6px, var(--v-surface) 6px 12px); }
+            .vn360-dl { font-size: 12px; font-weight: 700; color: var(--v-ink); }
+            .vn360-dd { font-size: 11px; color: var(--v-mute); }
+            {{-- A short column per day: booked as a share of the busiest day, so the week has a shape. --}}
+            .vn360-col { height: 38px; margin: 8px auto 6px; width: 18px; border-radius: 6px; background: var(--v-sunk);
+                display: flex; align-items: flex-end; overflow: hidden; border: 1px solid var(--v-line); }
+            .vn360-col b { display: block; width: 100%; background: var(--v-blue); border-radius: 4px 4px 0 0; }
+            .vn360-n { font-size: 13px; font-weight: 720; color: var(--v-ink); font-variant-numeric: tabular-nums; }
+            .vn360-n small { font-size: 11px; font-weight: 500; color: var(--v-mute); }
+            .vn360-closed { font-size: 11px; font-weight: 650; color: var(--v-bad); margin-top: 4px; }
+
+            .vn360-nophoto { display: flex; align-items: center; gap: 14px; border: 1px dashed color-mix(in srgb, var(--v-blue) 40%, var(--v-line));
+                border-radius: 14px; padding: 10px 14px; background: color-mix(in srgb, var(--v-blue) 4%, var(--v-surface)); }
+            .vn360-nophoto b { display: block; font-size: 13.5px; color: var(--v-ink); }
+            .vn360-nophoto span { font-size: 12.5px; color: var(--v-ink-2); }
+
+            @media (max-width: 1100px) { .vn360-figs { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+            @media (max-width: 640px) {
+                .vn360 { padding: 16px; }
+                .vn360-id { align-items: flex-start; }
+                .vn360-art { width: 72px; }
+                .vn360-wk { grid-template-columns: repeat(4, minmax(0, 1fr)); }
             }
-            .dark .vn360-root {
-                background: #0f172a;
-                box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
-            }
-            .vn360-card {
-                background: #f8fafc;
-                border: 1px solid #f1f5f9;
-                border-radius: 12px;
-                padding: 16px;
-                display: flex;
-                flex-direction: column;
-                gap: 4px;
-            }
-            .dark .vn360-card {
-                background: #1e293b;
-                border-color: #334155;
-            }
-            .vn360-figure {
-                font-size: 24px;
-                font-weight: 700;
-                letter-spacing: -0.02em;
-                line-height: 1.1;
-            }
-            .vn360-day {
-                border: 1px solid #f1f5f9;
-                border-radius: 10px;
-                padding: 10px 8px;
-                text-align: center;
-                background: #ffffff;
-            }
-            .dark .vn360-day {
-                background: #0f172a;
-                border-color: #334155;
-            }
-            .vn360-track {
-                height: 5px;
-                border-radius: 999px;
-                background: #e2e8f0;
-                overflow: hidden;
-                margin-top: 8px;
-            }
-            .dark .vn360-track { background: #334155; }
-            .vn360-fill { height: 100%; border-radius: 999px; background: #2563eb; }
         </style>
 
-        <div class="vn360-root relative overflow-hidden">
-            {{-- Ambient wash, matching the venues fleet hero --}}
-            <div class="pointer-events-none absolute -right-20 -top-20 h-64 w-64 rounded-full bg-blue-500/10 blur-3xl"></div>
-            <div class="pointer-events-none absolute -left-16 -bottom-16 h-56 w-56 rounded-full bg-sky-500/5 blur-3xl"></div>
-
-            {{-- Identity strip --}}
-            <div class="relative z-10 flex flex-col gap-4 border-b border-slate-100 pb-4 dark:border-slate-800 md:flex-row md:items-start md:justify-between">
-                <div class="flex items-start gap-3">
-                    <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-blue-100 bg-blue-50 text-blue-600 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-400">
-                        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                  d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
-                        </svg>
-                    </div>
-                    <div>
-                        <div class="flex flex-wrap items-center gap-2.5">
-                            <h2 class="text-lg font-bold tracking-tight text-slate-900 dark:text-white">
-                                {{ $t['branch'] }}
-                            </h2>
-                            <span @class([
-                                'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold border',
-                                'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800' => $t['onSale'],
-                                'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800' => ! $t['onSale'],
-                            ])>
-                                <span @class([
-                                    'h-1.5 w-1.5 rounded-full',
-                                    'bg-emerald-500 animate-pulse' => $t['onSale'],
-                                    'bg-rose-500' => ! $t['onSale'],
-                                ])></span>
-                                {{ $t['statusLabel'] }}
-                            </span>
-                        </div>
-                        <p class="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                            {{ $t['name'] }}@if ($t['city']) · {{ $t['city'] }}@endif ·
-                            {{ $t['courtsActive'] }} of {{ $t['courtsTotal'] }} units active
-                            @if ($t['hoursToday'])
-                                · open {{ $t['hoursToday']['open'] }}–{{ $t['hoursToday']['close'] }} today
-                            @else
-                                · closed today
-                            @endif
-                        </p>
-                    </div>
+        <div class="vn360">
+            <div class="vn360-id">
+                <div class="vn360-art">
+                    @include('filament.venue.court-pitch', ['sport' => $t['mainSport'], 'kind' => null])
                 </div>
-
-                <div class="flex flex-wrap gap-1.5">
-                    @foreach ($t['sports'] as $sport)
-                        <span class="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                            {{ $sport }}
-                        </span>
-                    @endforeach
+                <div style="min-width: 0">
+                    <div class="vn360-name">
+                        <h2>{{ $t['name'] }}</h2>
+                        <span class="vn360-pill {{ $t['onSale'] ? 'on' : 'off' }}"><i></i>{{ $t['statusLabel'] }}</span>
+                    </div>
+                    <p class="vn360-sub">
+                        @if ($t['city']){{ $t['city'] }} · @endif
+                        {{ $t['courtsActive'] }} of {{ $t['courtsTotal'] }} {{ \Illuminate\Support\Str::plural('court', $t['courtsTotal']) }} active
+                        @if ($t['hoursToday'])
+                            · open {{ $t['hoursToday']['open'] }}–{{ $t['hoursToday']['close'] }} today
+                        @else
+                            · closed today
+                        @endif
+                        @if ($t['setupLeft'] > 0)
+                            · <strong>{{ $t['setupLeft'] }} setup {{ \Illuminate\Support\Str::plural('step', $t['setupLeft']) }} left</strong>
+                        @endif
+                    </p>
+                    @if ($t['sports'] !== [])
+                        <div class="vn360-chips">
+                            @foreach ($t['sports'] as $sport)
+                                <span class="vn360-chip">{{ $sport }}</span>
+                            @endforeach
+                        </div>
+                    @endif
                 </div>
             </div>
 
-            {{-- Today's sheet + the money that moved --}}
-            <div class="relative z-10 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <div class="vn360-card">
-                    <span class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Occupancy today</span>
-                    <span class="vn360-figure text-slate-900 dark:text-white">{{ $t['occupancy'] }}%</span>
-                    <span class="text-xs text-slate-500 dark:text-slate-400">
-                        {{ $t['todayBookings'] }} booked of {{ $t['offeredToday'] }} court-hours offered
-                    </span>
-                    <div class="vn360-track"><div class="vn360-fill" style="width: {{ $t['occupancy'] }}%"></div></div>
+            @unless ($t['hasPhoto'])
+                <div class="vn360-nophoto">
+                    <x-hrn-illo name="photo" :size="78" />
+                    <div>
+                        <b>No photos yet — customers can't see this venue without one</b>
+                        <span>The first photo is the cover on the venue card. Add them in Edit → Photos.</span>
+                    </div>
                 </div>
+            @endunless
 
-                <div class="vn360-card">
-                    <span class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Collected today</span>
-                    <span class="vn360-figure text-emerald-600 dark:text-emerald-400">{{ $money($t['collectedToday']) }}</span>
-                    <span class="text-xs text-slate-500 dark:text-slate-400">From the payment ledger, not the order total</span>
+            <dl class="vn360-figs" style="margin: 0">
+                <div class="vn360-fig">
+                    <dt>Occupancy today</dt>
+                    <dd>{{ $t['occupancy'] }}%</dd>
+                    <p>{{ $t['todayBookings'] }} booked of {{ $t['offeredToday'] }} court-hours offered</p>
+                    <div class="vn360-track"><b style="width: {{ $t['occupancy'] }}%"></b></div>
                 </div>
-
-                <div class="vn360-card">
-                    <span class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Collected · 30 days</span>
-                    <span class="vn360-figure text-slate-900 dark:text-white">{{ $money($t['collected30d']) }}</span>
-                    <span class="text-xs text-slate-500 dark:text-slate-400">Advances, desk payments and refunds netted</span>
+                <div class="vn360-fig">
+                    <dt>Collected today</dt>
+                    <dd @class(['good' => $t['collectedToday'] > 0])>{{ $money($t['collectedToday']) }}</dd>
+                    <p>From the payment ledger, not the order total</p>
                 </div>
-
-                <div class="vn360-card">
-                    <span class="text-xs font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">Balance due</span>
-                    <span @class([
-                        'vn360-figure',
-                        'text-amber-600 dark:text-amber-400' => $t['balanceDue'] > 0,
-                        'text-slate-900 dark:text-white' => $t['balanceDue'] <= 0,
-                    ])>{{ $money($t['balanceDue']) }}</span>
-                    <span class="text-xs text-slate-500 dark:text-slate-400">
+                <div class="vn360-fig">
+                    <dt>Collected · 30 days</dt>
+                    <dd>{{ $money($t['collected30d']) }}</dd>
+                    <p>Advances, desk payments and refunds netted</p>
+                </div>
+                <div class="vn360-fig">
+                    <dt>Balance due</dt>
+                    <dd @class(['warn' => $t['balanceDue'] > 0])>{{ $money($t['balanceDue']) }}</dd>
+                    <p>
                         @if ($t['owingCount'] > 0)
                             Across {{ $t['owingCount'] }} upcoming {{ \Illuminate\Support\Str::plural('booking', $t['owingCount']) }}
                         @else
                             Nothing outstanding ahead
                         @endif
-                    </span>
+                    </p>
                 </div>
-            </div>
+            </dl>
 
-            {{-- The week ahead --}}
-            <div class="relative z-10">
-                <div class="mb-2 flex items-center justify-between">
-                    <span class="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Next seven days</span>
-                    <span class="text-xs text-slate-400 dark:text-slate-500">booked / offered</span>
-                </div>
-                <div class="grid grid-cols-4 gap-2 sm:grid-cols-7">
-                    @foreach ($t['days'] as $day)
-                        <div class="vn360-day">
-                            <div class="text-xs font-semibold text-slate-700 dark:text-slate-200">{{ $day['label'] }}</div>
-                            <div class="text-[11px] text-slate-400 dark:text-slate-500">{{ $day['date'] }}</div>
+            <div>
+                <div class="vn360-wk-h"><span>Next seven days</span><span>booked / offered</span></div>
+                <div class="vn360-wk">
+                    @foreach ($t['days'] as $i => $day)
+                        <div @class(['vn360-day', 'today' => $i === 0, 'closed' => $day['closed']])>
+                            <div class="vn360-dl">{{ $day['label'] }}</div>
+                            <div class="vn360-dd">{{ $day['date'] }}</div>
                             @if ($day['closed'])
-                                <div class="mt-1.5 text-[11px] font-medium text-rose-500 dark:text-rose-400">Closed</div>
+                                <div class="vn360-col"></div>
+                                <div class="vn360-closed">Closed</div>
                             @else
-                                <div class="mt-1.5 text-sm font-bold text-slate-900 dark:text-white">
-                                    {{ $day['booked'] }}<span class="text-[11px] font-normal text-slate-400">/{{ $day['offered'] }}</span>
+                                <div class="vn360-col" title="{{ $day['percent'] }}% of what was offered">
+                                    <b style="height: {{ $peak > 0 ? max($day['booked'] > 0 ? 8 : 0, (int) round($day['booked'] / $peak * 100)) : 0 }}%"></b>
                                 </div>
+                                <div class="vn360-n">{{ $day['booked'] }}<small>/{{ $day['offered'] }}</small></div>
                             @endif
-                            <div class="vn360-track"><div class="vn360-fill" style="width: {{ $day['percent'] }}%"></div></div>
                         </div>
                     @endforeach
                 </div>
