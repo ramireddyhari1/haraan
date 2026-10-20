@@ -61,7 +61,7 @@ class MyTeamPage extends Page
 
     public function mount(): void
     {
-        $this->taskDueDate = Carbon::today()->addDay()->toDateString();
+        $this->taskDueDate = \App\Support\BusinessClock::todayDate()->addDay()->toDateString();
     }
 
     /** All direct reportees */
@@ -88,7 +88,7 @@ class MyTeamPage extends Page
     /** Team's live attendance status for today */
     public function getTeamStatusProperty(): array
     {
-        $today = Carbon::today()->toDateString();
+        $today = \App\Support\BusinessClock::today();
         $reporteeIds = $this->reporteeIds;
 
         if (empty($reporteeIds)) {
@@ -120,7 +120,7 @@ class MyTeamPage extends Page
                     $details = 'On Break (' . ($att->shift?->name ?? 'Standard') . ')';
                 } elseif ($att->isCurrentlyClockedIn()) {
                     $status = 'active';
-                    $details = 'Clocked In @ ' . $att->clock_in_at->format('h:i A') . ' (' . $att->formatted_work_duration . ')';
+                    $details = 'Clocked In @ ' . \App\Support\BusinessClock::local($att->clock_in_at)->format('h:i A') . ' (' . $att->formatted_work_duration . ')';
                 } elseif ($att->clock_out_at !== null) {
                     $status = 'concluded';
                     $details = 'Shift Concluded (' . $att->formatted_work_duration . ')';
@@ -355,7 +355,7 @@ class MyTeamPage extends Page
                 'venue_id' => $emp->venue_id,
                 'priority' => $this->taskPriority,
                 'status' => 'todo',
-                'due_date' => $this->taskDueDate ?: Carbon::tomorrow()->toDateString(),
+                'due_date' => $this->taskDueDate ?: \App\Support\BusinessClock::todayDate()->addDay()->toDateString(),
             ]);
 
             $this->closeTaskModal();

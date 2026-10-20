@@ -38,7 +38,7 @@ class ShiftScheduleWidget extends Widget
 
         return EmployeeShiftRoster::with(['shift', 'venue'])
             ->where('employee_profile_id', $employee->id)
-            ->whereDate('roster_date', Carbon::today())
+            ->whereDate('roster_date', \App\Support\BusinessClock::todayDate())
             ->first();
     }
 
@@ -51,7 +51,7 @@ class ShiftScheduleWidget extends Widget
 
         return EmployeeShiftRoster::with(['shift', 'venue'])
             ->where('employee_profile_id', $employee->id)
-            ->whereDate('roster_date', '>', Carbon::today())
+            ->whereDate('roster_date', '>', \App\Support\BusinessClock::todayDate())
             ->orderBy('roster_date')
             ->limit(4)
             ->get()

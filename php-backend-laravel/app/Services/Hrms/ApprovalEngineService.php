@@ -85,8 +85,8 @@ final class ApprovalEngineService
             $hasActiveDelegation = EmployeeDelegation::where('delegator_id', $directManagerId)
                 ->where('delegatee_id', $user->id)
                 ->where('is_active', true)
-                ->whereDate('start_date', '<=', Carbon::today())
-                ->whereDate('end_date', '>=', Carbon::today())
+                ->whereDate('start_date', '<=', \App\Support\BusinessClock::todayDate())
+                ->whereDate('end_date', '>=', \App\Support\BusinessClock::todayDate())
                 ->where('max_approval_tier', '>=', $targetTier)
                 ->exists();
 

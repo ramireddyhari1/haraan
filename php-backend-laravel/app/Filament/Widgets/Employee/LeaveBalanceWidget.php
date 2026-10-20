@@ -39,7 +39,7 @@ class LeaveBalanceWidget extends Widget
             return [];
         }
 
-        $year = (int) Carbon::now()->year;
+        $year = (int) \App\Support\BusinessClock::now()->year;
 
         // Ensure leave balances exist for active types
         $types = EmployeeLeaveType::where('is_active', true)->get();
@@ -73,8 +73,8 @@ class LeaveBalanceWidget extends Widget
 
     public function openApplyModal(): void
     {
-        $this->startDate = Carbon::today()->toDateString();
-        $this->endDate = Carbon::today()->toDateString();
+        $this->startDate = \App\Support\BusinessClock::today();
+        $this->endDate = \App\Support\BusinessClock::today();
         $this->showApplyModal = true;
     }
 

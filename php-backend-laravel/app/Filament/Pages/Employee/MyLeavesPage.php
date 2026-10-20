@@ -40,8 +40,8 @@ class MyLeavesPage extends Page
 
     public function mount(): void
     {
-        $this->startDate = Carbon::today()->toDateString();
-        $this->endDate = Carbon::today()->toDateString();
+        $this->startDate = \App\Support\BusinessClock::today();
+        $this->endDate = \App\Support\BusinessClock::today();
     }
 
     public function getEmployeeProperty(): ?EmployeeProfile
@@ -56,7 +56,7 @@ class MyLeavesPage extends Page
             return [];
         }
 
-        $year = (int) Carbon::now()->year;
+        $year = (int) \App\Support\BusinessClock::now()->year;
 
         return EmployeeLeaveBalance::with('leaveType')
             ->where('employee_profile_id', $employee->id)

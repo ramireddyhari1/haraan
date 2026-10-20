@@ -96,7 +96,8 @@ final class EmployeeProfile extends Model
 
     public function todayAttendance(): HasOne
     {
-        return $this->hasOne(EmployeeAttendance::class)->whereDate('date', Carbon::today());
+        // The business (IST) day — attendance rows are dated with it (AttendanceService).
+        return $this->hasOne(EmployeeAttendance::class)->whereDate('date', \App\Support\BusinessClock::todayDate());
     }
 
     public function rosters(): HasMany
@@ -106,7 +107,7 @@ final class EmployeeProfile extends Model
 
     public function todayRoster(): HasOne
     {
-        return $this->hasOne(EmployeeShiftRoster::class)->whereDate('roster_date', Carbon::today());
+        return $this->hasOne(EmployeeShiftRoster::class)->whereDate('roster_date', \App\Support\BusinessClock::todayDate());
     }
 
     public function leaveBalances(): HasMany

@@ -43,8 +43,8 @@ class MyAttendancePage extends Page
 
     public function mount(): void
     {
-        $this->selectedMonth = Carbon::now()->format('Y-m');
-        $this->regDate = Carbon::yesterday()->toDateString();
+        $this->selectedMonth = \App\Support\BusinessClock::now()->format('Y-m');
+        $this->regDate = \App\Support\BusinessClock::todayDate()->subDay()->toDateString();
     }
 
     public function getEmployeeProperty(): ?EmployeeProfile
@@ -91,7 +91,7 @@ class MyAttendancePage extends Page
 
     public function openRegularisationModal(?string $date = null): void
     {
-        $this->regDate = $date ?? Carbon::yesterday()->toDateString();
+        $this->regDate = $date ?? \App\Support\BusinessClock::todayDate()->subDay()->toDateString();
         $this->regClockIn = '09:00';
         $this->regClockOut = '18:00';
         $this->regCategory = 'missed_punch';
@@ -117,8 +117,14 @@ class MyAttendancePage extends Page
         }
 
         try {
-            $in = Carbon::parse("{$this->regDate} {$this->regClockIn}");
-            $out = Carbon::parse("{$this->regDate} {$this->regClockOut}");
+            // The employee types venue wall-clock times; store the UTC instants they mean.
+            // Parsed in UTC, "09:00" was saved as 2:30 PM IST.
+            $in = Carbon::parse("{$this->regDate} {$this->regClockIn}", \App\Support\BusinessClock::zone())->utc();
+            $out = Carbon::parse("{$this->regDate} {$this->regClockOut}", \App\Support\BusinessClock::zone())->utc();
+            // A night shift ends after midnight: an earlier clock-out time is the next day.
+            if ($out->lessThanOrEqualTo($in)) {
+                $out->addDay();
+            }
 
             $service = app(AttendanceService::class);
             $service->requestRegularisation(

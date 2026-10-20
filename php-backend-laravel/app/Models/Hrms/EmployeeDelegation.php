@@ -54,7 +54,7 @@ final class EmployeeDelegation extends Model
             return false;
         }
 
-        $d = $date ?? Carbon::today();
+        $d = $date ?? \App\Support\BusinessClock::todayDate();
         return $d->gte($this->start_date) && $d->lte($this->end_date);
     }
 

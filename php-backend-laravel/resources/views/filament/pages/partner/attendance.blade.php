@@ -43,10 +43,10 @@
                                     {{ $rec->shift?->name ?? 'Standard Shift' }}
                                 </td>
                                 <td class="p-3.5 font-mono">
-                                    {{ $rec->clock_in_at ? $rec->clock_in_at->format('h:i A') : '—' }}
+                                    {{ $rec->clock_in_at ? \App\Support\BusinessClock::local($rec->clock_in_at)->format('h:i A') : '—' }}
                                 </td>
                                 <td class="p-3.5 font-mono">
-                                    {{ $rec->clock_out_at ? $rec->clock_out_at->format('h:i A') : 'Active' }}
+                                    {{ $rec->clock_out_at ? \App\Support\BusinessClock::local($rec->clock_out_at)->format('h:i A') : 'Active' }}
                                 </td>
                                 <td class="p-3.5 font-bold">
                                     {{ $rec->formatted_work_duration }}

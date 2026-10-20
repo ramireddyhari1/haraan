@@ -46,9 +46,8 @@ class AttendanceClockWidget extends Widget
             return null;
         }
 
-        return EmployeeAttendance::where('employee_profile_id', $employee->id)
-            ->whereDate('date', Carbon::today())
-            ->first();
+        // Today's shift, or last night's if it is still open — the same row clock-out uses.
+        return app(\App\Services\Hrms\AttendanceService::class)->openAttendance($employee);
     }
 
     public function updateLocation(float $lat, float $lon): void

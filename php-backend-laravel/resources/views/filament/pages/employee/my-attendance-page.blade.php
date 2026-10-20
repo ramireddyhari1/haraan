@@ -97,10 +97,10 @@
                                     {{ $rec->shift?->name ?? 'Standard' }}
                                 </td>
                                 <td class="p-4 font-mono whitespace-nowrap">
-                                    {{ $rec->clock_in_at ? $rec->clock_in_at->format('h:i A') : '—' }}
+                                    {{ $rec->clock_in_at ? \App\Support\BusinessClock::local($rec->clock_in_at)->format('h:i A') : '—' }}
                                 </td>
                                 <td class="p-4 font-mono whitespace-nowrap">
-                                    {{ $rec->clock_out_at ? $rec->clock_out_at->format('h:i A') : '—' }}
+                                    {{ $rec->clock_out_at ? \App\Support\BusinessClock::local($rec->clock_out_at)->format('h:i A') : '—' }}
                                 </td>
                                 <td class="p-4 font-bold font-mono whitespace-nowrap">
                                     {{ $rec->formatted_work_duration }}

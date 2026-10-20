@@ -22,8 +22,7 @@ use Illuminate\Support\Facades\DB;
  * The front page of Workforce & HR: who is in today, who is off, and what is waiting on a
  * manager. There were fourteen HR lists and nowhere that answered those three questions.
  *
- * "Today" is the date attendance rows are written with (AttendanceService uses
- * Carbon::today()), so the counts line up with the attendance list.
+ * "Today" is the business (IST) day, the date AttendanceService writes attendance with.
  */
 class WorkforceToday extends Page
 {
@@ -64,7 +63,7 @@ class WorkforceToday extends Page
 
     private function today(): array
     {
-        $today = Carbon::today();
+        $today = \App\Support\BusinessClock::todayDate();
         $staff = $this->working()->with('user:id,name')->get();
 
         $in = EmployeeAttendance::query()->whereDate('date', $today)->whereNotNull('clock_in_at')
@@ -131,13 +130,13 @@ class WorkforceToday extends Page
 
     private function payroll(): array
     {
-        $month = Carbon::today()->format('Y-m');
+        $month = \App\Support\BusinessClock::now()->format('Y-m');
         $rows = EmployeePayroll::query()->where('payroll_month', $month)->get();
         $paid = $rows->filter(fn ($r): bool => strtolower((string) $r->status) === 'paid');
         $staff = $this->working()->count();
 
         return [
-            'title' => 'Payroll · ' . Carbon::today()->format('F'),
+            'title' => 'Payroll · ' . \App\Support\BusinessClock::now()->format('F'),
             'stats' => [
                 ['label' => 'Payslips made', 'value' => number_format($rows->count()) . ' of ' . number_format($staff), 'tone' => $rows->count() < $staff ? 'warn' : null, 'sub' => $rows->count() < $staff ? ($staff - $rows->count()) . ' still to run' : 'everyone covered'],
                 ['label' => 'Net to pay', 'value' => self::inr((float) $rows->sum('net_salary'))],

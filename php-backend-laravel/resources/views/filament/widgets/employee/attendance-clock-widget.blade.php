@@ -99,7 +99,7 @@
             <div>
                 <span class="text-[11px] font-bold text-slate-400 block uppercase tracking-wider">Clock-In Time</span>
                 <span class="text-base sm:text-lg font-extrabold text-slate-900 mt-0.5 block font-mono">
-                    {{ $att?->clock_in_at ? \Illuminate\Support\Carbon::parse($att->clock_in_at)->format('h:i A') : '—' }}
+                    {{ $att?->clock_in_at ? \App\Support\BusinessClock::local(\Illuminate\Support\Carbon::parse($att->clock_in_at))->format('h:i A') : '—' }}
                 </span>
             </div>
 

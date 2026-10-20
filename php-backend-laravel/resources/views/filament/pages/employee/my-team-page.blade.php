@@ -265,7 +265,7 @@
                                     @endif
                                 </div>
                                 <div class="text-xs text-slate-500 font-mono">
-                                    Requested: {{ \Illuminate\Support\Carbon::parse($reg->requested_clock_in_at)->format('h:i A') }} &rarr; {{ \Illuminate\Support\Carbon::parse($reg->requested_clock_out_at)->format('h:i A') }}
+                                    Requested: {{ \App\Support\BusinessClock::local(\Illuminate\Support\Carbon::parse($reg->requested_clock_in_at))->format('h:i A') }} &rarr; {{ \App\Support\BusinessClock::local(\Illuminate\Support\Carbon::parse($reg->requested_clock_out_at))->format('h:i A') }}
                                 </div>
                                 <p class="text-xs text-slate-700 italic bg-white p-2 rounded-lg border border-slate-200/60 max-w-xl">
                                     "{{ $reg->reason }}"

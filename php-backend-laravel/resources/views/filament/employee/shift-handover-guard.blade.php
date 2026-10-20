@@ -3,9 +3,8 @@
     $profile = $user?->employeeProfile;
     $isCurrentlyClockedIn = false;
     if ($profile) {
-        $todayAtt = \App\Models\Hrms\EmployeeAttendance::where('employee_profile_id', $profile->id)
-            ->whereDate('date', \Illuminate\Support\Carbon::today())
-            ->first();
+        // Today's shift, or last night's if still open (AttendanceService::openAttendance).
+        $todayAtt = app(\App\Services\Hrms\AttendanceService::class)->openAttendance($profile);
         $isCurrentlyClockedIn = $todayAtt !== null && $todayAtt->clock_in_at !== null && $todayAtt->clock_out_at === null;
     }
 @endphp

@@ -41,8 +41,9 @@ class EmployeeAttendanceResource extends Resource
     {
         return $schema->schema([
             DatePicker::make('date')->required(),
-            DateTimePicker::make('clock_in_at'),
-            DateTimePicker::make('clock_out_at'),
+            // Typed and shown in venue time, stored in UTC like every other instant.
+            DateTimePicker::make('clock_in_at')->timezone(\App\Support\BusinessClock::zone()),
+            DateTimePicker::make('clock_out_at')->timezone(\App\Support\BusinessClock::zone()),
             TextInput::make('total_work_minutes')->numeric(),
             TextInput::make('total_break_minutes')->numeric(),
             Select::make('status')
@@ -71,8 +72,8 @@ class EmployeeAttendanceResource extends Resource
                 TextColumn::make('date')->date('D, M d, Y')->weight('bold')->sortable(),
                 TextColumn::make('employee.full_name')->label('Employee')->searchable(),
                 TextColumn::make('shift.name')->label('Shift')->placeholder('Standard'),
-                TextColumn::make('clock_in_at')->dateTime('h:i A')->fontFamily('mono'),
-                TextColumn::make('clock_out_at')->dateTime('h:i A')->fontFamily('mono')->placeholder('On Duty'),
+                TextColumn::make('clock_in_at')->dateTime('h:i A', \App\Support\BusinessClock::zone())->fontFamily('mono'),
+                TextColumn::make('clock_out_at')->dateTime('h:i A', \App\Support\BusinessClock::zone())->fontFamily('mono')->placeholder('On Duty'),
                 TextColumn::make('formatted_work_duration')->label('Worked'),
                 TextColumn::make('clock_in_geofence_status')
                     ->label('Geofence')

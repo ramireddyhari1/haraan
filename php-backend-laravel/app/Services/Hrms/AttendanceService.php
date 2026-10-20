@@ -10,6 +10,7 @@ use App\Models\Hrms\EmployeeProfile;
 use App\Models\Hrms\EmployeeShift;
 use App\Models\User;
 use App\Models\Venue;
+use App\Support\BusinessClock;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -53,7 +54,9 @@ class AttendanceService
         string $method = 'gps_web',
         ?string $photoPath = null
     ): EmployeeAttendance {
-        $today = Carbon::today();
+        // The working day is the business (IST) day; instants stay UTC. With the UTC date a
+        // shift starting before 05:30 IST clocked in on yesterday.
+        $today = BusinessClock::todayDate();
         $now = Carbon::now();
 
         // Target workplace: venue coordinates if assigned
@@ -80,7 +83,9 @@ class AttendanceService
         // Punctuality check
         $status = 'present';
         if ($shift !== null) {
-            $shiftStartTime = Carbon::parse($today->toDateString() . ' ' . $shift->start_time);
+            // Shift times are wall-clock times at the venue. Parsed in UTC, a 09:00 start meant
+            // 14:30 IST, so nobody was marked late before half past two.
+            $shiftStartTime = Carbon::parse($today->toDateString() . ' ' . $shift->start_time, BusinessClock::zone());
             $graceEndTime = (clone $shiftStartTime)->addMinutes($shift->grace_period_minutes);
 
             if ($now->greaterThan($graceEndTime)) {
@@ -113,7 +118,7 @@ class AttendanceService
             }
 
             if ($attendance->clock_in_at !== null) {
-                throw new RuntimeException("Employee already clocked in today at " . $attendance->clock_in_at->format('H:i'));
+                throw new RuntimeException("Employee already clocked in today at " . BusinessClock::local($attendance->clock_in_at)->format('g:i A'));
             }
 
             $attendance->employee_shift_id = $shift?->id;
@@ -142,12 +147,9 @@ class AttendanceService
         string $method = 'gps_web',
         ?string $photoPath = null
     ): EmployeeAttendance {
-        $today = Carbon::today();
         $now = Carbon::now();
 
-        $attendance = EmployeeAttendance::where('employee_profile_id', $employee->id)
-            ->whereDate('date', $today)
-            ->first();
+        $attendance = $this->openAttendance($employee);
 
         if ($attendance === null || $attendance->clock_in_at === null) {
             throw new RuntimeException("Cannot clock out: No clock-in record found for today.");
@@ -211,9 +213,7 @@ class AttendanceService
      */
     public function startBreak(EmployeeProfile $employee, string $type = 'lunch'): EmployeeAttendance
     {
-        $attendance = EmployeeAttendance::where('employee_profile_id', $employee->id)
-            ->whereDate('date', Carbon::today())
-            ->first();
+        $attendance = $this->openAttendance($employee);
 
         if ($attendance === null || ! $attendance->isCurrentlyClockedIn()) {
             throw new RuntimeException("Cannot start break: Employee is not currently clocked in.");
@@ -242,9 +242,7 @@ class AttendanceService
      */
     public function endBreak(EmployeeProfile $employee): EmployeeAttendance
     {
-        $attendance = EmployeeAttendance::where('employee_profile_id', $employee->id)
-            ->whereDate('date', Carbon::today())
-            ->first();
+        $attendance = $this->openAttendance($employee);
 
         if ($attendance === null || ! $attendance->isCurrentlyOnBreak()) {
             throw new RuntimeException("No active break found to conclude.");
@@ -267,6 +265,32 @@ class AttendanceService
         $attendance->save();
 
         return $attendance;
+    }
+
+    /**
+     * The shift this employee is on right now: today's attendance, or yesterday's if it is
+     * still open. A night shift that clocks in at 10 PM and out at 2 AM finishes on the next
+     * business day; looking only at today's row it could never clock out.
+     */
+    public function openAttendance(EmployeeProfile $employee): ?EmployeeAttendance
+    {
+        $today = BusinessClock::todayDate();
+
+        $current = EmployeeAttendance::where('employee_profile_id', $employee->id)
+            ->whereDate('date', $today)
+            ->first();
+
+        if ($current !== null && $current->clock_in_at !== null) {
+            return $current;
+        }
+
+        $overnight = EmployeeAttendance::where('employee_profile_id', $employee->id)
+            ->whereDate('date', $today->copy()->subDay())
+            ->whereNotNull('clock_in_at')
+            ->whereNull('clock_out_at')
+            ->first();
+
+        return $overnight ?? $current;
     }
 
     /**
@@ -428,11 +452,15 @@ class AttendanceService
             $out = Carbon::parse($regularisation->requested_clock_out_at);
             $workMinutes = (int) $in->diffInMinutes($out);
 
-            // Find existing attendance or create new
-            $attendance = EmployeeAttendance::firstOrNew([
-                'employee_profile_id' => $employee->id,
-                'date' => $date->toDateString(),
-            ]);
+            // Find that day's attendance (by date, as everywhere else — the column can hold
+            // "Y-m-d 00:00:00", which an exact match on "Y-m-d" missed, making a duplicate).
+            $attendance = EmployeeAttendance::where('employee_profile_id', $employee->id)
+                ->whereDate('date', $date->toDateString())
+                ->first()
+                ?? new EmployeeAttendance([
+                    'employee_profile_id' => $employee->id,
+                    'date' => $date->toDateString(),
+                ]);
 
             $attendance->clock_in_at = $in;
             $attendance->clock_out_at = $out;
