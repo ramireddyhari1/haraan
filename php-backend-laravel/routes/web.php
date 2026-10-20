@@ -367,6 +367,13 @@ Route::middleware(['web', 'auth'])->prefix('partner-docs')->controller(\App\Http
     Route::get('/form16a/{id}', 'webForm16a')->whereNumber('id')->name('partner.docs.form16a');
 });
 
+// The fast phone app (PartnerWebAppController): one page, every screen drawn in place.
+// Admin switch: /control → Platform rules → Partner web app → Fast phone app.
+Route::get('/partner/app/{screen?}', [\App\Http\Controllers\PartnerWebAppController::class, 'show'])
+    ->where('screen', '[a-z-]+')
+    ->middleware(['web'])
+    ->name('partner.app');
+
 // A fresh app token for the phone shell (PartnerAppShell): the console session vouches
 // for the partner, and the shell's screens then read /api/partner/* like the Android app.
 Route::post('/partner/app/token', function () {

@@ -59,6 +59,60 @@ final class PartnerAppShell
         'settings' => 'filament.partner.auth.profile',
     ];
 
+    /** Where the fast phone app lives (PartnerWebAppController). */
+    public const SPA_PATH = '/partner/app';
+
+    /**
+     * Destinations the fast app draws itself (registered screens in public/js/partner).
+     * Everything else (the Bookings day desk, Events, Settings) still opens its console
+     * page until it is ported.
+     *
+     * @var list<string>
+     */
+    public const SPA_SCREENS = [
+        'home', 'venues', 'matches', 'payments', 'scan', 'operations', 'settlement', 'pricing',
+        'standing', 'packages', 'academy', 'customers', 'staff', 'payouts', 'reports',
+        'notifications', 'support',
+    ];
+
+    /**
+     * Config for public/js/partner/pwa.js: install guide, booking-alert push, service
+     * worker. Shared by the console pages and the fast app.
+     *
+     * @return array<string, mixed>
+     */
+    public static function pwaConfig(): array
+    {
+        $user = auth()->user();
+
+        return [
+            'signedIn' => $user !== null && $user->canAccessPanel(\Filament\Facades\Filament::getPanel('partner')),
+            'userId' => $user?->id,
+            'csrf' => csrf_token(),
+            'swUrl' => asset('partner-sw.js'),
+            'subscribeUrl' => route('partner.push.subscribe'),
+            'icon' => asset('partner-app/icon-180.png'),
+            'installPrompt' => \App\Support\PlatformRules::bool('partner_web_app.install_prompt'),
+            'reshowDays' => \App\Support\PlatformRules::int('partner_web_app.install_reshow_days'),
+            'pushEnabled' => \App\Support\PlatformRules::bool('partner_web_app.push_enabled'),
+            'pushPrompt' => \App\Support\PlatformRules::string('partner_web_app.push_prompt'),
+            'vapidKey' => config('services.firebase.web_push_vapid_key') ?: null,
+            'firebase' => [
+                'apiKey' => config('services.firebase.api_key'),
+                'authDomain' => config('services.firebase.auth_domain'),
+                'projectId' => config('services.firebase.project_id'),
+                'messagingSenderId' => config('services.firebase.messaging_sender_id'),
+                'appId' => config('services.firebase.app_id'),
+            ],
+        ];
+    }
+
+    /** The admin switch in /control → Platform rules → Partner web app. */
+    public static function fastAppOn(): bool
+    {
+        return PlatformRules::bool('partner_web_app.fast_app');
+    }
+
     /** The signed-in partner, or null on the login page / for anyone else. */
     public static function user(): ?User
     {
@@ -78,8 +132,11 @@ final class PartnerAppShell
         return JwtService::issueForUser($user, (string) config('app.jwt_secret'), self::TOKEN_TTL);
     }
 
-    /** @return array<string, mixed>|null */
-    public static function config(): ?array
+    /**
+     * @param  bool  $spa  true for the fast app page itself
+     * @return array<string, mixed>|null
+     */
+    public static function config(bool $spa = false): ?array
     {
         $user = self::user();
 
@@ -100,8 +157,32 @@ final class PartnerAppShell
             'logo' => asset('images/haraan-logo-blue.png'),
             'logoWhite' => asset('images/haraan-logo-white.png'),
             'shareBase' => url('/gamehub'),
-            'urls' => self::destinations(),
+            'urls' => self::urls(self::destinations(), $spa || self::fastAppOn()),
+            'spa' => $spa,
+            'spaUrl' => self::fastAppOn() ? url(self::SPA_PATH) : null,
         ];
+    }
+
+    /**
+     * With the fast app on, every destination it draws points into it, so tapping Home
+     * on a console page (the Bookings desk, say) comes back to the fast app instead of
+     * the console. Destinations it can't draw yet keep their console page.
+     *
+     * @param  array<string, string>  $dest
+     * @return array<string, string>
+     */
+    private static function urls(array $dest, bool $fast): array
+    {
+        if (! $fast) {
+            return $dest;
+        }
+        foreach ($dest as $key => $url) {
+            if (in_array($key, self::SPA_SCREENS, true)) {
+                $dest[$key] = url(self::SPA_PATH . ($key === 'home' ? '' : '/' . $key));
+            }
+        }
+
+        return $dest;
     }
 
     /** @return array<string, string> key => URL, for the destinations this partner can open. */

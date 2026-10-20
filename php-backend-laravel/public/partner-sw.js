@@ -2,7 +2,7 @@
  * Haraan Partner: service worker for the partner console installed as a web app
  * (an iPhone "Add to Home Screen", or a desktop browser).
  *
- * Two jobs only:
+ * Three jobs:
  *   1. Push. FCM delivers the same data-only messages the Android partner app gets
  *      (BookingNotifier::pushToPartner etc.). This worker turns `data.title` /
  *      `data.body` into a notification. It must show one for EVERY push: Safari
@@ -10,12 +10,18 @@
  *   2. An offline page. Page loads go to the network; only when that fails is the
  *      cached offline screen shown. Nothing else is cached (bookings must never be
  *      served stale) and Livewire/POST traffic is never touched.
+ *   3. The app's own files (the fast app at /partner/app and the console's phone shell):
+ *      scripts, styles, icons and fonts are kept on the phone so the app opens without
+ *      downloading them again. Each URL carries its version (?v=file time), so a new
+ *      release is a new URL: fetched once, and the older copy of that file is dropped.
+ *      API data is never cached here.
  *
  * Registered with scope /partner by public/js/partner/pwa.js.
  */
 'use strict';
 
 var CACHE = 'hrn-partner-v1';
+var ASSETS = 'hrn-partner-assets-v1';
 var OFFLINE_URL = '/partner-app/offline.html';
 var ICON = '/partner-app/icon-192.png';
 
@@ -32,15 +38,57 @@ self.addEventListener('activate', function (event) {
         caches.keys()
             .then(function (keys) {
                 return Promise.all(keys.filter(function (k) {
-                    return k.indexOf('hrn-partner-') === 0 && k !== CACHE;
+                    return k.indexOf('hrn-partner-') === 0 && k !== CACHE && k !== ASSETS;
                 }).map(function (k) { return caches.delete(k); }));
             })
             .then(function () { return self.clients.claim(); })
     );
 });
 
+/** The app's own static files, and the Inter font the screens are set in. */
+function isAppFile(url) {
+    if (url.origin === self.location.origin) {
+        return /^\/(js\/partner|css\/partner|partner-app|images)\//.test(url.pathname);
+    }
+    return url.hostname === 'fonts.bunny.net';
+}
+
+/**
+ * A versioned file (?v=…) never changes: cache first. An unversioned one (an icon, an
+ * image) is shown from the cache and refreshed behind it, so a changed file shows up on
+ * the next open. A miss is fetched and stored, and any older version of it dropped.
+ */
+function appFile(req) {
+    return caches.open(ASSETS).then(function (cache) {
+        return cache.match(req).then(function (hit) {
+            var versioned = new URL(req.url).searchParams.has('v');
+            if (hit && versioned) return hit;
+            var network = fetch(req).then(function (res) {
+                if (res && (res.ok || res.type === 'opaque')) {
+                    var url = new URL(req.url);
+                    cache.keys().then(function (keys) {
+                        keys.forEach(function (k) {
+                            var ku = new URL(k.url);
+                            if (ku.origin === url.origin && ku.pathname === url.pathname && ku.search !== url.search) cache.delete(k);
+                        });
+                    });
+                    cache.put(req, res.clone());
+                }
+                return res;
+            });
+            if (hit) { network.catch(function () { /* offline: the cached copy stands */ }); return hit; }
+            return network;
+        });
+    });
+}
+
 self.addEventListener('fetch', function (event) {
     var req = event.request;
+    if (req.method === 'GET' && req.mode !== 'navigate') {
+        var url = new URL(req.url);
+        if (isAppFile(url)) event.respondWith(appFile(req));
+        return;
+    }
     if (req.method !== 'GET' || req.mode !== 'navigate') return;
 
     event.respondWith(

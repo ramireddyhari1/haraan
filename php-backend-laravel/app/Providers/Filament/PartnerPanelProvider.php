@@ -127,28 +127,7 @@ class PartnerPanelProvider extends PanelProvider
                     return '';
                 }
                 $v = fn (string $path): int => @filemtime(public_path($path)) ?: 1;
-                $user = auth()->user();
-
-                $config = [
-                    'signedIn' => $user !== null && $user->canAccessPanel(\Filament\Facades\Filament::getPanel('partner')),
-                    'userId' => $user?->id,
-                    'csrf' => csrf_token(),
-                    'swUrl' => asset('partner-sw.js'),
-                    'subscribeUrl' => route('partner.push.subscribe'),
-                    'icon' => asset('partner-app/icon-180.png'),
-                    'installPrompt' => \App\Support\PlatformRules::bool('partner_web_app.install_prompt'),
-                    'reshowDays' => \App\Support\PlatformRules::int('partner_web_app.install_reshow_days'),
-                    'pushEnabled' => \App\Support\PlatformRules::bool('partner_web_app.push_enabled'),
-                    'pushPrompt' => \App\Support\PlatformRules::string('partner_web_app.push_prompt'),
-                    'vapidKey' => config('services.firebase.web_push_vapid_key') ?: null,
-                    'firebase' => [
-                        'apiKey' => config('services.firebase.api_key'),
-                        'authDomain' => config('services.firebase.auth_domain'),
-                        'projectId' => config('services.firebase.project_id'),
-                        'messagingSenderId' => config('services.firebase.messaging_sender_id'),
-                        'appId' => config('services.firebase.app_id'),
-                    ],
-                ];
+                $config = \App\Support\PartnerAppShell::pwaConfig();
 
                 return '<link rel="manifest" href="' . e(asset('partner.webmanifest')) . '?v=' . $v('partner.webmanifest') . '">'
                     . '<meta name="theme-color" content="#ffffff">'
@@ -179,7 +158,14 @@ class PartnerPanelProvider extends PanelProvider
                 }
                 $v = fn (string $path): int => @filemtime(public_path($path)) ?: 1;
 
-                return '<link rel="stylesheet" href="' . e(asset('css/partner/app-shell.css')) . '?v=' . $v('css/partner/app-shell.css') . '">'
+                // Fast phone app on: a phone opening the console's Home (an iPhone Home
+                // Screen icon saved before the switch opens /partner) goes straight to
+                // it, before the console paints. Desktop widths stay on the console.
+                $toFast = ($config['spaUrl'] && request()->routeIs('filament.partner.pages.dashboard'))
+                    ? '<script>if(window.matchMedia&&matchMedia("(max-width: 767px)").matches){location.replace(' . json_encode($config['spaUrl'], JSON_HEX_TAG | JSON_UNESCAPED_SLASHES) . ');}</script>'
+                    : '';
+
+                return $toFast . '<link rel="stylesheet" href="' . e(asset('css/partner/app-shell.css')) . '?v=' . $v('css/partner/app-shell.css') . '">'
                     . '<script>window.HaraanPartnerApp=' . json_encode($config, JSON_HEX_TAG | JSON_HEX_AMP | JSON_UNESCAPED_SLASHES) . ';</script>'
                     . '<link rel="stylesheet" href="' . e(asset('css/partner/app-screens.css')) . '?v=' . $v('css/partner/app-screens.css') . '">'
                     . '<script src="' . e(asset('js/partner/app-shell.js')) . '?v=' . $v('js/partner/app-shell.js') . '" defer></script>'
@@ -469,6 +455,8 @@ class PartnerPanelProvider extends PanelProvider
             ->authMiddleware([
                 // Same 403 as Filament's, but with a way out (see the middleware).
                 \App\Http\Middleware\AuthenticateFilamentPanel::class,
+                // Fast phone app on: phones skip the console Home (see the middleware).
+                \App\Http\Middleware\SendPhonesToFastPartnerApp::class,
             ]);
     }
 }

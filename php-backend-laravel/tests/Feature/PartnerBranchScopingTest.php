@@ -376,7 +376,8 @@ class PartnerBranchScopingTest extends TestCase
             'is_active' => true,
         ]);
 
-        $desk = $this->desk([$this->koramangala], ['pricing']);
+        // Selling a pass is desk work ('bookings'); with it, the branch rule is what refuses.
+        $desk = $this->desk([$this->koramangala], ['bookings']);
 
         $this->as($desk)->postJson("/api/partner/packages/{$offer->id}/sell", [
             'customerPhone' => '9876543212',

@@ -21,8 +21,12 @@
     if (!cfg || window.__hrnAppShell) return;
     window.__hrnAppShell = true;
 
-    var PHONE = window.matchMedia('(max-width: 767px)');
     var root = document.documentElement;
+    // The fast app (/partner/app): one page, screens switched in place, no console under
+    // it. It is always the phone layout, even opened on a laptop (app-spa.css frames it).
+    var SPA = !!cfg.spa;
+    var SPA_ROOT = cfg.spaUrl ? (function () { try { return new URL(cfg.spaUrl, location.origin).pathname.replace(/\/+$/, ''); } catch (e) { return '/partner/app'; } })() : '/partner/app';
+    var PHONE = SPA ? { matches: true, addEventListener: function () {} } : window.matchMedia('(max-width: 767px)');
 
     /* ================================================================ utils === */
 
@@ -122,15 +126,28 @@
         return refreshing;
     }
 
+    /*
+     * The fast app remembers what it loaded, the way the Android app keeps a screen's data
+     * in memory: going back to a screen within CACHE_MS draws it at once instead of from a
+     * skeleton. Any write clears it all, so nothing stale survives a change; Home's own
+     * refresh asks for fresh data ({fresh: true}).
+     */
+    var CACHE_MS = 60000;
+    var cache = {};
+
     /** GET /api/partner/<path>, scoped to the console's selected branch like the app's branchParam. */
     function api(path, params, retried) {
         var q = [];
         params = params || {};
         if (params.branch !== false && cfg.branch) q.push('venue_id=' + encodeURIComponent(cfg.branch));
         Object.keys(params).forEach(function (k) {
-            if (k !== 'branch' && params[k] != null) q.push(k + '=' + encodeURIComponent(params[k]));
+            if (k !== 'branch' && k !== 'fresh' && params[k] != null) q.push(k + '=' + encodeURIComponent(params[k]));
         });
         var url = '/api/partner/' + path + (q.length ? (path.indexOf('?') >= 0 ? '&' : '?') + q.join('&') : '');
+        if (SPA && !params.fresh && !retried) {
+            var hit = cache[url];
+            if (hit && Date.now() - hit.t < CACHE_MS) return Promise.resolve(JSON.parse(hit.v));
+        }
         return fetch(url, {
             headers: { 'Accept': 'application/json', 'Authorization': 'Bearer ' + token },
             credentials: 'omit',
@@ -139,7 +156,10 @@
                 return refreshToken().then(function () { return api(path, params, true); });
             }
             if (!r.ok) throw new Error(path + ' ' + r.status);
-            return r.json();
+            return r.text().then(function (t) {
+                if (SPA) cache[url] = { t: Date.now(), v: t };
+                return JSON.parse(t);
+            });
         });
     }
 
@@ -149,6 +169,7 @@
      * (409 on check-in is an answer about the ticket, not a failure).
      */
     function apiSend(method, path, body, retried) {
+        cache = {};
         return fetch('/api/partner/' + path, {
             method: method,
             headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
@@ -373,10 +394,97 @@
 
     function isHome() { return path(u.home) === location.pathname.replace(/\/+$/, ''); }
 
+    /** The fast app's own path for a URL, or null when the URL is somewhere else. */
+    function spaPath(url) {
+        var p = path(url);
+        return p && (p === SPA_ROOT || p.indexOf(SPA_ROOT + '/') === 0) ? p : null;
+    }
+
     function go(url) {
         if (!url) return;
+        var into = cfg.spaUrl || SPA ? spaPath(url) : null;
+        if (SPA) {
+            if (into) navigate(into);
+            else location.href = url;
+            return;
+        }
+        // A console page linking into the fast app leaves the console for good.
+        if (into) { location.href = url; return; }
         if (window.Livewire && typeof window.Livewire.navigate === 'function') window.Livewire.navigate(url);
         else location.href = url;
+    }
+
+    /*
+     * In the fast app a screen change is a history entry and a redraw, never a page load.
+     * Going into a drawer tool slides it in; Back slides it out; tabs cross-fade.
+     */
+    var depth = 0;
+    function isToolPath(p) {
+        var keys = Object.keys(screens);
+        for (var i = 0; i < keys.length; i++) {
+            if (screens[keys[i]].tool && path(urlOf(keys[i])) === p) return true;
+        }
+        return false;
+    }
+    function navigate(p, replace) {
+        var here = location.pathname.replace(/\/+$/, '');
+        if (p === here) { closeDrawer(); return; }
+        var dir = isToolPath(p) ? 'push' : 'tab';
+        try { history.replaceState(Object.assign({}, history.state, { ha: 1, d: depth, y: window.scrollY }), ''); } catch (e) { /* none */ }
+        if (!replace && dir === 'push') depth++;
+        history[replace ? 'replaceState' : 'pushState']({ ha: 1, d: depth, y: 0 }, '', p);
+        swap(dir, 0);
+    }
+    function swap(dir, y) {
+        closeDrawer();
+        var draw = function () { mount(); window.scrollTo(0, y || 0); };
+        var reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+        if (document.startViewTransition && !reduced) {
+            if (dir !== 'tab') root.classList.add('ha-vt-' + dir);
+            var t = document.startViewTransition(draw);
+            var done = function () { root.classList.remove('ha-vt-push', 'ha-vt-pop'); };
+            // A transition the browser skips (a second tap mid-slide) still draws the
+            // screen; only its promises reject, and that isn't an error.
+            t.finished.then(done, done);
+            if (t.ready) t.ready.catch(function () {});
+            if (t.updateCallbackDone) t.updateCallbackDone.catch(function () {});
+            return;
+        }
+        draw();
+        var main = document.querySelector('.fi-main');
+        if (!main || reduced) return;
+        main.classList.remove('ha-enter', 'ha-enter-push', 'ha-enter-pop');
+        void main.offsetWidth;
+        main.classList.add(dir === 'push' ? 'ha-enter-push' : dir === 'pop' ? 'ha-enter-pop' : 'ha-enter');
+    }
+    function back() {
+        if (SPA && history.state && history.state.ha && history.state.d > 0) { history.back(); return; }
+        if (SPA) { depth = 0; history.replaceState({ ha: 1, d: 0, y: 0 }, '', path(u.home)); swap('pop', 0); return; }
+        var ref = document.referrer;
+        if (ref && ref.indexOf(location.origin + '/partner') === 0 && history.length > 1) history.back();
+        else go(u.home);
+    }
+    if (SPA) {
+        window.addEventListener('popstate', function (e) {
+            var st = e.state || {};
+            var d = st.d || 0;
+            var dir = d < depth ? 'pop' : 'tab';
+            depth = d;
+            swap(dir, st.y || 0);
+        });
+        // Every in-app link (drawer rows, Home's doors, screens' links) changes screen in place.
+        document.addEventListener('click', function (e) {
+            if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            var a = e.target.closest && e.target.closest('a[href]');
+            if (!a || (a.target && a.target !== '_self') || a.hasAttribute('download')) return;
+            var p = spaPath(a.getAttribute('href'));
+            if (!p) return;
+            e.preventDefault();
+            navigate(p);
+        });
+        document.addEventListener('submit', function (e) {
+            if (e.target && e.target.classList && e.target.classList.contains('ha-dout')) forgetHome();
+        }, true);
     }
 
     /* =========================================================== bottom bar === */
@@ -713,14 +821,15 @@
             var cl = courtsLane();
             var today = new Date();
             var tomorrow = new Date(Date.now() + 86400000);
+            var f = !!quiet;
             return Promise.all([
-                api('overview'),
-                api('today'),
-                focus && cl ? soft(api('venues/' + focus.id + '/day', { branch: false, date: ymd(today) })) : null,
-                can('reports') ? soft(api('payouts', { branch: false })) : null,
-                cl ? soft(api('bookings')) : null,
-                focus && cl ? soft(api('venues/' + focus.id + '/day', { branch: false, date: ymd(tomorrow) })) : null,
-                cl ? soft(api('insights')) : null,
+                api('overview', { fresh: f }),
+                api('today', { fresh: f }),
+                focus && cl ? soft(api('venues/' + focus.id + '/day', { branch: false, date: ymd(today), fresh: f })) : null,
+                can('reports') ? soft(api('payouts', { branch: false, fresh: f })) : null,
+                cl ? soft(api('bookings', { fresh: f })) : null,
+                focus && cl ? soft(api('venues/' + focus.id + '/day', { branch: false, date: ymd(tomorrow), fresh: f })) : null,
+                cl ? soft(api('insights', { fresh: f })) : null,
             ]).then(function (r) {
                 home.data = {
                     venues: venues, focus: focus, overview: r[0], day: r[1].data || r[1], grid: r[2],
@@ -728,6 +837,7 @@
                     insights: r[6] ? (r[6].data || r[6]) : null,
                 };
                 home.insights = home.data.insights;
+                rememberHome();
                 renderHome();
                 renderAppBar();
                 renderCompact();
@@ -739,6 +849,29 @@
                 host.querySelector('[data-retry]').addEventListener('click', function () { loadHome(); });
             }
         }).finally(function () { home.loading = false; });
+    }
+
+    /*
+     * The fast app keeps the last Home it drew on this phone, so opening it again shows
+     * that Home straight away and then quietly brings it up to date, as the app does.
+     * Per partner and per outlet; dropped after 12 hours and on sign-out.
+     */
+    var HOME_KEY = 'haHome:' + (cfg.name || '') + ':' + (cfg.branch == null ? 'all' : cfg.branch);
+    function rememberHome() {
+        if (!SPA || !home.data) return;
+        try { window.localStorage.setItem(HOME_KEY, JSON.stringify({ t: Date.now(), d: home.data })); } catch (e) { /* full or blocked */ }
+    }
+    function recallHome() {
+        if (!SPA || home.data) return;
+        try {
+            var saved = JSON.parse(window.localStorage.getItem(HOME_KEY) || 'null');
+            if (saved && Date.now() - saved.t < 12 * 3600 * 1000) { home.data = saved.d; home.insights = saved.d.insights; venuesCache = saved.d.venues; }
+        } catch (e) { /* none */ }
+    }
+    function forgetHome() {
+        try {
+            Object.keys(window.localStorage).forEach(function (k) { if (k.indexOf('haHome:') === 0) window.localStorage.removeItem(k); });
+        } catch (e) { /* none */ }
     }
 
     function skeleton() {
@@ -753,6 +886,7 @@
         var d = home.data;
         if (!host || !d) return;
         riseOrder = 0;
+        if (!window.__haHomeDrawn) { window.__haHomeDrawn = true; try { performance.mark('ha-home-drawn'); } catch (e) { /* none */ } }
         var day = d.day;
         var o = d.overview;
         var cl = courtsLane();
@@ -1948,9 +2082,7 @@
     document.addEventListener('click', function (e) {
         if (!e.target.closest('.ha-toolbar [data-back]')) return;
         e.preventDefault();
-        var ref = document.referrer;
-        if (ref && ref.indexOf(location.origin + '/partner') === 0 && history.length > 1) history.back();
-        else go(u.home);
+        back();
     });
 
     window.HaApp = {
@@ -1972,6 +2104,7 @@
 
     function screenHost() {
         var host = document.getElementById('ha-screen');
+        if (SPA && host && !active) { host.remove(); host = null; }
         if (!host) {
             var main = document.querySelector('.fi-main') || document.querySelector('main');
             if (!main) return null;
@@ -2046,7 +2179,9 @@
         }
         if (onHome) {
             renderCompact();
-            if (home.data && document.getElementById('ha-home')) renderHome();
+            // The fast app draws what it already has (in memory, or remembered from the
+            // last visit) straight away; the load below then brings it up to date.
+            if (home.data && (SPA || document.getElementById('ha-home'))) { homeHost(); renderHome(); }
             loadHome(!!home.data);
         } else {
             // Any other page is drawn as soon as it mounts; Home waits for its data.
@@ -2055,6 +2190,10 @@
     }
 
     function start() {
+        if (SPA) {
+            recallHome();
+            try { history.replaceState(Object.assign({ ha: 1, d: 0, y: 0 }, history.state), ''); } catch (e) { /* none */ }
+        }
         loadContext().then(function () { mount(); });
         mount();
         // Home keeps itself fresh while it's on screen, the way the app's poll does.

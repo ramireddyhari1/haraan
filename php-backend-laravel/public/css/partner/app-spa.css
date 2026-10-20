@@ -1,0 +1,83 @@
+/*
+ * The fast phone app (/partner/app, resources/views/partner/app.blade.php).
+ *
+ * The screens were drawn inside the Filament console, which brought Tailwind's base
+ * reset with it. This page has no console, so the parts of that reset the screens lean
+ * on are here, plus the screen-change motion.
+ */
+
+*, ::before, ::after { box-sizing: border-box; border: 0 solid; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; -webkit-tap-highlight-color: transparent; line-height: 1.5; }
+body { margin: 0; line-height: inherit; }
+h1, h2, h3, h4, h5, h6, p, blockquote, figure, dl, dd, pre, hr { margin: 0; }
+h1, h2, h3, h4, h5, h6 { font-size: inherit; font-weight: inherit; }
+ol, ul, menu { list-style: none; margin: 0; padding: 0; }
+a { color: inherit; text-decoration: inherit; }
+b, strong { font-weight: bolder; }
+img, svg, video, canvas { display: block; vertical-align: middle; }
+img, video { max-width: 100%; height: auto; }
+button, input, optgroup, select, textarea {
+    font-family: inherit; font-size: 100%; font-weight: inherit; line-height: inherit;
+    color: inherit; margin: 0; padding: 0;
+}
+button, select { text-transform: none; }
+button, [type='button'], [type='submit'] { -webkit-appearance: button; background-color: transparent; background-image: none; cursor: pointer; }
+input::placeholder, textarea::placeholder { color: #94a3b8; opacity: 1; }
+table { border-collapse: collapse; }
+[hidden] { display: none; }
+
+html.ha-spa, html.ha-spa body {
+    background: #F6F8FC;
+    color: #0F172A;
+    font-family: Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+/* Native feel: no rubber-band of the whole page behind the bars, no text-select on long press. */
+html.ha-spa body { overscroll-behavior-y: none; min-height: 100dvh; -webkit-user-select: none; user-select: none; }
+html.ha-spa input, html.ha-spa textarea, html.ha-spa [contenteditable] { -webkit-user-select: text; user-select: text; }
+html.ha-spa .fi-main-ctn { min-height: 100dvh; }
+html.ha-spa .fi-main { display: block; width: 100%; }
+
+/* Opened on a laptop: keep the phone layout, framed down the middle. */
+@media (min-width: 768px) {
+    html.ha-spa body { background: #E8EDF5; }
+    html.ha-spa .fi-main-ctn { max-width: 440px; margin: 0 auto; background: #F6F8FC; box-shadow: 0 0 0 1px rgba(15, 23, 42, .06), 0 20px 60px rgba(15, 23, 42, .10); }
+}
+
+/* --------------------------------------------------------------- motion --- *
+ * Screen changes: the header and bottom bar stay put; only the screen moves.
+ * Going into a tool slides in from the right, Back slides out, and switching tabs
+ * cross-fades with a small lift. Same-document View Transitions where the browser
+ * has them (iOS 18+), a plain CSS entrance otherwise.
+ */
+html.ha-spa #ha-nav { view-transition-name: ha-nav; }
+html.ha-spa #ha-appbar, html.ha-spa #ha-compact { view-transition-name: ha-head; }
+html.ha-spa .fi-main { view-transition-name: ha-screen; }
+
+::view-transition-group(ha-screen) { animation-duration: .26s; }
+::view-transition-old(ha-screen), ::view-transition-new(ha-screen) { animation-timing-function: cubic-bezier(.22, .9, .24, 1); }
+::view-transition-old(ha-screen) { animation: ha-vt-out .16s ease-in both; }
+::view-transition-new(ha-screen) { animation: ha-vt-in .26s cubic-bezier(.22, .9, .24, 1) both; }
+html.ha-vt-push::view-transition-old(ha-screen) { animation: ha-vt-push-out .26s cubic-bezier(.22, .9, .24, 1) both; }
+html.ha-vt-push::view-transition-new(ha-screen) { animation: ha-vt-push-in .3s cubic-bezier(.22, .9, .24, 1) both; }
+html.ha-vt-pop::view-transition-old(ha-screen) { animation: ha-vt-pop-out .24s cubic-bezier(.22, .9, .24, 1) both; }
+html.ha-vt-pop::view-transition-new(ha-screen) { animation: ha-vt-pop-in .28s cubic-bezier(.22, .9, .24, 1) both; }
+::view-transition-old(ha-nav), ::view-transition-new(ha-nav),
+::view-transition-old(ha-head), ::view-transition-new(ha-head) { animation: none; }
+
+@keyframes ha-vt-out { to { opacity: 0; } }
+@keyframes ha-vt-in { from { opacity: 0; transform: translateY(10px); } }
+@keyframes ha-vt-push-out { to { opacity: .6; transform: translateX(-22%); } }
+@keyframes ha-vt-push-in { from { transform: translateX(100%); box-shadow: -12px 0 30px rgba(15, 23, 42, .12); } }
+@keyframes ha-vt-pop-out { to { transform: translateX(100%); } }
+@keyframes ha-vt-pop-in { from { opacity: .6; transform: translateX(-22%); } }
+
+/* No View Transitions: the new screen still arrives, it just doesn't slide the old one away. */
+html.ha-spa .fi-main.ha-enter { animation: ha-vt-in .26s cubic-bezier(.22, .9, .24, 1) both; }
+html.ha-spa .fi-main.ha-enter-push { animation: ha-vt-push-in .3s cubic-bezier(.22, .9, .24, 1) both; }
+html.ha-spa .fi-main.ha-enter-pop { animation: ha-vt-pop-in .28s cubic-bezier(.22, .9, .24, 1) both; }
+
+@media (prefers-reduced-motion: reduce) {
+    ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+    html.ha-spa .fi-main.ha-enter, html.ha-spa .fi-main.ha-enter-push, html.ha-spa .fi-main.ha-enter-pop { animation: none; }
+}
