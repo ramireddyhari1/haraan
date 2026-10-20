@@ -406,8 +406,9 @@
         requestAnimationFrame(function step(t) {
             var k = Math.min(1, Math.max(0, (t - t0) / 750)), e = 1 - Math.pow(1 - k, 3);
             el.textContent = Math.round(from + (to - from) * e);
-            if (k < 1) requestAnimationFrame(step);
+            if (k < 1 && !el.__landed) requestAnimationFrame(step);
         });
+        setTimeout(function () { el.__landed = true; el.textContent = to; }, 900);
     }
 
     /* ============================================================= WALK-IN SHEET === */

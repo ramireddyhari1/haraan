@@ -68,6 +68,7 @@ class PartnerFastAppTest extends TestCase
         // The day desk is drawn by the fast app too (app-bookings.js).
         $this->assertStringContainsString('"bookings":"http://localhost/partner/app/bookings"', $res->getContent());
         $res->assertSee('js/partner/app-bookings.js', false);
+        $res->assertSee('js/partner/app-desk-tools.js', false);
     }
 
     public function test_unknown_screen_paths_are_refused(): void

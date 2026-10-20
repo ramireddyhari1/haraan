@@ -2228,9 +2228,11 @@
                 var k = Math.min(1, (t - t0) / 900);
                 var e = 1 - Math.pow(1 - k, 3);
                 el.textContent = rupees(from + (to - from) * e);
-                if (k < 1) requestAnimationFrame(step);
+                if (k < 1 && !el.__landed) requestAnimationFrame(step);
             }
             requestAnimationFrame(step);
+            // Frames can stall (a throttled or backgrounded page): the real figure always lands.
+            setTimeout(function () { el.__landed = true; el.textContent = rupees(to); }, 1000);
         });
     }
 
