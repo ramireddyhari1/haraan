@@ -17,14 +17,21 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
 
+    <!--
+      allowBackup=false: the sign-in token lives in SharedPreferences, and Auto Backup
+      would copy it to the phone's Google backup and restore a live session onto
+      another device. A partner on a new phone signs in again instead.
+      usesCleartextTraffic=false: prod is HTTPS only. Debug builds re-allow plain HTTP
+      to the local dev server through src/debug (network_security_config).
+    -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:windowSoftInputMode="adjustResize"
-        android:usesCleartextTraffic="true"
+        android:usesCleartextTraffic="false"
         android:theme="@style/Theme.HaraanPartner">
         <provider
             android:name="androidx.core.content.FileProvider"

@@ -10,14 +10,32 @@ android {
         applicationId = "com.haraan.partner"
         minSdk = 24
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 6
+        versionName = "1.5"
         // Live prod backend (same host the consumer app uses). The old EC2 IP
         // (13.204.63.181) is dead; partner endpoints live under /api/partner/*.
         buildConfigField("String", "API_BASE_URL", "\"https://haraan.app\"")
         // Shared OAuth Web client ID (android-app/gradle.properties). Blank → the
         // "Continue with Google" button hides itself, so this is never half-wired.
         buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", "\"${project.findProperty("GOOGLE_WEB_CLIENT_ID") ?: ""}\"")
+    }
+
+    // Every partner APK shipped so far is signed with this machine's Android debug key
+    // (SHA-256 D1:8E:7C:16…). The release build MUST keep the same key, or installed
+    // apps can't update in place: Android refuses an update signed by anyone else.
+    // Back this keystore up; losing it means every partner reinstalls from scratch.
+    // To move to a dedicated key later, set PARTNER_KEYSTORE / _PASSWORD / _ALIAS /
+    // _KEY_PASSWORD in ~/.gradle/gradle.properties (and plan the one-time reinstall).
+    signingConfigs {
+        create("partnerRelease") {
+            storeFile = file(
+                (project.findProperty("PARTNER_KEYSTORE") as String?)
+                    ?: "${System.getProperty("user.home")}/.android/debug.keystore"
+            )
+            storePassword = (project.findProperty("PARTNER_KEYSTORE_PASSWORD") as String?) ?: "android"
+            keyAlias = (project.findProperty("PARTNER_KEY_ALIAS") as String?) ?: "androiddebugkey"
+            keyPassword = (project.findProperty("PARTNER_KEY_PASSWORD") as String?) ?: "android"
+        }
     }
 
     buildTypes {
@@ -32,7 +50,11 @@ android {
                 "\"${project.findProperty("PARTNER_API_BASE_URL") ?: "https://haraan.app"}\""
             )
         }
+        // What partners install: not debuggable (no run-as reading the session,
+        // no WebView inspection of the payment pages), BuildConfig.DEBUG = false.
         release {
+            signingConfig = signingConfigs.getByName("partnerRelease")
+            isDebuggable = false
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }

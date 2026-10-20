@@ -578,6 +578,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
         session.onDuty = true; onDuty = true
         com.haraan.partner.alerts.BookingWatchService.start(appContext)
     }
+    var restrictedGuide by remember { mutableStateOf(false) }
     val notifPermission = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
     ) { _ -> if (com.haraan.partner.alerts.AlertOverlay.allowed(appContext)) goOnDuty() else dutySetup = true }
@@ -598,17 +599,21 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
             onAllow = {
                 dutySetup = false
                 goOnDuty()
-                runCatching {
-                    appContext.startActivity(
-                        android.content.Intent(
-                            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                            android.net.Uri.parse("package:" + appContext.packageName),
-                        ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
-                    )
-                }
+                // Android 13+ greys the switch out for apps installed from an APK until
+                // "Allow restricted settings" is chosen in App info — explain that first.
+                if (com.haraan.partner.alerts.OverlayAccess.needsRestrictedStep(appContext)) restrictedGuide = true
+                else com.haraan.partner.alerts.OverlayAccess.openOverlaySettings(appContext)
             },
             onNotificationsOnly = { dutySetup = false; goOnDuty() },
             onDismiss = { dutySetup = false },
+        )
+    }
+    if (restrictedGuide) {
+        com.haraan.partner.alerts.RestrictedSettingsDialog(
+            onOpenAppInfo = { com.haraan.partner.alerts.OverlayAccess.openAppInfo(appContext) },
+            onOpenOverlay = { restrictedGuide = false; com.haraan.partner.alerts.OverlayAccess.openOverlaySettings(appContext) },
+            onNotificationsOnly = { restrictedGuide = false },
+            onDismiss = { restrictedGuide = false },
         )
     }
     // Bumped whenever a new booking lands, so an open Home refetches quietly and
