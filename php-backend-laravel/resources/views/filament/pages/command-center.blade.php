@@ -111,7 +111,7 @@
                         </svg>
                         <div>
                             <p>All clear</p>
-                            <span>No support waiting, payouts due or failed payments.</span>
+                            <span>No unread support, payouts due, hidden venues, unsent messages or failed payments.</span>
                         </div>
                     </div>
                 @endif
@@ -232,7 +232,7 @@
                 <div class="cc-kv">
                     <div><span>Takings</span><b class="cc-num">{{ $venues['gmv'] }}</b></div>
                     <div><span>Bookings</span><b class="cc-num">{{ number_format($venues['bookings']) }}</b></div>
-                    <div><span>Venues · courts</span><b class="cc-num">{{ $venues['venues'] }} · {{ $courtCount }}</b></div>
+                    <div><span>On sale · courts</span><b class="cc-num">{{ $venues['venues'] }} · {{ $courtCount }}</b></div>
                 </div>
             </section>
 
@@ -305,11 +305,8 @@
 
                 @if (empty($feed))
                     <div class="cc-muted-empty">
-                        <svg width="46" height="56" viewBox="0 0 46 56" fill="none" aria-hidden="true">
-                            <path d="M5 3h36v47l-6-4-6 4-6-4-6 4-6-4-6 4z" fill="var(--cc-surface)" stroke="var(--cc-ink-3)" stroke-width="1.6" stroke-linejoin="round"/>
-                            <path d="M12 14h22M12 22h16M12 30h19" stroke="var(--cc-line)" stroke-width="3" stroke-linecap="round"/>
-                        </svg>
-                        No bookings have been made yet.
+                        <x-hrn-illo name="receipt" :size="96" />
+                        <span>No bookings have been made yet. The first one lands here the moment it is paid or held.</span>
                     </div>
                 @else
                     <div class="cc-feed">
@@ -343,7 +340,10 @@
                     </div>
                 </div>
                 @if (empty($audit))
-                    <div class="cc-muted-empty">Nobody has changed anything yet.</div>
+                    <div class="cc-muted-empty">
+                        <x-hrn-illo name="clipboard" :size="96" />
+                        <span>Nobody has changed anything yet. Edits to prices, venues, events and payouts are written here with who made them.</span>
+                    </div>
                 @else
                     <div class="cc-tl">
                         @foreach ($audit as $a)
@@ -372,7 +372,10 @@
                         <span class="v cc-num">{{ $c['gmv'] }}</span>
                     </div>
                 @empty
-                    <div class="cc-muted-empty">No paid bookings in this window.</div>
+                    <div class="cc-muted-empty">
+                        <x-hrn-illo name="map" :size="96" />
+                        <span>No paid bookings in this window, so no city to show yet.</span>
+                    </div>
                 @endforelse
 
                 <a class="cc-owed" href="{{ $ledger['url'] }}">

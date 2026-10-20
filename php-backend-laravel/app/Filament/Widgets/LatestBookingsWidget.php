@@ -39,16 +39,16 @@ class LatestBookingsWidget extends Widget
     public function getBookings(): array
     {
         return $this->scopedBookingQuery()
-            // This is the Events overview feed, so keep it to event bookings —
-            // on /control scopedBookingQuery() is unscoped and would otherwise
-            // leak venue/GameHub bookings onto the events page.
-            ->whereNotNull('event_id')
+            // This widget sits on the /control dashboard, which is the whole
+            // platform: it used to keep to event bookings, so a day of court
+            // bookings read "No bookings yet".
             ->with(['user', 'event', 'venue'])
             ->latest()
             ->limit(8)
             ->get()
             ->map(function (Booking $r): array {
-                $name = (string) ($r->user?->name ?? $r->guest_name ?? 'Guest');
+                // Guest first: desk walk-ins are booked under the owner's account.
+                $name = (string) ($r->guest_name ?: ($r->attendee_name ?: ($r->user?->name ?: 'Guest')));
                 $photo = MediaUrl::resolve($r->user?->avatar);
 
                 return [

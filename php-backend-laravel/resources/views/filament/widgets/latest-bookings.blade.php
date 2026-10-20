@@ -1,4 +1,4 @@
-{{-- Events-overview activity feed — recent bookings as premium transaction
+{{-- Dashboard activity feed (events and venues) — recent bookings as premium transaction
      cards. Self-contained markup + inline CSS, theme-aware. --}}
 @php $bookings = $this->getBookings(); @endphp
 
@@ -11,7 +11,7 @@
 
         @if (empty($bookings))
             <div class="lb-empty">
-                <div class="lb-empty-ic">🎟️</div>
+                <x-hrn-illo name="calendar" :size="104" />
                 <div class="lb-empty-t">No bookings yet</div>
                 <div class="lb-empty-d">Bookings from the app and walk-ins will appear here as they come in.</div>
             </div>

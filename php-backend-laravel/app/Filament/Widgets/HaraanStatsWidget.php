@@ -57,7 +57,9 @@ class HaraanStatsWidget extends StatsOverviewWidget
 
         // Catalog health — not money, but the levers an operator pulls.
         $venues = Venue::count();
-        $bookable = Venue::where('is_bookable', true)->count();
+        // What a customer can book now: the customer side's own filter plus the bookings
+        // switch. is_bookable alone stays on for drafts and photo-less venues.
+        $bookable = Venue::query()->published()->where('is_bookable', true)->count();
         $upcomingEvents = Event::query()
             ->whereDate('date', '>=', $now->toDateString())
             ->count();
@@ -138,7 +140,7 @@ class HaraanStatsWidget extends StatsOverviewWidget
         }
 
         return Stat::make('Venues', (string) $venues)
-            ->description("{$bookable} open for booking")
+            ->description($bookable === $venues ? 'All on sale' : "{$bookable} on sale · " . ($venues - $bookable) . ' not yet')
             ->descriptionIcon('heroicon-m-map-pin')
             ->color('success');
     }

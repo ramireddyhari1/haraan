@@ -161,6 +161,30 @@
             <path d="M46 24 62 62M114 24 98 62" stroke="{{ $acc }}" stroke-width="1" opacity=".35" stroke-dasharray="2 3"/>
             @break
 
+        @case('map')
+            {{-- A folded city map with a pin: where things sold. --}}
+            <path d="M28 30 58 20l44 12 30-10v62l-30 10-44-12-30 10Z" fill="{{ $paper }}" stroke="{{ $ink }}" stroke-width="1.6"/>
+            <path d="M58 20v62M102 32v62" stroke="{{ $ink }}" stroke-width="1.2" opacity=".5"/>
+            <path d="M36 60c10-8 18 4 28-2s16-14 26-8 18 6 30-4" stroke="{{ $acc }}" stroke-width="1.4" stroke-dasharray="3 3" opacity=".7"/>
+            <path d="M28 30 58 20v62l-30 10Z" fill="{{ $soft }}"/>
+            <g class="il-float">
+                <path d="M88 16c-9 0-15 6.5-15 14.5C73 42 88 56 88 56s15-14 15-25.5C103 22.5 97 16 88 16Z" fill="{{ $acc }}"/>
+                <circle cx="88" cy="30" r="5" fill="{{ $paper }}"/>
+            </g>
+            @break
+
+        @case('clipboard')
+            {{-- A clipboard with a pen: the audit log, nothing written yet. --}}
+            <rect x="46" y="18" width="62" height="76" rx="8" fill="{{ $paper }}" stroke="{{ $ink }}" stroke-width="1.6"/>
+            <rect x="64" y="12" width="26" height="12" rx="4" fill="{{ $soft }}" stroke="{{ $ink }}" stroke-width="1.4"/>
+            <path d="M58 40h38M58 52h30M58 64h34M58 76h22" stroke="{{ $ink }}" stroke-width="1.4" opacity=".35"/>
+            <g class="il-float">
+                <path d="m112 34 10 10-30 30-13 3 3-13Z" fill="{{ $acc }}" fill-opacity=".18" stroke="{{ $ink }}" stroke-width="1.4"/>
+                <path d="m106 40 10 10" stroke="{{ $ink }}" stroke-width="1.2"/>
+                <path d="m82 64 10 10" stroke="{{ $acc }}" stroke-width="2"/>
+            </g>
+            @break
+
         @default
             {{-- Unknown name: a quiet dot rather than a broken image. --}}
             <circle cx="80" cy="56" r="20" fill="{{ $soft }}" stroke="{{ $ink }}" stroke-width="1.6"/>

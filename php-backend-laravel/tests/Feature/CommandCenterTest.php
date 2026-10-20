@@ -163,6 +163,14 @@ class CommandCenterTest extends TestCase
             'user_id' => User::first()->id,
             'subject' => 'Refund please',
             'status' => 'open',
+            'admin_unread_count' => 1,
+        ]);
+        // Open, but the team has already read and answered it: not waiting.
+        \App\Models\SupportThread::forceCreate([
+            'user_id' => User::first()->id,
+            'subject' => 'Answered already',
+            'status' => 'open',
+            'admin_unread_count' => 0,
         ]);
 
         $component = Livewire::test(CommandCenter::class);
@@ -170,5 +178,57 @@ class CommandCenterTest extends TestCase
 
         $this->assertSame(1, $support['count']);
         $component->assertDontSee('All clear');
+    }
+
+    public function test_a_desk_walk_in_shows_the_guest_not_the_owner(): void
+    {
+        $this->signIn();
+        $owner = $this->partner();
+        $venue = \App\Models\Venue::create(['name' => 'Turf One', 'city' => 'Kadapa', 'location' => 'Kadapa', 'price' => 500]);
+
+        Booking::forceCreate([
+            'user_id' => $owner->id, 'booking_type' => 'venue', 'venue_id' => $venue->id,
+            'slot_date' => now()->toDateString(), 'start_time' => '18:00', 'end_time' => '19:00',
+            'guest_name' => 'Ravi Kumar', 'guest_phone' => '9876500001',
+            'quantity' => 1, 'total_amount' => 500, 'status' => 'CONFIRMED',
+        ]);
+
+        $feed = Livewire::test(CommandCenter::class)->get('feed');
+
+        $this->assertSame('Ravi Kumar', $feed[0]['who']);
+    }
+
+    public function test_venues_set_live_but_unfinished_are_flagged_and_not_counted_as_on_sale(): void
+    {
+        $this->signIn();
+        // Published and active, but no court, slot or photo — the app hides it.
+        \App\Models\Venue::create([
+            'name' => 'Half Built Arena', 'city' => 'Kadapa', 'location' => 'Kadapa', 'price' => 500,
+            'status' => 'published', 'is_active' => true, 'is_bookable' => true,
+        ]);
+
+        $component = Livewire::test(CommandCenter::class);
+        $hidden = collect($component->get('radar'))->firstWhere('title', 'Venues hidden');
+
+        $this->assertSame(1, $hidden['count']);
+        $this->assertSame(0, $component->get('venues')['venues']);
+    }
+
+    public function test_dashboard_feed_includes_venue_walk_ins_by_guest_name(): void
+    {
+        $this->signIn();
+        $owner = $this->partner();
+        $venue = \App\Models\Venue::create(['name' => 'Turf One', 'city' => 'Kadapa', 'location' => 'Kadapa', 'price' => 500]);
+
+        Booking::forceCreate([
+            'user_id' => $owner->id, 'booking_type' => 'venue', 'venue_id' => $venue->id,
+            'slot_date' => now()->toDateString(), 'start_time' => '18:00', 'end_time' => '19:00',
+            'guest_name' => 'Anjali', 'quantity' => 1, 'total_amount' => 500, 'status' => 'CONFIRMED',
+        ]);
+
+        $cards = (new \App\Filament\Widgets\LatestBookingsWidget())->getBookings();
+
+        $this->assertCount(1, $cards);
+        $this->assertSame('Anjali', $cards[0]['name']);
     }
 }

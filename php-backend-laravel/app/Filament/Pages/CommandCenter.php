@@ -14,6 +14,7 @@ use App\Filament\Resources\Venues\VenueResource;
 use App\Models\AdminAction;
 use App\Models\Booking;
 use App\Models\Event;
+use App\Models\MessageLog;
 use App\Models\Payout;
 use App\Models\PayoutBatch;
 use App\Models\SupportThread;
@@ -296,7 +297,8 @@ class CommandCenter extends Page
         $inFlight = (float) PayoutBatch::query()->whereIn(DB::raw('lower(status)'), ['processing', 'pending'])->sum(DB::raw('COALESCE(gross_amount, amount + commission_amount)'));
         $paidToday = (float) PayoutBatch::query()
             ->whereIn(DB::raw('lower(status)'), PayoutBatch::PAID)
-            ->where('updated_at', '>=', BusinessClock::now()->startOfDay()->setTimezone(config('app.timezone')))
+            // When it was paid, not when the row was last touched (a note edit moved it into "today").
+            ->where(DB::raw('COALESCE(processed_at, updated_at)'), '>=', BusinessClock::now()->startOfDay()->setTimezone(config('app.timezone')))
             ->sum('amount');
 
         return [
@@ -356,8 +358,11 @@ class CommandCenter extends Page
     {
         $q = fn () => $this->inWindow($this->paid()->where(fn ($w) => $w->where('booking_type', 'venue')->orWhereNotNull('venue_id')), $since);
 
+        // Only what customers can actually book: the customer side's own filter
+        // (Venue::scopePublished). Draft venues' courts used to swell "open" hours.
+        $onSale = Venue::query()->published()->pluck('id');
         $courts = Schema::hasTable('venue_courts')
-            ? (int) DB::table('venue_courts')->where('is_active', true)->count()
+            ? (int) DB::table('venue_courts')->where('is_active', true)->whereIn('venue_id', $onSale)->count()
             : 0;
 
         $hours = array_fill_keys(range(self::COURT_DAY_START, self::COURT_DAY_END - 1), 0);
@@ -388,7 +393,7 @@ class CommandCenter extends Page
         return [
             'gmv' => $this->inr((float) $q()->sum('total_amount')),
             'bookings' => (int) $q()->count(),
-            'venues' => (int) Venue::query()->where('is_active', true)->count(),
+            'venues' => $onSale->count(),
             'courts' => $courts,
             'hours' => $hours,
             'bookedHours' => $bookedHours,
@@ -498,8 +503,24 @@ class CommandCenter extends Page
         $pendingPayouts = (int) Payout::whereRaw('lower(status) = ?', ['pending'])->count();
         $items[] = $this->r('Payouts to send', $pendingPayouts, 'Partners waiting on a settlement', 'heroicon-o-banknotes', $this->resourceUrl(PayoutResource::class, 'control/finance/payouts'));
 
-        $openSupport = (int) SupportThread::query()->where('status', '!=', 'closed')->count();
-        $items[] = $this->r('Support waiting', $openSupport, 'Conversations that need a reply', 'heroicon-o-chat-bubble-left-right', $this->resourceUrl(SupportThreadResource::class, 'control/support-threads'));
+        // Waiting = the customer spoke last and nobody on the team has read it. Every
+        // open thread was counted before, including ones the team had already answered.
+        $openSupport = (int) SupportThread::query()->where('status', '!=', 'closed')->where('admin_unread_count', '>', 0)->count();
+        $items[] = $this->r('Support waiting', $openSupport, 'Open conversations with an unread message', 'heroicon-o-chat-bubble-left-right', $this->resourceUrl(SupportThreadResource::class, 'control/support-threads'));
+
+        // Set live by someone, but hidden from customers because setup isn't finished.
+        $hidden = Venue::query()->where('status', 'published')->where('is_active', true)->get()
+            ->reject(fn (Venue $v): bool => $v->isReadyForPublish())->count();
+        $items[] = $this->r('Venues hidden', $hidden, 'Set live, but missing a photo, court, slot or price', 'heroicon-o-map-pin', $this->resourceUrl(VenueResource::class, 'control/game-hub/venues'));
+
+        if (Schema::hasTable('message_log')) {
+            $unsent = (int) MessageLog::query()
+                ->where('direction', '!=', 'in')
+                ->whereIn('status', [MessageLog::STATUS_FAILED, MessageLog::STATUS_UNCONFIGURED, MessageLog::STATUS_UNROUTABLE])
+                ->where('created_at', '>=', now()->subDay())
+                ->count();
+            $items[] = $this->r('Messages not sent', $unsent, 'Tickets, OTPs or alerts that failed in the last 24 hours', 'heroicon-o-paper-airplane', \App\Filament\Clusters\GameHub\Pages\GameHubNotifications::getUrl());
+        }
 
         $failed = (int) Booking::query()->whereRaw('lower(status) = ?', ['failed'])
             ->where('created_at', '>=', now()->subDays(7))->count();
@@ -534,7 +555,9 @@ class CommandCenter extends Page
                     : ((int) $b->quantity).' '.((int) $b->quantity === 1 ? 'ticket' : 'tickets');
 
                 return [
-                    'who' => $b->user?->name ?: ($b->guest_name ?: ($b->attendee_name ?: 'Walk-in')),
+                    // The guest first: desk walk-ins are booked under the venue owner's
+                    // account, so the account name made every walk-in look like the owner.
+                    'who' => $b->guest_name ?: ($b->attendee_name ?: ($b->user?->name ?: 'Walk-in')),
                     'what' => $what,
                     'detail' => $detail,
                     'kind' => $isVenue ? 'venue' : 'event',
