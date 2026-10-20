@@ -92,13 +92,8 @@
 
                 @if (empty($onSale))
                     <div class="cc-muted-empty">
-                        <svg width="70" height="44" viewBox="0 0 70 44" fill="none" aria-hidden="true">
-                            @for ($i = 0; $i < 6; $i++)
-                                <path d="M{{ 4 + $i * 11 }} 30v-9a4 4 0 0 1 4-4h1a4 4 0 0 1 4 4v9" stroke="var(--cc-ink-3)" stroke-width="1.5"/>
-                                <path d="M{{ 2 + $i * 11 }} 30h13" stroke="var(--cc-ink-3)" stroke-width="1.5" stroke-linecap="round"/>
-                            @endfor
-                        </svg>
-                        Nothing is on sale. Published events with a future date show up here.
+                        <x-hrn-illo name="stage" :size="104" />
+                        <span>Nothing is on sale. Published events that haven't finished show up here — host submissions appear once you approve them.</span>
                     </div>
                 @else
                     <div style="display: flex; flex-direction: column; margin: 0 -8px">
@@ -121,7 +116,9 @@
                                 <span style="min-width:0">
                                     <span class="t" style="display:block">{{ $e['title'] }}</span>
                                     <span class="s" style="display:block">
-                                        @if (! is_null($e['days']))
+                                        @if (! empty($e['running']))
+                                            <span class="ev-soon">On now · till {{ $e['till'] }}</span>
+                                        @elseif (! is_null($e['days']))
                                             <span class="{{ $e['days'] <= 2 ? 'ev-soon' : '' }}">{{ $e['days'] === 0 ? 'Today' : ($e['days'] === 1 ? 'Tomorrow' : 'In '.$e['days'].' days') }}</span>
                                         @endif
                                         @if ($e['where']) · {{ $e['where'] }}@endif
@@ -163,7 +160,7 @@
                         </div>
                     </div>
                     @if (empty($categories))
-                        <div class="cc-muted-empty">No tickets sold in this window.</div>
+                        <div class="cc-muted-empty"><x-hrn-illo name="ticket" :size="80" /><span>No tickets sold in this window.</span></div>
                     @else
                         <div class="cc-split-bar" role="img" aria-label="Takings by category">
                             @foreach ($categories as $i => $c)
@@ -192,7 +189,7 @@
                             <span class="v cc-num">{{ $c['value'] }}</span>
                         </div>
                     @empty
-                        <div class="cc-muted-empty">No tickets sold in this window.</div>
+                        <div class="cc-muted-empty"><x-hrn-illo name="map" :size="80" /><span>No tickets sold in this window.</span></div>
                     @endforelse
                 </section>
             </div>
@@ -210,11 +207,8 @@
                 </div>
                 @if (empty($orders))
                     <div class="cc-muted-empty">
-                        <svg width="46" height="56" viewBox="0 0 46 56" fill="none" aria-hidden="true">
-                            <path d="M5 3h36v47l-6-4-6 4-6-4-6 4-6-4-6 4z" fill="var(--cc-surface)" stroke="var(--cc-ink-3)" stroke-width="1.6" stroke-linejoin="round"/>
-                            <path d="M12 14h22M12 22h16M12 30h19" stroke="var(--cc-line)" stroke-width="3" stroke-linecap="round"/>
-                        </svg>
-                        No ticket orders yet.
+                        <x-hrn-illo name="ticket" :size="96" />
+                        <span>No ticket orders yet. They appear here the moment someone pays or holds a seat.</span>
                     </div>
                 @else
                     <div class="cc-feed">
@@ -251,7 +245,7 @@
                         <span class="v cc-num">{{ $p['value'] }}</span>
                     </div>
                 @empty
-                    <div class="cc-muted-empty">No tickets sold in this window.</div>
+                    <div class="cc-muted-empty"><x-hrn-illo name="stadium-lights" :size="80" /><span>No tickets sold in this window.</span></div>
                 @endforelse
             </section>
         </div>

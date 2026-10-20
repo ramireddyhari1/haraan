@@ -863,6 +863,46 @@ final class Event extends Model
     }
 
     /**
+     * What a customer can buy right now: published (the only status the booking path
+     * accepts — EventBookingController::publishedEvent) and not finished. Admin screens
+     * used "not draft or cancelled", which counted host submissions still waiting for
+     * review as on sale, and `date >= today`, which dropped a festival after day one.
+     */
+    public function scopeOnSale(Builder $query): Builder
+    {
+        return $query->whereRaw('lower(status) = ?', ['published'])->notFinished();
+    }
+
+    /** The inverse of {@see scopeNotFinished()}: every session is over. */
+    public function scopeFinished(Builder $query): Builder
+    {
+        return $query->whereNot(fn (Builder $w): Builder => $w->notFinished());
+    }
+
+    /**
+     * Events taking place on a day: dated that day, or a multi-day event with a session
+     * spanning it (its `date` is only the first day).
+     */
+    public function scopeHappeningOn(Builder $query, \Carbon\CarbonInterface $day): Builder
+    {
+        $d = $day->toDateString();
+
+        return $query->where(function (Builder $w) use ($d): void {
+            $w->whereDate('date', $d)
+                ->orWhereHas('slots', fn (Builder $s): Builder => $s->whereRaw(
+                    'date(starts_at) <= ? and date(coalesce(ends_at, starts_at)) >= ?',
+                    [$d, $d],
+                ));
+        });
+    }
+
+    /** Submitted by a host and waiting for Haraan to review. */
+    public function isPendingReview(): bool
+    {
+        return strtolower((string) $this->status) === 'pending';
+    }
+
+    /**
      * The "from" price a buyer sees on any card, rail or bar — the cheapest tier
      * they could actually buy right now.
      *

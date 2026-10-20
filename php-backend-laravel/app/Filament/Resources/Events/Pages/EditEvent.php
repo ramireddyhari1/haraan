@@ -180,6 +180,8 @@ class EditEvent extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            \App\Filament\Resources\Events\Actions\EventReviewActions::approve(),
+            \App\Filament\Resources\Events\Actions\EventReviewActions::sendBack(),
             DeleteAction::make(),
         ];
     }

@@ -182,4 +182,76 @@ class EventsExecutiveCommandCenterTest extends TestCase
             ->assertDontSee('Bengaluru')
             ->assertDontSee('YoY');
     }
+
+    private function hostEvent(User $host, array $attrs): Event
+    {
+        return Event::forceCreate($attrs + [
+            'partner_id' => $host->id,
+            'time' => '19:00',
+            'price' => 500,
+            'total_slots' => 100,
+            'available_slots' => 100,
+            'status' => 'published',
+        ]);
+    }
+
+    public function test_pending_review_is_not_on_sale_and_is_queued_for_review(): void
+    {
+        $this->signIn();
+        $host = $this->partner();
+        $this->hostEvent($host, ['title' => 'Host Submission', 'status' => 'pending', 'date' => now()->addDays(3)->toDateString()]);
+        $this->hostEvent($host, ['title' => 'Real Show', 'date' => now()->addDays(4)->toDateString()]);
+
+        $page = Livewire::test(EventsOverview::class);
+
+        $this->assertSame(['Real Show'], array_column($page->get('onSale'), 'title'));
+        $this->assertSame(1, $page->get('hero')['onSaleCount']);
+        $review = collect($page->get('watch'))->firstWhere('title', 'Waiting for your review');
+        $this->assertSame(1, $review['count']);
+    }
+
+    public function test_a_festival_on_its_second_day_is_on_sale_and_not_history(): void
+    {
+        $this->signIn();
+        $host = $this->partner();
+        $fest = $this->hostEvent($host, ['title' => 'Three Day Fest', 'date' => now()->subDay()->toDateString()]);
+        \App\Models\EventSlot::create(['event_id' => $fest->id, 'starts_at' => now()->subDay()->setTime(18, 0), 'ends_at' => now()->subDay()->setTime(23, 0)]);
+        \App\Models\EventSlot::create(['event_id' => $fest->id, 'starts_at' => now()->setTime(18, 0), 'ends_at' => now()->setTime(23, 0)]);
+        \App\Models\EventSlot::create(['event_id' => $fest->id, 'starts_at' => now()->addDay()->setTime(18, 0), 'ends_at' => now()->addDay()->setTime(23, 0)]);
+
+        $this->assertTrue(Event::query()->onSale()->whereKey($fest->id)->exists());
+        $this->assertFalse(Event::query()->finished()->whereKey($fest->id)->exists());
+        $this->assertTrue(Event::query()->happeningOn(now())->whereKey($fest->id)->exists());
+
+        $onSale = Livewire::test(EventsOverview::class)->get('onSale');
+        $this->assertTrue($onSale[0]['running']);
+    }
+
+    public function test_approving_a_submission_publishes_it_and_tells_the_host(): void
+    {
+        $this->signIn();
+        $host = $this->partner();
+        $event = $this->hostEvent($host, ['title' => 'Open Mic', 'status' => 'pending', 'date' => now()->addDays(5)->toDateString()]);
+
+        Livewire::test(ListEvents::class)
+            ->callTableAction('approveEvent', $event);
+
+        $this->assertSame('published', $event->fresh()->status);
+        $this->assertDatabaseHas('notifications', ['audience_value' => (string) $host->id, 'title' => 'Your event is live']);
+        $this->assertDatabaseHas('admin_actions', ['action' => 'event.approved']);
+    }
+
+    public function test_sending_back_returns_to_draft_with_the_reason(): void
+    {
+        $this->signIn();
+        $host = $this->partner();
+        $event = $this->hostEvent($host, ['title' => 'Open Mic', 'status' => 'pending', 'date' => now()->addDays(5)->toDateString()]);
+
+        Livewire::test(ListEvents::class)
+            ->callTableAction('sendBackEvent', $event, ['reason' => 'Poster is blurry']);
+
+        $this->assertSame('draft', $event->fresh()->status);
+        $n = \App\Models\Notification::where('audience_value', (string) $host->id)->first();
+        $this->assertStringContainsString('Poster is blurry', $n->body);
+    }
 }

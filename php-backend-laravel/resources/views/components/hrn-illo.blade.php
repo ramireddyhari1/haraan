@@ -185,6 +185,32 @@
             </g>
             @break
 
+        @case('ticket')
+            {{-- A ticket with a torn stub: orders and sales. --}}
+            <path d="M30 34a6 6 0 0 0 6-6h70a6 6 0 0 0 6 6v8a8 8 0 0 0 0 16v8a6 6 0 0 0-6 6H36a6 6 0 0 0-6-6v-8a8 8 0 0 0 0-16Z" fill="{{ $paper }}" stroke="{{ $ink }}" stroke-width="1.6"/>
+            <path d="M86 32v44" stroke="{{ $ink }}" stroke-width="1.2" stroke-dasharray="2 4" opacity=".6"/>
+            <path d="M44 46h30M44 56h20M44 64h24" stroke="{{ $ink }}" stroke-width="1.4" opacity=".4"/>
+            <g class="il-float">
+                <path d="M104 22h22a4 4 0 0 1 4 4v8a6 6 0 0 0 0 12v8a4 4 0 0 1-4 4h-22Z" fill="{{ $acc }}" fill-opacity=".18" stroke="{{ $ink }}" stroke-width="1.4" transform="rotate(12 117 40)"/>
+                <path d="m112 40 4 4 7-8" stroke="{{ $acc }}" stroke-width="2" transform="rotate(12 117 40)"/>
+            </g>
+            @break
+
+        @case('stage')
+            {{-- A stage under two spotlights, curtains open: what's on. --}}
+            <path d="M22 82h116v10H22Z" fill="{{ $soft }}" stroke="{{ $ink }}" stroke-width="1.6"/>
+            <path d="M30 18h100" stroke="{{ $ink }}" stroke-width="2"/>
+            <path d="M32 18c0 24 4 48 14 64H32ZM128 18c0 24-4 48-14 64h14Z" fill="{{ $acc }}" fill-opacity=".16" stroke="{{ $ink }}" stroke-width="1.4"/>
+            <path d="m56 22 14 60M104 22 90 82" stroke="{{ $acc }}" stroke-width="1" opacity=".35" stroke-dasharray="2 3"/>
+            <path d="M52 18l4 6h-8ZM108 18l4 6h-8Z" fill="{{ $ink }}"/>
+            <g class="il-float">
+                <path d="M74 74V58a6 6 0 0 1 12 0v16" fill="{{ $paper }}" stroke="{{ $ink }}" stroke-width="1.4"/>
+                <circle cx="80" cy="48" r="5" fill="{{ $paper }}" stroke="{{ $ink }}" stroke-width="1.4"/>
+                <path d="M86 60l8-6" stroke="{{ $ink }}" stroke-width="1.4"/>
+                <circle cx="95" cy="53" r="2" fill="{{ $acc }}"/>
+            </g>
+            @break
+
         @default
             {{-- Unknown name: a quiet dot rather than a broken image. --}}
             <circle cx="80" cy="56" r="20" fill="{{ $soft }}" stroke="{{ $ink }}" stroke-width="1.6"/>

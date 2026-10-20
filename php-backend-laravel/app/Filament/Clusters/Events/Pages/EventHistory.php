@@ -75,9 +75,7 @@ class EventHistory extends Page implements HasTable
         return response()->streamDownload(function () use ($headers): void {
             $out = fopen('php://output', 'w');
             fputcsv($out, $headers);
-            EventResource::getEloquentQuery()
-                ->whereNotNull('date')
-                ->whereDate('date', '<', now()->toDateString())
+            $this->pastEvents()
                 ->chunk(200, function ($rows) use ($out): void {
                     foreach ($rows as $r) {
                         $cap = max((int) $r->total_slots, 0);
@@ -100,9 +98,9 @@ class EventHistory extends Page implements HasTable
     /** Events whose date has passed, scoped like the table (a partner sees only their own). */
     private function pastEvents(): Builder
     {
-        return EventResource::getEloquentQuery()
-            ->whereNotNull('date')
-            ->whereDate('date', '<', \App\Support\BusinessClock::todayDate());
+        // Every session over (Event::scopeFinished). `date < today` filed a festival
+        // under history while its second day was still selling.
+        return EventResource::getEloquentQuery()->finished();
     }
 
     /** Paid bookings on past events, joined to the event for its date and city. */
@@ -207,9 +205,7 @@ class EventHistory extends Page implements HasTable
     public function table(Table $table): Table
     {
         return $table
-            ->query(fn (): Builder => EventResource::getEloquentQuery()
-                ->whereNotNull('date')
-                ->whereDate('date', '<', now()->toDateString()))
+            ->query(fn (): Builder => $this->pastEvents())
             ->defaultSort('date', 'desc')
             ->columns([
                 TextColumn::make('title')

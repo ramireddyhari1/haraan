@@ -152,16 +152,22 @@ class EventsOverview extends Page
         return $this->upcoming()
             ->orderBy('date')->orderBy('time')
             ->limit(6)
+            ->with('slots')
             ->get(['id', 'title', 'date', 'time', 'city', 'venue', 'total_slots', 'available_slots', 'is_sold_out'])
             ->map(function (Event $e): array {
                 $cap = max(0, (int) $e->total_slots);
                 $sold = $cap > 0 ? max(0, $cap - max(0, (int) $e->available_slots)) : 0;
                 $date = $e->date ? Carbon::parse($e->date) : null;
+                // A multi-day event that started before today is running, not "in -2 days".
+                $running = $date !== null && $date->lt(BusinessClock::todayDate());
 
                 return [
                     'title' => $e->title,
-                    'when' => $date ? $date->format('D j M') : 'Date not set',
-                    'days' => $date ? (int) BusinessClock::todayDate()->diffInDays($date, false) : null,
+                    // The tile shows today's date for a running event; the line says till when.
+                    'when' => $running ? BusinessClock::todayDate()->format('D j M') : ($date ? $date->format('D j M') : 'Date not set'),
+                    'running' => $running,
+                    'till' => $running ? $e->endsAt()?->format('D j M') : null,
+                    'days' => $date && ! $running ? (int) BusinessClock::todayDate()->diffInDays($date, false) : null,
                     'where' => $e->venue ?: $e->city,
                     'sold' => $sold,
                     'cap' => $cap,
@@ -173,11 +179,10 @@ class EventsOverview extends Page
             ->all();
     }
 
+    /** What customers can buy now — see Event::scopeOnSale (pending review is not on sale). */
     private function upcoming()
     {
-        return Event::query()
-            ->whereDate('date', '>=', BusinessClock::todayDate())
-            ->whereRaw("lower(coalesce(status, '')) not in ('draft', 'cancelled', 'canceled')");
+        return Event::query()->onSale();
     }
 
     /** Paid ticket takings grouped by an events expression, biggest first. */
@@ -216,7 +221,8 @@ class EventsOverview extends Page
                 $s = strtolower((string) $b->status);
 
                 return [
-                    'who' => $b->user?->name ?: ($b->attendee_name ?: ($b->guest_name ?: 'Guest')),
+                    // The ticket holder first: desk registrations are made under the host's account.
+                    'who' => $b->attendee_name ?: ($b->guest_name ?: ($b->user?->name ?: 'Guest')),
                     'event' => $b->event?->title ?? 'Event #'.$b->event_id,
                     'qty' => (int) $b->quantity,
                     'amount' => Rupees::format((float) $b->total_amount),
@@ -246,9 +252,12 @@ class EventsOverview extends Page
             ->where(fn ($q) => $q->where('is_sold_out', true)->orWhere(fn ($w) => $w->where('total_slots', '>', 0)->where('available_slots', '<=', 0)))
             ->count();
 
-        $drafts = Event::query()->whereRaw("lower(coalesce(status, '')) = 'draft'")->whereDate('date', '>=', $today)->count();
+        $drafts = Event::query()->whereRaw("lower(coalesce(status, '')) = 'draft'")->notFinished()->count();
+        $pending = Event::query()->whereRaw("lower(coalesce(status, '')) = 'pending'")->notFinished()->count();
+        $pendingUrl = EventResource::getUrl('index', ['tableFilters' => ['status' => ['value' => 'pending']]]);
 
         return [
+            ['title' => 'Waiting for your review', 'sub' => 'Submitted by hosts — hidden until approved', 'count' => $pending, 'icon' => 'heroicon-o-inbox-arrow-down', 'url' => $pendingUrl],
             ['title' => 'Under 30% sold, this week', 'sub' => 'Starts within 7 days', 'count' => $soonAndThin, 'icon' => 'heroicon-o-clock', 'url' => $list],
             ['title' => 'Sold out', 'sub' => 'Upcoming, no seats left', 'count' => $soldOut, 'icon' => 'heroicon-o-check-badge', 'url' => $list, 'good' => true],
             ['title' => 'Drafts with a future date', 'sub' => 'Not visible to customers yet', 'count' => $drafts, 'icon' => 'heroicon-o-pencil-square', 'url' => $list],

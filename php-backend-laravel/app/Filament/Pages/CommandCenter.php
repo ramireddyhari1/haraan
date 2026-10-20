@@ -342,12 +342,12 @@ class CommandCenter extends Page
         ];
     }
 
-    /** Upcoming events a customer can see: not drafts, not cancelled. */
+    /** Upcoming events a customer can see and buy. */
     private function upcomingEvents()
     {
-        return Event::query()
-            ->whereDate('date', '>=', BusinessClock::todayDate())
-            ->where(fn ($w) => $w->whereNull('status')->orWhereNotIn(DB::raw('lower(status)'), ['draft', 'cancelled', 'canceled']));
+        // Event::scopeOnSale: published and not finished. Host submissions waiting for
+        // review are hidden from customers, so they aren't "upcoming" here either.
+        return Event::query()->onSale();
     }
 
     /**

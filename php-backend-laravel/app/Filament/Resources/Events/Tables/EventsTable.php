@@ -66,14 +66,19 @@ class EventsTable
                         Split::make([
                             TextColumn::make('status')
                                 ->badge()
-                                ->formatStateUsing(fn (?string $state): string => match (strtolower((string) $state)) {
-                                    'published' => 'Live',
+                                // A published event that has finished is not "Live", and a host
+                                // submission is waiting on us, not merely "Pending".
+                                ->formatStateUsing(fn (?string $state, Event $record): string => match (true) {
+                                    strtolower((string) $state) === 'published' && $record->hasFinished() => 'Ended',
+                                    strtolower((string) $state) === 'published' => 'Live',
+                                    strtolower((string) $state) === 'pending' => 'Waiting for review',
                                     default => $state ? ucfirst(strtolower($state)) : '—',
                                 })
-                                ->color(fn (?string $state): string => match (strtolower((string) $state)) {
-                                    'published' => 'success',
-                                    'draft' => 'gray',
-                                    'cancelled', 'ended' => 'danger',
+                                ->color(fn (?string $state, Event $record): string => match (true) {
+                                    strtolower((string) $state) === 'published' && $record->hasFinished() => 'gray',
+                                    strtolower((string) $state) === 'published' => 'success',
+                                    strtolower((string) $state) === 'draft' => 'gray',
+                                    in_array(strtolower((string) $state), ['cancelled', 'ended'], true) => 'danger',
                                     default => 'warning',
                                 }),
 
@@ -89,11 +94,12 @@ class EventsTable
 
                         // Price + tickets-gone, the two numbers an operator watches.
                         Split::make([
+                            // The buyer's "from" price. The `price` column is 0 for every
+                            // tiered event (CreateEvent), so it showed "₹0.00" on paid events.
                             TextColumn::make('price')
-                                ->money('INR')
+                                ->state(fn (Event $r): string => ($p = $r->fromPrice()) > 0 ? 'from ₹' . number_format($p, fmod($p, 1.0) === 0.0 ? 0 : 2) : 'Free')
                                 ->weight('bold')
-                                ->color('primary')
-                                ->sortable(),
+                                ->color('primary'),
 
                             TextColumn::make('sold')
                                 ->label('Tickets sold')
@@ -146,6 +152,8 @@ class EventsTable
             // edit form. Editing stays a deliberate, explicit action.
             ->recordUrl(fn ($record): string => EventAnalytics::getUrl(['record' => $record]))
             ->recordActions([
+                \App\Filament\Resources\Events\Actions\EventReviewActions::approve(),
+                \App\Filament\Resources\Events\Actions\EventReviewActions::sendBack(),
                 Action::make('analytics')
                     ->label('Analytics')
                     ->icon('heroicon-m-chart-bar')
@@ -213,6 +221,12 @@ class EventsTable
     /** BMS-style demand tag driven by real sell-through; null (no badge) when nothing's sold. */
     private static function demandLabel(Event $r): ?string
     {
+        // Demand only means something while customers can buy: a submission waiting for
+        // review, a draft or a finished event isn't "Selling".
+        if (strtolower((string) $r->status) !== 'published' || $r->hasFinished()) {
+            return null;
+        }
+
         $total = max(0, (int) $r->total_slots);
         if ($total === 0) {
             return null;
@@ -284,11 +298,28 @@ class EventsTable
     /** A neutral rounded placeholder for events without a poster (self-contained). */
     private static function posterPlaceholder(): string
     {
-        $svg = "<svg xmlns='http://www.w3.org/2000/svg' width='58' height='78'>"
-            . "<rect width='58' height='78' rx='12' fill='#e8ecf3'/>"
-            . "<path d='M16 54l10-12 8 8 6-6 12 10z' fill='#b6c0d0'/>"
-            . "<circle cx='22' cy='30' r='4' fill='#b6c0d0'/></svg>";
+        static $uri = null;
 
-        return 'data:image/svg+xml;base64,' . base64_encode($svg);
+        // No poster yet: the line-art stage (x-hrn-illo) on a portrait tile, so a missing
+        // poster reads as "add one" rather than a broken image.
+        return $uri ??= (static function (): string {
+            $html = \Illuminate\Support\Facades\Blade::render('<x-hrn-illo name="stage" :size="52" />');
+            $svg = substr($html, (int) strpos($html, '<svg'));
+            $svg = substr($svg, 0, (int) strrpos($svg, '</svg>') + 6);
+            // A data-URI image can't read CSS variables or classes; pin the light palette.
+            $svg = str_replace(
+                ['var(--illo-ink)', 'var(--illo-accent)', 'var(--illo-soft)', 'var(--illo-paper)', 'class="il-float"'],
+                ['#4b5b78', '#2563eb', '#e1eaff', '#ffffff', ''],
+                $svg,
+            );
+            $svg = preg_replace('/<svg[^>]*>/', '<svg x="3" y="22" width="52" height="36" viewBox="0 0 160 110" fill="none" stroke-linecap="round" stroke-linejoin="round">', $svg, 1);
+
+            $tile = "<svg xmlns='http://www.w3.org/2000/svg' width='58' height='78' viewBox='0 0 58 78'>"
+                . "<rect width='58' height='78' rx='12' fill='#f4f7fe'/>"
+                . $svg
+                . '</svg>';
+
+            return 'data:image/svg+xml;base64,' . base64_encode($tile);
+        })();
     }
 }

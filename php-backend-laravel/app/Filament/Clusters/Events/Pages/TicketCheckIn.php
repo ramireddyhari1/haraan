@@ -79,8 +79,9 @@ class TicketCheckIn extends Page
             $q->where('bookings.event_id', $this->event);
             $scope = 'this event';
         } else {
+            // Day two of a festival is "today" too, though its `date` is day one.
             $q->join('events', 'events.id', '=', 'bookings.event_id')
-                ->whereDate('events.date', \App\Support\BusinessClock::today());
+                ->whereIn('bookings.event_id', Event::query()->happeningOn(\App\Support\BusinessClock::todayDate())->select('events.id'));
             $user = auth()->user();
             if ($user && ! $user->isSuperAdmin()) {
                 $q->where('events.partner_id', $user->effectivePartnerId());
@@ -186,7 +187,7 @@ class TicketCheckIn extends Page
             if ($this->event !== null && (int) $booking->event_id !== $this->event) {
                 $wrong = $booking->event?->title ?? 'another event';
                 $this->rejected++;
-                $this->pushResult($booking->user?->name ?? 'Ticket', $wrong, "Not for “{$this->lockedTitle}”", false);
+                $this->pushResult($booking->attendee_name ?: ($booking->guest_name ?: ($booking->user?->name ?? 'Ticket')), $wrong, "Not for “{$this->lockedTitle}”", false);
                 Notification::make()
                     ->title('Wrong event')
                     ->body("This ticket is for “{$wrong}”, not “{$this->lockedTitle}”.")
@@ -199,7 +200,8 @@ class TicketCheckIn extends Page
             $updated = $service->checkIn($actor, (string) $booking->id);
             $newlyIn = (int) $updated->checked_in_count - $before;
 
-            $name = $updated->user?->name ?? ('Booking #' . $updated->id);
+            // The ticket holder: desk registrations are made under the host's account.
+            $name = $updated->attendee_name ?: ($updated->guest_name ?: ($updated->user?->name ?? ('Booking #' . $updated->id)));
             $eventTitle = $updated->event?->title ?? 'Event';
 
             if ($newlyIn > 0) {
