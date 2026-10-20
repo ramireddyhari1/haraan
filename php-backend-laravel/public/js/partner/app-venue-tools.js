@@ -28,7 +28,8 @@
     /* ================================================================= shared === */
 
     function list(r) { return r && r.data ? r.data : (r || []); }
-    function vibrate(ms) { if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) { /* none */ } } }
+    // Through the shell, so iPhones tick too; a longer buzz is the app's confirm.
+    function vibrate(ms) { A.haptic(Array.isArray(ms) || ms >= 12 ? 'confirm' : 'tick'); }
     function whole(n) { return rupees(Math.round(parseFloat(n) || 0)); }
     function cap(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
     function words(s) { return String(s || '').replace(/_/g, ' ').replace(/\b\w/g, function (c) { return c.toUpperCase(); }); }

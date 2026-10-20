@@ -64,13 +64,13 @@ final class PartnerAppShell
 
     /**
      * Destinations the fast app draws itself (registered screens in public/js/partner).
-     * Everything else (the Bookings day desk, Events, Settings) still opens its console
-     * page until it is ported.
+     * Everything else (Events, ticket Sales, Settings) still opens its console page
+     * until it is ported.
      *
      * @var list<string>
      */
     public const SPA_SCREENS = [
-        'home', 'venues', 'matches', 'payments', 'scan', 'operations', 'settlement', 'pricing',
+        'home', 'venues', 'matches', 'bookings', 'payments', 'scan', 'operations', 'settlement', 'pricing',
         'standing', 'packages', 'academy', 'customers', 'staff', 'payouts', 'reports',
         'notifications', 'support',
     ];

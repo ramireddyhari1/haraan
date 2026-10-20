@@ -65,8 +65,9 @@ class PartnerFastAppTest extends TestCase
         $this->assertStringContainsString('no-store', (string) $res->headers->get('Cache-Control'));
         $this->assertStringContainsString('"spa":true', $res->getContent());
         $this->assertStringContainsString('"venues":"http://localhost/partner/app/venues"', $res->getContent());
-        // Not yet ported: still the console's day desk.
-        $this->assertStringContainsString('"bookings":"http://localhost/partner/game-hub/day-bookings"', $res->getContent());
+        // The day desk is drawn by the fast app too (app-bookings.js).
+        $this->assertStringContainsString('"bookings":"http://localhost/partner/app/bookings"', $res->getContent());
+        $res->assertSee('js/partner/app-bookings.js', false);
     }
 
     public function test_unknown_screen_paths_are_refused(): void

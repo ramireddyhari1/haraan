@@ -20,7 +20,8 @@
     var esc = A.esc, rupees = A.rupees, inr = A.inr, h = A.h;
 
     function list(r) { return r && r.data ? r.data : (r || []); }
-    function vibrate(ms) { if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) { /* none */ } } }
+    // Through the shell, so iPhones tick too; a longer buzz is the app's confirm.
+    function vibrate(ms) { A.haptic(Array.isArray(ms) || ms >= 12 ? 'confirm' : 'tick'); }
 
     function page(title, actions, body) {
         return A.toolHeader(title, actions) + '<div class="ha-toolbody">' + body + '</div>';

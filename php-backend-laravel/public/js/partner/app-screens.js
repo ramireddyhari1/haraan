@@ -42,7 +42,8 @@
 
     function cap(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
     function list(r) { return r && r.data ? r.data : (r || []); }
-    function vibrate(ms) { if (navigator.vibrate) { try { navigator.vibrate(ms); } catch (e) { /* none */ } } }
+    // Through the shell, so iPhones tick too; a longer buzz is the app's confirm.
+    function vibrate(ms) { A.haptic(Array.isArray(ms) || ms >= 12 ? 'confirm' : 'tick'); }
 
     function failCard(host, retry) {
         host.innerHTML = '<div class="ha-fail"><b>Couldn’t load this</b><span>Check your connection and try again.</span><button type="button" class="ha-cta" data-retry>Try again</button></div>';

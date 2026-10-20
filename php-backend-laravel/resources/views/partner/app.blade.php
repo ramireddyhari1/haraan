@@ -29,12 +29,14 @@
     <link rel="stylesheet" href="{!! $asset('css/partner/app-screens.css') !!}">
     <link rel="stylesheet" href="{!! $asset('css/partner/app-tools.css') !!}">
     <link rel="stylesheet" href="{!! $asset('css/partner/app-venue-tools.css') !!}">
+    <link rel="stylesheet" href="{!! $asset('css/partner/app-bookings.css') !!}">
     <link rel="stylesheet" href="{!! $asset('css/partner/pwa.css') !!}">
     <script>window.HaraanPartnerApp={!! $json($config) !!};window.HaraanPartnerPwa={!! $json(\App\Support\PartnerAppShell::pwaConfig()) !!};</script>
     <script src="{!! $asset('js/partner/app-shell.js') !!}" defer></script>
     <script src="{!! $asset('js/partner/app-screens.js') !!}" defer></script>
     <script src="{!! $asset('js/partner/app-tools.js') !!}" defer></script>
     <script src="{!! $asset('js/partner/app-venue-tools.js') !!}" defer></script>
+    <script src="{!! $asset('js/partner/app-bookings.js') !!}" defer></script>
     <script src="{!! $asset('js/partner/pwa.js') !!}" defer></script>
 </head>
 <body class="ha-spa-body">

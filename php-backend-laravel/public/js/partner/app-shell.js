@@ -84,6 +84,135 @@
         return (min === 0 ? String(h12) : h12 + ':' + (min < 10 ? '0' : '') + min) + (h < 12 ? ' AM' : ' PM');
     }
     function shortTime(t) { return String(t || '').replace(':00', '').trim(); }
+
+    /*
+     * Haptics, the app's Haptics object on the web. Android Chrome has navigator.vibrate.
+     * iOS Safari has no vibration API, but since iOS 18 flipping an
+     * <input type="checkbox" switch> from a tap plays the system's own tick, so a hidden
+     * switch is flipped from inside the tap. Called outside a tap, iOS stays silent.
+     */
+    var IOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var BUZZ = { tick: [8], confirm: [12, 50, 18], reject: [28, 40, 28], money: [12, 60, 22] };
+    var TICKS = { tick: 1, confirm: 2, reject: 3, money: 2 };
+    var switchEl = null;
+    function iosTick() {
+        if (!switchEl) {
+            switchEl = document.createElement('label');
+            switchEl.className = 'ha-haptic';
+            switchEl.setAttribute('aria-hidden', 'true');
+            switchEl.innerHTML = '<input type="checkbox" switch tabindex="-1">';
+            document.body.appendChild(switchEl);
+        }
+        try { switchEl.click(); } catch (e) { /* none */ }
+    }
+    function haptic(kind) {
+        if (!BUZZ[kind]) kind = 'tick';
+        // Before the first tap on the page the browser refuses (and logs it): stay quiet.
+        if (navigator.userActivation && !navigator.userActivation.hasBeenActive) return;
+        if (!IOS) {
+            if (navigator.vibrate) { try { navigator.vibrate(BUZZ[kind]); } catch (e) { /* not in a gesture */ } }
+            return;
+        }
+        iosTick();
+        for (var i = 1; i < TICKS[kind]; i++) setTimeout(iosTick, i * 110);
+    }
+
+    /*
+     * Courts drawn from above, by sport: the same hand as the app's CourtsDay.kt
+     * (markings, mownBands, hatch, players, upright). Home's board and the walk-in sheet's
+     * court map both draw with it, so a court looks the same wherever it appears.
+     */
+    var clipN = 0;
+    var COURT = {
+        kind: function (sports) {
+            var s = (sports || []).join(' ').toLowerCase();
+            if (/badminton|tennis|pickle|squash|table|volley/.test(s)) return 'racket';
+            if (/football|futsal|soccer/.test(s)) return 'football';
+            if (/cricket/.test(s)) return 'cricket';
+            return 'plain';
+        },
+        grass: function (kind) { return kind === 'football' || kind === 'cricket'; },
+        /** Lines by sport inside r = [x, y, w, h], turned upright when the lane is wider than tall. */
+        markings: function (r, kind, c, sw) {
+            var x = r[0], y = r[1], w = r[2], hh = r[3];
+            if (w > hh) {
+                var cx0 = x + w / 2, cy0 = y + hh / 2;
+                return '<g transform="rotate(90 ' + f(cx0) + ' ' + f(cy0) + ')">' + COURT.markings([cx0 - hh / 2, cy0 - w / 2, hh, w], kind, c, sw) + '</g>';
+            }
+            sw = sw || 1;
+            var cx = x + w / 2, cy = y + hh / 2;
+            var g = '<g fill="none" stroke="' + c + '" stroke-width="' + sw + '">';
+            if (kind === 'racket') {
+                var svc = hh * 0.18;
+                g += rect(x, y, w, hh) + line(x, cy, x + w, cy, sw * 1.8) + line(x, cy - svc, x + w, cy - svc) + line(x, cy + svc, x + w, cy + svc)
+                    + line(cx, y, cx, cy - svc) + line(cx, cy + svc, cx, y + hh);
+            } else if (kind === 'football') {
+                var bw = w * 0.5, bh = hh * 0.14;
+                g += rect(x, y, w, hh) + line(x, cy, x + w, cy) + '<circle cx="' + f(cx) + '" cy="' + f(cy) + '" r="' + f(Math.min(w * 0.22, hh * 0.16)) + '"/>'
+                    + rect(cx - bw / 2, y, bw, bh) + rect(cx - bw / 2, y + hh - bh, bw, bh);
+            } else if (kind === 'cricket') {
+                var stw = Math.max(w * 0.34, 4), st = [cx - stw / 2, y + hh * 0.1, stw, hh * 0.8], cr = hh * 0.1;
+                g += rect(st[0], st[1], st[2], st[3]) + line(st[0] - 2, st[1] + cr, st[0] + stw + 2, st[1] + cr) + line(st[0] - 2, st[1] + st[3] - cr, st[0] + stw + 2, st[1] + st[3] - cr);
+            } else {
+                g += rect(x, y, w, hh) + line(x, cy, x + w, cy);
+            }
+            return g + '</g>';
+        },
+        /** Two players, one each side of the net, and the ball between them (players()). */
+        players: function (r, kind, cls, fill) {
+            var x = r[0], y = r[1], w = r[2], hh = r[3];
+            if (w > hh) { var cx0 = x + w / 2, cy0 = y + hh / 2; return '<g transform="rotate(90 ' + f(cx0) + ' ' + f(cy0) + ')">' + COURT.players([cx0 - hh / 2, cy0 - w / 2, hh, w], kind, cls, fill) + '</g>'; }
+            var hr = Math.max(2, Math.min(3.4, w * 0.11));
+            var cx = x + w / 2;
+            var a = [cx - w * 0.14, y + hh * 0.27], b = [cx + w * 0.14, y + hh - hh * 0.27];
+            var out = '<g class="' + (cls || '') + '">';
+            [a, b].forEach(function (p) {
+                out += '<circle cx="' + f(p[0]) + '" cy="' + f(p[1] + hr * 0.5) + '" r="' + f(hr * 1.25) + '" fill="rgba(0,0,0,.2)"/>';
+                if (fill) out += '<circle cx="' + f(p[0]) + '" cy="' + f(p[1]) + '" r="' + f(hr * 1.3) + '" fill="#fff"/>';
+                out += '<circle cx="' + f(p[0]) + '" cy="' + f(p[1]) + '" r="' + f(hr) + '" fill="' + (fill || '#fff') + '"/>';
+            });
+            if (kind !== 'plain' && !fill) out += '<circle class="ha-ball" cx="' + f(cx) + '" cy="' + f(y + hh / 2 - hh * 0.06) + '" r="' + f(hr * 0.55) + '" fill="#FFD166"/>';
+            return out + '</g>';
+        },
+        /**
+         * One court lane: turf (grass gets mown bands), its state's fill, its lines.
+         * state: open | booked | held | closed. o.players draws the two on court.
+         */
+        lane: function (r, kind, state, o) {
+            o = o || {};
+            var x = r[0], y = r[1], w = r[2], hh = r[3], rad = o.radius == null ? 7 : o.radius;
+            var id = 'hac' + (++clipN);
+            var grass = COURT.grass(kind);
+            var out = '<clipPath id="' + id + '"><rect x="' + f(x) + '" y="' + f(y) + '" width="' + f(w) + '" height="' + f(hh) + '" rx="' + rad + '"/></clipPath><g clip-path="url(#' + id + ')">';
+            var turf = state === 'closed' ? '#E6EAF0' : grass ? '#E3F4E8' : '#E8F0FB';
+            out += '<rect x="' + f(x) + '" y="' + f(y) + '" width="' + f(w) + '" height="' + f(hh) + '" fill="' + turf + '"/>';
+            if (grass && state !== 'closed') {
+                var across = w > hh;
+                for (var bnd = 0; bnd < 6; bnd += 2) {
+                    out += across ? '<rect x="' + f(x + bnd * w / 6) + '" y="' + f(y) + '" width="' + f(w / 6) + '" height="' + f(hh) + '" fill="#D6EEDD"/>'
+                        : '<rect x="' + f(x) + '" y="' + f(y + bnd * hh / 6) + '" width="' + f(w) + '" height="' + f(hh / 6) + '" fill="#D6EEDD"/>';
+                }
+            }
+            var fillCls = o.paint ? ' class="ha-paint"' : '';
+            if (state === 'booked') {
+                out += '<g' + fillCls + '><rect x="' + f(x) + '" y="' + f(y) + '" width="' + f(w) + '" height="' + f(hh) + '" fill="url(#ha-court-blue)"/></g>';
+            } else if (state === 'held') {
+                var ht = '';
+                for (var hx = x - hh; hx < x + w; hx += 5) ht += line(hx, y + hh, hx + hh, y, 1.4);
+                out += '<g' + fillCls + '><rect x="' + f(x) + '" y="' + f(y) + '" width="' + f(w) + '" height="' + f(hh) + '" fill="#FFF1DB"/><g stroke="rgba(217,119,6,.4)">' + ht + '</g></g>';
+            }
+            var lines = state === 'booked' ? 'rgba(255,255,255,.35)' : state === 'held' ? 'rgba(217,119,6,.33)' : state === 'closed' ? '#CBD2DC' : grass ? '#9FD1AE' : '#A9BFE6';
+            var inset = o.inset == null ? 4 : o.inset;
+            out += COURT.markings([x + inset, y + inset, w - inset * 2, hh - inset * 2], kind, lines, 1);
+            if (state === 'booked' && o.players !== false) out += COURT.players([x + inset, y + inset, w - inset * 2, hh - inset * 2], kind, o.bob ? 'ha-bob' : '');
+            return out + '</g>';
+        },
+        /** The blue a court in play is filled with, declared once per <svg>. */
+        defs: '<defs><linearGradient id="ha-court-blue" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#4A80FF"/><stop offset="1" stop-color="#1E40AF"/></linearGradient></defs>',
+    };
+    function f(n) { return (Math.round(n * 10) / 10).toString(); }
+    function rect(x, y, w, hh) { return '<rect x="' + f(x) + '" y="' + f(y) + '" width="' + f(w) + '" height="' + f(hh) + '"/>'; }
+    function line(x1, y1, x2, y2, sw) { return '<line x1="' + f(x1) + '" y1="' + f(y1) + '" x2="' + f(x2) + '" y2="' + f(y2) + '"' + (sw ? ' stroke-width="' + sw + '"' : '') + '/>'; }
     function minutesNow() { var d = new Date(); return d.getHours() * 60 + d.getMinutes(); }
     function ymd(d) {
         var m = d.getMonth() + 1, day = d.getDate();
@@ -523,7 +652,7 @@
                 if (!a) return;
                 e.preventDefault();
                 if (a.classList.contains('is-on')) return;
-                if (navigator.vibrate) { try { navigator.vibrate(8); } catch (err) { /* none */ } }
+                haptic('tick');
                 // The thumb starts moving on the tap; the page follows underneath it.
                 // Until that page has arrived, the bar keeps pointing at the tab that was
                 // tapped; a redraw from the page being left must not drag the thumb back.
@@ -745,38 +874,58 @@
     var home = { data: null, insights: null, loading: false, timer: null, state: {} };
 
     /** One hour of the day, court by court (courtHours in PartnerApp.kt). */
+    /**
+     * The day hour by hour, court by court. Every hour lists the venue's courts in the
+     * same order, a court that can't be sold then (another sport's hour, blocked) as
+     * 'none', so a court's bookings always sit on its own row of the board.
+     */
     function courtHours(grid) {
         if (!grid || !grid.slots) return [];
-        var byId = {};
-        (grid.courts || []).forEach(function (c) { byId[c.id] = c; });
+        var cols = grid.courts || [];
+        var short = shortCourtNames(cols);
         return grid.slots.map(function (s) {
-            var cells = (s.courts || []).filter(function (c) { return c.allowed; });
-            var states;
-            if (cells.length) {
-                states = cells.map(function (c) { return c.is_booked ? 'booked' : c.is_held ? 'held' : 'open'; });
+            var raw = s.time || s.label;
+            var all = s.courts || [];
+            var cells, courts, states;
+            if (all.length && cols.length) {
+                cells = cols.map(function (col) { return all.filter(function (c) { return c.court_id === col.id; })[0] || null; });
+                courts = cols.map(function (col, i) {
+                    return { name: col.name, short: short[i], kind: COURT.kind(col.sports && col.sports.length ? col.sports : s.sports) };
+                });
+                states = cells.map(function (c) { return !c || !c.allowed || c.block ? 'none' : c.is_booked ? 'booked' : c.is_held ? 'held' : 'open'; });
             } else {
                 var cap = Math.max(1, s.capacity || 0);
+                cells = [];
+                courts = [];
                 states = [];
-                for (var i = 0; i < cap; i++) states.push(i < Math.min(s.booked || 0, cap) ? 'booked' : 'open');
+                for (var i = 0; i < cap; i++) { cells.push(null); courts.push({ name: 'Court ' + (i + 1), short: String(i + 1), kind: COURT.kind(s.sports) }); states.push(i < Math.min(s.booked || 0, cap) ? 'booked' : 'open'); }
             }
-            var raw = s.time || s.label;
+            var priced = cells.filter(function (c, i) { return c && states[i] !== 'none'; });
             return {
                 time: String(raw || '').trim(),
                 start: slotStart(raw),
                 cells: states,
-                price: cells.length ? Math.min.apply(null, cells.map(function (c) { return c.price; })) : s.price,
-                courts: cells.map(function (c) { var col = byId[c.court_id]; return { name: col ? col.name : 'Court' }; }),
-                cellPrices: cells.map(function (c) { return c.price; }),
+                price: priced.length ? Math.min.apply(null, priced.map(function (c) { return c.price; })) : s.price,
+                courts: courts,
+                cellPrices: cells.map(function (c) { return c ? c.price : s.price; }),
                 bookings: cells.map(function (c) {
-                    var b = (c.bookings || [])[0];
+                    var b = c && (c.bookings || [])[0];
                     if (!b) return null;
                     var ch = String(b.channel || '').toLowerCase();
-                    return { id: b.id, customer: b.customer || 'Guest', phone: b.phone, amount: b.amount || 0, paid: b.amount_paid || 0, walkIn: ch === 'offline' || ch === 'walk-in' || ch === 'desk' };
+                    return { id: b.id, customer: b.customer || 'Guest', phone: b.phone, amount: b.amount || 0, paid: b.amount_paid || 0, status: b.payment_status || '', walkIn: ch === 'offline' || ch === 'walk-in' || ch === 'desk' };
                 }),
-                total: states.length,
+                total: states.filter(function (x) { return x !== 'none'; }).length,
                 free: states.filter(function (x) { return x === 'open'; }).length,
             };
-        }).filter(function (hh) { return hh.cells.length; });
+        }).filter(function (hh) { return hh.total > 0; });
+    }
+
+    /** "Court A", "Court B" → "A", "B" for the board's narrow label column; else the names. */
+    function shortCourtNames(cols) {
+        var names = cols.map(function (c) { return String(c.name || '').trim(); });
+        var first = names[0] ? names[0].split(/\s+/)[0] : '';
+        var shared = names.length > 1 && first && names.every(function (n) { var p = n.split(/\s+/); return p.length > 1 && p[0].toLowerCase() === first.toLowerCase(); });
+        return names.map(function (n) { return shared ? n.split(/\s+/).slice(1).join(' ') : n; });
     }
 
     function slotLength(hours) {
@@ -930,14 +1079,15 @@
 
         host.innerHTML = out;
         wireHome(host);
+        wireBoard(host);
+        placeHours(host);
+        tickBoard();
         countUps(host);
         placeSegs(host);
         // Home has real numbers on screen: the launch splash can go (PartnerSplash.php).
         document.dispatchEvent(new Event('ha:ready'));
         // A payment that arrived since the last draw lands with the app's money buzz.
-        if (home.payFresh && document.visibilityState === 'visible' && navigator.vibrate) {
-            try { navigator.vibrate([12, 60, 22]); } catch (err) { /* none */ }
-        }
+        if (home.payFresh && document.visibilityState === 'visible') haptic('money');
         home.payFresh = 0;
     }
 
@@ -965,6 +1115,10 @@
         var sub = money.expected > 0 && over ? '<span data-count="' + money.expected + '">' + rupees(money.expected) + '</span> earned · ' + rupees(money.collected) + ' collected'
             : money.expected > 0 ? '<span data-count="' + money.expected + '">' + rupees(money.expected) + '</span> expected · ' + rupees(money.collected) + ' in so far'
             : over ? 'No bookings came in.'
+            // The rupees live here so the board below doesn't say the same thing again.
+            : left > 0 && todayHours.length ? (left === 1 ? '1 court-hour left' : left + ' court-hours left') + (function (worth) {
+                return worth > 0 ? ' · ' + rupees(Math.round(worth)) + (left === 1 ? ' if it sells' : ' if they sell') : '';
+            })(sellableAhead(todayHours, minutesNow(), len))
             : left === 1 ? '1 court-hour still open.'
             : left > 0 ? left + ' court-hours still open.' : '';
 
@@ -1036,6 +1190,67 @@
 
     /* ---- DayGridCard --------------------------------------------------------- */
 
+    /** Rupees still sellable today: each open court-hour that hasn't started (sellableAhead). */
+    function sellableAhead(hours, now, len) {
+        return hours.filter(function (x) { return !(isFinite(x.start) && now >= x.start + len); }).reduce(function (t, x) {
+            return t + x.cells.reduce(function (a, c, i) { return a + (c === 'open' ? (x.cellPrices[i] != null ? x.cellPrices[i] : x.price) : 0); }, 0);
+        }, 0);
+    }
+
+    /** The courts as they are this minute, drawn with their real markings (NowCourts). */
+    function nowCourts(cells, kinds, live) {
+        var n = Math.max(1, cells.length);
+        var W = Math.min(132, 44 * Math.min(4, n)), H = 66, gap = 5;
+        var w = (W - gap * (n - 1)) / n;
+        var out = '';
+        cells.forEach(function (st, i) {
+            var kind = kinds[i] || kinds[0] || 'plain';
+            var state = st === 'none' ? 'closed' : live && st === 'booked' ? 'booked' : live && st === 'held' ? 'held' : 'open';
+            out += COURT.lane([i * (w + gap), 0, w, H], kind, state, { bob: true });
+        });
+        return '<svg class="ha-bd-courts" viewBox="0 0 ' + W + ' ' + H + '" style="width:' + W + 'px" aria-hidden="true">' + COURT.defs + out + '</svg>';
+    }
+
+    /** What the courts are doing now, in two lines: who's on, and until when (nowWords). */
+    function nowWords(current, courts, now, hours, len) {
+        var open = hours.filter(function (x) { return !(now != null && isFinite(x.start) && now >= x.start + len); }).reduce(function (t, x) { return t + x.free; }, 0);
+        var booked = hours.reduce(function (t, x) { return t + x.cells.filter(function (c) { return c === 'booked'; }).length; }, 0);
+        var tally = [open > 0 ? (open === 1 ? '1 court-hour open' : open + ' court-hours open') : null, booked > 0 ? booked + ' booked' : null].filter(Boolean).join(' · ') || null;
+        if (now == null) return [hours.length ? 'Opens ' + shortTime(hours[0].time) : 'Closed', tally];
+        if (!current) {
+            var nx = hours.filter(function (x) { return isFinite(x.start) && x.start > now; })[0];
+            return [nx ? 'Opens ' + shortTime(nx.time) : 'Closed now', tally];
+        }
+        var live = [];
+        current.cells.forEach(function (c, i) { if (c !== 'none') live.push(i); });
+        var n = live.length;
+        var playing = [];
+        current.cells.forEach(function (c, i) { if (c === 'booked') playing.push(i); });
+        var nextBooked = hours.filter(function (x) { return isFinite(x.start) && x.start > current.start && x.cells.indexOf('booked') >= 0; })[0];
+        var freeTill = nextBooked ? 'till ' + shortTime(nextBooked.time) : 'till close';
+        function name(i) { return (courts[i] || {}).name || 'Court ' + (i + 1); }
+        if (!playing.length) return [n > 2 ? 'All courts free' : n === 2 ? 'Both courts free' : courts.length > 1 ? name(live[0]) + ' free' : 'Court free', 'Free ' + freeTill];
+        if (playing.length === n) return [n === 1 ? name(0) + ' in play' : 'All courts in play', 'Ends ' + clock(current.start + len)];
+        if (playing.length === 1) {
+            var freeI = -1;
+            for (var i = 0; i < current.cells.length; i++) if (current.cells[i] === 'open') { freeI = i; break; }
+            return [name(playing[0]) + ' in play', freeI >= 0 ? name(freeI) + ' free ' + freeTill : null];
+        }
+        return [playing.length + ' of ' + n + ' courts in play', 'Ends ' + clock(current.start + len)];
+    }
+
+    /** "7 PM   VADI · HR   padi · open ₹400": what's under the finger while it slides. */
+    function readout(x, courts, past) {
+        return [shortTime(x.time)].concat(x.cells.map(function (c, i) {
+            if (c === 'none') return null;
+            var name = (courts[i] || {}).name || 'Court ' + (i + 1);
+            var price = x.cellPrices[i] != null ? x.cellPrices[i] : x.price;
+            if (c === 'booked') return name + ' · ' + (x.bookings[i] ? String(x.bookings[i].customer).split(' ')[0] : 'booked');
+            if (c === 'held') return name + ' · being paid';
+            return past ? name + ' · went unsold' : name + ' · open ' + rupees(price);
+        }).filter(Boolean)).join('   ');
+    }
+
     function partOf(start) {
         if (start < 12 * 60) return start < 5 * 60 ? 'Night' : 'Morning';
         if (start < 17 * 60) return 'Afternoon';
@@ -1043,132 +1258,163 @@
         return 'Night';
     }
 
-    function sky(part) {
-        if (part === 'Morning') return '<svg viewBox="0 0 15 11"><line x1="0" y1="9.9" x2="15" y2="9.9" stroke="rgba(255,255,255,.7)" stroke-width="1.2" stroke-linecap="round"/><path d="M3.75 9.9 A3.75 5.5 0 0 1 11.25 9.9 Z" fill="#fff"/></svg>';
-        if (part === 'Afternoon') {
-            var rays = '';
-            for (var k = 0; k < 8; k++) {
-                var a = k * Math.PI / 4;
-                rays += '<line x1="' + (7.5 + 4.6 * Math.cos(a)).toFixed(2) + '" y1="' + (5.5 + 4.6 * Math.sin(a)).toFixed(2) + '" x2="' + (7.5 + 6.2 * Math.cos(a)).toFixed(2) + '" y2="' + (5.5 + 6.2 * Math.sin(a)).toFixed(2) + '"/>';
-            }
-            return '<svg viewBox="0 0 15 11" overflow="visible"><circle cx="7.5" cy="5.5" r="3.5" fill="#fff"/><g stroke="#fff" stroke-width="1" stroke-linecap="round">' + rays + '</g></svg>';
-        }
-        if (part === 'Evening') return '<svg viewBox="0 0 15 11"><path d="M3.75 9.9 A3.75 4.95 0 0 1 11.25 9.9 Z" fill="#FDBA74"/><line x1="0" y1="9.9" x2="15" y2="9.9" stroke="rgba(255,255,255,.7)" stroke-width="1.2" stroke-linecap="round"/></svg>';
-        return '<svg viewBox="0 0 15 11"><mask id="ha-moon"><rect width="15" height="11" fill="#fff"/><circle cx="10" cy="3.9" r="4.2" fill="#000"/></mask><circle cx="7.5" cy="5.5" r="4.6" fill="#fff" mask="url(#ha-moon)"/></svg>';
-    }
-
-    function nowCourts(cells, live) {
-        var n = Math.max(1, cells.length);
-        var W = 92, H = 58, gap = 4;
-        var w = (W - gap * (n - 1)) / n;
-        var out = '';
-        cells.forEach(function (st, i) {
-            var x = i * (w + gap);
-            var playing = live && st === 'booked';
-            var line = playing ? 'rgba(29,78,216,.35)' : 'rgba(255,255,255,.4)';
-            out += '<rect x="' + x + '" y="0" width="' + w + '" height="' + H + '" rx="6" fill="' + (playing ? 'rgba(255,255,255,.95)' : 'rgba(255,255,255,.14)') + '"/>'
-                + '<g fill="none" stroke="' + line + '" stroke-width="1"><rect x="' + (x + 4) + '" y="4" width="' + (w - 8) + '" height="' + (H - 8) + '"/>'
-                + '<line x1="' + (x + 4) + '" y1="' + H / 2 + '" x2="' + (x + w - 4) + '" y2="' + H / 2 + '"/>'
-                + '<circle cx="' + (x + w / 2) + '" cy="' + H / 2 + '" r="' + ((w - 8) * 0.18) + '"/></g>';
-            if (playing) {
-                var ix = x + w / 2, sp = (w - 8) * 0.18;
-                out += '<g class="ha-players"><circle cx="' + (ix - sp) + '" cy="' + (4 + (H - 8) * 0.25) + '" r="3" fill="#1D4ED8"/>'
-                    + '<circle cx="' + (ix + sp) + '" cy="' + (H - 4 - (H - 8) * 0.25) + '" r="3" fill="#1D4ED8"/>'
-                    + '<circle class="ha-ball" cx="' + ix + '" cy="' + H / 2 + '" r="1.8" fill="#F59E0B"/></g>';
-            }
-        });
-        return '<svg class="ha-nowcourts" viewBox="0 0 92 58" aria-hidden="true">' + out + '</svg>';
-    }
-
-    function nowLine(current, courts, now, hours) {
-        if (now == null) return hours.length ? 'Opens ' + shortTime(hours[0].time) : 'Closed';
-        if (!current) {
-            var nx = hours.filter(function (x) { return isFinite(x.start) && x.start > now; })[0];
-            return nx ? 'Opens ' + shortTime(nx.time) : 'Closed now';
-        }
-        var playing = [];
-        current.cells.forEach(function (c, i) { if (c === 'booked') playing.push(i); });
-        if (!playing.length && current.cells.length > 1) return current.cells.length === 2 ? 'Both courts free' : 'All courts free';
-        if (!playing.length) return 'Court free';
-        if (playing.length === current.cells.length) return 'All in play';
-        if (playing.length === 1) return ((courts[playing[0]] || {}).name || '1 court') + ' in play';
-        return playing.length + ' courts in play';
-    }
-
+    /**
+     * The venue's day as a register on the counter: courts down, hours across (DayGridCard).
+     * On top, the courts this minute; booked hours solid with initials; gone hours hatched
+     * out; a line through the exact minute; slide a finger along to read each hour.
+     */
     function dayGridCard(label, hours, now, len) {
         function past(x) { return now != null && isFinite(x.start) && now >= x.start + len; }
         function isNow(x) { return now != null && isFinite(x.start) && now >= x.start && now < x.start + len; }
-        var ahead = hours.filter(function (x) { return !past(x); });
-        var open = ahead.reduce(function (s, x) { return s + x.free; }, 0);
-        var booked = hours.reduce(function (s, x) { return s + x.cells.filter(function (c) { return c === 'booked'; }).length; }, 0);
-        var sellable = ahead.reduce(function (s, x) {
-            return s + x.cells.reduce(function (t, c, i) { return t + (c === 'open' ? (x.cellPrices[i] != null ? x.cellPrices[i] : x.price) : 0); }, 0);
-        }, 0);
         var courts = hours.reduce(function (m, x) { return x.courts.length > m.length ? x.courts : m; }, []);
         var rows = courts.length || hours.reduce(function (m, x) { return Math.max(m, x.total); }, 0);
         var current = hours.filter(isNow)[0];
+        var nowCol = -1;
+        hours.forEach(function (x, i) { if (nowCol < 0 && isNow(x)) nowCol = i; });
         var cellsNow = current ? current.cells : Array.apply(null, Array(Math.max(1, rows))).map(function () { return 'open'; });
+        var words = nowWords(current, courts, now, hours, len);
 
-        // Parts of the day over their columns.
         var runs = [];
         hours.forEach(function (x) {
             var p = partOf(isFinite(x.start) ? x.start : 0);
             if (runs.length && runs[runs.length - 1][0] === p) runs[runs.length - 1][1]++;
             else runs.push([p, 1]);
         });
-        var parts = '<div class="ha-dg-parts">' + runs.map(function (r) {
-            return '<span style="flex:' + r[1] + '"><em>' + sky(r[0]) + (r[1] >= 3 ? '<b>' + r[0] + '</b>' : '') + '</em><i></i></span>';
+        var parts = '<div class="ha-bd-parts">' + runs.map(function (r) {
+            return '<span style="flex:' + r[1] + '"><em>' + (r[1] >= 3 ? r[0] : '') + '</em><i></i></span>';
         }).join('') + '</div>';
 
         var grid = '';
         for (var r = 0; r < rows; r++) {
             var cname = (courts[r] || {}).name || 'Court ' + (r + 1);
-            grid += '<div class="ha-dg-row"><span class="ha-dg-court">' + esc(cname) + '</span><span class="ha-dg-cells">';
+            grid += '<div class="ha-bd-row"><span class="ha-bd-court">' + esc((courts[r] || {}).short || cname) + '</span><span class="ha-bd-cells">';
             hours.forEach(function (x, c) {
                 var st = x.cells[r];
                 var bk = x.bookings[r];
+                var gone = past(x);
                 var cls = st === 'booked' ? 'is-booked' : st === 'held' ? 'is-held' : st === 'open' ? 'is-open' : 'is-none';
-                if (past(x)) cls += ' is-past';
-                if (isNow(x)) cls += ' is-now';
-                var tappable = (st === 'booked' && bk) || (st === 'open' && !past(x));
-                grid += '<button type="button" class="ha-dg-cell ' + cls + '" style="--o:' + (c + r) + '"'
-                    + (tappable ? '' : ' disabled')
-                    + ' data-cell="' + r + ':' + c + '" aria-label="' + esc(cname + ' at ' + x.time + ': ' + (st === 'booked' ? 'booked by ' + (bk ? bk.customer : 'a customer') : st === 'held' ? 'someone is paying' : st === 'open' ? (past(x) ? 'played, not booked' : 'open, tap to book') : 'not sold')) + '">'
+                if (gone) cls += ' is-past';
+                var tappable = (st === 'booked' && bk) || (st === 'open' && !gone);
+                grid += '<button type="button" class="ha-bd-cell ' + cls + '" style="--o:' + (c + r) + '" data-col="' + c + '"'
+                    + (tappable ? '' : ' disabled') + ' data-cell="' + r + ':' + c + '" aria-label="' + esc(cname + ' at ' + x.time + ': '
+                    + (st === 'booked' ? 'booked by ' + (bk ? bk.customer : 'a customer') : st === 'held' ? 'someone is paying' : st === 'open' ? (gone ? 'played, not booked' : 'open, tap to book') : 'not sold')) + '">'
                     + (st === 'booked' && bk ? esc(initials(bk.customer)) : '') + '</button>';
             });
             grid += '</span></div>';
         }
-        // Hour labels: first, last, "Now" and every third hour — but never two so close
-        // their text collides (a 6 AM–10 PM day used to print "9 PM" on top of "10 PM").
-        // Labels are placed by priority and anything within `gap` columns of one is dropped.
-        var gap = Math.max(2, Math.ceil(hours.length * 34 / 250));
-        var want = [];
-        hours.forEach(function (x, i) {
-            var hr = isFinite(x.start) ? Math.floor(x.start / 60) : -1;
-            var pr = isNow(x) ? 0 : i === 0 ? 1 : i === hours.length - 1 ? 2 : (hr >= 0 && hr % 3 === 0 && x.start % 60 === 0) ? 3 : -1;
-            if (pr >= 0) want.push([pr, i]);
-        });
-        var kept = {};
-        want.sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; }).forEach(function (w) {
-            for (var k in kept) { if (Math.abs(k - w[1]) < gap) return; }
-            kept[w[1]] = true;
-        });
-        var marks = '<div class="ha-dg-hours">' + hours.map(function (x, i) {
-            return '<span class="' + (isNow(x) ? 'is-now' : '') + '">' + (!kept[i] ? '' : isNow(x) ? 'Now' : esc(shortTime(x.time))) + '</span>';
+        var line = '';
+        if (nowCol >= 0) {
+            var frac = Math.max(0, Math.min(1, (now - hours[nowCol].start) / len));
+            line = '<i class="ha-bd-line" style="--n:' + hours.length + ';--at:' + (nowCol + frac).toFixed(3) + ';--c:' + nowCol + '"></i>';
+        }
+        // Clock hours on the edge where each begins: every third whole hour.
+        var marks = '<div class="ha-bd-hours" style="--n:' + hours.length + '">' + hours.map(function (x, i) {
+            var s0 = x.start;
+            if (!(isFinite(s0) && s0 % 60 === 0 && (s0 / 60) % 3 === 0)) return '';
+            return '<span style="--c:' + i + '">' + esc(shortTime(x.time)) + '</span>';
         }).join('') + '</div>';
 
         home.state.gridHours = hours;
         home.state.gridCourts = courts;
+        home.state.gridLen = len;
+        home.state.gridLive = now != null;
 
-        return '<div class="ha-daygrid">'
-            + '<div class="ha-dg-head"><span>' + esc(label) + '</span>' + (now != null ? '<span class="ha-live"><i></i>Live</span>' : '') + '</div>'
-            + '<div class="ha-dg-top"><div class="ha-dg-fig"><div class="ha-dg-big"><b>' + open + '</b><span>' + (open === 1 ? 'court-hour<br>to sell' : 'court-hours<br>to sell') + '</span></div>'
-            + '<p>' + (sellable > 0 && now != null ? rupees(sellable) + ' still to earn today' : sellable > 0 ? rupees(sellable) + ' up for grabs' : booked > 0 ? booked + ' booked · sold out' : 'Nothing on sale') + '</p>'
-            + '<small>' + (booked === 0 ? 'Nothing booked yet' : booked + ' already booked') + '</small></div>'
-            + '<div class="ha-dg-now">' + nowCourts(cellsNow, !!current) + '<span>' + esc(nowLine(current, courts, now, hours)) + '</span></div></div>'
-            + parts + '<div class="ha-dg-grid">' + grid + '</div>' + marks
-            + '<div class="ha-dg-key"><i class="k-booked"></i>Booked<i class="k-open"></i>Open · tap to book</div>'
+        return '<div class="ha-board" data-board>'
+            + '<div class="ha-bd-head"><span>' + esc(label) + '</span>' + (now != null ? '<span class="ha-bd-clock"><i></i><b data-clock>' + esc(clock(now)) + '</b></span>' : '') + '</div>'
+            + '<div class="ha-bd-now">' + nowCourts(cellsNow, courts.map(function (c) { return c.kind; }), !!current)
+            + '<div><b>' + esc(words[0]) + '</b>' + (words[1] ? '<small>' + esc(words[1]) + '</small>' : '') + '</div></div>'
+            + parts + '<div class="ha-bd-grid" data-scrub>' + grid + line + '</div>' + (hours.length ? marks : '')
+            + '<div class="ha-bd-foot"><div class="ha-bd-key"><i class="k-booked"></i>Booked<i class="k-open"></i>Open<span>Slide to read hours</span></div><div class="ha-bd-read" hidden></div></div>'
             + '</div>';
+    }
+
+    /** Hour labels that would crowd the one before them are dropped, after layout (HourLabels). */
+    function placeHours(host) {
+        host.querySelectorAll('.ha-bd-hours').forEach(function (row) {
+            var lastRight = -Infinity;
+            var box = row.getBoundingClientRect();
+            row.querySelectorAll('span').forEach(function (sp) {
+                sp.hidden = false;
+                var r = sp.getBoundingClientRect();
+                var left = Math.max(0, Math.min(box.width - r.width, r.left - box.left));
+                sp.style.setProperty('--x', left.toFixed(1) + 'px');
+                sp.classList.add('is-placed');
+                if (left < lastRight + 6) sp.hidden = true;
+                else lastRight = left + r.width;
+            });
+        });
+    }
+
+    /** Slide along the board to read it hour by hour, with a tick per hour. */
+    function wireBoard(host) {
+        var board = host.querySelector('[data-scrub]');
+        if (!board) return;
+        var card = board.closest('.ha-board');
+        var read = card.querySelector('.ha-bd-read');
+        var key = card.querySelector('.ha-bd-key');
+        var x0 = null, y0 = null, col = null, scrubbing = false;
+        function colAt(clientX) {
+            var hours = home.state.gridHours || [];
+            if (!hours.length) return null;
+            var cells = board.querySelector('.ha-bd-cells');
+            var r = cells.getBoundingClientRect();
+            var cw = (r.width - 3 * (hours.length - 1)) / hours.length;
+            return Math.max(0, Math.min(hours.length - 1, Math.floor((clientX - r.left) / (cw + 3))));
+        }
+        function show(c) {
+            if (c === col) return;
+            col = c;
+            haptic('tick');
+            board.querySelectorAll('.ha-bd-cell.is-lift').forEach(function (b) { b.classList.remove('is-lift'); });
+            board.querySelectorAll('.ha-bd-cell[data-col="' + c + '"]').forEach(function (b) { b.classList.add('is-lift'); });
+            var hrs = home.state.gridHours, x = hrs[c];
+            var gone = home.state.gridLive && isFinite(x.start) && minutesNow() >= x.start + (home.state.gridLen || 60);
+            read.textContent = readout(x, home.state.gridCourts || [], gone);
+            read.hidden = false; key.hidden = true;
+        }
+        function end() {
+            if (scrubbing) {
+                board.querySelectorAll('.ha-bd-cell.is-lift').forEach(function (b) { b.classList.remove('is-lift'); });
+                read.hidden = true; key.hidden = false;
+                // The tap that ends a slide must not also open the cell under it.
+                board.addEventListener('click', function stop(e) { e.stopPropagation(); e.preventDefault(); }, { capture: true, once: true });
+                setTimeout(function () { board.dispatchEvent(new Event('ha-noop')); }, 0);
+            }
+            x0 = null; col = null; scrubbing = false;
+        }
+        board.addEventListener('pointerdown', function (e) { x0 = e.clientX; y0 = e.clientY; scrubbing = false; col = null; });
+        board.addEventListener('pointermove', function (e) {
+            if (x0 == null) return;
+            if (!scrubbing) {
+                if (Math.abs(e.clientX - x0) < 8 || Math.abs(e.clientX - x0) < Math.abs(e.clientY - y0)) return;
+                scrubbing = true;
+                try { board.setPointerCapture(e.pointerId); } catch (err) { /* none */ }
+            }
+            show(colAt(e.clientX));
+        });
+        board.addEventListener('pointerup', end);
+        board.addEventListener('pointercancel', end);
+    }
+
+    /** The board's clock and now-line move with the minute while Home sits open. */
+    var boardTimer = null;
+    function tickBoard() {
+        clearInterval(boardTimer);
+        boardTimer = setInterval(function () {
+            var card = document.querySelector('#ha-home .ha-board');
+            if (!card || !home.state.gridLive || document.visibilityState !== 'visible') return;
+            var now = minutesNow();
+            var hours = home.state.gridHours || [], len = home.state.gridLen || 60;
+            var col = -1;
+            hours.forEach(function (x, i) { if (col < 0 && isFinite(x.start) && now >= x.start && now < x.start + len) col = i; });
+            var lineEl = card.querySelector('.ha-bd-line');
+            var was = lineEl ? +lineEl.style.getPropertyValue('--c') : -1;
+            // A new hour changes what's past and what's on court: draw Home again.
+            if (col !== was) { renderHome(); return; }
+            var clockEl = card.querySelector('[data-clock]');
+            if (clockEl) clockEl.textContent = clock(now);
+            if (lineEl) lineEl.style.setProperty('--at', (col + Math.max(0, Math.min(1, (now - hours[col].start) / len))).toFixed(3));
+        }, 30000);
     }
 
     /* ---- Desk doors ---------------------------------------------------------- */
@@ -1191,7 +1437,7 @@
         return '<div class="ha-doors"><div class="ha-doors-row">' + doors.map(function (x) {
             if (x[0] === 'wa') {
                 return '<button type="button" class="ha-door is-locked" data-locked="WhatsApp bookings are coming in the next update.">'
-                    + '<span class="ha-door-tile">' + whatsappMark() + '<em>Coming soon</em><span class="ha-door-lock">' + mat('lock') + '</span></span><b>WhatsApp</b></button>';
+                    + '<span class="ha-door-tile">' + whatsappMark() + '<span class="ha-door-lock">' + mat('lock') + '</span></span><b>WhatsApp</b></button>';
             }
             return '<a class="ha-door" href="' + esc(x[2]) + '"><span class="ha-door-tile">' + glyph(DOORS[x[0]]) + '</span><b>' + esc(x[1]) + '</b></a>';
         }).join('') + '</div><div class="ha-doors-note" hidden>' + mat('lock') + '<span></span></div></div>';
@@ -1385,7 +1631,7 @@
             el.classList.remove('is-lit');
             if (on) { void el.offsetWidth; el.classList.add('is-lit'); }
         });
-        if (navigator.vibrate) { try { navigator.vibrate(6); } catch (err) { /* none */ } }
+        haptic('tick');
         clearTimeout(home.litTimer);
         home.litTimer = setTimeout(function () { host.querySelectorAll('.ha-pay .is-lit').forEach(function (el) { el.classList.remove('is-lit'); }); }, 1600);
     }
@@ -1886,7 +2132,7 @@
                 var name = b.parentNode.getAttribute('data-seg');
                 var v = b.getAttribute('data-v');
                 if (b.classList.contains('is-on')) return;
-                if (navigator.vibrate) { try { navigator.vibrate(5); } catch (err) { /* none */ } }
+                haptic('tick');
                 var ins = home.insights;
                 // Only the toggled card redraws: the page stays put and its thumb slides.
                 if (name === 'cust') { home.state.custMonthly = v === 'month'; swapCard('.ha-cust', ins && ins.customers ? customersCard(ins.customers, home.state.custMonthly) : null); }
@@ -1897,7 +2143,7 @@
             }
             if ((b = t.closest('[data-day]'))) {
                 home.state.selDay = +b.getAttribute('data-day');
-                if (navigator.vibrate) { try { navigator.vibrate(4); } catch (err) { /* none */ } }
+                haptic('tick');
                 swapCard('.ha-week', home.insights ? weekCard(home.insights) : null);
                 return;
             }
@@ -2001,7 +2247,13 @@
         if (!hour) return;
         var bk = hour.bookings[p[0]];
         var court = (home.state.gridCourts[p[0]] || {}).name || null;
-        if (hour.cells[p[0]] !== 'booked' || !bk) { go(urlOf('sales')); return; }
+        haptic('tick');
+        if (hour.cells[p[0]] !== 'booked' || !bk) {
+            // The desk opens the walk-in sheet on this court and hour.
+            try { sessionStorage.setItem('haDeskOpen', JSON.stringify({ date: ymd(new Date()), time: hour.time, court: court })); } catch (e) { /* none */ }
+            go(urlOf('sales'));
+            return;
+        }
         var digits = String(bk.phone || '').replace(/\D/g, '');
         var local = digits.length > 10 ? digits.slice(-10) : digits;
         var pretty = local.length === 10 ? '+91 ' + local.slice(0, 5) + ' ' + local.slice(5) : (bk.phone || '');
@@ -2091,6 +2343,7 @@
         minutesNow: minutesNow, ymd: ymd, store: store, h: h, glyph: glyph, mat: mat, MAT: MAT, DRAWER: DRAWER,
         can: can, isDesk: isDesk, lane: lane, courtsLane: courtsLane, urlOf: urlOf, go: go, share: share,
         sheet: sheet, toast: toast, loadScript: loadScript, months: MONTHS, toolHeader: toolHeader, payToken: payToken,
+        haptic: haptic, court: COURT, back: back,
         token: function () { return token; }, refresh: refreshToken,
         register: function (key, screen) { screens[key] = screen; },
     };
