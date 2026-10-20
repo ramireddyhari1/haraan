@@ -116,6 +116,10 @@ class AdminPanelProvider extends PanelProvider
                 // which meant every rule on it ran on its default with no way to change it.
                 // Its own canAccess() gates it per section (fees → finance, the rest → admin).
                 \App\Filament\Pages\PlatformRulesPage::class,
+                // Platform → Operations: the emergency switches (maintenance, pause bookings,
+                // stop payments, AI off…). Built, enforced server-side and tested, but never
+                // listed here — so no admin could reach a kill switch. Super admins only.
+                \App\Filament\Pages\OperationsPage::class,
                 // Platform → App updates: the in-app update sheet of the Haraan and Partner apps.
                 \App\Filament\Pages\AppUpdatesPage::class,
                 \App\Filament\Pages\ServerStatus::class,

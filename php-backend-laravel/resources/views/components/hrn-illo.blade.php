@@ -211,6 +211,18 @@
             </g>
             @break
 
+        @case('switchboard')
+            {{-- A breaker panel: the platform's emergency switches. Tint --illo-accent red when any are on. --}}
+            <rect x="34" y="16" width="92" height="78" rx="8" fill="{{ $paper }}" stroke="{{ $ink }}" stroke-width="1.6"/>
+            <path d="M34 30h92" stroke="{{ $ink }}" stroke-width="1.2" opacity=".5"/>
+            <circle cx="42" cy="23" r="2" fill="{{ $ink }}" opacity=".5"/><circle cx="118" cy="23" r="2" fill="{{ $ink }}" opacity=".5"/>
+            @foreach ([48, 70, 92] as $i => $x)
+                <rect x="{{ $x }}" y="40" width="16" height="42" rx="4" fill="{{ $soft }}" stroke="{{ $ink }}" stroke-width="1.3"/>
+                <rect x="{{ $x + 3 }}" y="{{ $i === 1 ? 62 : 44 }}" width="10" height="14" rx="2" fill="{{ $i === 1 ? $acc : $paper }}" stroke="{{ $ink }}" stroke-width="1.1"/>
+            @endforeach
+            <g class="il-float"><circle cx="128" cy="14" r="8" fill="{{ $acc }}"/><path d="M128 9v5" stroke="{{ $paper }}" stroke-width="2"/><path d="M124.5 11.5a5 5 0 1 0 7 0" stroke="{{ $paper }}" stroke-width="1.6"/></g>
+            @break
+
         @default
             {{-- Unknown name: a quiet dot rather than a broken image. --}}
             <circle cx="80" cy="56" r="20" fill="{{ $soft }}" stroke="{{ $ink }}" stroke-width="1.6"/>

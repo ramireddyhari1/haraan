@@ -43,7 +43,9 @@ class FeatureFlagResource extends Resource
             TextInput::make('key')
                 ->required()
                 ->unique(ignoreRecord: true)
-                ->helperText('Machine name the app checks, e.g. local_league_creation')
+                ->helperText(fn (?FeatureFlag $record): string => $record?->readBy()
+                    ? 'Read by: ' . $record->readBy()
+                    : 'Machine name the app checks. Nothing reads a new key until an app or server change starts checking it.')
                 ->disabledOn('edit'),
             TextInput::make('name')->required(),
             Textarea::make('description')->columnSpanFull(),
@@ -70,6 +72,16 @@ class FeatureFlagResource extends Resource
             ->columns([
                 TextColumn::make('key')->searchable()->copyable(),
                 TextColumn::make('name')->searchable(),
+                // Whether switching it does anything. Seeded flags like new_scorecard were
+                // never read by any app version, so toggling them looked like control.
+                TextColumn::make('read_by')
+                    ->label('What it changes')
+                    ->state(fn (FeatureFlag $r): string => $r->readBy() ?? 'No effect — nothing reads it')
+                    ->tooltip(fn (FeatureFlag $r): ?string => $r->readBy() ? null : 'No app version or server code checks this key, so switching it changes nothing.')
+                    ->color(fn (FeatureFlag $r): string => $r->readBy() ? 'gray' : 'warning')
+                    ->icon(fn (FeatureFlag $r): string => $r->readBy() ? 'heroicon-m-check-circle' : 'heroicon-m-exclamation-triangle')
+                    ->iconColor(fn (FeatureFlag $r): string => $r->readBy() ? 'success' : 'warning')
+                    ->wrap(),
                 ToggleColumn::make('enabled'),
                 TextColumn::make('rollout_percentage')->label('Rollout')->suffix('%')->sortable(),
                 IconColumn::make('organization_ids')

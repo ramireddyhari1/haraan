@@ -23,6 +23,22 @@ final class FeatureFlag extends Model
     /** Clients refetch /api/config when a flag changes. */
     protected string $contentDomain = 'config';
 
+    /**
+     * The flags some code actually reads, and what each one changes. A flag not listed here
+     * is still sent in /api/config, but no app version or server path looks at it, so
+     * switching it changes nothing. Add a key here in the same change that starts reading it.
+     */
+    public const READ_BY = [
+        'server_driven_home' => 'Android home uses Home layout',
+        \App\Support\Membership\MembershipSettings::IN_APP_CHECKOUT_FLAG => 'Pro/Hero bought in the app',
+    ];
+
+    /** What reading this flag changes, or null when nothing reads it. */
+    public function readBy(): ?string
+    {
+        return self::READ_BY[$this->key] ?? null;
+    }
+
     protected $fillable = [
         'key',
         'name',

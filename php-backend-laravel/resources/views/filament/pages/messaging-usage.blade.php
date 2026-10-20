@@ -173,7 +173,8 @@
                 <div class="hmu-note">
                     <strong>Journeys are switched off.</strong>
                     Messages are still being queued and held, but nothing is delivered.
-                    Set <code>MESSAGING_JOURNEYS_ENABLED=true</code> to start sending.
+                    {{-- It's an admin switch (PlatformRules messaging.journeys_enabled); the .env value is only its default. --}}
+                    Turn on <a href="{{ \App\Filament\Pages\PlatformRulesPage::getUrl() }}#messaging" style="font-weight:600;text-decoration:underline">Platform rules → Messaging → Send journey messages</a> to start sending.
                 </div>
             @endunless
 

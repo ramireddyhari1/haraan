@@ -38,6 +38,8 @@ class AppServiceProvider extends ServiceProvider
     {
         Gate::policy(Event::class, EventPolicy::class);
 
+        $this->showSystemTimestampsInBusinessTime();
+
         // Signing out of the partner web app unhooks that browser from booking alerts,
         // so a shared desk iPhone stops buzzing for the partner who just left. Logout
         // fires before the session is invalidated, so the token is still readable.
@@ -184,5 +186,43 @@ class AppServiceProvider extends ServiceProvider
                 ->where('user_id', $user->id)
                 ->select('notification_id'))
             ->count();
+    }
+
+    /**
+     * Columns holding instants the system wrote (UTC in the database). Admin-entered schedule
+     * fields (starts_at, ends_at, expires_at…) are left out: those pickers store the wall-clock
+     * time as typed, so converting them on display would shift what the admin entered.
+     */
+    public const SYSTEM_TIMESTAMPS = [
+        'created_at', 'updated_at', 'deleted_at', 'last_seen_at', 'last_active_at', 'last_used_at',
+        'last_message_at', 'signed_in_at', 'email_verified_at', 'verified_at', 'processed_at', 'paid_at',
+        'collected_at', 'refunded_at', 'cancelled_at', 'completed_at', 'checked_in_at', 'approved_at',
+        'reviewed_at', 'published_at', 'featured_at', 'sent_at', 'read_at', 'notified_at', 'opened_at',
+        'closed_at', 'occurred_at', 'assigned_at', 'clock_in_at', 'clock_out_at', 'token_expires_at',
+        'offer_expires_at',
+    ];
+
+    /**
+     * The app clock is UTC on purpose (BusinessClock), so every "created at" in /control and
+     * /partner read 5½ hours behind, unlabelled. Show system instants in the business zone.
+     * Time-of-day columns (->time()) hold wall-clock times and are never converted.
+     */
+    private function showSystemTimestampsInBusinessTime(): void
+    {
+        $zoneFor = static function (string $name, bool $isTime): ?string {
+            $field = str_contains($name, '.') ? substr($name, (int) strrpos($name, '.') + 1) : $name;
+
+            return ! $isTime && in_array($field, self::SYSTEM_TIMESTAMPS, true)
+                ? \App\Support\BusinessClock::zone()
+                : null; // null = Filament's default
+        };
+
+        \Filament\Tables\Columns\TextColumn::configureUsing(static function (\Filament\Tables\Columns\TextColumn $column) use ($zoneFor): void {
+            $column->timezone(static fn (\Filament\Tables\Columns\TextColumn $column): ?string => $zoneFor($column->getName(), $column->isTime()));
+        });
+
+        \Filament\Infolists\Components\TextEntry::configureUsing(static function (\Filament\Infolists\Components\TextEntry $entry) use ($zoneFor): void {
+            $entry->timezone(static fn (\Filament\Infolists\Components\TextEntry $component): ?string => $zoneFor($component->getName(), $component->isTime()));
+        });
     }
 }
