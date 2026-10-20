@@ -79,8 +79,9 @@ class RewardProgramResource extends Resource
                     ->native(false),
                 Select::make('status')->options(RewardProgram::STATUSES)->required()->default('draft')->native(false)
                     ->helperText('Only Live programs inside their dates give rewards.'),
-                DateTimePicker::make('starts_at')->label('Starts'),
-                DateTimePicker::make('ends_at')->label('Ends')->after('starts_at'),
+                // India time in, UTC stored — RewardProgram::scopeRunning compares with now().
+                DateTimePicker::make('starts_at')->label('Starts')->timezone(\App\Support\BusinessClock::zone())->seconds(false),
+                DateTimePicker::make('ends_at')->label('Ends')->timezone(\App\Support\BusinessClock::zone())->seconds(false)->after('starts_at'),
                 TextInput::make('priority')->numeric()->default(100)->minValue(0)->maxValue(10000)
                     ->helperText('Lower runs first. When a player hits a cap, earlier programs win.'),
             ]),
@@ -153,7 +154,7 @@ class RewardProgramResource extends Resource
                     ->formatStateUsing(fn (RewardProgram $r): string => $r->grants_count.($r->budget_total ? ' / '.$r->budget_total : '')),
                 TextColumn::make('claimed_count')->label('Claimed'),
                 TextColumn::make('redeemed_count')->label('Used'),
-                TextColumn::make('ends_at')->label('Ends')->dateTime('d M Y')->placeholder('—'),
+                TextColumn::make('ends_at')->label('Ends')->dateTime('d M Y', \App\Support\BusinessClock::zone())->placeholder('—'),
             ])
             ->filters([
                 SelectFilter::make('status')->options(RewardProgram::STATUSES),

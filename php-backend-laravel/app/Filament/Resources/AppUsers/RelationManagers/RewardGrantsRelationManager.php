@@ -83,7 +83,7 @@ class RewardGrantsRelationManager extends RelationManager
 
                 TextColumn::make('expires_at')
                     ->label('Expires')
-                    ->dateTime('d M Y')
+                    ->dateTime('d M Y', \App\Support\BusinessClock::zone())
                     ->placeholder('No expiry'),
             ])
             ->headerActions([

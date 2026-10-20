@@ -74,7 +74,7 @@ class UserForm
                             ->default('ACTIVE'),
                         OrganizationSelect::make()
                             ->helperText('Home organization — also scopes what this staff member sees in the panel.'),
-                        DateTimePicker::make('email_verified_at')
+                        DateTimePicker::make('email_verified_at')->timezone(\App\Support\BusinessClock::zone())
                             ->label('Email verified at')
                             ->helperText('Optional. Set to mark the email as already verified.'),
                     ]),

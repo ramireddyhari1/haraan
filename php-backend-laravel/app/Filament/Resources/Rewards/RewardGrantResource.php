@@ -68,7 +68,7 @@ class RewardGrantResource extends Resource
                     ->description(fn (RewardGrant $r): ?string => $r->status_reason),
                 TextColumn::make('match_id')->label('Match')->placeholder('—'),
                 TextColumn::make('created_at')->label('Given')->dateTime('d M Y H:i'),
-                TextColumn::make('expires_at')->label('Expires')->dateTime('d M Y')->placeholder('—'),
+                TextColumn::make('expires_at')->label('Expires')->dateTime('d M Y', \App\Support\BusinessClock::zone())->placeholder('—'),
             ])
             ->filters([
                 SelectFilter::make('user_id')

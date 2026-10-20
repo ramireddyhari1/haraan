@@ -56,7 +56,7 @@ final class MemberSubscriptionActions
                     ->label('Plan')
                     ->required()
                     ->options(fn (): array => MemberPlan::query()->where('is_default', false)->orderBy('rank')->pluck('name', 'id')->all()),
-                DateTimePicker::make('until')
+                DateTimePicker::make('until')->timezone(\App\Support\BusinessClock::zone())
                     ->label('Until')
                     ->minDate(now())
                     ->helperText('Leave empty for no end date.'),
@@ -151,7 +151,7 @@ final class MemberSubscriptionActions
             ->visible(fn (MemberSubscription $record): bool => $record->provider === MemberSubscription::PROVIDER_ADMIN
                 && $record->status !== MemberSubscription::STATUS_REVOKED)
             ->schema([
-                DateTimePicker::make('until')
+                DateTimePicker::make('until')->timezone(\App\Support\BusinessClock::zone())
                     ->label('Until')
                     ->minDate(now())
                     ->helperText('Leave empty for no end date.'),

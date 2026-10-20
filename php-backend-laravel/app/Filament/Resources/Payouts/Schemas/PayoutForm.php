@@ -23,7 +23,7 @@ class PayoutForm
                 TextInput::make('status')
                     ->required()
                     ->default('PENDING'),
-                DateTimePicker::make('processed_at'),
+                DateTimePicker::make('processed_at')->timezone(\App\Support\BusinessClock::zone()),
             ]);
     }
 }

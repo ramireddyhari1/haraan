@@ -99,7 +99,7 @@ class MemberEntitlementOverrideResource extends Resource
                 ->visible(fn (Get $get): bool => MemberFeature::exists((string) $get('feature_key'))
                     && ! MemberFeature::isBoolean((string) $get('feature_key'))),
 
-            DateTimePicker::make('expires_at')
+            DateTimePicker::make('expires_at')->timezone(\App\Support\BusinessClock::zone())
                 ->label('Expires')
                 ->helperText('Leave empty for no expiry.'),
 
@@ -126,7 +126,7 @@ class MemberEntitlementOverrideResource extends Resource
                         : ($r->limit_value === null ? 'Unlimited' : (string) $r->limit_value)),
                 TextColumn::make('expires_at')
                     ->label('Expires')
-                    ->dateTime('d M Y')
+                    ->dateTime('d M Y', \App\Support\BusinessClock::zone())
                     ->placeholder('Never')
                     ->color(fn (MemberEntitlementOverride $r): string => $r->expires_at?->isPast() ? 'danger' : 'gray'),
                 TextColumn::make('reason')->limit(40)->wrap(),

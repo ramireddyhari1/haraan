@@ -41,11 +41,11 @@ class PartnerSubscriptionForm
                     ->helperText('Halted and cancelled drop the partner to the default plan. '
                         . 'Neither ever affects ticket delivery.'),
 
-                DateTimePicker::make('current_period_start')
+                DateTimePicker::make('current_period_start')->timezone(\App\Support\BusinessClock::zone())
                     ->label('Period start')
                     ->default(now()),
 
-                DateTimePicker::make('current_period_end')
+                DateTimePicker::make('current_period_end')->timezone(\App\Support\BusinessClock::zone())
                     ->label('Period end')
                     ->default(now()->addMonth())
                     ->helperText('Once this passes, the plan stops granting features. Leave empty for '

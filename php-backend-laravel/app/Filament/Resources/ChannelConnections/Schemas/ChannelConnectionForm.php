@@ -47,7 +47,7 @@ class ChannelConnectionForm
                     ->required(fn (string $operation): bool => $operation === 'create')
                     ->helperText('Stored encrypted. Leave blank when editing to keep the current token.'),
 
-                DateTimePicker::make('token_expires_at')
+                DateTimePicker::make('token_expires_at')->timezone(\App\Support\BusinessClock::zone())
                     ->label('Token expires')
                     ->helperText('Optional. Past this, replies stop and the connection reads as unusable.'),
 

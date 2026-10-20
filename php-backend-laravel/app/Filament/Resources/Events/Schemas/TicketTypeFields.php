@@ -209,10 +209,15 @@ class TicketTypeFields
                         ->columnSpanFull()
                         ->helperText('Price climbs as spots sell — the first phase fills, then the next. '
                             . 'The live price is always the earliest phase with room left. Leave empty for a flat price.'),
+                    // India time in, UTC stored — TicketType::isOnSale compares with now().
                     DateTimePicker::make('sales_start')
+                        ->timezone(\App\Support\BusinessClock::zone())
+                        ->seconds(false)
                         ->label('On sale from')
                         ->helperText('Leave blank to sell immediately (used for Early Bird).'),
                     DateTimePicker::make('sales_end')
+                        ->timezone(\App\Support\BusinessClock::zone())
+                        ->seconds(false)
                         ->label('On sale until')
                         ->helperText('Leave blank for no end (used for Early Bird).'),
                     TextInput::make('sort')

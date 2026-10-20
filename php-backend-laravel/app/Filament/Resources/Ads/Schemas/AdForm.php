@@ -46,8 +46,10 @@ class AdForm
                     ->required()
                     ->numeric()
                     ->default(0),
-                DateTimePicker::make('starts_at'),
-                DateTimePicker::make('ends_at'),
+                // India time in the picker, UTC in the database: Ad::scopeServing compares with
+                // now(). Without a zone, "6 PM" was saved as 6 PM UTC and went live at 11:30 PM.
+                DateTimePicker::make('starts_at')->timezone(\App\Support\BusinessClock::zone())->seconds(false)->helperText('India time.'),
+                DateTimePicker::make('ends_at')->timezone(\App\Support\BusinessClock::zone())->seconds(false)->helperText('India time.'),
             ]);
     }
 }

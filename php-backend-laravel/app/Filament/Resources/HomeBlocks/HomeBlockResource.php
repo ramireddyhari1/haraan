@@ -69,8 +69,9 @@ class HomeBlockResource extends Resource
                 ->options(fn (): array => OrganizationSelect::options())
                 ->searchable()
                 ->helperText('Leave empty for all districts.'),
-            DateTimePicker::make('starts_at')->helperText('Optional — schedule the block to appear.'),
-            DateTimePicker::make('ends_at')->helperText('Optional — schedule the block to disappear.'),
+            // India time in, UTC stored — HomeBlock's schedule scope compares with now().
+            DateTimePicker::make('starts_at')->timezone(\App\Support\BusinessClock::zone())->seconds(false)->helperText('Optional — when the block appears (India time).'),
+            DateTimePicker::make('ends_at')->timezone(\App\Support\BusinessClock::zone())->seconds(false)->helperText('Optional — when the block disappears (India time).'),
         ]);
     }
 
@@ -90,8 +91,8 @@ class HomeBlockResource extends Resource
                     ->label('Targeted')
                     ->state(fn (HomeBlock $r): bool => ! empty($r->organization_ids))
                     ->boolean(),
-                TextColumn::make('starts_at')->dateTime()->placeholder('—')->toggleable(),
-                TextColumn::make('ends_at')->dateTime()->placeholder('—')->toggleable(),
+                TextColumn::make('starts_at')->dateTime(null, \App\Support\BusinessClock::zone())->placeholder('—')->toggleable(),
+                TextColumn::make('ends_at')->dateTime(null, \App\Support\BusinessClock::zone())->placeholder('—')->toggleable(),
             ]);
     }
 

@@ -55,8 +55,8 @@ class AdsTable
                 TextColumn::make('sort_order')
                     ->numeric()
                     ->sortable(),
-                TextColumn::make('starts_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
-                TextColumn::make('ends_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('starts_at')->dateTime(null, \App\Support\BusinessClock::zone())->sortable()->toggleable(isToggledHiddenByDefault: true),
+                TextColumn::make('ends_at')->dateTime(null, \App\Support\BusinessClock::zone())->sortable()->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('created_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
                 TextColumn::make('updated_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
             ])

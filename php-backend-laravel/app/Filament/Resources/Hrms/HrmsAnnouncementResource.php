@@ -59,8 +59,8 @@ class HrmsAnnouncementResource extends Resource
                 ])
                 ->default('all')
                 ->required(),
-            DateTimePicker::make('published_at')->default(now()),
-            DateTimePicker::make('expires_at'),
+            DateTimePicker::make('published_at')->timezone(\App\Support\BusinessClock::zone())->seconds(false)->default(now()),
+            DateTimePicker::make('expires_at')->timezone(\App\Support\BusinessClock::zone())->seconds(false),
             Toggle::make('is_active')->default(true),
             Textarea::make('body')->rows(4)->required(),
         ]);

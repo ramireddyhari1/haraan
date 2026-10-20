@@ -667,6 +667,9 @@ class EventForm
                             ->placeholder('e.g. Day 1 · Evening')
                             ->helperText('Optional — defaults to the date & time.')
                             ->columnSpanFull(),
+                        // Session times are wall-clock times at the venue, like the event's own
+                        // date + time (EventSlot::combine), and are shown to buyers as typed — so
+                        // no timezone here, deliberately.
                         DateTimePicker::make('starts_at')
                             ->label('Starts')
                             ->native(false)
