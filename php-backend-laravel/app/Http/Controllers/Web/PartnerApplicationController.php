@@ -44,6 +44,8 @@ class PartnerApplicationController extends Controller
             'amenities' => array_keys(VenueForm::AMENITIES),
             'rulePresets' => VenueForm::RULE_PRESETS,
             'maxPhotos' => self::MAX_PHOTOS,
+            'askPayouts' => PlatformRules::bool('partner_onboarding.ask_payouts'),
+            'banks' => self::banks(),
             'prefill' => ContactPrefill::for($request->user()),
             'source' => Str::limit((string) ($request->query('utm_source') ?: $request->query('from', '')), 100, ''),
         ]);
@@ -66,6 +68,23 @@ class PartnerApplicationController extends Controller
         $input['photos'] = array_values(array_filter((array) $request->file('photos', []), fn ($f): bool => $f instanceof UploadedFile));
 
         $place = in_array($input['business_type'] ?? null, PartnerApplication::PLACE_TYPES, true);
+        $askPayouts = PlatformRules::bool('partner_onboarding.ask_payouts');
+        $method = $askPayouts ? ($input['payout_method'] ?? 'later') : 'later';
+        $input['payout_method'] = $method;
+        $input['ifsc_code'] = strtoupper(preg_replace('/\s+/', '', (string) ($input['ifsc_code'] ?? '')));
+        $input['account_number'] = preg_replace('/\s+/', '', (string) ($input['account_number'] ?? ''));
+        $input['account_number_confirmation'] = preg_replace('/\s+/', '', (string) ($input['account_number_confirmation'] ?? ''));
+        $input['upi_vpa'] = trim((string) ($input['upi_vpa'] ?? ''));
+        // Fields the chosen method doesn't use are dropped, not validated: an owner who
+        // typed an IFSC and then picked "share on the call" isn't stopped by it.
+        if ($method !== 'bank') {
+            foreach (['bank_name', 'account_number', 'account_number_confirmation', 'ifsc_code'] as $unused) {
+                $input[$unused] = '';
+            }
+        }
+        if ($method === 'later') {
+            $input['account_holder'] = $input['upi_vpa'] = '';
+        }
         $time = ['nullable', 'date_format:H:i'];
 
         $validator = Validator::make($input, [
@@ -109,6 +128,14 @@ class PartnerApplicationController extends Controller
             'rules' => ['nullable', 'array', 'max:20'],
             'rules.*' => ['string', 'max:120'],
 
+            // Payouts — bank account, UPI, or both; or later on the call.
+            'payout_method' => ['required', Rule::in(array_keys(PartnerApplication::PAYOUT_METHODS))],
+            'bank_name' => [Rule::requiredIf($method === 'bank'), 'nullable', 'string', 'max:80'],
+            'account_holder' => [Rule::requiredIf(in_array($method, ['bank', 'upi'], true)), 'nullable', 'string', 'min:2', 'max:100'],
+            'account_number' => [Rule::requiredIf($method === 'bank'), 'nullable', 'regex:/^\d{9,18}$/', 'confirmed'],
+            'ifsc_code' => [Rule::requiredIf($method === 'bank'), 'nullable', 'regex:' . PartnerApplication::IFSC_PATTERN],
+            'upi_vpa' => [Rule::requiredIf($method === 'upi'), 'nullable', 'max:120', 'regex:' . PartnerApplication::UPI_PATTERN],
+
             // Today
             'booking_channels' => ['nullable', 'array'],
             'booking_channels.*' => [Rule::in(array_keys(PartnerApplication::BOOKING_CHANNELS))],
@@ -144,6 +171,15 @@ class PartnerApplicationController extends Controller
             'phone.required' => 'We need a number to call you on.',
             'gstin.regex' => 'That GSTIN doesn’t look right — it is 15 characters, like 37ABCDE1234F1Z5. Leave it empty if you don’t have one.',
             'consent.accepted' => 'Tick the box so we can call you.',
+            'bank_name.required' => 'Pick your bank.',
+            'account_holder.required' => 'Whose name is the account in?',
+            'account_number.required' => 'Enter the account number.',
+            'account_number.regex' => 'An account number is 9 to 18 digits.',
+            'account_number.confirmed' => 'The two account numbers don’t match.',
+            'ifsc_code.required' => 'Enter the IFSC — it is printed on your cheque book.',
+            'ifsc_code.regex' => 'An IFSC is 11 characters, like HDFC0001234 (the fifth is a zero).',
+            'upi_vpa.required' => 'Enter your UPI ID.',
+            'upi_vpa.regex' => 'A UPI ID looks like name@okhdfcbank.',
         ]);
 
         // Hours that open and close at the same minute produce no slots — say so here,
@@ -240,6 +276,12 @@ class PartnerApplicationController extends Controller
             'booking_channels' => array_values(array_unique($data['booking_channels'] ?? [])) ?: null,
             'monthly_bookings' => $data['monthly_bookings'] ?? null,
             'goals' => array_values(array_unique($data['goals'] ?? [])) ?: null,
+            'payout_method' => $method,
+            'bank_name' => $method === 'bank' ? $clean($data['bank_name'] ?? null, 80) : null,
+            'account_holder' => $method === 'later' ? null : $clean($data['account_holder'] ?? null, 100),
+            'account_number' => $method === 'bank' ? ($data['account_number'] ?: null) : null,
+            'ifsc_code' => $method === 'bank' ? ($data['ifsc_code'] ?: null) : null,
+            'upi_vpa' => $method === 'later' ? null : (filled($data['upi_vpa'] ?? null) ? mb_strtolower($data['upi_vpa']) : null),
             'contact_name' => trim($data['contact_name']),
             'contact_role' => $data['contact_role'] ?? null,
             'phone' => $phone,
@@ -263,6 +305,15 @@ class PartnerApplicationController extends Controller
         }
 
         return response()->json(['reference' => $application->fresh()->reference], 201);
+    }
+
+    /** @return array<int, string> */
+    public static function banks(): array
+    {
+        return array_values(array_filter(array_map(
+            'trim',
+            explode(',', PlatformRules::string('partner_onboarding.banks')),
+        )));
     }
 
     /** @return array<int, string> */

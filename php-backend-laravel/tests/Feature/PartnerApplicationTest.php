@@ -7,11 +7,13 @@ namespace Tests\Feature;
 use App\Filament\Resources\PartnerApplications\Pages\ViewPartnerApplication;
 use App\Filament\Resources\PartnerApplications\PartnerApplicationResource;
 use App\Models\PartnerApplication;
+use App\Models\PartnerPayoutAccount;
 use App\Models\User;
 use App\Models\Venue;
 use App\Support\PlatformRules;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Testing\TestResponse;
@@ -61,6 +63,13 @@ class PartnerApplicationTest extends TestCase
             'phone' => '98765 43210',
             'email' => 'Ravi@Example.com',
             'call_time' => 'evening',
+            'payout_method' => 'bank',
+            'bank_name' => 'HDFC Bank',
+            'account_holder' => 'Green Field Sports LLP',
+            'account_number' => '5010 0012 3443 21',
+            'account_number_confirmation' => '50100012344321',
+            'ifsc_code' => 'hdfc0001234',
+            'upi_vpa' => 'Ravi@okhdfcbank',
             'consent' => true,
         ], $overrides);
     }
@@ -119,6 +128,52 @@ class PartnerApplicationTest extends TestCase
         $this->assertEqualsWithDelta(14.4673, $app->latitude, 0.0001);
         $this->assertCount(2, $app->images);
         Storage::disk('public')->assertExists($app->images[0]);
+    }
+
+    public function test_bank_details_are_stored_encrypted_and_shown_masked(): void
+    {
+        $this->apply()->assertCreated();
+
+        $app = PartnerApplication::sole();
+        $this->assertSame('bank', $app->payout_method);
+        $this->assertSame('50100012344321', $app->account_number);
+        $this->assertSame('HDFC0001234', $app->ifsc_code);
+        $this->assertSame('ravi@okhdfcbank', $app->upi_vpa);
+        $this->assertSame('•••• 4321', $app->maskedAccount());
+        $this->assertSame('ra••@okhdfcbank', $app->maskedUpi());
+
+        $raw = DB::table('partner_applications')->value('account_number');
+        $this->assertStringNotContainsString('50100012344321', (string) $raw);
+        $this->assertStringNotContainsString('ravi@', (string) DB::table('partner_applications')->value('upi_vpa'));
+    }
+
+    public function test_payout_details_are_checked(): void
+    {
+        $this->apply(['account_number_confirmation' => '50100012344320'])
+            ->assertStatus(422)->assertJsonValidationErrors(['account_number']);
+        $this->apply(['ifsc_code' => 'HDFC1001234'])
+            ->assertStatus(422)->assertJsonValidationErrors(['ifsc_code']);
+        $this->apply(['account_number' => '1234', 'account_number_confirmation' => '1234'])
+            ->assertStatus(422)->assertJsonValidationErrors(['account_number']);
+        $this->apply(['payout_method' => 'upi', 'upi_vpa' => 'not-a-upi'])
+            ->assertStatus(422)->assertJsonValidationErrors(['upi_vpa']);
+
+        $this->assertSame(0, PartnerApplication::count());
+    }
+
+    public function test_upi_only_and_later_need_no_bank(): void
+    {
+        $this->apply(['payout_method' => 'upi', 'bank_name' => '', 'account_number' => '', 'account_number_confirmation' => '', 'ifsc_code' => ''])->assertCreated();
+        $upi = PartnerApplication::sole();
+        $this->assertSame('upi', $upi->payout_method);
+        $this->assertNull($upi->account_number);
+        $this->assertSame('ravi@okhdfcbank', $upi->upi_vpa);
+        $upi->delete();
+
+        $this->apply(['payout_method' => 'later', 'account_number' => '', 'ifsc_code' => 'junk'])->assertCreated();
+        $later = PartnerApplication::sole();
+        $this->assertFalse($later->hasPayoutDetails());
+        $this->assertNull($later->ifsc_code);
     }
 
     public function test_same_phone_twice_returns_the_first_application(): void
@@ -216,6 +271,14 @@ class PartnerApplicationTest extends TestCase
         $this->assertSame('PARTNER', $partner->role);
         $this->assertSame($partner->id, $app->partner_id);
         $this->assertSame(PartnerApplication::STATUS_APPROVED, $app->status);
+
+        // The bank details became their settlement account — unverified, for finance to check.
+        $payout = PartnerPayoutAccount::where('partner_id', $partner->id)->sole();
+        $this->assertSame('bank', $payout->method);
+        $this->assertSame('50100012344321', $payout->account_number);
+        $this->assertSame('HDFC0001234', $payout->ifsc_code);
+        $this->assertSame('Green Field Sports LLP', $payout->account_holder);
+        $this->assertNull($payout->verified_at);
 
         Livewire::test(ViewPartnerApplication::class, ['record' => $app->getKey()])
             ->callAction('createVenue')

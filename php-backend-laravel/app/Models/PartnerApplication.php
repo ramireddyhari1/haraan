@@ -101,6 +101,9 @@ class PartnerApplication extends Model
         'images' => 'array',
         'amenities' => 'array',
         'rules' => 'array',
+        // Payout details never sit in the database in the clear.
+        'account_number' => 'encrypted',
+        'upi_vpa' => 'encrypted',
         'reviewed_at' => 'datetime',
         'contacted_at' => 'datetime',
     ];
@@ -155,6 +158,32 @@ class PartnerApplication extends Model
 
     public const SLOT_LENGTHS = [30 => '30 minutes', 60 => '1 hour', 90 => '1.5 hours', 120 => '2 hours'];
 
+    public const PAYOUT_METHODS = [
+        'bank' => 'Bank account',
+        'upi' => 'UPI only',
+        'later' => 'Share on the call',
+    ];
+
+    /**
+     * The first four letters of an IFSC name the bank. Lets the form pick the bank
+     * for the owner as they type the IFSC printed on their cheque book.
+     */
+    public const IFSC_BANKS = [
+        'SBIN' => 'State Bank of India', 'HDFC' => 'HDFC Bank', 'ICIC' => 'ICICI Bank', 'UTIB' => 'Axis Bank',
+        'KKBK' => 'Kotak Mahindra Bank', 'PUNB' => 'Punjab National Bank', 'BARB' => 'Bank of Baroda',
+        'CNRB' => 'Canara Bank', 'UBIN' => 'Union Bank of India', 'IDIB' => 'Indian Bank',
+        'IOBA' => 'Indian Overseas Bank', 'BKID' => 'Bank of India', 'CBIN' => 'Central Bank of India',
+        'IBKL' => 'IDBI Bank', 'YESB' => 'Yes Bank', 'INDB' => 'IndusInd Bank', 'FDRL' => 'Federal Bank',
+        'IDFB' => 'IDFC FIRST Bank', 'AUBL' => 'AU Small Finance Bank', 'KARB' => 'Karnataka Bank',
+        'SIBL' => 'South Indian Bank', 'KVBL' => 'Karur Vysya Bank', 'CIUB' => 'City Union Bank',
+        'TMBL' => 'Tamilnad Mercantile Bank', 'MAHB' => 'Bank of Maharashtra', 'PSIB' => 'Punjab & Sind Bank',
+        'UCBA' => 'UCO Bank', 'BDBL' => 'Bandhan Bank', 'RATN' => 'RBL Bank', 'DBSS' => 'DBS Bank India',
+    ];
+
+    public const IFSC_PATTERN = '/^[A-Z]{4}0[A-Z0-9]{6}$/';
+
+    public const UPI_PATTERN = '/^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z][a-zA-Z0-9]{1,63}$/';
+
     public function hasPlace(): bool
     {
         return in_array($this->business_type, self::PLACE_TYPES, true);
@@ -199,6 +228,31 @@ class PartnerApplication extends Model
 
         return 'Free up to ' . $this->cancel_free_hours . ' h before'
             . ($this->cancel_refund_percent !== null ? ', then ' . $this->cancel_refund_percent . '% back' : '');
+    }
+
+    public function hasPayoutDetails(): bool
+    {
+        return filled($this->account_number) || filled($this->upi_vpa);
+    }
+
+    /** •••• 4321 — the review page never shows the whole number. */
+    public function maskedAccount(): ?string
+    {
+        $num = preg_replace('/\D/', '', (string) $this->account_number);
+
+        return $num === '' ? null : '•••• ' . substr($num, -4);
+    }
+
+    /** ra••••@okhdfc */
+    public function maskedUpi(): ?string
+    {
+        $vpa = (string) $this->upi_vpa;
+        if (! str_contains($vpa, '@')) {
+            return $vpa === '' ? null : $vpa;
+        }
+        [$head, $bank] = explode('@', $vpa, 2);
+
+        return mb_substr($head, 0, 2) . str_repeat('•', max(2, mb_strlen($head) - 2)) . '@' . $bank;
     }
 
     /** Public URLs of the uploaded photos, for the review page. */

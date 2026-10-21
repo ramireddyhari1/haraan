@@ -8,9 +8,11 @@ use App\Filament\Resources\Partners\PartnerResource;
 use App\Filament\Resources\Venues\VenueResource;
 use App\Models\AdminAction;
 use App\Models\PartnerApplication;
+use App\Models\PartnerPayoutAccount;
 use App\Services\PartnerApplicationVenueBuilder;
 use App\Support\PartnerAccountResolver;
 use App\Support\PartnerLane;
+use App\Support\PayoutAccountEditor;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -77,7 +79,8 @@ final class PartnerApplicationActions
             ->visible(fn (PartnerApplication $record): bool => $record->partner_id === null
                 && $record->status !== PartnerApplication::STATUS_REJECTED)
             ->modalHeading(fn (PartnerApplication $record): string => 'Create a partner for ' . $record->business_name)
-            ->modalDescription('Their console sign-in uses this email or phone. Venues are still added by you in Game Hub → Venues and assigned to them there.')
+            ->modalDescription(fn (PartnerApplication $record): string => 'Their console sign-in uses this email or phone.'
+                . ($record->hasPayoutDetails() ? ' The bank / UPI details they gave become their settlement account, unverified until finance checks them.' : ''))
             ->modalSubmitActionLabel('Create partner')
             ->schema([
                 TextInput::make('name')->label('Partner name')->required()->maxLength(120),
@@ -112,6 +115,20 @@ final class PartnerApplicationActions
                             'partner_type' => $data['partner_type'],
                             'status' => 'active',
                         ]);
+
+                        // Their payout details become the settlement account — through the one
+                        // write path, so the change trail and "unverified" state apply.
+                        if ($record->hasPayoutDetails() && ! PartnerPayoutAccount::where('partner_id', $result[0]->id)->exists()) {
+                            $bank = $record->payout_method === 'bank' && filled($record->account_number);
+                            app(PayoutAccountEditor::class)->save($result[0]->id, [
+                                'method' => $bank ? 'bank' : 'upi',
+                                'account_holder' => $record->account_holder ?: $data['name'],
+                                'bank_name' => $record->bank_name,
+                                'account_number' => $record->account_number,
+                                'ifsc_code' => $record->ifsc_code,
+                                'upi_vpa' => $record->upi_vpa,
+                            ], auth()->user());
+                        }
 
                         $record->forceFill([
                             'status' => PartnerApplication::STATUS_APPROVED,

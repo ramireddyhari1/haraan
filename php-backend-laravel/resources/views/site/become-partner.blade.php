@@ -26,6 +26,9 @@
         'amenities' => $amenities,
         'rules' => $rulePresets,
         'maxPhotos' => $maxPhotos,
+        'askPayouts' => $askPayouts,
+        'banks' => $banks,
+        'ifscBanks' => PA::IFSC_BANKS,
     ];
 @endphp
 <!DOCTYPE html>
@@ -392,6 +395,59 @@
             .bp-day { grid-template-columns: 70px 1fr 1fr; gap: 8px; padding: 8px 10px; }
             .bp-day__t { padding: 0 6px; font-size: 13.5px; }
         }
+
+        /* ── Payouts: a cheque leaf that fills in ─────────────────────────────── */
+        .bp-cheque { position: relative; margin: 4px 0 18px; padding: 16px 18px 14px; border-radius: 14px; border: 1px solid #CFDBEF; overflow: hidden;
+            background:
+                repeating-radial-gradient(circle at 85% 120%, transparent 0 9px, rgba(37,99,235,.06) 9px 10px),
+                repeating-linear-gradient(115deg, transparent 0 7px, rgba(37,99,235,.035) 7px 8px),
+                linear-gradient(135deg, #F6F9FF, #EDF3FD);
+            box-shadow: 0 16px 30px -24px rgba(30,58,138,.55); transition: transform .4s var(--spring), box-shadow .3s; }
+        .bp-cheque.is-ready { box-shadow: 0 18px 34px -22px rgba(30,58,138,.7); }
+        .bp-cheque.is-flash { animation: chequeFlip .5s var(--spring); }
+        @keyframes chequeFlip { 40% { transform: rotateX(10deg) translateY(-3px); } }
+        .bp-cheque__top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+        .bp-cheque__bank { display: flex; gap: 8px; align-items: center; min-width: 0; }
+        .bp-cheque__bank svg { width: 20px; height: 20px; flex: none; stroke: var(--blue-d); stroke-width: 1.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+        .bp-cheque__bank b { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .bp-cheque__ifsc { font-size: 10px; font-weight: 800; letter-spacing: .14em; color: var(--mute); white-space: nowrap; }
+        .bp-cheque__ifsc b { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 12.5px; letter-spacing: .08em; color: var(--ink); margin-left: 4px; }
+        .bp-cheque__branch { font-size: 11.5px; color: var(--mute); min-height: 15px; margin: 2px 0 8px 28px; }
+        .bp-cheque__pay { display: flex; align-items: baseline; gap: 10px; border-bottom: 1.5px solid #B9C8E2; padding-bottom: 4px; margin-bottom: 12px; }
+        .bp-cheque small { font-size: 9.5px; font-weight: 800; letter-spacing: .16em; color: #7C8DAA; flex: none; }
+        .bp-cheque__pay span { font-size: 15.5px; font-weight: 700; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .bp-cheque__pay span.is-empty, .bp-cheque b.is-empty { color: #A9B6CC; font-weight: 600; }
+        .bp-cheque__row { display: flex; justify-content: space-between; gap: 14px; align-items: flex-end; }
+        .bp-cheque__ac, .bp-cheque__upi { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        .bp-cheque__ac b { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; font-size: 16px; letter-spacing: .1em; }
+        .bp-cheque__upi { text-align: right; align-items: flex-end; }
+        .bp-cheque__upi b { font-size: 12.5px; max-width: 170px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .bp-cheque__ok { position: absolute; right: 14px; top: 40px; border: 2.5px solid var(--green); color: var(--green); border-radius: 8px; padding: 2px 8px; font-weight: 800; font-size: 12px; letter-spacing: .18em; transform: rotate(-9deg) scale(1.8); opacity: 0; transition: opacity .25s, transform .35s cubic-bezier(.5,0,.75,0); pointer-events: none; }
+        .bp-cheque.is-ready .bp-cheque__ok { opacity: .9; transform: rotate(-9deg) scale(1); }
+        .bp-cheque.is-later { opacity: .45; filter: grayscale(.6); }
+        .bp-cheque__ac b { white-space: nowrap; }
+        @media (max-width: 960px) {
+            .bp-cheque { padding: 14px 14px 12px; }
+            .bp-cheque__ac b { font-size: 14px; letter-spacing: .06em; }
+            /* Account number over UPI; the stamp takes the corner they leave free. */
+            .bp-cheque__row { flex-direction: column; align-items: flex-start; gap: 8px; }
+            .bp-cheque__upi { text-align: left; align-items: flex-start; }
+            .bp-cheque__upi b { max-width: 200px; }
+            .bp-cheque__ok { top: auto; bottom: 16px; right: 14px; }
+        }
+        .bp-in--mono { font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace; letter-spacing: .08em; }
+        .bp-select { appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; background-size: 18px; padding-right: 42px; cursor: pointer; }
+        .bp-later { display: none; gap: 12px; align-items: flex-start; padding: 14px; border-radius: 14px; background: #F8FAFC; border: 1.5px dashed var(--line-2); font-size: 13.5px; color: var(--ink-2); line-height: 1.5; margin-bottom: 14px; }
+        .bp-later svg { width: 20px; height: 20px; flex: none; stroke: var(--blue); stroke-width: 1.8; fill: none; stroke-linecap: round; stroke-linejoin: round; margin-top: 1px; }
+        .bp-later.is-on { display: flex; }
+        .bp-secure { display: flex; gap: 6px; align-items: center; }
+        .bp-secure svg { width: 14px; height: 14px; stroke: currentColor; stroke-width: 2; fill: none; flex: none; }
+        #scBank { transition: opacity .5s var(--ease), transform .6s var(--spring); }
+        .sc-coin { opacity: 0; }
+        .is-paid .sc-coin { animation: coinArc 2.4s var(--ease) infinite; }
+        .is-paid .sc-coin:nth-of-type(2) { animation-delay: .8s; }
+        .is-paid .sc-coin:nth-of-type(3) { animation-delay: 1.6s; }
+        @keyframes coinArc { 0% { opacity: 0; offset-distance: 0%; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; offset-distance: 100%; } }
     </style>
 </head>
 <body>
@@ -494,6 +550,18 @@
                 <g id="scPhoto" class="sc-g is-off"><g transform="rotate(-7 50 255)"><rect class="st-t" x="16" y="224" width="62" height="66" rx="3" fill="#fff"/><clipPath id="scClip"><rect x="21" y="229" width="52" height="45"/></clipPath><rect x="21" y="229" width="52" height="45" fill="#E2E8F0"/><image id="scPhotoImg" x="21" y="229" width="52" height="45" preserveAspectRatio="xMidYMid slice" clip-path="url(#scClip)"/></g></g>
                 <g id="scParking" class="sc-g is-off"><path class="st" d="M176 262 V236"/><rect class="st-t" x="164" y="214" width="24" height="24" rx="4" fill="#2563EB"/><text x="176" y="231" text-anchor="middle" style="font:800 14px 'Plus Jakarta Sans',sans-serif;fill:#fff">P</text></g>
 
+                <g id="scBank" class="sc-g is-off">
+                    <path d="M236 74 L262 58 L288 74 Z" fill="#DBEAFE" class="st-t"/>
+                    <rect x="240" y="74" width="44" height="4" fill="#fff" class="st-t"/>
+                    <path class="st-t" d="M246 78 V96 M256 78 V96 M268 78 V96 M278 78 V96"/>
+                    <rect x="236" y="96" width="52" height="5" fill="#fff" class="st-t"/>
+                    <circle cx="262" cy="67" r="2.4" fill="#2563EB"/>
+                    <path d="M123 150 Q 180 52 250 92" fill="none" stroke="#94A3B8" stroke-width="1.2" stroke-dasharray="3 4"/>
+                    <circle class="sc-coin" r="4.5" fill="#FBBF24" stroke="#B45309" stroke-width="1" style="offset-path: path('M123 150 Q 180 52 250 92')"/>
+                    <circle class="sc-coin" r="4.5" fill="#FBBF24" stroke="#B45309" stroke-width="1" style="offset-path: path('M123 150 Q 180 52 250 92')"/>
+                    <circle class="sc-coin" r="4.5" fill="#FBBF24" stroke="#B45309" stroke-width="1" style="offset-path: path('M123 150 Q 180 52 250 92')"/>
+                </g>
+
                 {{-- The phone we'll ring. --}}
                 <g id="scCall" class="sc-g is-off">
                     <path class="st sc-ring" d="M488 230 a20 20 0 0 1 0 30" />
@@ -529,7 +597,7 @@
             <form id="bpForm" novalidate>
                 <div id="bpHead">
                     <div class="bp-rail" id="bpRail" aria-hidden="true"></div>
-                    <div class="bp-stepno"><span id="bpStepNo">Step 1</span><span class="bp-saved" id="bpSaved"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>Saved<span class="bp-saved__long">&nbsp;on this device</span></span></div>
+                    <div class="bp-stepno"><span id="bpStepNo">Step 1</span><span class="bp-saved" id="bpSaved"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>Saved<span class="bp-saved__long">on this device</span></span></div>
                     <h2 class="bp-h" id="bpTitle">What do you run?</h2>
                     <p class="bp-sub" id="bpSub"></p>
                 </div>
@@ -777,6 +845,80 @@
                         </div>
                     </div>
 
+                    {{-- Payouts — becomes the partner's settlement account (Finance verifies it). --}}
+                    <div class="bp-step" data-key="payouts" data-label="Payouts" data-title="Where should we send your money?" data-sub="Online bookings are settled to this account. Haraan finance checks it before the first transfer.">
+                        <div class="bp-group" data-field="payout_method">
+                            <div class="bp-chips" data-single="payout_method" data-keep>
+                                @foreach (PA::PAYOUT_METHODS as $k => $l)
+                                    <button type="button" class="bp-chip" data-val="{{ $k }}"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>{{ $l }}</button>
+                                @endforeach
+                            </div>
+                        </div>
+
+                        {{-- The cheque leaf fills in as they type. --}}
+                        <div class="bp-cheque" id="bpCheque" aria-hidden="true">
+                            <div class="bp-cheque__top">
+                                <span class="bp-cheque__bank"><svg viewBox="0 0 24 24"><path d="M3 10l9-6 9 6M5 10v8M19 10v8M9 10v8M15 10v8M3 20h18"/></svg><b id="chBank">Your bank</b></span>
+                                <span class="bp-cheque__ifsc">IFSC <b id="chIfsc">— — — —</b></span>
+                            </div>
+                            <div class="bp-cheque__branch" id="chBranch"></div>
+                            <div class="bp-cheque__pay"><small>PAY TO</small><span id="chName">Account holder’s name</span></div>
+                            <div class="bp-cheque__row">
+                                <div class="bp-cheque__ac"><small>A/C NO.</small><b id="chAc">•••• •••• ••••</b></div>
+                                <div class="bp-cheque__upi" id="chUpiWrap"><small>UPI</small><b id="chUpi">—</b></div>
+                            </div>
+                            <div class="bp-cheque__ok" id="chOk">READY</div>
+                        </div>
+
+                        <div id="bpBankFields">
+                            <div class="bp-f" data-field="ifsc_code">
+                                <label for="bpIfsc">IFSC code <em>printed on your cheque book or passbook</em></label>
+                                <input class="bp-in bp-in--mono" id="bpIfsc" name="ifsc_code" maxlength="11" autocapitalize="characters" spellcheck="false" autocomplete="off" placeholder="HDFC0001234">
+                                <div class="bp-hint" id="bpIfscHint">We fill in the bank from the IFSC.</div>
+                                <div class="bp-err"></div>
+                            </div>
+                            <div class="bp-f" data-field="bank_name">
+                                <label for="bpBank">Bank</label>
+                                <select class="bp-in bp-select" id="bpBank" name="bank_name">
+                                    <option value="">Pick your bank</option>
+                                    @foreach ($banks as $b)
+                                        <option value="{{ $b }}">{{ $b }}</option>
+                                    @endforeach
+                                    <option value="__other">Another bank…</option>
+                                </select>
+                                <input class="bp-in" id="bpBankOther" maxlength="80" placeholder="Name of your bank" style="margin-top:8px" hidden>
+                                <div class="bp-err"></div>
+                            </div>
+                        </div>
+                        <div class="bp-f" data-field="account_holder" id="bpHolderField">
+                            <label for="bpHolder">Account holder’s name <em>exactly as the bank has it</em></label>
+                            <input class="bp-in" id="bpHolder" name="account_holder" maxlength="100" autocomplete="off" placeholder="e.g. Green Field Sports LLP">
+                            <div class="bp-err"></div>
+                        </div>
+                        <div class="bp-row" id="bpAcRow">
+                            <div class="bp-f" data-field="account_number">
+                                <label for="bpAc">Account number</label>
+                                <input class="bp-in bp-in--mono" id="bpAc" name="account_number" inputmode="numeric" maxlength="22" autocomplete="off" placeholder="5010 0012 3443 21">
+                                <div class="bp-err"></div>
+                            </div>
+                            <div class="bp-f" data-field="account_number_confirmation">
+                                <label for="bpAc2">Type it again</label>
+                                <input class="bp-in bp-in--mono" id="bpAc2" name="account_number_confirmation" inputmode="numeric" maxlength="22" autocomplete="off" placeholder="Same number">
+                                <div class="bp-err"></div>
+                            </div>
+                        </div>
+                        <div class="bp-f" data-field="upi_vpa" id="bpUpiField">
+                            <label for="bpUpi" id="bpUpiLbl">UPI ID <em>optional</em></label>
+                            <input class="bp-in" id="bpUpi" name="upi_vpa" maxlength="120" inputmode="email" autocapitalize="off" spellcheck="false" autocomplete="off" placeholder="name@okhdfcbank">
+                            <div class="bp-err"></div>
+                        </div>
+                        <div class="bp-later" id="bpLater">
+                            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/></svg>
+                            <span>No problem — we’ll take your bank or UPI details on the call. Bookings can’t be paid out until they’re added.</span>
+                        </div>
+                        <p class="bp-hint bp-secure"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>Stored encrypted. Only Haraan finance sees the full number.</p>
+                    </div>
+
                     {{-- Review the slip, then stamp it. --}}
                     <div class="bp-step" data-key="review" data-label="Review" data-title="Check your application" data-sub="This is exactly what reaches our partner team — and what your venue page starts from.">
                         <div class="bp-slip" id="bpSlip">
@@ -844,7 +986,7 @@
     const ORDER = $$('.bp-step', form).map((s) => s.dataset.key);
     const PLACE_ONLY = ['courts', 'hours', 'photos', 'extras'];
     const isPlace = () => state.business_type !== 'event';
-    const flow = () => ORDER.filter((k) => isPlace() || !PLACE_ONLY.includes(k));
+    const flow = () => ORDER.filter((k) => (isPlace() || !PLACE_ONLY.includes(k)) && (CFG.askPayouts || k !== 'payouts'));
     const reached = (k) => ORDER.indexOf(step) >= ORDER.indexOf(k);
 
     const unit = () => (state.business_type === 'cafe' ? 'Table' : 'Court');
@@ -858,6 +1000,8 @@
         booking_channels: [], monthly_bookings: '', goals: [],
         contact_name: CFG.prefill.name || '', contact_role: '', phone: (CFG.prefill.phone || '').replace(/^\+91/, ''),
         email: CFG.prefill.email || '', call_time: '', gstin: '', note: '',
+        payout_method: 'bank', bank_name: '', account_holder: '', account_number: '', account_number_confirmation: '',
+        ifsc_code: '', upi_vpa: '',
     };
     let photos = []; // [{ blob, url }] — memory only, never in the draft
     let step = 'type';
@@ -875,7 +1019,8 @@
         clearTimeout(saveT);
         saveT = setTimeout(() => {
             try {
-                localStorage.setItem(DRAFT_KEY, JSON.stringify({ state, step }));
+                const { account_number, account_number_confirmation, ...keep } = state;
+                localStorage.setItem(DRAFT_KEY, JSON.stringify({ state: keep, step }));
                 const s = $('#bpSaved'); s.classList.add('is-on'); clearTimeout(s._t); s._t = setTimeout(() => s.classList.remove('is-on'), 1600);
             } catch (e) {}
         }, 350);
@@ -890,7 +1035,7 @@
     const CHECK = '<svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>';
 
     // ── Plain inputs ─────────────────────────────────────────────────────────────
-    ['business_name', 'tagline', 'about', 'area', 'city', 'address', 'map_link', 'contact_name', 'email', 'gstin', 'note'].forEach((n) => {
+    ['business_name', 'tagline', 'about', 'area', 'city', 'address', 'map_link', 'contact_name', 'email', 'gstin', 'note', 'account_holder', 'ifsc_code', 'upi_vpa'].forEach((n) => {
         const el = form.elements[n]; if (el) el.value = state[n] || '';
     });
     $('#bpPhone').value = fmtPhone(state.phone);
@@ -1125,7 +1270,7 @@
         // Groups marked data-keep always hold an answer; the rest toggle off on a second tap.
         state[k] = !g.hasAttribute('data-keep') && state[k] === v ? (g.hasAttribute('data-num') ? null : '') : v;
         if (k === 'cancel_free_hours' && state.cancel_free_hours !== null && state.cancel_refund_percent === null) state.cancel_refund_percent = 0;
-        buzz(6); paintChoices(); paintHours(); paintScene(); save();
+        buzz(6); paintChoices(); paintHours(); paintPayout(); paintScene(); save();
     }));
 
     // Copy that depends on what they run.
@@ -1140,6 +1285,73 @@
         // Default court names follow the unit ("Court 2" → "Table 2").
         state.courts.forEach((c, i) => { if (/^(Court|Table) \d+$/.test(c.name)) c.name = unit() + ' ' + (i + 1); });
     };
+
+    // ── Payouts: the cheque leaf ─────────────────────────────────────────────────
+    const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+    const UPI_RE = /^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z][a-zA-Z0-9]{1,63}$/;
+    const groupAc = (v) => digits(v).slice(0, 18).replace(/(\d{4})(?=\d)/g, '$1 ');
+    const bankSel = $('#bpBank');
+    const setBank = (name) => {
+        if (!name) return;
+        const known = Array.from(bankSel.options).find((o) => o.value.toLowerCase() === name.toLowerCase());
+        if (known) { bankSel.value = known.value; $('#bpBankOther').hidden = true; state.bank_name = known.value; }
+        else { bankSel.value = '__other'; $('#bpBankOther').hidden = false; $('#bpBankOther').value = name; state.bank_name = name; }
+    };
+    if (state.bank_name) setBank(state.bank_name);
+    let branchFor = '';
+    const lookupBranch = async (code) => {
+        if (branchFor === code) return;
+        branchFor = code;
+        // Public IFSC directory — only the IFSC is sent. Quietly does nothing offline.
+        try {
+            const r = await fetch('https://ifsc.razorpay.com/' + encodeURIComponent(code));
+            if (!r.ok || branchFor !== code) { if (r.status === 404) $('#bpIfscHint').textContent = 'We couldn’t find that IFSC — check it on your cheque book.'; return; }
+            const d = await r.json();
+            if (branchFor !== code) return;
+            if (d.BANK && !state.bank_name) setBank(d.BANK);
+            $('#chBranch').textContent = [d.BRANCH, d.CITY].filter(Boolean).join(', ');
+            $('#bpIfscHint').textContent = (d.BANK || '') + (d.BRANCH ? ' · ' + d.BRANCH : '');
+            paintPayout();
+        } catch (e) {}
+    };
+    const payoutReady = () => {
+        const m = state.payout_method;
+        if (m === 'upi') return state.account_holder.trim().length >= 2 && UPI_RE.test(state.upi_vpa.trim());
+        if (m === 'bank') return !!state.bank_name && state.account_holder.trim().length >= 2 && /^\d{9,18}$/.test(digits(state.account_number))
+            && digits(state.account_number) === digits(state.account_number_confirmation) && IFSC_RE.test(state.ifsc_code)
+            && (!state.upi_vpa.trim() || UPI_RE.test(state.upi_vpa.trim()));
+        return false;
+    };
+    const paintPayout = () => {
+        const m = state.payout_method;
+        $('#bpBankFields').hidden = m !== 'bank';
+        $('#bpAcRow').hidden = m !== 'bank';
+        $('#bpHolderField').hidden = m === 'later';
+        $('#bpUpiField').hidden = m === 'later';
+        $('#bpLater').classList.toggle('is-on', m === 'later');
+        $('#bpUpiLbl').innerHTML = m === 'upi' ? 'UPI ID' : 'UPI ID <em>optional</em>';
+        const ch = $('#bpCheque');
+        ch.classList.toggle('is-later', m === 'later');
+        const put = (id, text, empty) => { const el = $(id); el.textContent = text || empty; el.classList.toggle('is-empty', !text); };
+        put('#chBank', m === 'upi' ? 'UPI' : state.bank_name, 'Your bank');
+        put('#chIfsc', m === 'bank' ? state.ifsc_code : '', '— — — —');
+        put('#chName', state.account_holder.trim().toUpperCase(), 'Account holder’s name');
+        put('#chAc', m === 'bank' ? groupAc(state.account_number) : '', '•••• •••• ••••');
+        put('#chUpi', state.upi_vpa.trim().toLowerCase(), '—');
+        $('#chUpiWrap').hidden = m === 'bank' && !state.upi_vpa.trim();
+        if (m !== 'bank') $('#chBranch').textContent = '';
+        const ready = payoutReady();
+        if (ready && !ch.classList.contains('is-ready')) { ch.classList.remove('is-flash'); void ch.offsetWidth; ch.classList.add('is-flash'); buzz([10, 30, 16]); }
+        ch.classList.toggle('is-ready', ready);
+    };
+    bankSel.addEventListener('change', () => {
+        const other = bankSel.value === '__other';
+        $('#bpBankOther').hidden = !other;
+        state.bank_name = other ? $('#bpBankOther').value.trim() : bankSel.value;
+        if (other) $('#bpBankOther').focus();
+        setErr('bank_name', ''); paintPayout(); paintScene(); save();
+    });
+    $('#bpBankOther').addEventListener('input', (e) => { state.bank_name = e.target.value.trim(); paintPayout(); save(); e.stopPropagation(); });
 
     // ── The scene ────────────────────────────────────────────────────────────────
     const show = (id, on) => $(id).classList.toggle('is-off', !on);
@@ -1185,6 +1397,10 @@
         if (photos.length) $('#scPhotoImg').setAttribute('href', photos[0].url);
         show('#scParking', isPlace() && state.amenities.includes('Parking'));
         $('#scBeams').style.opacity = state.amenities.includes('Floodlights') ? '1' : '0';
+
+        const paying = reached('payouts') && CFG.askPayouts && state.payout_method !== 'later';
+        show('#scBank', paying);
+        scene.classList.toggle('is-paid', paying && payoutReady());
 
         show('#scPeople', reached('today') && (state.booking_channels.length > 0 || state.monthly_bookings !== ''));
         show('#scCall', reached('contact'));
@@ -1267,6 +1483,20 @@
             need(!state.email || /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(state.email), 'email', 'That email doesn’t look right.');
             need(!state.gstin || /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/i.test(state.gstin), 'gstin', 'A GSTIN is 15 characters, like 37ABCDE1234F1Z5. Leave it empty if you don’t have one.');
         }
+        if (key === 'payouts') {
+            const m = state.payout_method;
+            const ac = digits(state.account_number);
+            if (m === 'bank') {
+                need(IFSC_RE.test(state.ifsc_code), 'ifsc_code', state.ifsc_code ? 'An IFSC is 11 characters, like HDFC0001234 (the fifth is a zero).' : 'Enter the IFSC — it is printed on your cheque book.');
+                need(!!state.bank_name, 'bank_name', 'Pick your bank.');
+            }
+            if (m !== 'later') need(state.account_holder.trim().length >= 2, 'account_holder', 'Whose name is the account in?');
+            if (m === 'bank') {
+                need(/^\d{9,18}$/.test(ac), 'account_number', ac ? 'An account number is 9 to 18 digits.' : 'Enter the account number.');
+                need(!ac || ac === digits(state.account_number_confirmation), 'account_number_confirmation', 'The two account numbers don’t match.');
+            }
+            if (m === 'upi' || state.upi_vpa.trim()) need(UPI_RE.test(state.upi_vpa.trim()), 'upi_vpa', state.upi_vpa.trim() ? 'A UPI ID looks like name@okhdfcbank.' : 'Enter your UPI ID.');
+        }
         if (key === 'review') need($('#bpConsent').checked, 'consent', 'Tick the box so we can call you.');
         if (bad.length) {
             buzz([10, 40, 10]);
@@ -1304,6 +1534,8 @@
         }
         rows.push(
             ['Today', esc(words(state.booking_channels, L.channels) || 'Not said'), esc([L.monthly[state.monthly_bookings] ? L.monthly[state.monthly_bookings] + ' a month' : '', words(state.goals, L.goals)].filter(Boolean).join(' · ')), 'today'],
+            ...(CFG.askPayouts ? [['Payouts', esc(state.payout_method === 'later' ? 'On the call' : state.payout_method === 'upi' ? 'UPI · ' + state.upi_vpa.trim().toLowerCase() : (state.bank_name || 'Bank') + ' · •••• ' + digits(state.account_number).slice(-4)),
+                esc(state.payout_method === 'later' ? 'We’ll take the details when we call' : [state.account_holder.trim(), state.payout_method === 'bank' ? 'IFSC ' + state.ifsc_code : '', state.payout_method === 'bank' && state.upi_vpa.trim() ? 'UPI ' + state.upi_vpa.trim().toLowerCase() : ''].filter(Boolean).join(' · ')), 'payouts']] : []),
             ['Call', esc(state.contact_name.trim() + (state.contact_role ? ' · ' + L.roles[state.contact_role] : '')), esc(['+91 ' + fmtPhone(state.phone), state.call_time ? L.callTimes[state.call_time] : '', state.email].filter(Boolean).join(' · ')), 'contact'],
         );
         $('#slBody').innerHTML = rows.map(([k, v, sub, s]) => `<div class="bp-slip__sec"><dt>${k}</dt><dd>${v}${sub ? `<small>${sub}</small>` : ''}</dd><button type="button" class="bp-slip__edit" data-goto="${s}">Edit</button></div>`).join('');
@@ -1321,10 +1553,21 @@
             const was = $('#bpPhoneWrap').classList.contains('is-valid');
             $('#bpPhoneWrap').classList.toggle('is-valid', phoneOk());
             if (!was && phoneOk()) buzz(12);
-        } else if (el.name && el.name in state && el.name !== 'consent') {
+        } else if (el.name === 'account_number' || el.name === 'account_number_confirmation') {
+            el.value = groupAc(el.value);
+            state[el.name] = digits(el.value);
+        } else if (el.name === 'ifsc_code') {
+            el.value = el.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 11);
+            state.ifsc_code = el.value;
+            const bank = CFG.ifscBanks[el.value.slice(0, 4)];
+            if (bank && !state.bank_name) setBank(bank);
+            if (IFSC_RE.test(el.value)) lookupBranch(el.value);
+            else { $('#chBranch').textContent = ''; $('#bpIfscHint').textContent = 'We fill in the bank from the IFSC.'; }
+        } else if (el.name && el.name in state && el.name !== 'consent' && el.name !== 'bank_name') {
             state[el.name] = el.name === 'gstin' ? el.value.toUpperCase().replace(/\s/g, '') : el.value;
             if (el.name === 'map_link') pinFromLink(el.value);
         }
+        if (step === 'payouts') paintPayout();
         setErr(el.closest('[data-field]')?.dataset.field, '');
         paintScene(); save();
     });
@@ -1346,6 +1589,8 @@
         photos: 'photos', amenities: 'extras', rules: 'extras',
         booking_channels: 'today', monthly_bookings: 'today', goals: 'today',
         contact_name: 'contact', contact_role: 'contact', phone: 'contact', email: 'contact', call_time: 'contact', gstin: 'contact', note: 'contact',
+        payout_method: 'payouts', bank_name: 'payouts', account_holder: 'payouts', account_number: 'payouts',
+        account_number_confirmation: 'payouts', ifsc_code: 'payouts', upi_vpa: 'payouts',
         consent: 'review',
     };
     const payload = () => {
@@ -1365,6 +1610,10 @@
             contact_name: state.contact_name, contact_role: state.contact_role || null, phone: digits(state.phone),
             email: state.email || null, call_time: state.call_time || null, gstin: state.gstin || null, note: state.note,
             consent: true, source: CFG.source || null,
+            payout_method: CFG.askPayouts ? state.payout_method : 'later',
+            bank_name: state.bank_name || null, account_holder: state.account_holder.trim() || null,
+            account_number: digits(state.account_number) || null, account_number_confirmation: digits(state.account_number_confirmation) || null,
+            ifsc_code: state.ifsc_code || null, upi_vpa: state.upi_vpa.trim() || null,
         };
     };
 
@@ -1427,7 +1676,7 @@
         }, 1250);
     };
 
-    paintChoices(); paintTypeCopy(); paintPin(); paintCourts(); paintHours(); paintPhotos(); goTo(step);
+    paintChoices(); paintTypeCopy(); paintPin(); paintCourts(); paintHours(); paintPhotos(); paintPayout(); goTo(step);
 })();
 </script>
 @endif

@@ -261,6 +261,26 @@ class PartnerApplicationResource extends Resource
                     TextEntry::make('gstin')->label('GSTIN')->placeholder('—')->copyable(),
                 ]),
 
+            // Masked here; the full number reaches finance in Settlement accounts once the
+            // partner is created (PayoutAccountEditor), where it is verified before any transfer.
+            Section::make('Payouts')
+                ->columnSpanFull()
+                ->columns(4)
+                ->schema([
+                    TextEntry::make('payout_method')->label('Paid by')
+                        ->formatStateUsing(fn (?string $state): string => PartnerApplication::PAYOUT_METHODS[$state] ?? '—')
+                        ->placeholder('Not asked'),
+                    TextEntry::make('bank_name')->label('Bank')->placeholder('—')
+                        ->suffix(fn (PartnerApplication $record): string => $record->ifsc_code ? ' · IFSC ' . $record->ifsc_code : ''),
+                    TextEntry::make('account_holder')->label('Account holder')->placeholder('—'),
+                    TextEntry::make('masked_account')->label('Account / UPI')
+                        ->state(fn (PartnerApplication $record): ?string => implode(' · ', array_filter([$record->maskedAccount(), $record->maskedUpi()])) ?: null)
+                        ->helperText(fn (PartnerApplication $record): ?string => $record->hasPayoutDetails()
+                            ? ($record->partner_id ? 'Full details are in Finance → Settlement accounts.' : 'Create partner copies these into their settlement account, unverified.')
+                            : null)
+                        ->placeholder('—'),
+                ]),
+
             Section::make('Courts & pricing')
                 ->visible($place)
                 ->columnSpanFull()
