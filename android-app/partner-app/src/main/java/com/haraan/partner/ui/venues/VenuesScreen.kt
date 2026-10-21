@@ -197,7 +197,7 @@ fun VenuesScreen(
                     }
                 }
                 item(key = "details-${v.id}") {
-                    Reveal(i * 3 + 2) { VenueDetailsCard(room.details, published = room.details != null, onSupport = onSupport) }
+                    Reveal(i * 3 + 2) { VenueDetailsCard(room.details, published = room.details != null, commission = room.v.commission, onSupport = onSupport) }
                 }
                 if (!room.courts.isNullOrEmpty()) {
                     item(key = "courts-${v.id}") {

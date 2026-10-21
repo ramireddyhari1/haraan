@@ -106,7 +106,6 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -114,6 +113,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -201,6 +201,13 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.sp
 import com.haraan.partner.ui.drawer.HaraanPartnerDrawer
 import com.haraan.partner.ui.Haptics
+import com.haraan.partner.ui.components.BallRefreshBox
+import com.haraan.partner.ui.components.LocalRefreshBall
+import com.haraan.partner.ui.components.refreshBallFor
+import com.haraan.partner.ui.components.LocalSessionDoor
+import com.haraan.partner.ui.components.Problem
+import com.haraan.partner.ui.components.ProblemState
+import com.haraan.partner.ui.components.SessionDoor
 import com.haraan.partner.ui.home.CellState
 import com.haraan.partner.ui.home.CourtHour
 import com.haraan.partner.ui.home.CourtTag
@@ -213,7 +220,7 @@ import com.haraan.partner.ui.components.rememberMoneyMotion
 
 private sealed interface UiState<out T> {
     data object Loading : UiState<Nothing>
-    data class Error(val message: String) : UiState<Nothing>
+    data class Error(val message: String, val problem: Problem = Problem.Other) : UiState<Nothing>
     data class Data<T>(val value: T) : UiState<T>
 }
 
@@ -481,6 +488,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     var showReports by remember { mutableStateOf(false) }
     var showPayouts by remember { mutableStateOf(false) }
     var showCustomers by remember { mutableStateOf(false) }
+    var showReviews by remember { mutableStateOf(false) }
     var showPackages by remember { mutableStateOf(false) }
     var showAcademy by remember { mutableStateOf(false) }
     var showNotifications by remember { mutableStateOf(false) }
@@ -498,7 +506,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     // screen opened, so coming back reset the tab to Home, zeroed the bell and
     // stopped new-booking alerts for as long as Reports or Payouts was open.
     val screenOpen = showNotifications || showSupport || showAcademy || showPackages ||
-        showCustomers || showPayouts || showReports || showStaff || showShiftRegister ||
+        showCustomers || showReviews || showPayouts || showReports || showStaff || showShiftRegister ||
         showStandingSlots || showPricingMatrix || showWhatsAppDesk || showOperationsCenter ||
         detail != null || manageVenue != null
     // Build the visible tabs from the partner's lane so an event host never sees
@@ -736,6 +744,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
             showAcademy -> showAcademy = false
             showPackages -> showPackages = false
             showCustomers -> showCustomers = false
+            showReviews -> showReviews = false
             showPayouts -> showPayouts = false
             showReports -> showReports = false
             showStaff -> showStaff = false
@@ -778,6 +787,10 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
     }
     if (showCustomers) {
         CustomersScreen(api, token, session.branchId, onBack = { showCustomers = false })
+        return
+    }
+    if (showReviews) {
+        ReviewsScreen(api, token, session.branchId, onBack = { showReviews = false })
         return
     }
     if (showPayouts) {
@@ -960,6 +973,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                 onStaff = if (!session.isDesk) ({ showStaff = true; closeDrawer() }) else null,
                 onPayouts = if (session.can("reports")) ({ showPayouts = true; closeDrawer() }) else null,
                 onReports = if (session.can("reports")) ({ showReports = true; closeDrawer() }) else null,
+                onReviews = if ((lane == Lane.VENUE || lane == Lane.BOTH) && session.can("reports")) ({ showReviews = true; closeDrawer() }) else null,
                 onAcademy = if (session.can("bookings") || session.can("reports")) ({ showAcademy = true; closeDrawer() }) else null,
                 onShiftRegister = if (lane == Lane.VENUE || lane == Lane.CAFE) ({ showShiftRegister = true; closeDrawer() }) else null,
                 onStandingSlots = if (lane == Lane.VENUE || lane == Lane.BOTH) ({ showStandingSlots = true; closeDrawer() }) else null,
@@ -1047,6 +1061,18 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
         // floating bar instead of stopping at a pale band above it.
         containerColor = if (tab == Tab.Scan) Color.Black else AuthPageBg,
     ) { padding ->
+        // The pull-to-refresh ball is the focus venue's own sport.
+        val refreshBall = remember(venues, branchId) {
+            refreshBallFor(venues?.let { list -> list.firstOrNull { it.id == branchId } ?: list.firstOrNull() }?.sports.orEmpty())
+        }
+        val sessionDoor = remember(session.name) {
+            SessionDoor(
+                name = session.name,
+                role = if (session.isDesk) "Desk staff" else "Owner",
+                signInAgain = { session.clear(); onSignedOut() },
+            )
+        }
+        CompositionLocalProvider(LocalRefreshBall provides refreshBall, LocalSessionDoor provides sessionDoor) {
         Column(
             Modifier.fillMaxSize().padding(
                 // Scan and Home draw their own status-bar space: the camera and the
@@ -1165,6 +1191,7 @@ private fun HomeScaffold(api: PartnerApi, session: Session, onSignedOut: () -> U
                 Tab.Scan -> ScanTab(api, token, bottomInset = padding.calculateBottomPadding())
             }
         }
+        }
     }
     }
 }
@@ -1197,6 +1224,7 @@ private fun PartnerDrawer(
     onPayouts: (() -> Unit)?,
     onReports: (() -> Unit)?,
     onAcademy: (() -> Unit)?,
+    onReviews: (() -> Unit)? = null,
     onShiftRegister: (() -> Unit)? = null,
     onStandingSlots: (() -> Unit)? = null,
     onPricingMatrix: (() -> Unit)? = null,
@@ -1221,6 +1249,7 @@ private fun PartnerDrawer(
         onPayouts = onPayouts,
         onReports = onReports,
         onAcademy = onAcademy,
+        onReviews = onReviews,
         onShiftRegister = onShiftRegister,
         onStandingSlots = onStandingSlots,
         onPricingMatrix = onPricingMatrix,
@@ -1543,28 +1572,48 @@ internal fun <T> RefreshableContent(
 ) {
     var data by remember(key) { mutableStateOf<UiState<T>>(UiState.Loading) }
     var refreshing by remember(key) { mutableStateOf(false) }
+    var updatedAt by remember(key) { mutableStateOf<Long?>(null) }
+    var lastFailed by remember(key) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    val view = LocalView.current
-    LaunchedEffect(key) { data = runCatchingUi { load() } }
+    LaunchedEffect(key) {
+        data = runCatchingUi { load() }
+        if (data is UiState.Data) updatedAt = System.currentTimeMillis()
+    }
     LaunchedEffect(key, reloadSignal) {
         if (reloadSignal > 0 && data is UiState.Data) {
             val fresh = runCatchingUi { load() }
-            if (fresh is UiState.Data) data = fresh
+            if (fresh is UiState.Data) { data = fresh; updatedAt = System.currentTimeMillis() }
         }
     }
-    PullToRefreshBox(
+    // The pull itself ticks when it arms; the ball says how the load went.
+    BallRefreshBox(
         isRefreshing = refreshing,
         onRefresh = {
-            Haptics.tick(view)
             scope.launch {
                 refreshing = true
-                data = runCatchingUi { load() }
+                val fresh = runCatchingUi { load() }
+                // A failed pull keeps what's on screen rather than replacing it
+                // with an error page; the line under the ball says it's stale.
+                lastFailed = fresh !is UiState.Data && data is UiState.Data
+                if (!lastFailed) data = fresh
+                if (fresh is UiState.Data) updatedAt = System.currentTimeMillis()
                 refreshing = false
             }
         },
+        updatedAt = updatedAt,
+        lastFailed = lastFailed,
         modifier = Modifier.fillMaxSize(),
     ) {
-        Loaded(data) { content(it) }
+        Loaded(
+            data,
+            onRetry = {
+                data = UiState.Loading
+                scope.launch {
+                    data = runCatchingUi { load() }
+                    if (data is UiState.Data) updatedAt = System.currentTimeMillis()
+                }
+            },
+        ) { content(it) }
     }
 }
 
@@ -5716,13 +5765,13 @@ private fun ScanTab(api: PartnerApi, token: String, bottomInset: Dp = 0.dp) {
 }
 
 @Composable
-private fun <T> Loaded(state: UiState<T>, content: @Composable (T) -> Unit) {
+private fun <T> Loaded(state: UiState<T>, onRetry: (() -> Unit)? = null, content: @Composable (T) -> Unit) {
     when (state) {
         // A skeleton of the shape that's coming, not a spinner in the void: the
         // screen keeps its silhouette while the data lands, so switching sections
         // reads as one continuous surface instead of a blank flash.
         is UiState.Loading -> SkeletonList()
-        is UiState.Error -> EmptyState(state.message)
+        is UiState.Error -> ProblemState(state.problem, onRetry, detail = state.message)
         is UiState.Data -> ScreenEnter { content(state.value) }
     }
 }
@@ -5858,7 +5907,17 @@ private fun ListCard(title: String, subtitle: String, trailing: String, footer: 
 private suspend fun <T> runCatchingUi(block: suspend () -> T): UiState<T> = try {
     UiState.Data(block())
 } catch (e: ApiException) {
-    UiState.Error(e.message ?: "Error")
+    UiState.Error(
+        e.message ?: "Error",
+        when {
+            e.code == 401 -> Problem.SignedOut
+            e.code >= 500 -> Problem.Server
+            else -> Problem.Other
+        },
+    )
+} catch (e: java.io.IOException) {
+    // No route to the server at all: DNS, refused, timed out.
+    UiState.Error(e.message ?: "Offline", Problem.Offline)
 } catch (e: Exception) {
     UiState.Error(e.message ?: "Something went wrong")
 }

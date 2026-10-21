@@ -386,6 +386,8 @@ data class VenueSummary(
     val sports: List<String> = emptyList(),
     val bookings: Int,
     val revenue: Double,
+    /** Haraan's commission as set in /control: "Free — no commission" or "10% of each online booking". */
+    val commission: String? = null,
 )
 
 data class BookingSummary(
@@ -820,6 +822,27 @@ data class PassDetail(
 )
 
 /** One customer of this venue, identified by phone across online + walk-in bookings. */
+/** One player review on the partner's Reviews screen. */
+data class ReviewRow(
+    val id: Long,
+    val name: String,
+    val rating: Int,
+    val text: String,
+    val ago: String,
+    /** Tied to a real booking at the venue. */
+    val played: Boolean,
+    val venue: String,
+)
+
+data class ReviewsPage(
+    val average: Double?,
+    val count: Int,
+    val thisMonth: Int,
+    /** Stars (5..1) → how many reviews gave that. */
+    val spread: Map<Int, Int>,
+    val reviews: List<ReviewRow>,
+)
+
 data class CustomerRow(
     val name: String,
     val phone: String,
@@ -1063,8 +1086,6 @@ data class VenueDetails(
     val amenities: List<String>,
     val rules: List<String>,
     val cancellation: String?,
-    /** "Convenience fee 4%", one line per fee players pay on top. */
-    val fees: List<String>,
     val images: List<String>,
     val rating: Double?,
     val ratingsCount: Int,
@@ -1473,6 +1494,7 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 },
                 bookings = o.optInt("bookings"),
                 revenue = o.optDouble("revenue", 0.0),
+                commission = o.optStringOrNull("commission_label"),
             )
         }
     }
@@ -1837,20 +1859,11 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
 
     /**
      * The venue as players see it, from the public venue API (no token): address, map pin,
-     * about, amenities, rules, policy and fees. Only published venues answer; others 404.
+     * about, amenities, rules and policy. Only published venues answer; others 404.
      */
     suspend fun publicVenue(venueId: Long): VenueDetails = withContext(Dispatchers.IO) {
         val o = JSONObject(request("GET", "/api/venues/$venueId", null, null)).getJSONObject("data")
         fun list(k: String) = o.optJSONArray(k).toStringList()
-        val fees = o.optJSONArray("fees")?.let { a ->
-            (0 until a.length()).mapNotNull { i ->
-                val f = a.optJSONObject(i) ?: return@mapNotNull null
-                val v = f.optDouble("value", 0.0)
-                if (v <= 0) return@mapNotNull null
-                val amount = if (f.optString("type") == "percent") formatInr(v) + "%" else "₹" + formatInr(v)
-                f.optString("label").ifBlank { "Fee" }.replaceFirstChar { it.uppercase() } + " " + amount
-            }
-        }.orEmpty()
         VenueDetails(
             address = o.optStringOrNull("address"),
             latitude = if (o.isNull("latitude")) null else o.optDouble("latitude"),
@@ -1861,7 +1874,6 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
             amenities = list("amenities"),
             rules = list("rules"),
             cancellation = o.optStringOrNull("cancellation"),
-            fees = fees,
             images = list("images"),
             rating = o.optStringOrNull("rating")?.toDoubleOrNull()?.takeIf { it > 0 },
             // Counted off real reviews only: old rows still carry the column's seeded
@@ -2235,6 +2247,32 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
     }
 
     /** GET /api/partner/customers — who books here, keyed on phone. */
+    /** GET /api/partner/reviews — average, 5→1 spread and the latest live reviews (read-only). */
+    suspend fun reviews(token: String, venueId: Long? = null, stars: Int = 0): ReviewsPage = withContext(Dispatchers.IO) {
+        val q = if (stars in 1..5) "?stars=$stars" else ""
+        val o = JSONObject(get("/api/partner/reviews" + q + branchParam(venueId, if (q.isEmpty()) "?" else "&"), token)).getJSONObject("data")
+        val spread = o.optJSONObject("spread")
+        val arr = o.optJSONArray("reviews")
+        ReviewsPage(
+            average = if (o.isNull("average")) null else o.optDouble("average"),
+            count = o.optInt("count"),
+            thisMonth = o.optInt("this_month"),
+            spread = (5 downTo 1).associateWith { spread?.optInt(it.toString()) ?: 0 },
+            reviews = if (arr == null) emptyList() else (0 until arr.length()).map { i ->
+                val r = arr.getJSONObject(i)
+                ReviewRow(
+                    id = r.optLong("id"),
+                    name = r.optString("name"),
+                    rating = r.optInt("rating"),
+                    text = r.optString("text"),
+                    ago = r.optString("ago"),
+                    played = r.optBoolean("played"),
+                    venue = r.optString("venue"),
+                )
+            },
+        )
+    }
+
     suspend fun customers(token: String, query: String = "", venueId: Long? = null): CustomersPage = withContext(Dispatchers.IO) {
         val q = if (query.isBlank()) "" else "?q=" + java.net.URLEncoder.encode(query.trim(), "UTF-8")
         val suffix = q + branchParam(venueId, if (q.isEmpty()) "?" else "&")

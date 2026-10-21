@@ -100,6 +100,7 @@ internal fun HaraanPartnerDrawer(
     onPayouts: (() -> Unit)?,
     onReports: (() -> Unit)?,
     onAcademy: (() -> Unit)?,
+    onReviews: (() -> Unit)? = null,
     onShiftRegister: (() -> Unit)? = null,
     onStandingSlots: (() -> Unit)? = null,
     onPricingMatrix: (() -> Unit)? = null,
@@ -151,6 +152,7 @@ internal fun HaraanPartnerDrawer(
                     onStaff?.let { Triple(HaraanIcons.Staff, "Staff", it) },
                     onPayouts?.let { Triple(HaraanIcons.Payouts, "Payouts", it) },
                     onReports?.let { Triple(HaraanIcons.Reports, "Reports", it) },
+                    onReviews?.let { Triple(HaraanIcons.Reviews, "Reviews", it) },
                 )
                 if (tools.isNotEmpty()) {
                     HaraanDrawerSectionHeader("Management")

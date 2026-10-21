@@ -88,7 +88,7 @@ internal fun openDirections(context: Context, d: VenueDetails) {
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-internal fun VenueDetailsCard(d: VenueDetails?, published: Boolean, onSupport: () -> Unit, modifier: Modifier = Modifier) {
+internal fun VenueDetailsCard(d: VenueDetails?, published: Boolean, commission: String?, onSupport: () -> Unit, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val view = LocalView.current
     Column(
@@ -202,11 +202,12 @@ internal fun VenueDetailsCard(d: VenueDetails?, published: Boolean, onSupport: (
             }
         }
 
-        if (d.cancellation != null || d.fees.isNotEmpty()) {
+        // Haraan's fees on the player's bill aren't the partner's to see; their commission is.
+        if (d.cancellation != null || commission != null) {
             Section("Policy & charges")
             Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 d.cancellation?.let { KeyLine("Cancellation", it) }
-                if (d.fees.isNotEmpty()) KeyLine("Players also pay", d.fees.joinToString(" · "))
+                commission?.let { KeyLine("Haraan commission", "$it · set by Haraan") }
             }
         }
 

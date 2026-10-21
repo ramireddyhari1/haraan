@@ -179,6 +179,13 @@ internal object HaraanIcons {
         stroke("M15.5 14.5 C17.5 15.1 19.5 16.8 20 20.5", STROKE_SECONDARY, alpha = 0.7f)
     }
 
+    // Reviews: a star with a light fill — what players said (same glyph as the web app).
+    val Reviews: ImageVector = icon("Reviews") {
+        fill("M12 3.2 L14.4 8.1 L19.8 8.9 L15.9 12.7 L16.8 18.1 L12 15.5 L7.2 18.1 L8.1 12.7 L4.2 8.9 L9.6 8.1 Z", alpha = 0.2f)
+        stroke("M12 3.2 L14.4 8.1 L19.8 8.9 L15.9 12.7 L16.8 18.1 L12 15.5 L7.2 18.1 L8.1 12.7 L4.2 8.9 L9.6 8.1 Z", STROKE_PRIMARY)
+        stroke("M5 21 H19", STROKE_SECONDARY, alpha = 0.5f)
+    }
+
     // 13. Packages: Multi-pass tiered membership cards
     val Packages: ImageVector = icon("Packages") {
         // Front pass card
