@@ -922,7 +922,7 @@
             <div class="location-sheet__body" id="locationBody">
                 <label class="loc-search">
                     <svg class="loc-search__icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-                    <input type="search" id="locationSearch" placeholder="Search for a city" autocomplete="off" spellcheck="false">
+                    <input type="search" id="locationSearch" placeholder="Search a city, area or place" autocomplete="off" spellcheck="false">
                 </label>
 
                 <button id="useCurrent" class="loc-current">
@@ -949,6 +949,13 @@
                 <section class="loc-group loc-group--list">
                     <h4 class="loc-group__label" id="locAllLabel">All cities</h4>
                     <div id="allCities" class="loc-rows" role="list"></div>
+                    {{-- Google Places suggestions while searching — any area, town or
+                         landmark, not just the curated city list. --}}
+                    <div id="locPlacesWrap" class="loc-places" hidden>
+                        <h4 class="loc-group__label">Places</h4>
+                        <div id="locPlaces" class="loc-rows" role="list"></div>
+                        <p class="loc-places__credit">Powered by Google</p>
+                    </div>
                     <div id="locEmpty" class="loc-empty" hidden>
                         <span class="loc-empty__icon" aria-hidden="true">
                             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>

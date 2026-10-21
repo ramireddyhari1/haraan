@@ -228,9 +228,135 @@ document.addEventListener('DOMContentLoaded', () => {
                     row.style.display = hit ? '' : 'none';
                     if (hit) visible++;
                 });
-                if (emptyState) emptyState.hidden = !(query && visible === 0);
+                localHits = visible;
+                // Hold the empty state while Google is still looking.
+                if (emptyState) emptyState.hidden = !(query && visible === 0 && !window.HaraanGoogleMapsKey);
+                searchPlaces(this.value.trim());
             };
+            clearPlaces();
         }
+    }
+
+    /* --- Google Places search: any area / town / landmark, not just cities.json --- */
+
+    const placesWrap = document.getElementById('locPlacesWrap');
+    const placesList = document.getElementById('locPlaces');
+    let localHits    = 0;
+    let placesTimer  = null;
+    let placesSeq    = 0;      // drops responses that arrive after a newer keystroke
+    let placesToken  = null;   // one billing session per search → pick
+    const PIN_SVG =
+        '<svg class="loc-row__pin" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>';
+
+    /** Lazy-load the Maps JS Places library once (shared with other pickers). */
+    function loadGooglePlaces() {
+        const key = window.HaraanGoogleMapsKey;
+        if (!key) return Promise.reject('no-key');
+        return window.__haraanGooglePromise || (window.__haraanGooglePromise = new Promise((resolve, reject) => {
+            if (window.google && window.google.maps && window.google.maps.places) { resolve(); return; }
+            window.__haraanGmapsReady = () => resolve();
+            const s = document.createElement('script');
+            s.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(key) +
+                '&libraries=places&loading=async&callback=__haraanGmapsReady';
+            s.async = true;
+            s.onerror = () => { window.__haraanGooglePromise = null; reject('load-failed'); };
+            document.head.appendChild(s);
+        }));
+    }
+
+    function clearPlaces() {
+        clearTimeout(placesTimer);
+        placesSeq++;
+        if (placesList) placesList.innerHTML = '';
+        if (placesWrap) placesWrap.hidden = true;
+    }
+
+    function escapeHtml(s) {
+        return String(s || '').replace(/[&<>"']/g, (ch) =>
+            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]);
+    }
+
+    /** Debounced Places Autocomplete for the typed query (India only). */
+    function searchPlaces(query) {
+        clearPlaces();
+        if (!window.HaraanGoogleMapsKey || query.length < 2) {
+            if (emptyState) emptyState.hidden = !(query && localHits === 0);
+            return;
+        }
+        const seq = placesSeq;
+        placesTimer = setTimeout(() => {
+            loadGooglePlaces().then(() => {
+                const places = google.maps.places;
+                if (!placesToken) placesToken = new places.AutocompleteSessionToken();
+                new places.AutocompleteService().getPlacePredictions({
+                    input: query,
+                    componentRestrictions: { country: 'in' },
+                    sessionToken: placesToken,
+                }, (predictions, status) => {
+                    if (seq !== placesSeq) return;
+                    const list = status === places.PlacesServiceStatus.OK ? (predictions || []) : [];
+                    renderPlaces(list.slice(0, 6));
+                    if (emptyState) emptyState.hidden = !(localHits === 0 && list.length === 0);
+                });
+            }).catch(() => {
+                if (seq === placesSeq && emptyState) emptyState.hidden = localHits !== 0;
+            });
+        }, 250);
+    }
+
+    function renderPlaces(predictions) {
+        if (!placesList || !placesWrap) return;
+        placesList.innerHTML = '';
+        predictions.forEach((p) => {
+            const fmt  = p.structured_formatting || {};
+            const main = fmt.main_text || p.description;
+            const sub  = fmt.secondary_text || '';
+            const row  = document.createElement('div');
+            row.className = 'loc-row loc-row--place';
+            row.setAttribute('role', 'listitem');
+            row.innerHTML = PIN_SVG +
+                '<span class="loc-row__text">' +
+                    `<span class="loc-row__name">${escapeHtml(main)}</span>` +
+                    (sub ? `<span class="loc-row__sub">${escapeHtml(sub)}</span>` : '') +
+                '</span>';
+            row.addEventListener('click', () => pickPlace(p, row));
+            placesList.appendChild(row);
+        });
+        placesWrap.hidden = predictions.length === 0;
+    }
+
+    /**
+     * Resolve the picked prediction to coordinates + its city. A served city
+     * (cities.json) wins so listings scope correctly; otherwise the pill shows
+     * the place's own town. Coordinates are always the exact spot picked, so
+     * "near you" sorting uses where the viewer actually is.
+     */
+    function pickPlace(prediction, row) {
+        row.classList.add('is-loading');
+        const svc = new google.maps.places.PlacesService(document.createElement('div'));
+        svc.getDetails({
+            placeId: prediction.place_id,
+            fields: ['geometry', 'address_components', 'name'],
+            sessionToken: placesToken,
+        }, (place, status) => {
+            placesToken = null; // session ends at the details call
+            row.classList.remove('is-loading');
+            if (status !== google.maps.places.PlacesServiceStatus.OK || !place || !place.geometry) return;
+
+            let city = '', district = '', area = '';
+            (place.address_components || []).forEach((c) => {
+                const t = c.types || [];
+                if (!city && (t.includes('locality') || t.includes('postal_town'))) city = c.long_name;
+                if (!district && t.includes('administrative_area_level_2')) district = c.long_name;
+                if (!area && (t.includes('sublocality_level_1') || t.includes('sublocality') || t.includes('neighborhood'))) area = c.long_name;
+            });
+            const loc = place.geometry.location;
+            const coords = { latitude: loc.lat(), longitude: loc.lng() };
+            const detected = city || district || area || place.name;
+            applyDetectedCity([city, district, area, place.name].filter(Boolean), detected, 'India', coords);
+        });
     }
 
     /** The subtitle line element under the sheet title. */

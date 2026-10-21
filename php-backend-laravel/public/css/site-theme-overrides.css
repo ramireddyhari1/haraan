@@ -195,6 +195,14 @@
 .location-sheet__body.is-searching #locAllLabel{display:none}
 
 /* Empty state */
+.loc-places{margin-top:4px}
+.loc-places[hidden]{display:none}
+.loc-row--place{align-items:flex-start;gap:12px}
+.loc-row__pin{flex:none;width:18px;height:18px;margin-top:2px;color:#9aa1ac}
+.loc-row__text{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.loc-row__sub{font-size:13px;color:#8a919c;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.loc-row.is-loading{opacity:.55;pointer-events:none}
+.loc-places__credit{margin:6px 2px 0;font-size:11px;color:#a3a9b3;text-align:right}
 .loc-empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:4px;padding:34px 20px 20px}
 .loc-empty[hidden]{display:none}
 .loc-empty__icon{width:52px;height:52px;display:grid;place-items:center;border-radius:16px;background:#f3f5f8;color:#aab0bb;margin-bottom:8px}
