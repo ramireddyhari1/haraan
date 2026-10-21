@@ -345,6 +345,106 @@ class BookingRepository(
     }
   }
 
+  /** A Razorpay UPI QR for a held order (POST /api/bookings/upi-qr). */
+  data class UpiQr(
+    val qrId: String,
+    /** The raw `upi://pay…` string — drawn as a QR here, and handed to UPI apps on this phone. */
+    val upi: String?,
+    /** Razorpay's own QR image, only when it sent no `upi://` string to draw. */
+    val imageUrl: String?,
+    val amount: Double,
+    /** Seconds left on the hold — the real deadline, not the QR's. */
+    val expiresIn: Int,
+  )
+
+  sealed interface UpiQrResult {
+    data class Ready(val qr: UpiQr) : UpiQrResult
+    /** The order got confirmed meanwhile (paid another way). */
+    data class Confirmed(val booking: BookingResult.Success) : UpiQrResult
+    data class Failed(val message: String) : UpiQrResult
+  }
+
+  /**
+   * A UPI QR for the held order [orderId], so the buyer can pay from any UPI app even when
+   * Razorpay's checkout lists none on this phone. Same order, same hold, same amount;
+   * asking again returns the same QR.
+   */
+  suspend fun createUpiQr(token: String, orderId: String): UpiQrResult = withContext(Dispatchers.IO) {
+    try {
+      val (code, body) = postJson("/api/bookings/upi-qr", token, JSONObject().put("razorpayOrderId", orderId))
+      if (code !in 200..299) {
+        return@withContext UpiQrResult.Failed(parseErrorMessage(body, "UPI QR isn’t available right now."))
+      }
+      val json = JSONObject(body)
+      if (json.optString("status").equals("CONFIRMED", ignoreCase = true)) {
+        return@withContext UpiQrResult.Confirmed(confirmedFrom(json))
+      }
+      val upi = json.optString("upi").takeIf { it.startsWith("upi://") }
+      val image = json.optString("imageUrl").takeIf { it.startsWith("http") }
+      if (upi == null && image == null) return@withContext UpiQrResult.Failed("UPI QR isn’t available right now.")
+      UpiQrResult.Ready(
+        UpiQr(
+          qrId = json.optString("qrId"),
+          upi = upi,
+          imageUrl = image,
+          amount = json.optDouble("amount", 0.0),
+          expiresIn = json.optInt("expiresIn", 15 * 60),
+        )
+      )
+    } catch (e: Exception) {
+      UpiQrResult.Failed("Couldn’t reach Haraan. Check your connection.")
+    }
+  }
+
+  /**
+   * Has the held order been paid — by its UPI QR or through Razorpay? Confirms it on the
+   * server when it has. [BookingResult.Error] means "not yet" (or "can't tell"), never "unpaid".
+   */
+  suspend fun upiQrStatus(token: String, orderId: String): BookingResult = withContext(Dispatchers.IO) {
+    try {
+      val (code, body) = postJson("/api/bookings/upi-qr/status", token, JSONObject().put("razorpayOrderId", orderId))
+      if (code !in 200..299) return@withContext BookingResult.Error(parseErrorMessage(body, "Still waiting for payment."))
+      val json = JSONObject(body)
+      when (json.optString("status").uppercase()) {
+        "CONFIRMED" -> confirmedFrom(json)
+        "EXPIRED", "CANCELLED", "REFUNDED" -> BookingResult.Error("This hold has ended. Pick your slot again.")
+        else -> BookingResult.Error("Waiting for payment")
+      }
+    } catch (e: Exception) {
+      BookingResult.Error("Waiting for payment")
+    }
+  }
+
+  private fun postJson(path: String, token: String, body: JSONObject): Pair<Int, String> {
+    val connection = (URL(baseUrl.trimEnd('/') + path).openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      connectTimeout = 15000
+      readTimeout = 20000
+      setRequestProperty("Content-Type", "application/json")
+      setRequestProperty("Accept", "application/json")
+      setRequestProperty("Authorization", "Bearer $token")
+    }
+    connection.outputStream.use { it.write(body.toString().toByteArray(Charsets.UTF_8)) }
+    val code = connection.responseCode
+    val text = readBody(connection)
+    connection.disconnect()
+    return code to text
+  }
+
+  private fun confirmedFrom(json: JSONObject): BookingResult.Success {
+    val data = json.optJSONObject("data") ?: JSONObject()
+    return BookingResult.Success(
+      bookingId = data.optInt("id"),
+      quantity = data.optInt("quantity"),
+      totalAmount = data.optString("totalAmount", "0.00"),
+      status = "CONFIRMED",
+      message = json.optString("message", "Booking confirmed."),
+      ticketCode = data.optString("ticketCode").takeIf { it.isNotBlank() },
+      bookingCount = data.optJSONArray("bookings")?.length() ?: 1,
+    )
+  }
+
   /** Result of a coupon-code check (POST /api/bookings/validate-coupon). */
   data class CouponResult(
     val valid: Boolean,

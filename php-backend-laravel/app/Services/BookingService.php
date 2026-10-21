@@ -611,7 +611,101 @@ final class BookingService
             ->all();
 
         if ($ids !== []) {
+            // A UPI QR for this hold must stop taking money before the slot goes back.
+            $this->closeOrderUpiQr($razorpayOrderId);
             $this->releaseBookings($ids);
+        }
+    }
+
+    /** Where an order's checkout UPI QR is remembered: the QR is per order, not per row. */
+    private static function upiQrCacheKey(string $orderId): string
+    {
+        return 'checkout_upi_qr:'.$orderId;
+    }
+
+    /**
+     * A single-use, fixed-amount Razorpay UPI QR for a held checkout order — the buyer's
+     * way to pay by UPI when Razorpay's checkout shows no UPI app on their phone.
+     *
+     * One QR per order: asking again while it is live returns the same QR, so the buyer
+     * can never be shown two codes for one booking and pay both. The amount is the
+     * order's grand total, the one the Razorpay order carries. Creating it moves no
+     * money; the hold is confirmed only when {@see paidOrderUpiQr()} sees a captured
+     * payment of the full amount.
+     *
+     * @param  Collection<int, Booking>  $bookings  The order's PENDING rows.
+     * @return array{id: string, upi: string|null, image_url: string|null, close_by: int, amount: float}
+     *
+     * @throws RuntimeException  When Razorpay refuses the QR (product not enabled, auth, network).
+     */
+    public function upiQrForOrder(string $orderId, Collection $bookings, string $name): array
+    {
+        $key = self::upiQrCacheKey($orderId);
+        $cached = \Illuminate\Support\Facades\Cache::get($key);
+
+        if (is_array($cached) && ($cached['close_by'] ?? 0) > time() + 60) {
+            return $cached;
+        }
+
+        $amount = Booking::orderGrandTotal($bookings);
+        $first = $bookings->first();
+        $minutes = max(1, (int) ceil(max(0, ($first->reserved_until?->getTimestamp() ?? time()) - time()) / 60));
+
+        $qr = $this->razorpay->createUpiQr(
+            (int) round($amount * 100),
+            $name,
+            'Booking #'.$first->id,
+            $minutes,
+            ['booking_id' => (string) $first->id, 'order_id' => $orderId, 'source' => 'app_checkout'],
+        );
+
+        if ($qr['id'] === '' || ($qr['upi'] === null && $qr['image_url'] === null)) {
+            throw new RuntimeException('Razorpay returned no UPI QR.', 502);
+        }
+
+        $payload = $qr + ['amount' => $amount];
+        \Illuminate\Support\Facades\Cache::put($key, $payload, now()->addDay());
+
+        return $payload;
+    }
+
+    /**
+     * The payment id if this order's UPI QR has been paid in full, else null. Only a QR
+     * this server minted for this order counts (its notes must name one of the order's
+     * rows), so a paid QR from another booking can never settle this one.
+     *
+     * @throws RuntimeException  When Razorpay can't be reached — "don't know", never "unpaid".
+     */
+    public function paidOrderUpiQr(string $orderId): ?string
+    {
+        $cached = \Illuminate\Support\Facades\Cache::get(self::upiQrCacheKey($orderId));
+        $qrId = is_array($cached) ? (string) ($cached['id'] ?? '') : '';
+
+        if ($qrId === '') {
+            return null;
+        }
+
+        $status = $this->razorpay->upiQrStatus($qrId);
+
+        if (! $status['paid']) {
+            return null;
+        }
+
+        $owns = Booking::query()
+            ->where('razorpay_order_id', $orderId)
+            ->whereKey((int) ($status['booking_id'] ?? 0))
+            ->exists();
+
+        return $owns ? $status['payment_id'] : null;
+    }
+
+    /** Stop the order's UPI QR taking payments. Best-effort; Razorpay's close_by is the backstop. */
+    public function closeOrderUpiQr(string $orderId): void
+    {
+        $cached = \Illuminate\Support\Facades\Cache::get(self::upiQrCacheKey($orderId));
+
+        if (is_array($cached) && ($cached['id'] ?? '') !== '') {
+            $this->razorpay->closeUpiQr((string) $cached['id']);
         }
     }
 
@@ -716,6 +810,19 @@ final class BookingService
                 Log::warning("Could not check Razorpay order {$orderId} before expiring its hold: " . $e->getMessage());
 
                 continue;
+            }
+
+            // Not paid through the order — maybe through its UPI QR. Close the QR first so
+            // no payment can land after this check, then look.
+            if ($paymentId === null) {
+                try {
+                    $this->closeOrderUpiQr($orderId);
+                    $paymentId = $this->paidOrderUpiQr($orderId);
+                } catch (RuntimeException $e) {
+                    Log::warning("Could not check the UPI QR for order {$orderId} before expiring its hold: " . $e->getMessage());
+
+                    continue;
+                }
             }
 
             if ($paymentId !== null) {

@@ -555,6 +555,8 @@ Route::middleware('auth.jwt')->prefix('bookings')->group(function (): void {
     Route::post('/confirm', [BookingsController::class, 'confirm']);
     Route::post('/status', [BookingsController::class, 'status']);
     Route::post('/release', [BookingsController::class, 'release']);
+    Route::post('/upi-qr', [BookingsController::class, 'upiQr'])->middleware('throttle:20,1');
+    Route::post('/upi-qr/status', [BookingsController::class, 'upiQrStatus'])->middleware('throttle:60,1');
     Route::get('/{id}', [BookingsController::class, 'show']);
     Route::post('/', [BookingsController::class, 'store']);
     Route::patch('/{id}/cancel', [BookingsController::class, 'cancel']);

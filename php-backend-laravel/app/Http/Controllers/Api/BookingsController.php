@@ -309,6 +309,124 @@ final class BookingsController extends Controller
     }
 
     /**
+     * POST /api/bookings/upi-qr — a Razorpay UPI QR for a held order, so the buyer can pay
+     * by UPI from any app even when Razorpay's checkout shows no UPI app on their phone.
+     * Body: { razorpayOrderId }. Same order, same hold, same amount; asking again returns
+     * the same QR. Creating it moves no money.
+     */
+    public function upiQr(Request $request): JsonResponse
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        if (! $authUser instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $orderId = trim($request->validate(['razorpayOrderId' => ['required', 'string']])['razorpayOrderId']);
+
+        /** @var Collection<int, Booking> $bookings */
+        $bookings = Booking::query()
+            ->with(['event', 'venue', 'ticketType'])
+            ->where('razorpay_order_id', $orderId)
+            ->where('user_id', $authUser->id)
+            ->get();
+
+        if ($bookings->isEmpty()) {
+            return response()->json(['error' => 'Reservation not found'], 404);
+        }
+
+        $first = $bookings->first();
+        $status = strtoupper((string) $first->status);
+
+        if ($status === 'CONFIRMED') {
+            return response()->json(['status' => 'CONFIRMED', 'data' => $this->envelope($bookings, 'CONFIRMED')]);
+        }
+
+        if ($status !== 'PENDING' || ($first->reserved_until !== null && $first->reserved_until->isPast())) {
+            return response()->json(['error' => 'This hold has ended. Pick your slot again.'], 409);
+        }
+
+        $name = $first->venue?->name ?? $first->event?->title ?? 'Haraan';
+
+        try {
+            $qr = $this->bookings->upiQrForOrder($orderId, $bookings, (string) $name);
+        } catch (RuntimeException $e) {
+            \Illuminate\Support\Facades\Log::warning("Checkout UPI QR failed for order {$orderId}: ".$e->getMessage());
+
+            return response()->json([
+                'error' => 'UPI QR isn’t available right now. Pay with Razorpay instead.',
+            ], 503);
+        }
+
+        return response()->json([
+            'status'    => 'PENDING',
+            'qrId'      => $qr['id'],
+            'upi'       => $qr['upi'],
+            'imageUrl'  => $qr['upi'] === null ? $qr['image_url'] : null,
+            'amount'    => $qr['amount'],
+            // The hold, not the QR, is the real deadline: a payment after it may find the slot gone.
+            'expiresAt' => $first->reserved_until?->toIso8601String(),
+            'expiresIn' => $first->reserved_until ? max(0, $first->reserved_until->getTimestamp() - time()) : null,
+        ]);
+    }
+
+    /**
+     * POST /api/bookings/upi-qr/status — has the order been paid (by its UPI QR, or by
+     * Razorpay checkout)? Confirms the hold when it has. Body: { razorpayOrderId }.
+     */
+    public function upiQrStatus(Request $request): JsonResponse
+    {
+        $authUser = $request->attributes->get('auth_user');
+
+        if (! $authUser instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $orderId = trim($request->validate(['razorpayOrderId' => ['required', 'string']])['razorpayOrderId']);
+
+        /** @var Collection<int, Booking> $bookings */
+        $bookings = Booking::query()
+            ->with(['event', 'venue', 'ticketType'])
+            ->where('razorpay_order_id', $orderId)
+            ->where('user_id', $authUser->id)
+            ->get();
+
+        if ($bookings->isEmpty()) {
+            return response()->json(['error' => 'Reservation not found'], 404);
+        }
+
+        $current = strtoupper((string) $bookings->first()->status);
+
+        if ($current === 'CONFIRMED') {
+            return response()->json(['status' => 'CONFIRMED', 'data' => $this->envelope($bookings, 'CONFIRMED')]);
+        }
+
+        if (in_array($current, ['CANCELLED', 'REFUNDED'], true)) {
+            return response()->json(['status' => $current, 'data' => $this->envelope($bookings, $current)]);
+        }
+
+        try {
+            $paymentId = $this->bookings->paidOrderUpiQr($orderId)
+                ?? $this->razorpay->capturedPaymentFor($orderId);
+        } catch (\Throwable) {
+            // Can't reach Razorpay — say "still waiting", never "unpaid".
+            $paymentId = null;
+        }
+
+        if ($paymentId !== null && $paymentId !== '') {
+            $confirmed = $this->bookings
+                ->confirmReservedOrder($authUser, $orderId, $paymentId)
+                ->load(['event', 'venue', 'ticketType']);
+
+            BookingNotifier::dispatch($confirmed->first());
+
+            return response()->json(['status' => 'CONFIRMED', 'data' => $this->envelope($confirmed, 'CONFIRMED')]);
+        }
+
+        return response()->json(['status' => $current === 'EXPIRED' ? 'EXPIRED' : 'PENDING']);
+    }
+
+    /**
      * POST /api/bookings/release — hand back a reservation the buyer abandoned (modal dismissed
      * or payment failed), freeing its seats immediately instead of waiting for the hold to lapse.
      */

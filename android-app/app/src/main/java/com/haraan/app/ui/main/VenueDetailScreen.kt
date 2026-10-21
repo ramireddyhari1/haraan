@@ -1468,6 +1468,85 @@ internal fun BookingSheet(
     else -> "Checkout"
   }
 
+  // How the buyer chose to pay on the review page: UPI (a Razorpay UPI QR any UPI app can
+  // pay, shown even when Razorpay's checkout lists no UPI app on this phone) or Razorpay's
+  // checkout for cards / netbanking / wallets.
+  var payByUpiQr by remember { mutableStateOf(true) }
+  // The UPI QR page's state: the held order it pays and the QR itself.
+  var upiQr by remember { mutableStateOf<BookingRepository.UpiQr?>(null) }
+  var qrOrder by remember { mutableStateOf<BookingResult.PaymentRequired?>(null) }
+  var qrToken by remember { mutableStateOf<String?>(null) }
+
+  // Paid and confirmed server-side, by any route — print the slip.
+  val showPaid: (BookingResult.Success) -> Unit = { done ->
+    upiQr = null
+    submitting = false
+    isPaidOnline = true
+    bookedCode = done.ticketCode
+    result = done.message
+    success = true
+  }
+
+  // Razorpay's own checkout for a held order. Every outcome owns its reset.
+  val openRazorpay: (BookingResult.PaymentRequired, String) -> Unit = { r, token ->
+    val activity = ctx as? android.app.Activity
+    if (activity == null) {
+      // No Activity to host the sheet: drop the hold rather than leave the
+      // court blocked for 15 minutes on a checkout that can't open.
+      scope.launch { BookingRepository().releaseOrder(token, r.orderId) }
+      result = "Couldn't open payment."
+      submitting = false
+    } else {
+      // Arm the one-shot handler BEFORE opening the sheet — the result
+      // arrives via HomeActivity → PaymentBridge.
+      com.haraan.app.data.PaymentBridge.await { outcome ->
+        scope.launch {
+          when (outcome) {
+            is com.haraan.app.data.PaymentBridge.Outcome.Success -> {
+              val confirmed = BookingRepository().confirmOrder(
+                token = token,
+                orderId = r.orderId,
+                paymentId = outcome.paymentId,
+                signature = outcome.signature,
+              )
+              submitting = false
+              when (confirmed) {
+                is BookingResult.Success -> showPaid(confirmed)
+                else -> {
+                  val status = BookingRepository().checkOrderStatus(token, r.orderId)
+                  if (status is BookingResult.Success) {
+                    showPaid(status)
+                  } else {
+                    result = (confirmed as? BookingResult.Error)?.message
+                      ?: "Payment could not be verified."
+                  }
+                }
+              }
+            }
+            is com.haraan.app.data.PaymentBridge.Outcome.Cancelled -> {
+              BookingRepository().releaseOrder(token, r.orderId)
+              submitting = false
+              result = "Payment cancelled — the slot has been released."
+            }
+            is com.haraan.app.data.PaymentBridge.Outcome.Failed -> {
+              BookingRepository().releaseOrder(token, r.orderId)
+              submitting = false
+              result = outcome.message
+            }
+          }
+        }
+      }
+      openRazorpayCheckout(
+        activity = activity,
+        pr = r,
+        name = "",
+        email = "",
+        phone = "",
+        description = "${venue.name} · ${selectedSlot?.time.orEmpty()}",
+      )
+    }
+  }
+
   // The commit itself, hoisted out of the form's button so the order-summary PAGE can
   // own it. `slot` is captured at call time, not at composition.
   val submitBooking: () -> Unit = {
@@ -1508,72 +1587,25 @@ internal fun BookingSheet(
 
         // The slot is now held PENDING for 15 minutes. Take the money, then
         // confirm — the same reserve → pay → confirm handshake the ticket flow
-        // uses, down to the shared /api/bookings/confirm endpoint.
+        // uses. UPI goes by the order's UPI QR; anything else by Razorpay's checkout.
         is BookingResult.PaymentRequired -> {
-          val activity = ctx as? android.app.Activity
-          if (activity == null) {
-            // No Activity to host the sheet: drop the hold rather than leave the
-            // court blocked for 15 minutes on a checkout that can't open.
-            BookingRepository().releaseOrder(token, r.orderId)
-            result = "Couldn't open payment."
-            submitting = false
+          if (!payByUpiQr) {
+            openRazorpay(r, token)
           } else {
-            // Arm the one-shot handler BEFORE opening the sheet — the result
-            // arrives via HomeActivity → PaymentBridge.
-            com.haraan.app.data.PaymentBridge.await { outcome ->
-              scope.launch {
-                when (outcome) {
-                  is com.haraan.app.data.PaymentBridge.Outcome.Success -> {
-                    val confirmed = BookingRepository().confirmOrder(
-                      token = token,
-                      orderId = r.orderId,
-                      paymentId = outcome.paymentId,
-                      signature = outcome.signature,
-                    )
-                    submitting = false
-                    when (confirmed) {
-                      is BookingResult.Success -> {
-                        // Paid and verified server-side — print the slip.
-                        isPaidOnline = true
-                        bookedCode = confirmed.ticketCode
-                        result = confirmed.message
-                        success = true
-                      }
-                      else -> {
-                        val status = BookingRepository().checkOrderStatus(token, r.orderId)
-                        if (status is BookingResult.Success) {
-                          isPaidOnline = true
-                          bookedCode = status.ticketCode
-                          result = status.message
-                          success = true
-                        } else {
-                          result = (confirmed as? BookingResult.Error)?.message
-                            ?: "Payment could not be verified."
-                        }
-                      }
-                    }
-                  }
-                  is com.haraan.app.data.PaymentBridge.Outcome.Cancelled -> {
-                    BookingRepository().releaseOrder(token, r.orderId)
-                    submitting = false
-                    result = "Payment cancelled — the slot has been released."
-                  }
-                  is com.haraan.app.data.PaymentBridge.Outcome.Failed -> {
-                    BookingRepository().releaseOrder(token, r.orderId)
-                    submitting = false
-                    result = outcome.message
-                  }
-                }
+            when (val q = BookingRepository().createUpiQr(token, r.orderId)) {
+              is BookingRepository.UpiQrResult.Ready -> {
+                qrOrder = r
+                qrToken = token
+                upiQr = q.qr
+              }
+              is BookingRepository.UpiQrResult.Confirmed -> showPaid(q.booking)
+              // No QR (Razorpay's QR product off, or a network blip): don't strand the
+              // hold — say so and open Razorpay's checkout on the same order.
+              is BookingRepository.UpiQrResult.Failed -> {
+                result = q.message
+                openRazorpay(r, token)
               }
             }
-            openRazorpayCheckout(
-              activity = activity,
-              pr = r,
-              name = "",
-              email = "",
-              phone = "",
-              description = "${venue.name} · ${selectedSlot?.time.orEmpty()}",
-            )
           }
         }
       }
@@ -1627,9 +1659,42 @@ internal fun BookingSheet(
     // showed through behind it and it inherited the sheet's rounded lip. A checkout that
     // decides money should own the screen: opaque, full height, its own app bar, its own
     // back. Same shape as the event order summary.
+    // ── Pay by UPI: the order's UPI QR, over the review page ──
+    val qr = upiQr
+    if (qr != null) {
+      // Leaving drops the hold (and closes the QR server-side) so the court isn't blocked.
+      val leave: () -> Unit = {
+        val r = qrOrder; val token = qrToken
+        upiQr = null
+        submitting = false
+        result = "Payment cancelled — the slot has been released."
+        if (r != null && token != null) scope.launch { BookingRepository().releaseOrder(token, r.orderId) }
+      }
+      BackHandler(enabled = true, onBack = leave)
+      UpiQrPayPage(
+        qr = qr,
+        venueName = venue.name,
+        checkPaid = {
+          val token = qrToken; val r = qrOrder
+          if (token == null || r == null) null
+          else BookingRepository().upiQrStatus(token, r.orderId) as? BookingResult.Success
+        },
+        onPaid = showPaid,
+        onUseRazorpay = {
+          val r = qrOrder; val token = qrToken
+          upiQr = null
+          if (r != null && token != null) openRazorpay(r, token) else submitting = false
+        },
+        onBack = leave,
+      )
+      return@Dialog
+    }
+
     if (reviewing) {
       BackHandler(enabled = true) { reviewing = false }
       VenueReviewPage(
+        payByUpi = payByUpiQr,
+        onPayByUpi = { payByUpiQr = it },
         venue = venue,
         sport = selectedSport,
         date = selectedDate,
@@ -1911,6 +1976,8 @@ internal fun BookingSheet(
  */
 @Composable
 private fun VenueReviewPage(
+  payByUpi: Boolean,
+  onPayByUpi: (Boolean) -> Unit,
   venue: VenueDetailData,
   sport: String,
   date: LocalDate,
@@ -2234,6 +2301,25 @@ private fun VenueReviewPage(
         }
       }
 
+      // ── Pay with — UPI always on the list, whatever this phone has installed ──
+      if (total > 0) {
+        ReviewCard {
+          Text("Pay with", color = BookInk.Ink, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, letterSpacing = (-0.34).sp)
+          Spacer(Modifier.height(10.dp))
+          PayMethodRow(
+            title = "UPI",
+            sub = "Scan a QR or open any UPI app — GPay, PhonePe, Paytm, BHIM",
+            selected = payByUpi,
+          ) { onPayByUpi(true) }
+          Spacer(Modifier.height(8.dp))
+          PayMethodRow(
+            title = "Cards, netbanking & wallets",
+            sub = "Razorpay secure checkout",
+            selected = !payByUpi,
+          ) { onPayByUpi(false) }
+        }
+      }
+
       // ── The venue's own policies — nothing invented ──
       val rules = venue.rules.filter { it.isNotBlank() }
       if (venue.cancellation.isNotBlank() || rules.isNotEmpty()) {
@@ -2283,11 +2369,45 @@ private fun VenueReviewPage(
           CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
         } else {
           Text(
-            if (total > 0) "Proceed ₹${inr(total)}" else "Confirm booking",
+            when {
+              total <= 0 -> "Confirm booking"
+              payByUpi -> "Pay ₹${inr(total)} by UPI"
+              else -> "Proceed ₹${inr(total)}"
+            },
             color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, maxLines = 1,
           )
         }
       }
+    }
+  }
+}
+
+/** One way to pay: a radio, its name, one line on what it covers. */
+@Composable
+private fun PayMethodRow(title: String, sub: String, selected: Boolean, onClick: () -> Unit) {
+  Row(
+    modifier = Modifier
+      .pressable(haptic = Feel.SELECT, onClick = onClick)
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(12.dp))
+      .background(if (selected) BookInk.BlueTint else Color.White)
+      .border(1.dp, if (selected) BookInk.Blue else BookInk.Line, RoundedCornerShape(12.dp))
+      .padding(horizontal = 12.dp, vertical = 11.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Box(
+      Modifier
+        .size(20.dp)
+        .clip(CircleShape)
+        .border(2.dp, if (selected) BookInk.Blue else Color(0xFFCBD5E1), CircleShape),
+      contentAlignment = Alignment.Center,
+    ) {
+      if (selected) Box(Modifier.size(10.dp).clip(CircleShape).background(BookInk.Blue))
+    }
+    Spacer(Modifier.width(12.dp))
+    Column(Modifier.weight(1f)) {
+      Text(title, color = BookInk.Ink, fontWeight = FontWeight.ExtraBold, fontSize = 14.5.sp)
+      Text(sub, color = BookInk.Muted, fontSize = 12.sp, lineHeight = 16.sp, modifier = Modifier.padding(top = 1.dp))
     }
   }
 }
