@@ -106,6 +106,7 @@ class PartnerApplication extends Model
         'upi_vpa' => 'encrypted',
         'reviewed_at' => 'datetime',
         'contacted_at' => 'datetime',
+        'whatsapp_confirmed_at' => 'datetime',
     ];
 
     protected static function booted(): void

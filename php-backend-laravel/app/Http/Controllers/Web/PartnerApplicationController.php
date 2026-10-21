@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Web;
 use App\Filament\Resources\Venues\Schemas\VenueForm;
 use App\Http\Controllers\Controller;
 use App\Models\PartnerApplication;
+use App\Services\PartnerApplicationNotifier;
 use App\Support\ContactPrefill;
 use App\Support\PlatformRules;
 use Illuminate\Http\JsonResponse;
@@ -46,6 +47,10 @@ class PartnerApplicationController extends Controller
             'maxPhotos' => self::MAX_PHOTOS,
             'askPayouts' => PlatformRules::bool('partner_onboarding.ask_payouts'),
             'banks' => self::banks(),
+            // Only promise a WhatsApp confirmation when one can actually be sent.
+            'whatsappLive' => PlatformRules::bool('partner_onboarding.whatsapp_confirm')
+                && (\App\Models\MessageTemplate::query()->where('key', PartnerApplicationNotifier::TEMPLATE_KEY)->where('channel', 'whatsapp')
+                    ->where('is_active', true)->first()?->isApproved() ?? false),
             'prefill' => ContactPrefill::for($request->user()),
             'source' => Str::limit((string) ($request->query('utm_source') ?: $request->query('from', '')), 100, ''),
         ]);
@@ -147,6 +152,8 @@ class PartnerApplicationController extends Controller
             'contact_name' => ['required', 'string', 'min:2', 'max:100'],
             'contact_role' => ['nullable', Rule::in(array_keys(PartnerApplication::CONTACT_ROLES))],
             'phone' => ['required', 'string', 'max:20'],
+            'whatsapp_same' => ['nullable', 'boolean'],
+            'whatsapp_phone' => [Rule::requiredIf(($input['whatsapp_same'] ?? true) === false), 'nullable', 'string', 'max:20'],
             'email' => ['nullable', 'email:filter', 'max:160'],
             'call_time' => ['nullable', Rule::in(array_keys(PartnerApplication::CALL_TIMES))],
             'gstin' => ['nullable', 'string', 'regex:/^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/i'],
@@ -169,6 +176,7 @@ class PartnerApplicationController extends Controller
             'photos.*.max' => 'Each photo must be under 10 MB.',
             'contact_name.required' => 'Who should we ask for?',
             'phone.required' => 'We need a number to call you on.',
+            'whatsapp_phone.required' => 'Enter the number you use on WhatsApp.',
             'gstin.regex' => 'That GSTIN doesn’t look right — it is 15 characters, like 37ABCDE1234F1Z5. Leave it empty if you don’t have one.',
             'consent.accepted' => 'Tick the box so we can call you.',
             'bank_name.required' => 'Pick your bank.',
@@ -203,6 +211,19 @@ class PartnerApplicationController extends Controller
                 'message' => 'That phone number doesn’t look right.',
                 'errors' => ['phone' => ['Enter a 10-digit mobile number.']],
             ], 422);
+        }
+
+        $whatsapp = null;
+        if (($data['whatsapp_same'] ?? true) === false) {
+            $whatsapp = self::normalisePhone((string) ($data['whatsapp_phone'] ?? ''));
+            if ($whatsapp === null) {
+                return response()->json([
+                    'message' => 'That WhatsApp number doesn’t look right.',
+                    'errors' => ['whatsapp_phone' => ['Enter a 10-digit mobile number.']],
+                ], 422);
+            }
+            // The same number twice is just "this number".
+            $whatsapp = $whatsapp === $phone ? null : $whatsapp;
         }
 
         // Pressing submit twice, or coming back tomorrow to "check it went through",
@@ -285,6 +306,7 @@ class PartnerApplicationController extends Controller
             'contact_name' => trim($data['contact_name']),
             'contact_role' => $data['contact_role'] ?? null,
             'phone' => $phone,
+            'whatsapp_phone' => $whatsapp,
             'email' => filled($data['email'] ?? null) ? mb_strtolower(trim($data['email'])) : null,
             'call_time' => $data['call_time'] ?? null,
             'gstin' => filled($data['gstin'] ?? null) ? strtoupper($data['gstin']) : null,
@@ -304,7 +326,12 @@ class PartnerApplicationController extends Controller
             $application->forceFill(['images' => array_values(array_filter($paths))])->saveQuietly();
         }
 
-        return response()->json(['reference' => $application->fresh()->reference], 201);
+        $application = $application->fresh();
+
+        // After the response: the owner sees their stamp without waiting on WhatsApp.
+        dispatch(fn () => app(PartnerApplicationNotifier::class)->received($application))->afterResponse();
+
+        return response()->json(['reference' => $application->reference], 201);
     }
 
     /** @return array<int, string> */

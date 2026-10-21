@@ -38,7 +38,7 @@ final class PartnerApplicationActions
             ->label('WhatsApp')
             ->icon('heroicon-m-chat-bubble-left-right')
             ->color('gray')
-            ->url(fn (PartnerApplication $record): string => 'https://wa.me/' . ltrim($record->phone, '+'), shouldOpenInNewTab: true);
+            ->url(fn (PartnerApplication $record): string => 'https://wa.me/' . ltrim($record->whatsapp_phone ?: $record->phone, '+'), shouldOpenInNewTab: true);
     }
 
     public static function markContacted(): Action

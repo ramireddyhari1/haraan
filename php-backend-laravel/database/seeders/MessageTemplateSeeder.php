@@ -184,6 +184,19 @@ class MessageTemplateSeeder extends Seeder
                     '2' => 'review page URL',
                 ],
             ],
+            [
+                // To an APPLICANT, right after the /become-a-partner form. Also
+                // registered by migration 2026_10_21_000005 so prod has the row.
+                'key' => 'partner.application_received',
+                'name' => 'Partner application received',
+                'category' => 'utility',
+                'provider_template_id' => 'partner_application_received',
+                'body' => "Hi {{1}}, we have received your application to list *{{2}}* on Haraan.\n\n"
+                    . "Your reference number is {{3}}.\n\n"
+                    . "Someone from the Haraan partner team will call you within {{4}} hours to set up your listing, prices and payouts. "
+                    . "Please keep this reference handy for the call.\n\n— Team Haraan",
+                'variables' => ['1' => 'contact name', '2' => 'business name', '3' => 'application reference (HP-000123)', '4' => 'call-back hours from Platform rules'],
+            ],
         ];
 
         foreach ($templates as $template) {

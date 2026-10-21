@@ -13,6 +13,16 @@ class ViewPartnerApplication extends ViewRecord
 {
     protected static string $resource = PartnerApplicationResource::class;
 
+    /** Payout details are shown in full here, so every opening of them is on the audit trail. */
+    public function mount(int|string $record): void
+    {
+        parent::mount($record);
+
+        if ($this->getRecord()->hasPayoutDetails()) {
+            \App\Models\AdminAction::log('partner_application.payout_viewed', ['reference' => $this->getRecord()->reference], $this->getRecord());
+        }
+    }
+
     public function getTitle(): string
     {
         return (string) $this->getRecord()->business_name;

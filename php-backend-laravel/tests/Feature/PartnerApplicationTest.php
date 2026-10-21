@@ -6,10 +6,12 @@ namespace Tests\Feature;
 
 use App\Filament\Resources\PartnerApplications\Pages\ViewPartnerApplication;
 use App\Filament\Resources\PartnerApplications\PartnerApplicationResource;
+use App\Models\MessageTemplate;
 use App\Models\PartnerApplication;
 use App\Models\PartnerPayoutAccount;
 use App\Models\User;
 use App\Models\Venue;
+use App\Services\WhatsAppService;
 use App\Support\PlatformRules;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
@@ -176,6 +178,55 @@ class PartnerApplicationTest extends TestCase
         $this->assertNull($later->ifsc_code);
     }
 
+    public function test_whatsapp_number_can_differ_from_the_call_number(): void
+    {
+        $this->apply(['whatsapp_same' => false, 'whatsapp_phone' => '91234 56789'])->assertCreated();
+        $this->assertSame('+919123456789', PartnerApplication::sole()->whatsapp_phone);
+        PartnerApplication::query()->delete();
+
+        // The same number twice is just "this number".
+        $this->apply(['whatsapp_same' => false, 'whatsapp_phone' => '9876543210'])->assertCreated();
+        $this->assertNull(PartnerApplication::sole()->whatsapp_phone);
+        PartnerApplication::query()->delete();
+
+        $this->apply(['whatsapp_same' => false, 'whatsapp_phone' => ''])
+            ->assertStatus(422)->assertJsonValidationErrors(['whatsapp_phone']);
+        $this->apply(['whatsapp_same' => false, 'whatsapp_phone' => '12345'])
+            ->assertStatus(422)->assertJsonValidationErrors(['whatsapp_phone']);
+    }
+
+    public function test_whatsapp_confirmation_goes_to_the_chosen_number_once_approved(): void
+    {
+        MessageTemplate::query()->where('key', 'partner.application_received')->update(['status' => 'approved']);
+
+        $this->mock(WhatsAppService::class)
+            ->shouldReceive('sendTemplate')
+            ->once()
+            ->withArgs(fn (string $phone, string $name, array $vars): bool => $phone === '+919123456789'
+                && $name === 'partner_application_received'
+                && $vars[0] === 'Ravi Kumar' && $vars[1] === 'Green Field Arena' && str_starts_with($vars[2], 'HP-') && $vars[3] === '24')
+            ->andReturn(true);
+
+        $this->apply(['whatsapp_same' => false, 'whatsapp_phone' => '9123456789'])->assertCreated();
+
+        $this->assertNotNull(PartnerApplication::sole()->whatsapp_confirmed_at);
+    }
+
+    public function test_no_whatsapp_while_the_template_is_draft_or_switched_off(): void
+    {
+        $this->mock(WhatsAppService::class)->shouldNotReceive('sendTemplate');
+
+        // Registered as a draft by the migration: blocked, nothing leaves.
+        $this->assertSame('draft', MessageTemplate::query()->where('key', 'partner.application_received')->value('status'));
+        $this->apply()->assertCreated();
+        $this->assertNull(PartnerApplication::sole()->whatsapp_confirmed_at);
+
+        MessageTemplate::query()->where('key', 'partner.application_received')->update(['status' => 'approved']);
+        PlatformRules::save(['partner_onboarding.whatsapp_confirm' => false]);
+        $this->apply(['phone' => '9000000001'])->assertCreated();
+        $this->assertSame(0, PartnerApplication::query()->whereNotNull('whatsapp_confirmed_at')->count());
+    }
+
     public function test_same_phone_twice_returns_the_first_application(): void
     {
         $first = $this->apply()->json('reference');
@@ -247,7 +298,13 @@ class PartnerApplicationTest extends TestCase
             ->assertOk()
             ->assertSee('Turf A')
             ->assertSee('Floodlights')
-            ->assertSee('Free up to 24 h before');
+            ->assertSee('Free up to 24 h before')
+            // Payout details in full for the admin, and the opening is on the audit trail.
+            ->assertSee('5010 0012 3443 21')
+            ->assertSee('HDFC0001234')
+            ->assertSee('ravi@okhdfcbank');
+
+        $this->assertTrue(\App\Models\AdminAction::query()->where('action', 'partner_application.payout_viewed')->exists());
     }
 
     public function test_application_becomes_a_partner_and_a_draft_venue(): void

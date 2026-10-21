@@ -254,6 +254,11 @@ class PartnerApplicationResource extends Resource
                             ? ' · ' . (PartnerApplication::CONTACT_ROLES[$record->contact_role] ?? $record->contact_role)
                             : ''),
                     TextEntry::make('phone')->copyable()->url(fn (PartnerApplication $record): string => 'tel:' . $record->phone),
+                    TextEntry::make('whatsapp')->label('WhatsApp')
+                        ->state(fn (PartnerApplication $record): string => $record->whatsapp_phone ?: $record->phone)
+                        ->helperText(fn (PartnerApplication $record): string => ($record->whatsapp_phone ? 'Different from the call number. ' : 'Same as the call number. ')
+                            . ($record->whatsapp_confirmed_at ? 'Confirmation sent ' . $record->whatsapp_confirmed_at->diffForHumans() . '.' : 'No confirmation sent yet.'))
+                        ->url(fn (PartnerApplication $record): string => 'https://wa.me/' . ltrim($record->whatsapp_phone ?: $record->phone, '+'), shouldOpenInNewTab: true),
                     TextEntry::make('email')->placeholder('—')->copyable(),
                     TextEntry::make('call_time')->label('Best time')
                         ->formatStateUsing(fn (?string $state): string => PartnerApplication::CALL_TIMES[$state] ?? (string) $state)
@@ -261,24 +266,33 @@ class PartnerApplicationResource extends Resource
                     TextEntry::make('gstin')->label('GSTIN')->placeholder('—')->copyable(),
                 ]),
 
-            // Masked here; the full number reaches finance in Settlement accounts once the
-            // partner is created (PayoutAccountEditor), where it is verified before any transfer.
+            // In full: this page is super-admin only, and the admin needs the real numbers
+            // to check them on the call. Each opening is audit-logged (ViewPartnerApplication).
+            // Create partner copies them into Settlement accounts, unverified until finance checks.
             Section::make('Payouts')
                 ->columnSpanFull()
-                ->columns(4)
+                ->columns(3)
+                ->description(fn (PartnerApplication $record): ?string => $record->hasPayoutDetails()
+                    ? ($record->partner_id ? 'Also in Finance → Settlement accounts, where finance verifies it.' : 'Create partner copies these into their settlement account, unverified.')
+                    : null)
                 ->schema([
                     TextEntry::make('payout_method')->label('Paid by')
                         ->formatStateUsing(fn (?string $state): string => PartnerApplication::PAYOUT_METHODS[$state] ?? '—')
                         ->placeholder('Not asked'),
-                    TextEntry::make('bank_name')->label('Bank')->placeholder('—')
-                        ->suffix(fn (PartnerApplication $record): string => $record->ifsc_code ? ' · IFSC ' . $record->ifsc_code : ''),
-                    TextEntry::make('account_holder')->label('Account holder')->placeholder('—'),
-                    TextEntry::make('masked_account')->label('Account / UPI')
-                        ->state(fn (PartnerApplication $record): ?string => implode(' · ', array_filter([$record->maskedAccount(), $record->maskedUpi()])) ?: null)
-                        ->helperText(fn (PartnerApplication $record): ?string => $record->hasPayoutDetails()
-                            ? ($record->partner_id ? 'Full details are in Finance → Settlement accounts.' : 'Create partner copies these into their settlement account, unverified.')
-                            : null)
+                    TextEntry::make('account_holder')->label('Account holder')->placeholder('—')->copyable(),
+                    TextEntry::make('bank_name')->label('Bank')->placeholder('—'),
+                    TextEntry::make('account_number')->label('Account number')
+                        ->formatStateUsing(fn (?string $state): string => trim(chunk_split((string) $state, 4, ' ')))
+                        ->copyable()
+                        ->copyableState(fn (PartnerApplication $record): ?string => $record->account_number)
+                        ->fontFamily(\Filament\Support\Enums\FontFamily::Mono)
+                        ->weight('bold')
                         ->placeholder('—'),
+                    TextEntry::make('ifsc_code')->label('IFSC')->copyable()
+                        ->fontFamily(\Filament\Support\Enums\FontFamily::Mono)
+                        ->url(fn (PartnerApplication $record): ?string => $record->ifsc_code ? 'https://ifsc.razorpay.com/' . $record->ifsc_code : null, shouldOpenInNewTab: true)
+                        ->placeholder('—'),
+                    TextEntry::make('upi_vpa')->label('UPI ID')->copyable()->placeholder('—'),
                 ]),
 
             Section::make('Courts & pricing')

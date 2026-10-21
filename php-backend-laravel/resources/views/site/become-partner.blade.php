@@ -29,6 +29,7 @@
         'askPayouts' => $askPayouts,
         'banks' => $banks,
         'ifscBanks' => PA::IFSC_BANKS,
+        'whatsappLive' => $whatsappLive,
     ];
 @endphp
 <!DOCTYPE html>
@@ -448,6 +449,17 @@
         .is-paid .sc-coin:nth-of-type(2) { animation-delay: .8s; }
         .is-paid .sc-coin:nth-of-type(3) { animation-delay: 1.6s; }
         @keyframes coinArc { 0% { opacity: 0; offset-distance: 0%; } 15% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; offset-distance: 100%; } }
+
+        /* ── WhatsApp number ─────────────────────────────────────────────────── */
+        .bp-wa { border: 1.5px solid var(--line); border-radius: 16px; padding: 14px; margin-bottom: 16px; background: #FBFCFE; }
+        .bp-wa__head { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px; }
+        .bp-wa__icon { width: 34px; height: 34px; flex: none; border-radius: 10px; background: #E7F7EE; display: grid; place-items: center; }
+        .bp-wa__icon svg { width: 19px; height: 19px; stroke: #15803D; stroke-width: 1.7; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+        .bp-wa__head b { display: block; font-size: 14px; }
+        .bp-wa__head small { color: var(--mute); font-size: 12.5px; line-height: 1.45; }
+        .bp-wa .bp-phone { margin-top: 10px; background: #fff; }
+        .bp-wa .bp-chip { background: #fff; }
+        #scChat { transition: opacity .4s var(--ease), transform .5s var(--spring); }
     </style>
 </head>
 <body>
@@ -560,6 +572,12 @@
                     <circle class="sc-coin" r="4.5" fill="#FBBF24" stroke="#B45309" stroke-width="1" style="offset-path: path('M123 150 Q 180 52 250 92')"/>
                     <circle class="sc-coin" r="4.5" fill="#FBBF24" stroke="#B45309" stroke-width="1" style="offset-path: path('M123 150 Q 180 52 250 92')"/>
                     <circle class="sc-coin" r="4.5" fill="#FBBF24" stroke="#B45309" stroke-width="1" style="offset-path: path('M123 150 Q 180 52 250 92')"/>
+                </g>
+
+                <g id="scChat" class="sc-g is-off">
+                    <path class="st-t" d="M372 196 h44 a6 6 0 0 1 6 6 v16 a6 6 0 0 1-6 6 h-30 l-10 8 v-8 h-4 a6 6 0 0 1-6-6 v-16 a6 6 0 0 1 6-6z" fill="#DCF8E7"/>
+                    <path d="M381 206 h26 M381 213 h18" stroke="#15803D" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M405 218 l3 3 6-7" fill="none" stroke="#2563EB" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
                 </g>
 
                 {{-- The phone we'll ring. --}}
@@ -817,7 +835,23 @@
                                 <input id="bpPhone" name="phone" inputmode="tel" autocomplete="tel-national" placeholder="98765 43210" maxlength="16">
                                 <span class="bp-phone__ok"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg></span>
                             </div>
-                            <div class="bp-hint">We call and WhatsApp on this number only about your listing.</div>
+                            <div class="bp-hint">We call this number only about your listing.</div>
+                            <div class="bp-err"></div>
+                        </div>
+                        <div class="bp-wa bp-group" data-field="whatsapp_phone">
+                            <div class="bp-wa__head">
+                                <span class="bp-wa__icon"><svg viewBox="0 0 24 24"><path d="M4 20l1.3-3.9A8 8 0 1 1 8 18.8z"/><path d="M9 9.5c.3 1.8 2.6 4.3 4.6 4.9l1.1-1.2 1.8.9c-.2.9-1 1.7-1.9 1.7-3 0-6.7-3.6-6.7-6.6 0-.9.8-1.7 1.6-1.9l.9 1.8z"/></svg></span>
+                                <span><b>WhatsApp updates</b><small id="bpWaSub">Your reference number and every update from Haraan about your listing.</small></span>
+                            </div>
+                            <div class="bp-chips" data-single="whatsapp_same" data-keep data-bool>
+                                <button type="button" class="bp-chip" data-val="1"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>On my mobile number</button>
+                                <button type="button" class="bp-chip" data-val="0"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg>On another number</button>
+                            </div>
+                            <div class="bp-phone" id="bpWaWrap" hidden>
+                                <span class="bp-phone__cc"><svg viewBox="0 0 30 20"><rect width="30" height="20" fill="#fff"/><rect width="30" height="6.67" fill="#FF9933"/><rect y="13.33" width="30" height="6.67" fill="#138808"/><circle cx="15" cy="10" r="2.6" fill="none" stroke="#000080" stroke-width=".8"/></svg>+91</span>
+                                <input id="bpWaPhone" name="whatsapp_phone" inputmode="tel" autocomplete="off" placeholder="WhatsApp number" maxlength="16" aria-label="WhatsApp number">
+                                <span class="bp-phone__ok"><svg viewBox="0 0 24 24"><path d="M5 12l5 5 9-10"/></svg></span>
+                            </div>
                             <div class="bp-err"></div>
                         </div>
                         <div class="bp-f" data-field="email">
@@ -1000,6 +1034,7 @@
         booking_channels: [], monthly_bookings: '', goals: [],
         contact_name: CFG.prefill.name || '', contact_role: '', phone: (CFG.prefill.phone || '').replace(/^\+91/, ''),
         email: CFG.prefill.email || '', call_time: '', gstin: '', note: '',
+        whatsapp_same: true, whatsapp_phone: '',
         payout_method: 'bank', bank_name: '', account_holder: '', account_number: '', account_number_confirmation: '',
         ifsc_code: '', upi_vpa: '',
     };
@@ -1247,7 +1282,7 @@
         $$('[data-multi]').forEach((g) => $$('[data-val]', g).forEach((c) => c.classList.toggle('is-on', state[g.dataset.multi].includes(c.dataset.val))));
         $$('[data-single]').forEach((g) => $$('[data-val]', g).forEach((c) => {
             const v = state[g.dataset.single];
-            c.classList.toggle('is-on', String(v ?? '') === c.dataset.val);
+            c.classList.toggle('is-on', g.hasAttribute('data-bool') ? (v ? '1' : '0') === c.dataset.val : String(v ?? '') === c.dataset.val);
         }));
     };
     $$('[data-multi]').forEach((g) => g.addEventListener('click', (e) => {
@@ -1267,10 +1302,12 @@
         const k = g.dataset.single;
         let v = c.dataset.val;
         if (g.hasAttribute('data-num')) v = v === '' ? null : +v;
+        if (g.hasAttribute('data-bool')) v = v === '1';
         // Groups marked data-keep always hold an answer; the rest toggle off on a second tap.
         state[k] = !g.hasAttribute('data-keep') && state[k] === v ? (g.hasAttribute('data-num') ? null : '') : v;
         if (k === 'cancel_free_hours' && state.cancel_free_hours !== null && state.cancel_refund_percent === null) state.cancel_refund_percent = 0;
-        buzz(6); paintChoices(); paintHours(); paintPayout(); paintScene(); save();
+        if (k === 'whatsapp_same') { setErr('whatsapp_phone', ''); if (!state.whatsapp_same) setTimeout(() => $('#bpWaPhone').focus(), 50); }
+        buzz(6); paintChoices(); paintHours(); paintPayout(); paintWa(); paintScene(); save();
     }));
 
     // Copy that depends on what they run.
@@ -1284,6 +1321,18 @@
         $('#bpMonthlyLbl').textContent = t === 'event' ? 'Tickets or entries in a usual month' : 'Bookings in a usual month';
         // Default court names follow the unit ("Court 2" → "Table 2").
         state.courts.forEach((c, i) => { if (/^(Court|Table) \d+$/.test(c.name)) c.name = unit() + ' ' + (i + 1); });
+    };
+
+    // ── WhatsApp number ──────────────────────────────────────────────────────────
+    const waOk = () => /^[6-9]\d{9}$/.test(digits(state.whatsapp_phone));
+    const waNumber = () => (state.whatsapp_same ? digits(state.phone).slice(-10) : digits(state.whatsapp_phone));
+    const paintWa = () => {
+        $('#bpWaWrap').hidden = state.whatsapp_same;
+        $('#bpWaPhone').value = fmtPhone(state.whatsapp_phone);
+        $('#bpWaWrap').classList.toggle('is-valid', waOk());
+        $('#bpWaSub').textContent = CFG.whatsappLive
+            ? 'Your reference number arrives here as soon as you send, then every update about your listing.'
+            : 'Every update from Haraan about your listing comes here.';
     };
 
     // ── Payouts: the cheque leaf ─────────────────────────────────────────────────
@@ -1404,6 +1453,7 @@
 
         show('#scPeople', reached('today') && (state.booking_channels.length > 0 || state.monthly_bookings !== ''));
         show('#scCall', reached('contact'));
+        show('#scChat', reached('contact') && (state.whatsapp_same ? phoneOk() : waOk()));
         const ringing = reached('contact') && phoneOk();
         scene.classList.toggle('is-ringing', ringing);
         $('#scPhoneNum').textContent = ringing ? fmtPhone(state.phone) : 'calling…';
@@ -1480,6 +1530,7 @@
         if (key === 'contact') {
             need(state.contact_name.trim().length >= 2, 'contact_name', 'Who should we ask for?');
             need(phoneOk(), 'phone', state.phone ? 'Enter a 10-digit mobile number.' : 'We need a number to call you on.');
+            need(state.whatsapp_same || waOk(), 'whatsapp_phone', state.whatsapp_phone ? 'Enter a 10-digit WhatsApp number.' : 'Enter the number you use on WhatsApp.');
             need(!state.email || /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(state.email), 'email', 'That email doesn’t look right.');
             need(!state.gstin || /^\d{2}[A-Z]{5}\d{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/i.test(state.gstin), 'gstin', 'A GSTIN is 15 characters, like 37ABCDE1234F1Z5. Leave it empty if you don’t have one.');
         }
@@ -1536,7 +1587,7 @@
             ['Today', esc(words(state.booking_channels, L.channels) || 'Not said'), esc([L.monthly[state.monthly_bookings] ? L.monthly[state.monthly_bookings] + ' a month' : '', words(state.goals, L.goals)].filter(Boolean).join(' · ')), 'today'],
             ...(CFG.askPayouts ? [['Payouts', esc(state.payout_method === 'later' ? 'On the call' : state.payout_method === 'upi' ? 'UPI · ' + state.upi_vpa.trim().toLowerCase() : (state.bank_name || 'Bank') + ' · •••• ' + digits(state.account_number).slice(-4)),
                 esc(state.payout_method === 'later' ? 'We’ll take the details when we call' : [state.account_holder.trim(), state.payout_method === 'bank' ? 'IFSC ' + state.ifsc_code : '', state.payout_method === 'bank' && state.upi_vpa.trim() ? 'UPI ' + state.upi_vpa.trim().toLowerCase() : ''].filter(Boolean).join(' · ')), 'payouts']] : []),
-            ['Call', esc(state.contact_name.trim() + (state.contact_role ? ' · ' + L.roles[state.contact_role] : '')), esc(['+91 ' + fmtPhone(state.phone), state.call_time ? L.callTimes[state.call_time] : '', state.email].filter(Boolean).join(' · ')), 'contact'],
+            ['Call', esc(state.contact_name.trim() + (state.contact_role ? ' · ' + L.roles[state.contact_role] : '')), esc(['+91 ' + fmtPhone(state.phone), 'WhatsApp ' + (state.whatsapp_same ? 'same number' : '+91 ' + fmtPhone(state.whatsapp_phone)), state.call_time ? L.callTimes[state.call_time] : '', state.email].filter(Boolean).join(' · ')), 'contact'],
         );
         $('#slBody').innerHTML = rows.map(([k, v, sub, s]) => `<div class="bp-slip__sec"><dt>${k}</dt><dd>${v}${sub ? `<small>${sub}</small>` : ''}</dd><button type="button" class="bp-slip__edit" data-goto="${s}">Edit</button></div>`).join('');
     };
@@ -1553,6 +1604,12 @@
             const was = $('#bpPhoneWrap').classList.contains('is-valid');
             $('#bpPhoneWrap').classList.toggle('is-valid', phoneOk());
             if (!was && phoneOk()) buzz(12);
+        } else if (el.id === 'bpWaPhone') {
+            state.whatsapp_phone = digits(el.value).replace(/^(91|0)(?=\d{10}$)/, '');
+            el.value = fmtPhone(state.whatsapp_phone);
+            const was = $('#bpWaWrap').classList.contains('is-valid');
+            $('#bpWaWrap').classList.toggle('is-valid', waOk());
+            if (!was && waOk()) buzz(12);
         } else if (el.name === 'account_number' || el.name === 'account_number_confirmation') {
             el.value = groupAc(el.value);
             state[el.name] = digits(el.value);
@@ -1588,7 +1645,7 @@
         courts_detail: 'courts', hours_json: 'hours', slot_minutes: 'hours', cancel_free_hours: 'hours', cancel_refund_percent: 'hours',
         photos: 'photos', amenities: 'extras', rules: 'extras',
         booking_channels: 'today', monthly_bookings: 'today', goals: 'today',
-        contact_name: 'contact', contact_role: 'contact', phone: 'contact', email: 'contact', call_time: 'contact', gstin: 'contact', note: 'contact',
+        contact_name: 'contact', contact_role: 'contact', phone: 'contact', whatsapp_phone: 'contact', whatsapp_same: 'contact', email: 'contact', call_time: 'contact', gstin: 'contact', note: 'contact',
         payout_method: 'payouts', bank_name: 'payouts', account_holder: 'payouts', account_number: 'payouts',
         account_number_confirmation: 'payouts', ifsc_code: 'payouts', upi_vpa: 'payouts',
         consent: 'review',
@@ -1610,6 +1667,7 @@
             contact_name: state.contact_name, contact_role: state.contact_role || null, phone: digits(state.phone),
             email: state.email || null, call_time: state.call_time || null, gstin: state.gstin || null, note: state.note,
             consent: true, source: CFG.source || null,
+            whatsapp_same: !!state.whatsapp_same, whatsapp_phone: state.whatsapp_same ? null : digits(state.whatsapp_phone),
             payout_method: CFG.askPayouts ? state.payout_method : 'later',
             bank_name: state.bank_name || null, account_holder: state.account_holder.trim() || null,
             account_number: digits(state.account_number) || null, account_number_confirmation: digits(state.account_number_confirmation) || null,
@@ -1670,13 +1728,14 @@
             form.style.display = 'none';
             $('#bpRef').textContent = ref;
             if (duplicate) $('#bpNextCall').textContent = 'We already have your application from this number — no need to send it again.';
+            else if (CFG.whatsappLive) $('#bpNextCall').textContent = `Within ${CFG.callbackHours} hours. Your reference is on its way to WhatsApp at +91 ${fmtPhone(waNumber())}.`;
             $('#bpDone').classList.add('is-on');
             scene.classList.add('is-done');
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }, 1250);
     };
 
-    paintChoices(); paintTypeCopy(); paintPin(); paintCourts(); paintHours(); paintPhotos(); paintPayout(); goTo(step);
+    paintChoices(); paintTypeCopy(); paintPin(); paintCourts(); paintHours(); paintPhotos(); paintPayout(); paintWa(); goTo(step);
 })();
 </script>
 @endif
