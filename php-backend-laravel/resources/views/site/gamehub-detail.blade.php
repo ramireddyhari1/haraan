@@ -55,7 +55,11 @@
         str_contains($mvCat, 'cricket') => '<path d="M15.5 3.5a2.1 2.1 0 0 1 3 3L9 16l-3 1 1-3z"></path><circle cx="6.5" cy="17.5" r="3"></circle>',
         str_contains($mvCat, 'football'), str_contains($mvCat, 'soccer') => '<circle cx="12" cy="12" r="9"></circle><path d="M12 7.5 8.5 10l1.3 4h4.4l1.3-4z"></path><path d="M12 3v4.5M4 9.5 8.5 10M20 9.5 15.5 10M7 20l2.8-6M17 20l-2.8-6"></path>',
         str_contains($mvCat, 'basketball') => '<circle cx="12" cy="12" r="9"></circle><path d="M12 3v18M3 12h18M5.6 5.6a12 12 0 0 0 12.8 12.8M18.4 5.6A12 12 0 0 1 5.6 18.4"></path>',
-        default => '<ellipse cx="9.5" cy="9.5" rx="6.5" ry="5.5" transform="rotate(-45 9.5 9.5)"></ellipse><path d="M13.5 13.5 20 20"></path><path d="M6.5 6.5 12.5 12.5M6.5 12.5 12.5 6.5"></path>',
+        // Each racquet sport gets its own object — the old bare racket (oval + stick)
+        // read as a magnifying glass.
+        str_contains($mvCat, 'pickle') => \App\Support\SportGlyph::PICKLEBALL,
+        str_contains($mvCat, 'tennis') => \App\Support\SportGlyph::TENNIS,
+        default => \App\Support\SportGlyph::BADMINTON,
     };
 
     // The app's amenityIcon(): free-text label → the closest glyph, falling back to a
@@ -107,43 +111,60 @@
     #slots-grid-container .sb-group__count { margin-left: auto; font-size: 12.5px; font-weight: 700; color: #475569; }
     #slots-grid-container .sb-group__count.is-none { color: #94A3B8; }
 
-    #slots-grid-container .sb-keys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
+    /* Slot cards (2026-10-21): a time card, not a keyboard key. Time on the left at
+       full weight, the length or the reason underneath, a status dot in the corner.
+       Physical: a hairline + contact shadow at rest, a press sinks 1px and the
+       shadow closes; a pick fills blue and a tick draws itself. */
+    #slots-grid-container .sb-keys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
     #slots-grid-container .sb-key {
         position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
-        min-height: 54px; padding: 8px 4px 9px; margin: 0;
-        background: #FFFFFF; border: 1px solid #D9E1EC; border-bottom: 3px solid #C5D0DF; border-radius: 12px;
-        box-shadow: 0 1px 0 #fff inset; color: #0F172A; cursor: pointer; text-align: center;
-        transform: none; transition: transform .07s ease, border-color .15s ease, background-color .15s ease;
+        min-height: 52px; padding: 8px 6px; margin: 0;
+        background: #FFFFFF; border: 1px solid #DFE5EE; border-radius: 12px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .05);
+        color: #0F172A; cursor: pointer; text-align: center; overflow: hidden;
+        transform: none; transition: transform .09s ease, box-shadow .12s ease, border-color .15s ease, background-color .18s ease;
         -webkit-tap-highlight-color: transparent; user-select: none;
     }
     #slots-grid-container .sb-key::before, #slots-grid-container .sb-key::after { content: none; }
-    #slots-grid-container .sb-key:hover { border-color: #B9C6DA; border-bottom-color: #AEBBD0; }
-    #slots-grid-container .sb-key:active:not(.is-booked) { transform: translateY(2px); border-bottom-width: 1px; margin-bottom: 2px; }
-    #slots-grid-container .sb-key__time { font-size: 16.5px; font-weight: 800; letter-spacing: -.01em; line-height: 1.15; }
-    #slots-grid-container .sb-key__time small { margin-left: 3px; font-size: 10.5px; font-weight: 700; color: #94A3B8; letter-spacing: .02em; }
-    #slots-grid-container .sb-key__sub { font-size: 11.5px; font-weight: 700; color: #64748B; line-height: 1.2; }
+    #slots-grid-container .sb-key:hover:not(.is-booked):not(.is-selected) { border-color: #C9D4E3; }
+    #slots-grid-container .sb-key:active:not(.is-booked) {
+        transform: translateY(1px) scale(.985);
+        box-shadow: 0 0 0 rgba(15, 23, 42, 0), 0 1px 1px rgba(15, 23, 42, .08);
+    }
+    #slots-grid-container .sb-key__time { display: flex; align-items: baseline; font-size: 17px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; }
+    #slots-grid-container .sb-key__time small { margin-left: 3px; font-size: 10.5px; font-weight: 700; color: #94A3B8; letter-spacing: .03em; }
+    #slots-grid-container .sb-key__sub,
+    #slots-grid-container .sb-key__len { font-size: 11.5px; font-weight: 600; color: #94A3B8; line-height: 1.2; }
     #slots-grid-container .sb-key__soon { font-size: 11px; font-weight: 700; color: #2563EB; line-height: 1.2; }
 
-    /* Peak: costs more, says how much, in a warm ink — no flame. */
-    #slots-grid-container .sb-key.is-peak .sb-key__sub { color: #B45309; }
+    /* Peak: costs more, says how much, in a warm ink. */
+    #slots-grid-container .sb-key.is-peak .sb-key__sub { color: #B45309; font-weight: 700; }
 
-    /* Picked: the key stays pressed, in blue. */
+    /* Picked: blue card, tick in the corner drawn on the pick. */
     /* !important only here: site-theme-overrides.css forces a pale selected tile with
        !important on desktop, which turned white text invisible. */
     #slots-grid-container .sb-key.is-selected {
-        background: #2563EB !important; border-color: #1D4ED8 !important; border-bottom: 1px solid #1D4ED8 !important; margin-top: 2px;
-        min-height: 52px; color: #fff; transform: none;
-        box-shadow: 0 1px 0 rgba(255, 255, 255, .22) inset, 0 4px 10px -4px rgba(37, 99, 235, .6) !important;
+        background: #2563EB !important; border-color: #2563EB !important; color: #fff;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, .25) inset, 0 8px 16px -8px rgba(37, 99, 235, .75), 0 0 0 3px rgba(37, 99, 235, .14) !important;
     }
     #slots-grid-container .sb-key.is-selected .sb-key__time { color: #fff !important; }
     #slots-grid-container .sb-key.is-selected .sb-key__time small,
     #slots-grid-container .sb-key.is-selected .sb-key__sub,
-    #slots-grid-container .sb-key.is-selected .sb-key__soon { color: rgba(255, 255, 255, .82); }
+    #slots-grid-container .sb-key.is-selected .sb-key__len,
+    #slots-grid-container .sb-key.is-selected .sb-key__soon { color: rgba(255, 255, 255, .8); }
+    #slots-grid-container .sb-key__tick { display: none; position: absolute; top: 7px; right: 7px; width: 16px; height: 16px; border-radius: 50%; background: #fff; color: #2563EB; }
+    #slots-grid-container .sb-key.is-selected .sb-key__tick { display: block; }
+    #slots-grid-container .sb-key__tick path { stroke-dasharray: 12; stroke-dashoffset: 0; }
+    #slots-grid-container .sb-key.is-pop .sb-key__tick { animation: sb-tick-in .32s cubic-bezier(.2, .9, .3, 1.3) both; }
+    #slots-grid-container .sb-key.is-pop .sb-key__tick path { animation: sb-tick-draw .3s .08s ease-out both; }
+    #slots-grid-container .sb-key.is-pop { animation: sb-pick .28s cubic-bezier(.2, .9, .3, 1.2); }
+    @keyframes sb-tick-in { from { transform: scale(0); } to { transform: scale(1); } }
+    @keyframes sb-tick-draw { from { stroke-dashoffset: 12; } to { stroke-dashoffset: 0; } }
+    @keyframes sb-pick { 0% { transform: scale(.96); } 60% { transform: scale(1.02); } 100% { transform: scale(1); } }
 
-    /* Taken: recessed into the sheet, time struck through. */
+    /* Taken: a dashed outline on the sheet, time struck through - nothing to press. */
     #slots-grid-container .sb-key.is-booked {
-        background: #F2F5F9; border: 1px solid #E3E9F1; border-bottom-width: 1px; margin-top: 2px; min-height: 52px;
-        box-shadow: 0 1px 2px rgba(15, 23, 42, .06) inset; color: #A3AFC0; cursor: not-allowed;
+        background: #F6F8FB; border: 1px dashed #D5DDE8; box-shadow: none; color: #A3AFC0; cursor: not-allowed;
     }
     #slots-grid-container .sb-key.is-booked .sb-key__clock { text-decoration: line-through; text-decoration-thickness: 1.5px; text-decoration-color: #B8C3D2; }
     #slots-grid-container .sb-key.is-booked .sb-key__sub { color: #94A3B8; }
@@ -160,6 +181,261 @@
 
     #slots-grid-container .sb-key--skel { cursor: default; border-color: #E8EDF4; border-bottom-color: #E1E7F0; background: linear-gradient(90deg, #F4F7FB 25%, #EAF0F7 50%, #F4F7FB 75%) 0 0 / 200% 100%; animation: sb-shimmer 1.2s linear infinite; }
     @keyframes sb-shimmer { to { background-position: -200% 0; } }
+
+    /* ── Phone dock: ticket stub + Checkout key (2026-10-21) ───────────────
+       Replaces the pill / subtotal / "Continue · ₹" stack in the sheet foot. The
+       stub is a real pass shape: a date tear-off, a perforation with two punched
+       notches, and the picked times. No money - checkout shows the bill. */
+    .co-dock { display: none; }
+    .mven__modal-foot .sticky-booking-card > .mb-24,
+    .mven__modal-foot .price-calculator-panel,
+    .mven__modal-foot #book-now-button,
+    .mven__modal-foot .booking-notice-text { display: none !important; }
+    .mven__modal-foot .co-dock { display: block; }
+
+    .co-stub {
+        position: relative; display: flex; align-items: stretch; margin-bottom: 12px;
+        background: #F7F9FD; border: 1px solid #E1E8F4; border-radius: 16px;
+        box-shadow: 0 1px 0 #fff inset;
+        transition: background-color .2s ease, border-color .2s ease;
+    }
+    .co-dock:not(.is-empty) .co-stub { background: #fff; border-color: #CFDCF3; box-shadow: 0 1px 0 #fff inset, 0 6px 14px -10px rgba(37, 99, 235, .45); }
+    /* Punched notches top and bottom of the perforation, cut from the sheet colour. */
+    .co-stub::before, .co-stub::after {
+        content: ""; position: absolute; left: 63px; width: 14px; height: 14px; border-radius: 50%;
+        background: #fff; border: 1px solid #E1E8F4;
+    }
+    .co-stub::before { top: -8px; clip-path: inset(50% 0 0 0); }
+    .co-stub::after { bottom: -8px; clip-path: inset(0 0 50% 0); }
+    .co-dock:not(.is-empty) .co-stub::before, .co-dock:not(.is-empty) .co-stub::after { border-color: #CFDCF3; }
+    .co-stub__date {
+        flex: none; width: 70px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        padding: 10px 0; border-right: 1.5px dashed #D5DEEC; color: #64748B;
+        font-size: 10px; font-weight: 800; letter-spacing: .12em; line-height: 1.25;
+    }
+    .co-stub__date b { font-size: 24px; font-weight: 800; letter-spacing: -.03em; color: #0F172A; line-height: 1.05; font-variant-numeric: tabular-nums; }
+    .co-dock:not(.is-empty) .co-stub__date span:first-child { color: #2563EB; }
+    .co-stub__body { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 11px 6px 11px 14px; }
+    .co-stub__what {
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: 10.5px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: #2563EB;
+    }
+    .co-dock.is-empty .co-stub__what { color: #94A3B8; }
+    .co-stub__times { display: flex; flex-direction: column; gap: 2px; min-height: 26px; justify-content: center; }
+    .co-range {
+        display: flex; align-items: baseline; gap: 4px; white-space: nowrap;
+        font-size: 21px; font-weight: 800; letter-spacing: -.03em; line-height: 1.15; color: #0F172A; font-variant-numeric: tabular-nums;
+        animation: co-range-in .26s cubic-bezier(.2, .9, .3, 1.15) both;
+    }
+    .co-range small { font-size: 11.5px; font-weight: 800; letter-spacing: .02em; color: #64748B; }
+    .co-range i { margin-left: 4px; font-style: normal; font-size: 11.5px; font-weight: 700; letter-spacing: 0; color: #64748B; }
+    .co-dock.is-multi .co-range { font-size: 16px; }
+    .co-stub__hint { font-size: 15px; font-weight: 700; color: #94A3B8; letter-spacing: -.01em; }
+    .co-stub__facts { font-size: 12px; font-weight: 600; color: #64748B; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .co-stub__facts b { font-weight: 700; color: #0F172A; }
+    @keyframes co-range-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+
+    /* The court itself, drawn: lines in blue, its name stamped under it. */
+    .co-stub__court {
+        flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+        width: 58px; padding-right: 8px; color: #93B4F5;
+    }
+    .co-dock:not(.is-empty) .co-stub__court { color: #2563EB; }
+    .co-dock.is-empty .co-stub__court { color: #CBD5E1; }
+    .co-stub__court svg { display: block; transform: rotate(-4deg); }
+    .co-dock:not(.is-empty) .co-stub__court svg { animation: co-court-in .4s cubic-bezier(.2, .9, .3, 1.3) both; }
+    .co-stub__court span {
+        max-width: 54px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: inherit;
+    }
+    @keyframes co-court-in { from { transform: rotate(-14deg) scale(.85); opacity: .4; } to { transform: rotate(-4deg); opacity: 1; } }
+    .co-stub__clear {
+        position: absolute; top: -10px; right: 6px; width: 24px; height: 24px; display: none; align-items: center; justify-content: center;
+        padding: 0; border: 1px solid #CFDCF3; border-radius: 50%; background: #fff; color: #64748B; cursor: pointer;
+        box-shadow: 0 2px 6px -2px rgba(15, 23, 42, .25); -webkit-tap-highlight-color: transparent;
+    }
+    .co-dock:not(.is-empty) .co-stub__clear { display: inline-flex; }
+    .co-stub__clear:active { transform: scale(.88); background: #F1F5F9; }
+
+    /* The key: blue, a pass sitting in a slot on the left, an arrow on the right,
+       and a 2px lip underneath that a press closes. */
+    .co-go {
+        position: relative; display: flex; align-items: center; gap: 12px; width: 100%; height: 56px; padding: 0 8px 0 8px;
+        border: 0; border-radius: 16px; overflow: hidden; cursor: pointer;
+        background: #2563EB; color: #fff; font: inherit;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, .22) inset, 0 3px 0 #1D4ED8, 0 10px 20px -10px rgba(37, 99, 235, .8);
+        transition: transform .08s ease, box-shadow .08s ease, background-color .2s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .co-go:active:not(:disabled), .co-go.is-going { transform: translateY(3px); box-shadow: 0 0 0 #1D4ED8, 0 3px 8px -4px rgba(37, 99, 235, .7); }
+    .co-go:disabled { cursor: default; background: #E8EDF5; color: #94A3B8; box-shadow: 0 1px 0 #fff inset, 0 2px 0 #D5DDEA; }
+    .co-go__pass {
+        flex: none; display: flex; align-items: center; justify-content: center; width: 44px; height: 40px; border-radius: 11px;
+        background: rgba(255, 255, 255, .16); box-shadow: 0 1px 2px rgba(0, 0, 0, .12) inset;
+    }
+    .co-go__pass svg { transform: rotate(-8deg); transition: transform .3s cubic-bezier(.2, .8, .3, 1), opacity .25s ease; }
+    .co-go:disabled .co-go__pass { background: #DDE4EF; box-shadow: none; }
+    .co-go:disabled .co-go__pass svg { opacity: .55; filter: grayscale(1); }
+    .co-go__label { flex: 1; text-align: left; font-size: 16.5px; font-weight: 800; letter-spacing: -.01em; }
+    .co-go__arrow {
+        flex: none; display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 12px;
+        background: #fff; color: #2563EB; transition: transform .3s cubic-bezier(.2, .8, .3, 1);
+    }
+    .co-go:disabled .co-go__arrow { background: #DDE4EF; color: #A3AFC0; }
+    .co-dock:not(.is-empty) .co-go__pass svg { animation: co-pass-ready .5s cubic-bezier(.2, .9, .3, 1.3) both; }
+    /* Going: the pass slides out to the right through the key, the arrow follows. */
+    .co-go.is-going .co-go__pass svg { transform: translateX(260px) rotate(0deg); opacity: 0; }
+    .co-go.is-going .co-go__arrow { transform: translateX(6px); }
+    @keyframes co-pass-ready { 0% { transform: rotate(-8deg) translateY(10px); opacity: 0; } 100% { transform: rotate(-8deg); opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) {
+        .co-range, .co-dock:not(.is-empty) .co-go__pass svg, .co-dock:not(.is-empty) .co-stub__court svg { animation: none; }
+        .crt { transition: none !important; }
+    }
+
+    /* ── RATE VENUE form (real, 2026-10-21) — big tappable stars that name themselves ── */
+    .rvf { text-align: center; }
+    .rvf__title { margin: 0; font-size: 18px; font-weight: 800; letter-spacing: -.02em; color: #0F172A; }
+    .rvf__lede { margin: 4px 0 0; font-size: 13px; color: #64748B; }
+    .rvf__note { margin: 0; font-size: 13.5px; color: #475569; }
+    .rvf__stars { display: flex; justify-content: center; gap: 6px; margin-top: 18px; }
+    .rvf .rvf__star {
+        width: 48px; height: 48px; display: inline-flex; align-items: center; justify-content: center; padding: 0;
+        border: 0; border-radius: 14px; background: #F1F5F9; color: #CBD5E1; cursor: pointer;
+        transition: background-color .15s ease, color .15s ease, transform .1s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .rvf .rvf__star svg { width: 28px; height: 28px; fill: currentColor; }
+    .rvf .rvf__star:active { transform: scale(.9); }
+    .rvf .rvf__star.is-active { background: #FFF7E0; color: #F59E0B; }
+    .rvf .rvf__star.is-pop { animation: rvf-pop .32s cubic-bezier(.2, .9, .3, 1.4); }
+    @keyframes rvf-pop { 0% { transform: scale(.8); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
+    .rvf__word { display: block; height: 18px; margin-top: 8px; font-size: 13px; font-weight: 700; color: #B45309; }
+    .rvf .rvf__text { width: 100%; margin-top: 14px; padding: 12px 14px; border: 1px solid #E2E8F0; border-radius: 14px; font: inherit; font-size: 14px; resize: vertical; background: #F8FAFC; }
+    .rvf .rvf__text:focus { outline: none; border-color: #2563EB; background: #fff; box-shadow: 0 0 0 3px rgba(37, 99, 235, .14); }
+    .rvf__err { margin: 10px 0 0; font-size: 13px; font-weight: 600; color: #DC2626; }
+    .rvf .rvf__go {
+        width: 100%; height: 50px; margin-top: 14px; border: 0; border-radius: 14px; background: #2563EB; color: #fff;
+        font-size: 15.5px; font-weight: 800; cursor: pointer;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, .22) inset, 0 3px 0 #1D4ED8, 0 10px 20px -10px rgba(37, 99, 235, .8);
+        transition: transform .08s ease, box-shadow .08s ease, background-color .15s ease;
+    }
+    .rvf .rvf__go:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 0 0 #1D4ED8, 0 3px 8px -4px rgba(37, 99, 235, .7); }
+    .rvf .rvf__go:disabled { background: #E8EDF5; color: #94A3B8; box-shadow: none; cursor: default; }
+    .rvf__as { margin: 10px 0 0; font-size: 12px; color: #94A3B8; }
+    .rvf__as b { color: #475569; }
+    .mven__review-played {
+        display: inline-flex; align-items: center; height: 18px; margin-left: 4px; padding: 0 6px; border-radius: 5px; vertical-align: 1px;
+        background: #ECFDF3; color: #15803D; font-size: 10px; font-weight: 800; letter-spacing: .02em;
+    }
+    .mven__review { transition: opacity .3s ease, transform .3s ease; }
+    .mven__review.is-new { opacity: 0; transform: translateY(-6px); }
+    .rvf-toast {
+        position: fixed; left: 50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); z-index: 80; transform: translate(-50%, 12px);
+        display: inline-flex; align-items: center; gap: 8px; padding: 11px 16px; border-radius: 999px;
+        background: #0F172A; color: #fff; font-size: 13.5px; font-weight: 700; opacity: 0; pointer-events: none;
+        box-shadow: 0 10px 24px -10px rgba(15, 23, 42, .6); transition: opacity .2s ease, transform .25s cubic-bezier(.2, .8, .3, 1);
+    }
+    .rvf-toast svg { color: #4ADE80; }
+    .rvf-toast.is-on { opacity: 1; transform: translate(-50%, 0); }
+
+    /* ── Sheet head: tight, aligned to the content's 16px edge, no rule under it ── */
+    .mven__modal-head .mven__modal-id { flex: 1; min-width: 0; }
+    .mven__modal-head .mven__modal-title { font-size: 18px; line-height: 1.2; letter-spacing: -.02em; }
+    .mven__modal-sub {
+        margin: 1px 0 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        font-size: 12.5px; font-weight: 500; color: #64748B;
+    }
+    @media (max-width: 720px) {
+        .mven__modal-head {
+            justify-content: space-between !important; align-items: center !important;
+            padding: 4px 12px 6px 16px !important; border-bottom: 0 !important;
+        }
+        .mven__modal-head .mven__modal-x { width: 32px; height: 32px; }
+        .mven__modal-head .mven__modal-x svg { width: 16px; height: 16px; }
+        .mven__modal-body { padding-top: 10px !important; }
+        /* The instruction line said what the screen already shows. */
+        .mven__modal-body #booking-widget > .detail-card-panel__subtitle { display: none; }
+    }
+
+    /* ── Courts: a card per court with its drawing and its own rate ──────── */
+    .crt-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+    .crt-head__count { font-size: 12px; font-weight: 600; color: #94A3B8; }
+    .court-selector-container .court-pill.crt,
+    .mven__modal-body .court-selector-container .court-pill.crt {
+        position: relative; flex: none; display: flex; align-items: center; gap: 10px;
+        height: auto; min-width: 128px; padding: 9px 14px 9px 9px; margin: 0;
+        border: 1px solid #E1E7EF; border-radius: 16px; background: #fff; color: #0F172A; text-align: left;
+        box-shadow: 0 1px 0 #fff inset, 0 1px 2px rgba(15, 23, 42, .06), 0 6px 12px -10px rgba(15, 23, 42, .35);
+        transition: transform .09s ease, box-shadow .12s ease, border-color .15s ease, background-color .15s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .mven__modal-body .court-selector-container .court-pill.crt:hover { background: #fff; color: #0F172A; border-color: #C9D4E3; }
+    .court-selector-container .court-pill.crt:active { transform: translateY(1px) scale(.98); box-shadow: 0 1px 1px rgba(15, 23, 42, .08); }
+    .crt__art {
+        flex: none; display: flex; align-items: center; justify-content: center; width: 36px; height: 46px; border-radius: 10px;
+        background: #F1F5FA; color: #94A3B8; transition: background-color .15s ease, color .15s ease;
+    }
+    .crt__art svg { width: 26px; height: 36px; }
+    .crt__txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
+    .crt__txt b { font-size: 14px; font-weight: 800; letter-spacing: -.01em; white-space: nowrap; }
+    .crt__txt small { margin-top: 2px; font-size: 12.5px; font-weight: 700; color: #334155; font-variant-numeric: tabular-nums; }
+    .crt__txt small i { font-style: normal; font-weight: 500; color: #94A3B8; }
+    .crt__txt em { margin-top: 1px; font-style: normal; font-size: 10.5px; font-weight: 700; color: #B45309; white-space: nowrap; }
+    .crt__tick { position: absolute; top: -5px; right: -5px; width: 18px; height: 18px; display: none; filter: drop-shadow(0 2px 3px rgba(37, 99, 235, .35)); }
+    .court-selector-container .court-pill.crt.is-active,
+    .mven__modal-body .court-selector-container .court-pill.crt.is-active {
+        background: #F5F8FF; border-color: #2563EB; color: #0F172A;
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, .12), 0 8px 16px -10px rgba(37, 99, 235, .55);
+    }
+    .court-pill.crt.is-active .crt__art { background: #2563EB; color: #fff; }
+    .court-pill.crt.is-active .crt__tick { display: block; animation: sb-tick-in .3s cubic-bezier(.2, .9, .3, 1.3) both; }
+    /* Room for the tick that sits on the card's corner. */
+    .mven__modal-body .court-selector-container { padding-top: 6px !important; padding-bottom: 8px !important; }
+
+    /* ── Slot board: one segmented control, one rate line, one grid ──────────
+       The control filters the grid to a part of the day. Its white thumb slides
+       between tabs (--i = active index); counts are the live open figures. */
+    #slots-grid-container .sb-seg {
+        position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+        padding: 3px; margin-bottom: 12px; border-radius: 12px; background: #EEF1F5;
+    }
+    #slots-grid-container .sb-seg__thumb {
+        position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 3); border-radius: 9px; background: #fff;
+        box-shadow: 0 1px 1px rgba(15, 23, 42, .06), 0 2px 6px -1px rgba(15, 23, 42, .14);
+        transform: translateX(calc(var(--i, 0) * 100%));
+        transition: transform .28s cubic-bezier(.3, .7, .2, 1);
+    }
+    #slots-grid-container .sb-seg__tab {
+        position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 1px;
+        padding: 7px 4px 6px; border: 0; background: none; cursor: pointer; font: inherit; color: #64748B;
+        -webkit-tap-highlight-color: transparent;
+    }
+    #slots-grid-container .sb-seg__tab b { position: relative; font-size: 13px; font-weight: 700; letter-spacing: -.01em; }
+    #slots-grid-container .sb-seg__tab small { font-size: 11px; font-weight: 600; color: #94A3B8; font-variant-numeric: tabular-nums; }
+    #slots-grid-container .sb-seg__tab.is-on b { color: #0F172A; font-weight: 800; }
+    #slots-grid-container .sb-seg__tab.is-on small { color: #16A34A; }
+    #slots-grid-container .sb-seg__tab:active:not(:disabled) b { opacity: .6; }
+    #slots-grid-container .sb-seg__tab.is-none { cursor: default; color: #B6C0CE; }
+    /* You have picks in this part of the day. */
+    #slots-grid-container .sb-seg__dot { position: absolute; top: 1px; right: -8px; width: 6px; height: 6px; border-radius: 50%; background: #2563EB; }
+
+    #slots-grid-container .sb-rateline {
+        display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 0 2px 10px;
+        font-size: 12.5px; color: #64748B; font-variant-numeric: tabular-nums;
+    }
+    #slots-grid-container .sb-rateline b { font-size: 14px; font-weight: 800; color: #0F172A; }
+    #slots-grid-container .sb-rateline__peak { font-weight: 600; color: #B45309; white-space: nowrap; }
+    #slots-grid-container .sb-rateline.is-offline { color: #B45309; font-weight: 600; }
+
+    /* The segment already names the part of the day — no second heading. */
+    #slots-grid-container .sb-seg ~ .sb-group { margin-top: 0; }
+    #slots-grid-container .sb-seg ~ .sb-group .sb-group__head { display: none; }
+    @media (prefers-reduced-motion: reduce) {
+        #slots-grid-container .sb-seg__thumb { transition: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+        .co-go__pass svg, .co-go__arrow { transition: none; }
+    }
 </style>
 
 <div class="mven" data-venue-id="{{ $venue->id }}">
@@ -240,7 +516,7 @@
         {{-- ── 3. Rating summary + RATE VENUE ────────────────────────────── --}}
         <div class="mven__rule"></div>
         <div class="mven__rating">
-            <div class="mven__rating-copy">
+            <div class="mven__rating-copy" id="mven-rating-copy">
                 @if($venue->ratings_count > 0)
                     <div class="mven__rating-top">
                         <strong>{{ number_format($mvScore, 1) }}</strong>
@@ -327,16 +603,18 @@
         <a class="mven__dir" href="{{ $mvMapUrl }}" target="_blank" rel="noopener">Get directions</a>
 
         {{-- ── 9. Reviews ─────────────────────────────────────────────────── --}}
-        @if(count($venue->reviews_list))
+        {{-- Always rendered (hidden while empty) so a first review posted from RATE VENUE
+             can appear at once, without a reload. --}}
+        <div id="mven-reviews-wrap" @if(!count($venue->reviews_list)) hidden @endif>
             <div class="mven__rule"></div>
-            <h2 class="mven__h2">Reviews ({{ $venue->reviews }})</h2>
-            <div class="mven__reviews">
+            <h2 class="mven__h2">Reviews (<span data-reviews-count>{{ $venue->reviews }}</span>)</h2>
+            <div class="mven__reviews" id="mven-reviews-list">
                 @foreach($venue->reviews_list as $review)
                     <div class="mven__review">
                         <div class="mven__review-head">
                             <span class="mven__review-face">{{ mb_strtoupper(mb_substr($review->user, 0, 1)) }}</span>
                             <span class="mven__review-who">
-                                <strong>{{ $review->user }}</strong>
+                                <strong>{{ $review->user }} @if(!empty($review->played))<span class="mven__review-played">Played here</span>@endif</strong>
                                 <small>{{ $review->date }}</small>
                             </span>
                             <span class="mven__review-score">
@@ -348,7 +626,7 @@
                     </div>
                 @endforeach
             </div>
-        @endif
+        </div>
 
         {{-- ── 9b. FAQ — answered from this venue's own data (PublicWebController::
              venueFaqs); the same list is the page's FAQPage markup, which search
@@ -397,7 +675,10 @@
     <div class="mven__modal-card" role="dialog" aria-modal="true" aria-labelledby="mvenModalTitle">
         <span class="mven__modal-grip" aria-hidden="true"></span>
         <div class="mven__modal-head">
-            <h2 id="mvenModalTitle" class="mven__modal-title">Book a slot</h2>
+            <div class="mven__modal-id">
+                <h2 id="mvenModalTitle" class="mven__modal-title">Book a slot</h2>
+                <p class="mven__modal-sub">{{ $venue->title }}@if($venue->location) · {{ $venue->location }}@endif</p>
+            </div>
             <button type="button" class="mven__modal-x" data-mven-close aria-label="Close">
                 <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
@@ -665,7 +946,10 @@
 
                 <!-- Court / Sub-Venue Selector Pills -->
                 <div class="mb-28">
-                    <label class="sidebar-label">Select Court / Pitch / Lane</label>
+                    <div class="crt-head">
+                        <label class="sidebar-label">Choose a court</label>
+                        <span id="crt-count" class="crt-head__count"></span>
+                    </div>
                     <div id="court-selector-container" class="court-selector-container">
                         <!-- Dynamically populated in JavaScript -->
                     </div>
@@ -807,28 +1091,37 @@
                     @endforeach
                 </div>
 
-                <!-- Add Review Form (Mock Live Action) -->
-                <div class="review-form-card">
-                    <h4>Add Your Review</h4>
-                    <div class="rating-selector-row">
-                        <span class="rating-selector-label">Your Rating:</span>
-                        <div class="rating-selector-stars" id="rating-selector">
-                            <span onclick="setFormRating(1)" class="star-btn">★</span>
-                            <span onclick="setFormRating(2)" class="star-btn">★</span>
-                            <span onclick="setFormRating(3)" class="star-btn">★</span>
-                            <span onclick="setFormRating(4)" class="star-btn">★</span>
-                            <span onclick="setFormRating(5)" class="star-btn">★</span>
+                {{-- RATE VENUE — saved for real (POST /gamehub/{id}/review → VenueReviewService,
+                     the same path as the app). Was a mock that drew a card and saved nothing.
+                     Name comes from the account; one review per person, re-rating edits it. --}}
+                <div class="review-form-card rvf" data-rvf>
+                    @if(!empty($venue->is_owner))
+                        <p class="rvf__note">This is your venue — players' ratings show here and in your partner app.</p>
+                    @else
+                        <h4 class="rvf__title">{{ !empty($venue->my_review) ? 'Your rating' : 'How was it here?' }}</h4>
+                        <p class="rvf__lede">{{ !empty($venue->my_review) ? 'Change it any time — your earlier rating is replaced.' : 'Your rating helps other players pick a court.' }}</p>
+                        <div class="rvf__stars" id="rating-selector" role="radiogroup" aria-label="Your rating">
+                            @foreach(['Poor', 'Okay', 'Good', 'Very good', 'Excellent'] as $i => $word)
+                                <button type="button" class="star-btn rvf__star" role="radio" aria-checked="false" aria-label="{{ $i + 1 }} star{{ $i ? 's' : '' }} — {{ $word }}" data-word="{{ $word }}" onclick="setFormRating({{ $i + 1 }})">
+                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 17.3 6.2 3.7-1.6-7 5.4-4.7-7.1-.6L12 2 9.1 8.7 2 9.3l5.4 4.7-1.6 7z"/></svg>
+                                </button>
+                            @endforeach
                         </div>
-                    </div>
-                    <div class="mb-16">
-                        <input type="text" id="review-user" placeholder="Your Name" class="review-input-field">
-                    </div>
-                    <div class="mb-16">
-                        <textarea id="review-comment" placeholder="Write your review here..." rows="4" class="review-input-field review-comment-textarea"></textarea>
-                    </div>
-                    <button onclick="submitReview()" class="review-submit-btn">
-                        Submit Review
-                    </button>
+                        <span class="rvf__word" id="rvf-word">Tap a star</span>
+                        <textarea id="review-comment" rows="3" maxlength="1000" class="review-input-field review-comment-textarea rvf__text"
+                                  placeholder="What stood out — the surface, lights, staff? (optional)">{{ $venue->my_review['text'] ?? '' }}</textarea>
+                        <p class="rvf__err" id="rvf-err" hidden></p>
+                        @auth
+                            <button type="button" onclick="submitReview(this)" class="review-submit-btn rvf__go" id="rvf-go" disabled>
+                                {{ !empty($venue->my_review) ? 'Update rating' : 'Post rating' }}
+                            </button>
+                            <p class="rvf__as">Posting as <b>{{ \Illuminate\Support\Str::of(auth()->user()->name)->explode(' ')->first() }}</b></p>
+                        @else
+                            <button type="button" class="review-submit-btn rvf__go" onclick="(window.openLoginModal ? window.openLoginModal() : (document.getElementById('loginBtn') || {click(){ location.href='/login'; }}).click())">
+                                Sign in to rate
+                            </button>
+                        @endauth
+                    @endif
                 </div>
             </div>
         </div>
@@ -890,6 +1183,35 @@
                 @else
                     <p class="booking-notice-text">Instant digital confirmation backed by Razorpay secure payment.</p>
                 @endguest
+
+                {{-- Phone sheet dock (shown only inside .mven__modal-foot): what you picked,
+                     drawn as a ticket stub, and the Checkout key. No money here — the bill
+                     with fees is the checkout page's job. Filled by renderDock(). --}}
+                <div id="co-dock" class="co-dock is-empty" aria-live="polite">
+                    <div class="co-stub">
+                        <div class="co-stub__date" aria-hidden="true">
+                            <span id="co-dow">—</span><b id="co-day">—</b><span id="co-mon"></span>
+                        </div>
+                        <div class="co-stub__body">
+                            <span id="co-what" class="co-stub__what">Your slot</span>
+                            <div id="co-times" class="co-stub__times"><span class="co-stub__hint">Tap an open time above</span></div>
+                            <span id="co-facts" class="co-stub__facts"></span>
+                        </div>
+                        <div id="co-court" class="co-stub__court" aria-hidden="true"></div>
+                        <button type="button" id="co-clear" class="co-stub__clear" aria-label="Clear picked slots" onclick="clearPicks()">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                        </button>
+                    </div>
+                    <button type="button" id="co-go" class="co-go" disabled onclick="goCheckout(this)">
+                        <span class="co-go__pass" aria-hidden="true">
+                            <svg viewBox="0 0 32 22" width="30" height="21"><path d="M3 2h26a1 1 0 0 1 1 1v4.5a3.5 3.5 0 0 0 0 7V19a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-4.5a3.5 3.5 0 0 0 0-7V3a1 1 0 0 1 1-1z" fill="#fff"/><path d="M21 3.5v15" stroke="#93B4F5" stroke-width="1.4" stroke-dasharray="1.6 1.8"/><path d="M7 8h9M7 11h6M7 14h8" stroke="#2563EB" stroke-width="1.6" stroke-linecap="round"/><circle cx="25.5" cy="11" r="2" fill="#2563EB"/></svg>
+                        </span>
+                        <span class="co-go__label" id="co-go-label">{{ auth()->check() ? 'Checkout' : 'Sign in to checkout' }}</span>
+                        <span class="co-go__arrow" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+                        </span>
+                    </button>
+                </div>
             </div>
         </div>
 
@@ -1938,12 +2260,23 @@
         if (!container) return;
 
         const courts = venueCourts[selectedSport] || [];
+        const countEl = document.getElementById('crt-count');
+        if (countEl) countEl.innerText = courts.length > 1 ? courts.length + ' courts' : '';
+        // A card per court: its drawing, its name, its own rate (and peak rate when set).
+        const art = courtDrawing(selectedSport, null);
         container.innerHTML = courts.map(court => {
             const isActive = court === selectedCourt;
-            const activeClass = isActive ? 'is-active' : '';
+            const rate = courtPrices[court] ?? venueBasePrice;
+            const peak = courtPeak[court] && courtPeak[court].price > rate ? courtPeak[court].price : 0;
             return `
-                <button onclick="selectCourt('${court}')" class="court-pill ${activeClass}">
-                    ${court}
+                <button type="button" onclick="selectCourt('${court}')" class="court-pill crt ${isActive ? 'is-active' : ''}" aria-pressed="${isActive}">
+                    <span class="crt__art">${art}</span>
+                    <span class="crt__txt">
+                        <b>${court}</b>
+                        <small>₹${Number(rate).toLocaleString('en-IN')}<i>/hr</i></small>
+                        ${peak ? `<em>peak ₹${Number(peak).toLocaleString('en-IN')}</em>` : ''}
+                    </span>
+                    <svg class="crt__tick" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="8" fill="#2563EB"/><path d="M4.5 8.2l2.3 2.3 4.7-4.9" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
             `;
         }).join('');
@@ -2005,6 +2338,13 @@
 
     // What moved between two live reads: { slotId: 'taken' | 'freed' }.
     let slotFlips = {};
+    // Which part of the day the slot grid shows ('Morning' | 'Afternoon' | 'Evening').
+    let activePart = null;
+    function selectPart(name) {
+        if (name === activePart) return;
+        activePart = name;
+        renderSlots(true);
+    }
     let liveCheckedAt = 0;
     let liveFailed = false;
     function diffStates(prev, next) {
@@ -2102,6 +2442,7 @@
     function renderSlots(animate = false) {
         const container = document.getElementById('slots-grid-container');
         if (!container) return;
+        if (!selectedSlots.length) renderDock(); // the stub follows the picked day
 
         const rate = currentRate();
 
@@ -2141,10 +2482,6 @@
             return;
         }
 
-        const states = slots.map(s => slotState(s.id));
-        const openCount = states.filter(s => s === 'open').length;
-        const bookedCount = states.filter(s => s === 'booked').length;
-
         // Today only: how soon the first open slot starts — a real clock, not a sales line.
         const now = new Date();
         const nowMin = now.getHours() * 60 + now.getMinutes();
@@ -2162,7 +2499,7 @@
             const to = spoken((group[group.length - 1].time.split(' - ')[1] || ''));
 
             let groupHtml = `
-                <section class="sb-group">
+                <section class="sb-group" id="sb-g-${title.toLowerCase()}">
                     <header class="sb-group__head">
                         <h4>${title}</h4>
                         <span class="sb-group__hours">${from}${to ? ' – ' + to : ''}</span>
@@ -2202,6 +2539,7 @@
                          aria-label="${slot.time}, ${state === 'open' ? '₹' + r + (isPeak ? ' peak' : '') : state}">
                         <span class="sb-key__time"><span class="sb-key__clock">${clock.replace(/^0/, '')}</span><small>${ampm || ''}</small></span>
                         ${sub ? `<span class="sb-key__sub">${sub}</span>` : tag}
+                        <svg class="sb-key__tick" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 8.2l2.3 2.3 4.7-4.9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </div>
                 `;
             });
@@ -2213,20 +2551,43 @@
             return groupHtml;
         };
 
-        // One quiet line: what's open, and the price once — not a pulsing "LIVE" badge.
+        // The price once, and the peak rate only where this court has one.
         const peakRates = slots.map(s => slotRate(s.time)).filter(v => v > rate);
-        const head = `
-            <div class="sb-status${liveFailed ? ' is-offline' : ''}">
-                <span class="sb-status__count">
-                    ${liveFailed ? 'Couldn’t refresh · showing last known' : `<b>${openCount}</b> open${bookedCount ? ` · ${bookedCount} booked` : ''}`}
-                </span>
-                <span class="sb-status__rate">₹${rate.toLocaleString()} / hour${peakRates.length ? ' · peak ₹' + Math.max(...peakRates).toLocaleString() : ''}</span>
+
+        // Parts of the day, each a jump to its group with its real open count.
+        const parts = [
+            ['Morning', slots.filter(s => s.start < 12 * 60)],
+            ['Afternoon', slots.filter(s => s.start >= 12 * 60 && s.start < 17 * 60)],
+            ['Evening', slots.filter(s => s.start >= 17 * 60)],
+        ];
+        const peakWin = courtPeak[selectedCourt] && courtPeak[selectedCourt].start && courtPeak[selectedCourt].end
+            ? ' · ' + spoken(courtPeak[selectedCourt].start).replace(/ (AM|PM)$/, (m, ap) => spoken(courtPeak[selectedCourt].end).endsWith(ap) ? '' : m) + '–' + spoken(courtPeak[selectedCourt].end)
+            : '';
+        // One part of the day on screen at a time. Keep the player's choice while it still
+        // has slots; otherwise land on the first part with something open.
+        const openIn = (g) => g.filter(s => slotState(s.id) === 'open').length;
+        const current = parts.find(([n, g]) => n === activePart && g.length);
+        if (!current) activePart = (parts.find(([, g]) => openIn(g)) || parts.find(([, g]) => g.length) || parts[0])[0];
+        const activeIdx = parts.findIndex(([n]) => n === activePart);
+        const pickedIn = (g) => g.some(s => selectedSlots.some(p => p.key === `${selectedDate}_${selectedSport}_${selectedCourt}_${s.id}`));
+
+        const bar = `
+            <div class="sb-seg" role="tablist" aria-label="Part of day" style="--i:${activeIdx}">
+                <span class="sb-seg__thumb" aria-hidden="true"></span>
+                ${parts.map(([name, g]) => {
+                    const n = openIn(g);
+                    const on = name === activePart;
+                    return `<button type="button" role="tab" aria-selected="${on}" class="sb-seg__tab${on ? ' is-on' : ''}${g.length ? '' : ' is-none'}" ${g.length ? `onclick="selectPart('${name}')"` : 'disabled'}>
+                        <b>${name}${pickedIn(g) ? '<i class="sb-seg__dot"></i>' : ''}</b>
+                        <small>${!g.length ? 'Closed' : (n ? n + ' open' : 'Full')}</small>
+                    </button>`;
+                }).join('')}
+            </div>
+            <div class="sb-rateline${liveFailed ? ' is-offline' : ''}">
+                ${liveFailed ? 'Couldn’t refresh · showing last known' : `<span><b>₹${rate.toLocaleString('en-IN')}</b> / hour</span>${peakRates.length ? `<span class="sb-rateline__peak">Peak ₹${Math.max(...peakRates).toLocaleString('en-IN')}${peakWin}</span>` : ''}`}
             </div>`;
 
-        container.innerHTML = head +
-            renderGroup('Morning', slots.filter(s => s.start < 12 * 60)) +
-            renderGroup('Afternoon', slots.filter(s => s.start >= 12 * 60 && s.start < 17 * 60)) +
-            renderGroup('Evening', slots.filter(s => s.start >= 17 * 60));
+        container.innerHTML = bar + renderGroup(activePart, parts[activeIdx][1]);
         // The flip flash plays once; the next render is calm again.
         slotFlips = {};
     }
@@ -2330,78 +2691,237 @@
                 bookBtn.innerText = 'Continue · ₹' + total.toLocaleString('en-IN');
             }
         }
+        renderDock();
     }
+
+    // Phone dock: the picks as a ticket stub. Times only — the bill lives on checkout.
+    // Back-to-back slots on one court read as one range ("6:00 – 8:00 AM").
+    function renderDock() {
+        const dock = document.getElementById('co-dock');
+        if (!dock) return;
+        const go = document.getElementById('co-go');
+        const mins = (t) => timeMin((t || '').trim());
+        const clock = (m) => {
+            const h24 = Math.floor((m % 1440) / 60), mm = m % 60;
+            return { t: ((h24 % 12) || 12) + ':' + String(mm).padStart(2, '0'), ap: h24 < 12 ? 'AM' : 'PM' };
+        };
+        const picks = selectedSlots.map(p => {
+            const [a, b] = p.time.split(' - ');
+            const s = mins(a), e0 = mins(b);
+            return { ...p, s, e: e0 != null && e0 <= s ? e0 + 1440 : e0 };
+        }).sort((x, y) => (x.date + x.court).localeCompare(y.date + y.court) || x.s - y.s);
+
+        // Merge touching slots on the same day + court.
+        const ranges = [];
+        picks.forEach(p => {
+            const last = ranges[ranges.length - 1];
+            if (last && last.date === p.date && last.court === p.court && last.e === p.s) { last.e = p.e; last.keys.push(p.key); }
+            else ranges.push({ date: p.date, court: p.court, s: p.s, e: p.e, keys: [p.key] });
+        });
+
+        dock.classList.toggle('is-empty', !picks.length);
+        dock.classList.toggle('is-multi', ranges.length > 1);
+        go.disabled = !picks.length;
+
+        const ymd = picks.length ? picks[0].date : selectedDate;
+        const [y, m, d] = String(ymd).split('-').map(Number);
+        const dt = new Date(y, (m || 1) - 1, d || 1);
+        document.getElementById('co-dow').innerText = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][dt.getDay()];
+        document.getElementById('co-day').innerText = d || '—';
+        document.getElementById('co-mon').innerText = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][(m || 1) - 1];
+
+        const sport = picks.length ? picks[0].sport : selectedSport;
+        const courts = [...new Set(picks.map(p => p.court).filter(Boolean))];
+        const court = courts.length === 1 ? courts[0] : (picks.length ? null : selectedCourt);
+        document.getElementById('co-what').innerText = [sport, court || (courts.length > 1 ? courts.length + ' courts' : '')].filter(Boolean).join(' · ');
+        document.getElementById('co-court').innerHTML = courtDrawing(sport, court);
+
+        const times = document.getElementById('co-times');
+        const facts = document.getElementById('co-facts');
+        if (!picks.length) {
+            times.innerHTML = '<span class="co-stub__hint">Tap an open time above</span>';
+            facts.innerText = '';
+            return;
+        }
+        const days = new Set(ranges.map(r => r.date)).size;
+        times.innerHTML = ranges.map(r => {
+            const a = clock(r.s), b = clock(r.e);
+            const day = days > 1 ? `<i>${pillDay(r.date).split(', ')[1]}</i>` : '';
+            const crt = courts.length > 1 ? `<i>${r.court}</i>` : '';
+            return `<span class="co-range">${a.t}${a.ap === b.ap ? '' : ' <small>' + a.ap + '</small>'} – ${b.t} <small>${b.ap}</small>${day}${crt}</span>`;
+        }).join('');
+
+        // Facts: total play time, and — today only — how soon it starts, from the real clock.
+        const total = picks.reduce((n, p) => n + ((p.e ?? p.s) - p.s), 0);
+        const len = total % 60 ? (total >= 60 ? Math.floor(total / 60) + ' hr ' + (total % 60) + ' min' : total + ' min') : (total / 60) + ' hr';
+        let soon = '';
+        if (ymd === todayYmd) {
+            const now = new Date();
+            const left = Math.min(...picks.filter(p => p.date === todayYmd).map(p => p.s)) - (now.getHours() * 60 + now.getMinutes());
+            if (left > 0) soon = 'starts in ' + (left < 60 ? left + ' min' : Math.floor(left / 60) + 'h' + (left % 60 ? ' ' + (left % 60) + 'm' : ''));
+        }
+        facts.innerHTML = [len + ' of play', picks.length > 1 ? picks.length + ' slots' : '', soon ? `<b>${soon}</b>` : ''].filter(Boolean).join(' · ');
+    }
+
+    function clearPicks() {
+        selectedSlots = [];
+        updatePriceBreakdown();
+        renderSlots();
+    }
+
+    // A small line drawing of the court being booked, with its name on it.
+    function courtDrawing(sport, court) {
+        const s = String(sport || '').toLowerCase();
+        const label = court ? String(court).replace(/^(court|pitch|net|lane)\s*/i, '').slice(0, 6) || court : '';
+        const line = 'fill="none" stroke="currentColor" stroke-width="1.3"';
+        let marks;
+        if (s.includes('football') || s.includes('soccer')) {
+            marks = `<rect x="4" y="4" width="40" height="60" rx="3" ${line}/><path d="M4 34h40" ${line}/><circle cx="24" cy="34" r="7" ${line}/><path d="M15 4v9h18V4M15 64v-9h18v9" ${line}/>`;
+        } else if (s.includes('cricket')) {
+            marks = `<ellipse cx="24" cy="34" rx="20" ry="30" ${line}/><rect x="19" y="16" width="10" height="36" rx="1.5" ${line}/><path d="M17 21h14M17 47h14" ${line}/>`;
+        } else if (s.includes('badminton')) {
+            marks = `<rect x="6" y="4" width="36" height="60" rx="2" ${line}/><path d="M9 4v60M39 4v60M6 34h36M6 25h36M6 43h36M24 4v21M24 43v21M6 7h36M6 61h36" ${line} stroke-width="1"/>`;
+        } else {
+            // tennis / pickleball / anything racket-shaped
+            marks = `<rect x="6" y="4" width="36" height="60" rx="2" ${line}/><path d="M6 34h36M6 22h36M6 46h36M24 4v18M24 46v18" ${line} stroke-width="1"/>`;
+        }
+        return `<svg viewBox="0 0 48 68" width="40" height="56">${marks}<path d="M4 34h40" stroke="currentColor" stroke-width="2" stroke-dasharray="2 1.6"/></svg>`
+            + (label ? `<span>${label}</span>` : '');
+    }
+
+    // Checkout key: the pass slides out of the key, then the review page opens.
+    function goCheckout(btn) {
+        if (btn.disabled || btn.classList.contains('is-going')) return;
+        try { navigator.vibrate && navigator.vibrate(12); } catch (_) { /* blocked */ }
+        btn.classList.add('is-going');
+        const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        setTimeout(() => {
+            btn.classList.remove('is-going');
+            checkoutBooking();
+        }, reduce ? 0 : 340);
+    }
+    renderDock();
 
     function toggleAccordion(bodyId, chevronId) {
         document.getElementById(bodyId).classList.toggle('is-collapsed');
         document.getElementById(chevronId).classList.toggle('is-collapsed');
     }
 
+    // RATE VENUE: stars name themselves ("Very good"), and Post wakes up once one is picked.
     function setFormRating(rating) {
         currentFormRating = rating;
-        const stars = document.querySelectorAll('#rating-selector .star-btn');
-        stars.forEach((star, idx) => {
-            if (idx < rating) {
-                star.classList.add('is-active');
-            } else {
-                star.classList.remove('is-active');
+        document.querySelectorAll('#rating-selector .star-btn').forEach((star, idx) => {
+            const on = idx < rating;
+            star.classList.toggle('is-active', on);
+            star.setAttribute('aria-checked', idx === rating - 1 ? 'true' : 'false');
+            if (on && idx === rating - 1) {
+                star.classList.remove('is-pop'); void star.offsetWidth; star.classList.add('is-pop');
             }
         });
+        const word = document.getElementById('rvf-word');
+        const picked = document.querySelectorAll('#rating-selector .star-btn')[rating - 1];
+        if (word) word.textContent = picked ? picked.dataset.word : 'Tap a star';
+        const go = document.getElementById('rvf-go');
+        if (go) go.disabled = rating < 1;
+        try { rating && navigator.vibrate && navigator.vibrate(8); } catch (_) { /* blocked */ }
     }
 
-    function submitReview() {
-        const nameInput = document.getElementById('review-user');
-        const commentInput = document.getElementById('review-comment');
-        
-        const name = nameInput.value.trim();
-        const comment = commentInput.value.trim();
-
-        if (!name || !comment || currentFormRating === 0) {
-            alert('Please select a rating, enter your name, and write a review.');
-            return;
+    // Saved on the server (VenueReviewService), then drawn into both review lists from
+    // what the server returned — never from what was typed.
+    async function submitReview(btn) {
+        const err = document.getElementById('rvf-err');
+        const text = (document.getElementById('review-comment')?.value || '').trim();
+        if (currentFormRating < 1) return;
+        const label = btn.innerText;
+        btn.disabled = true;
+        btn.innerText = 'Posting…';
+        if (err) err.hidden = true;
+        try {
+            const res = await fetch('/gamehub/' + venueId + '/review', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRF-TOKEN': csrfToken },
+                body: JSON.stringify({ rating: currentFormRating, text }),
+            });
+            const j = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                const msg = (j.errors && Object.values(j.errors)[0] && Object.values(j.errors)[0][0]) || j.message || 'Couldn’t post your rating. Try again.';
+                throw new Error(res.status === 401 || res.status === 419 ? 'Sign in again to post your rating.' : msg);
+            }
+            drawMyReview(j.review, j.venue);
+            btn.innerText = 'Update rating';
+            const title = document.querySelector('.rvf__title');
+            if (title) title.textContent = 'Your rating';
+            document.dispatchEvent(new CustomEvent('mven:close'));
+            reviewToast(j.review.updated ? 'Your rating is updated' : 'Thanks — your rating is live');
+        } catch (e) {
+            if (err) { err.textContent = e.message; err.hidden = false; }
+            btn.innerText = label;
+        } finally {
+            btn.disabled = currentFormRating < 1;
         }
-
-        const listDiv = document.getElementById('reviews-list-container');
-        const newCard = document.createElement('div');
-        newCard.className = 'review-card is-new';
-
-        let starsHtml = '';
-        for (let i = 0; i < 5; i++) {
-            starsHtml += `<span class="review-star ${i < currentFormRating ? 'is-active' : ''}">★</span>`;
-        }
-
-        newCard.innerHTML = `
-            <div class="review-card__header">
-                <div class="review-user-info">
-                    <div class="review-user-avatar">
-                        ${name.substring(0, 1).toUpperCase()}
-                    </div>
-                    <div>
-                        <strong class="review-user-name">${name}</strong>
-                        <span class="review-date">Just now</span>
-                    </div>
-                </div>
-                <div class="review-star-rating">
-                    ${starsHtml}
-                </div>
-            </div>
-            <p class="review-comment">${comment}</p>
-        `;
-
-        listDiv.prepend(newCard);
-        setTimeout(() => newCard.classList.remove('is-new'), 50);
-
-        const badge = document.getElementById('reviews-count-badge');
-        const countStr = badge.innerText;
-        const currentCount = parseInt(countStr) || 0;
-        badge.innerText = (currentCount + 1) + ' Reviews';
-
-        nameInput.value = '';
-        commentInput.value = '';
-        setFormRating(0);
-        
-        alert('Thank you for your feedback! Your review has been added.');
     }
+
+    const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+    // Put the viewer's review at the top of both lists (replacing their earlier one) and
+    // refresh the counts the page shows.
+    function drawMyReview(r, venue) {
+        if (!r.visible) return; // hidden by Haraan: saved, but it isn't shown to others
+        const face = escHtml((r.name || '?').slice(0, 1).toUpperCase());
+        const star = '<svg viewBox="0 0 24 24" width="13" height="13" fill="currentColor" aria-hidden="true"><path d="m12 17.3 6.2 3.7-1.6-7 5.4-4.7-7.1-.6L12 2 9.1 8.7 2 9.3l5.4 4.7-1.6 7z"></path></svg>';
+        const played = r.played ? '<span class="mven__review-played">Played here</span>' : '';
+
+        const wrap = document.getElementById('mven-reviews-wrap');
+        const list = document.getElementById('mven-reviews-list');
+        if (wrap && list) {
+            list.querySelector('[data-mine]')?.remove();
+            const el = document.createElement('div');
+            el.className = 'mven__review is-new';
+            el.dataset.mine = '1';
+            el.innerHTML = `<div class="mven__review-head"><span class="mven__review-face">${face}</span>
+                <span class="mven__review-who"><strong>${escHtml(r.name)} ${played}</strong><small>${escHtml(r.ago)}</small></span>
+                <span class="mven__review-score">${star}<b>${r.rating}</b></span></div>
+                ${r.text ? `<p class="mven__review-text">${escHtml(r.text)}</p>` : ''}`;
+            list.prepend(el);
+            wrap.hidden = false;
+            requestAnimationFrame(() => el.classList.remove('is-new'));
+        }
+        const dlist = document.getElementById('reviews-list-container');
+        if (dlist) {
+            dlist.querySelector('[data-mine]')?.remove();
+            const card = document.createElement('div');
+            card.className = 'review-card';
+            card.dataset.mine = '1';
+            card.innerHTML = `<div class="review-card__header"><div class="review-user-info"><div class="review-user-avatar">${face}</div>
+                <div><strong class="review-user-name">${escHtml(r.name)}</strong><span class="review-date">${escHtml(r.ago)}</span></div></div>
+                <div class="review-star-rating">${[1, 2, 3, 4, 5].map((i) => `<span class="review-star ${i <= r.rating ? 'is-active' : ''}">★</span>`).join('')}</div></div>
+                ${r.text ? `<p class="review-comment">${escHtml(r.text)}</p>` : ''}`;
+            dlist.prepend(card);
+        }
+        if (venue) {
+            const n = venue.reviews;
+            document.querySelectorAll('[data-reviews-count]').forEach((e) => { e.textContent = n; });
+            const badge = document.getElementById('reviews-count-badge');
+            if (badge) badge.textContent = n + (n === 1 ? ' Review' : ' Reviews');
+            const sum = document.getElementById('mven-rating-copy');
+            if (sum && n > 0) {
+                sum.innerHTML = `<div class="mven__rating-top"><strong>${Number(venue.rating).toFixed(1)}</strong></div>
+                    <span class="mven__rating-sub">${n} ${n === 1 ? 'rating' : 'ratings'}</span>`;
+            }
+        }
+    }
+
+    function reviewToast(text) {
+        const t = document.createElement('div');
+        t.className = 'rvf-toast';
+        t.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg>' + escHtml(text);
+        document.body.appendChild(t);
+        requestAnimationFrame(() => t.classList.add('is-on'));
+        setTimeout(() => { t.classList.remove('is-on'); setTimeout(() => t.remove(), 300); }, 2600);
+    }
+    @if(!empty($venue->my_review))
+        setFormRating({{ (int) $venue->my_review['rating'] }});
+    @endif
 
     async function checkoutBooking() {
         if (selectedSlots.length === 0) {
@@ -3257,6 +3777,8 @@
         open([document.querySelector('.review-form-card')], 'Rate this venue');
     });
     modal.querySelectorAll('[data-mven-close]').forEach((b) => b.addEventListener('click', close));
+    // A posted rating closes its sheet (submitReview dispatches this).
+    document.addEventListener('mven:close', close);
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !modal.hidden) close(); });
 })();
 </script>

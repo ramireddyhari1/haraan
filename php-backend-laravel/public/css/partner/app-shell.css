@@ -62,90 +62,94 @@ html.ha-app.ha-home-on #ha-compact { display: flex; }
 .ha-ibtn svg { width: 23px; height: 23px; }
 .ha-ibtn:active { background: rgba(15, 23, 42, .06); }
 
-/* The header: the desktop console's floating glass bar (hrn-glass-topbar), sized
-   for a thumb — inset from the edges, rounded, frosted, with the account chip. */
+/* The header: seamless edge-to-edge native app bar with frosted glass blur,
+   handling top safe-area insets cleanly on iOS and Android PWAs. */
 .ha-glassbar {
-    position: fixed; z-index: 40; left: 10px; right: 10px; top: calc(env(safe-area-inset-top, 0px) + 8px); height: 60px;
-    align-items: center; gap: 6px; padding: 0 8px; box-sizing: border-box; border-radius: 20px;
-    background: rgba(255, 255, 255, .82); -webkit-backdrop-filter: saturate(1.6) blur(16px); backdrop-filter: saturate(1.6) blur(16px);
-    border: 1px solid rgba(230, 233, 240, .9);
-    box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 10px 26px -16px rgba(15, 23, 42, .28);
+    position: fixed; z-index: 40; left: 0; right: 0; top: 0;
+    height: calc(58px + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 0px) 12px 0;
+    align-items: center; gap: 8px; box-sizing: border-box;
+    border-radius: 0 0 20px 20px;
+    background: rgba(255, 255, 255, .92);
+    -webkit-backdrop-filter: saturate(1.8) blur(20px); backdrop-filter: saturate(1.8) blur(20px);
+    border-bottom: 1px solid rgba(15, 23, 42, .08);
+    box-shadow: 0 2px 12px -4px rgba(15, 23, 42, .06);
     transition: box-shadow .25s, background .25s;
 }
-/* Page content scrolls away under a soft fade instead of showing in the gap above the bar. */
-.ha-glassbar::before {
-    content: ""; position: absolute; z-index: -1; left: -10px; right: -10px; bottom: 100%; height: calc(env(safe-area-inset-top, 0px) + 9px);
-    background: var(--ha-page);
-}
-html.ha-collapsed .ha-compact { background: rgba(255, 255, 255, .9); box-shadow: 0 1px 2px rgba(15, 23, 42, .05), 0 14px 30px -14px rgba(15, 23, 42, .32); }
+.ha-glassbar::before { display: none; }
+html.ha-collapsed .ha-compact { background: rgba(255, 255, 255, .95); box-shadow: 0 4px 16px -6px rgba(15, 23, 42, .1); }
 .ha-hbtn {
-    width: 42px; height: 42px; flex: none; display: grid; place-items: center; position: relative;
-    border: 0; border-radius: 14px; background: #F3F5F9; color: var(--ha-ink); cursor: pointer;
-    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .04); -webkit-tap-highlight-color: transparent; transition: transform .12s, background .15s;
+    width: 40px; height: 40px; flex: none; display: grid; place-items: center; position: relative;
+    border: 0; border-radius: 12px; background: #F1F5F9; color: var(--ha-ink); cursor: pointer;
+    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .06); -webkit-tap-highlight-color: transparent; transition: transform .12s, background .15s;
 }
-.ha-hbtn svg { width: 22px; height: 22px; }
-.ha-hbtn.ha-bell { border-radius: 999px; }
-.ha-hbtn.ha-bell svg { width: 21px; height: 21px; }
-.ha-hbtn:active { transform: scale(.92); background: #E9EDF4; }
+.ha-hbtn svg { width: 20px; height: 20px; }
+.ha-hbtn.ha-bell { border-radius: 12px; }
+.ha-hbtn.ha-bell svg { width: 20px; height: 20px; }
+.ha-hbtn:active { transform: scale(.92); background: #E2E8F0; }
 .ha-acct {
-    flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 10px 0 4px;
-    border: 0; border-radius: 14px; background: none; text-align: left; font-family: inherit; color: var(--ha-ink); cursor: pointer;
+    flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 8px 0 2px;
+    border: 0; border-radius: 12px; background: none; text-align: left; font-family: inherit; color: var(--ha-ink); cursor: pointer;
     -webkit-tap-highlight-color: transparent; transition: background .15s, transform .12s;
 }
 .ha-acct:active { background: rgba(15, 23, 42, .05); transform: scale(.98); }
 .ha-acct-av {
-    position: relative; width: 36px; height: 36px; flex: none; border-radius: 999px; display: grid; place-items: center;
-    background: linear-gradient(135deg, #0A1738, #0B1C46); color: #fff; font: 800 13px/1 Inter, system-ui, sans-serif; letter-spacing: .2px;
-    box-shadow: 0 4px 10px -4px rgba(11, 28, 70, .6);
+    position: relative; width: 34px; height: 34px; flex: none; border-radius: 10px; display: grid; place-items: center;
+    background: linear-gradient(135deg, #0F172A, #1E293B); color: #fff; font: 800 12.5px/1 Inter, system-ui, sans-serif; letter-spacing: .2px;
+    box-shadow: 0 2px 6px -2px rgba(15, 23, 42, .4);
 }
-.ha-acct-av i { position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 99px; background: #22C55E; border: 2px solid #fff; box-sizing: border-box; }
+.ha-acct-av i { position: absolute; right: -2px; bottom: -2px; width: 10px; height: 10px; border-radius: 99px; background: #16A34A; border: 2px solid #fff; box-sizing: border-box; }
 .ha-acct-tx { min-width: 0; display: flex; flex-direction: column; }
-.ha-acct-tx b { font-size: 15px; line-height: 19px; font-weight: 800; letter-spacing: -.2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ha-acct-tx small { font-size: 11.5px; line-height: 15px; font-weight: 500; color: var(--ha-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ha-acct-tx b { font-size: 14.5px; line-height: 18px; font-weight: 750; letter-spacing: -.2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ha-ink); }
+.ha-acct-tx small { font-size: 11px; line-height: 14px; font-weight: 500; color: var(--ha-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ha-grow { flex: 1; min-width: 0; }
 
-/* ── the floating bottom bar (HaraanBottomBar) ───────────────────────────── */
-
+/* ── Handcrafted Native Mobile Tab Bar (HaraanBottomBar) ─────────────────── */
+/* Refined frosted glass dock with tactile tonal active indicator and
+   safe-area insets for iPhone Home Indicator and Android gesture navigation. */
 .ha-nav {
     position: fixed; z-index: 45; left: 0; right: 0; bottom: 0;
-    padding: 6px 16px calc(10px + env(safe-area-inset-bottom, 0px));
-    background: linear-gradient(to top, var(--ha-page) 70%, rgba(247, 248, 251, 0));
+    padding: 6px 14px max(10px, env(safe-area-inset-bottom, 0px));
+    background: linear-gradient(to top, rgba(248, 250, 252, .98) 75%, rgba(248, 250, 252, 0));
+    pointer-events: none;
 }
 .ha-nav-cap {
-    position: relative; display: flex; gap: 2px; height: 64px; padding: 6px; border-radius: 32px; box-sizing: border-box;
-    background:
-        linear-gradient(to bottom, rgba(255, 255, 255, .14), rgba(255, 255, 255, 0) 45px),
-        linear-gradient(105deg, #4D8BFF, #2563EB 55%, #1D4ED8);
-    box-shadow: 0 10px 20px -6px rgba(30, 64, 175, .55), inset 0 1px 0 rgba(255, 255, 255, .32), inset 0 -1px 0 rgba(255, 255, 255, .06);
+    pointer-events: auto;
+    position: relative; display: flex; gap: 3px; height: 60px; padding: 5px; border-radius: 30px; box-sizing: border-box;
+    background: rgba(255, 255, 255, .94);
+    -webkit-backdrop-filter: blur(24px) saturate(1.8); backdrop-filter: blur(24px) saturate(1.8);
+    border: 1px solid rgba(15, 23, 42, .08);
+    box-shadow: 0 10px 30px -10px rgba(15, 23, 42, .14), 0 2px 8px -2px rgba(15, 23, 42, .04);
 }
-/* One white thumb for the whole bar. It moves on a critically damped curve (no
-   overshoot), so it settles instead of wobbling; the icons ride the same curve. */
+/* Refined tonal sapphire active thumb that glides on a critically damped curve */
 .ha-nav-thumb {
-    position: absolute; top: 6px; bottom: 6px; left: 0; width: 0; border-radius: 26px; background: #fff; opacity: 0;
-    box-shadow: 0 6px 12px -4px rgba(30, 64, 175, .45), inset 0 -1px 0 rgba(30, 64, 175, .06);
-    transition: transform .44s cubic-bezier(.22, .9, .24, 1), width .44s cubic-bezier(.22, .9, .24, 1), opacity .2s;
+    position: absolute; top: 5px; bottom: 5px; left: 0; width: 0; border-radius: 25px;
+    background: #EFF6FF; border: 1px solid rgba(37, 99, 235, .14); opacity: 0;
+    box-shadow: 0 2px 8px -2px rgba(37, 99, 235, .18);
+    transition: transform .40s cubic-bezier(.22, .9, .24, 1), width .40s cubic-bezier(.22, .9, .24, 1), opacity .18s;
     will-change: transform, width;
 }
 .ha-nav-slot {
     position: relative; z-index: 1; flex: 1 1 0; min-width: 0; display: grid; place-items: center;
-    color: rgba(255, 255, 255, .85); text-decoration: none; -webkit-tap-highlight-color: transparent;
+    color: #64748B; text-decoration: none; -webkit-tap-highlight-color: transparent;
+    transition: color .2s ease;
 }
-.ha-nav-slot.is-on { flex-grow: 2.6; }
-.ha-nav-slot:active .ha-nav-glyph { transform: scale(.86); }
+.ha-nav-slot.is-on { flex-grow: 2.4; color: #1D4ED8; }
+.ha-nav-slot:active .ha-nav-glyph { transform: scale(.88); }
 .ha-nav-cap.is-still .ha-nav-thumb, .ha-nav-cap.is-still .ha-nav-in, .ha-nav-cap.is-still .ha-nav-word, .ha-nav-cap.is-still svg { transition: none !important; }
-.ha-nav-in { position: relative; display: flex; align-items: center; padding: 0 10px; min-width: 0; transition: transform .44s cubic-bezier(.22, .9, .24, 1); }
-.ha-nav-glyph { position: relative; width: 24px; height: 24px; flex: none; transition: transform .12s; }
-.ha-nav-glyph svg { position: absolute; inset: .5px; width: 23px; height: 23px; transition: opacity .25s, transform .3s; }
+.ha-nav-in { position: relative; display: flex; align-items: center; padding: 0 10px; min-width: 0; transition: transform .40s cubic-bezier(.22, .9, .24, 1); }
+.ha-nav-glyph { position: relative; width: 22px; height: 22px; flex: none; transition: transform .12s; }
+.ha-nav-glyph svg { position: absolute; inset: 0; width: 22px; height: 22px; transition: opacity .22s, transform .26s; }
 .ha-nav-glyph .g-on { opacity: 0; transform: scale(.9); color: #1D4ED8; }
 .ha-nav-slot.is-on .g-out { opacity: 0; }
 .ha-nav-slot.is-on .g-on { opacity: 1; transform: none; }
 .ha-nav-word {
-    display: none; white-space: nowrap; margin-left: 7px;
-    font: 700 13.5px/1 Inter, system-ui, sans-serif; letter-spacing: -.1px; color: #1D4ED8;
+    display: none; white-space: nowrap; margin-left: 6px;
+    font: 700 13px/1 Inter, system-ui, sans-serif; letter-spacing: -.15px; color: #1D4ED8;
 }
-/* The label arrives just behind the thumb, so the eye reads "moved, then named". */
-.ha-nav-slot.is-on .ha-nav-word { display: block; animation: ha-word-in .3s .16s cubic-bezier(.22, .9, .24, 1) both; }
-@keyframes ha-word-in { from { opacity: 0; transform: translateX(-5px); } }
+/* The label arrives smoothly once space has opened */
+.ha-nav-slot.is-on .ha-nav-word { display: block; animation: ha-word-in .26s .12s cubic-bezier(.22, .9, .24, 1) both; }
+@keyframes ha-word-in { from { opacity: 0; transform: translateX(-4px); } }
 
 /* ── drawer (HaraanNavigationDrawer) ─────────────────────────────────────── */
 

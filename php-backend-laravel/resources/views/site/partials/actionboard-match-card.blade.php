@@ -15,11 +15,12 @@
     $c1 = $abCode($t1); $c2 = $abCode($t2);
     $icon1 = hrn_team_icon($swap ? ($m['team2Logo'] ?? '') : ($m['team1Logo'] ?? ''), $swap ? ($m['team2Emblem'] ?? '') : ($m['team1Emblem'] ?? ''));
     $icon2 = hrn_team_icon($swap ? ($m['team1Logo'] ?? '') : ($m['team2Logo'] ?? ''), $swap ? ($m['team1Emblem'] ?? '') : ($m['team2Emblem'] ?? ''));
-    $yet2 = $abYetToBat($s2, $o2);
+    // "Yet to bat" is cricket's word; a football side on 0 has simply not scored.
+    $yet2 = ($m['isCricket'] ?? true) && $abYetToBat($s2, $o2);
     $place = $m['locality'] !== '' ? $m['locality'] : (strcasecmp($m['venue'], 'Custom Match') !== 0 ? $m['venue'] : '');
     $loc = implode(' · ', array_filter([$place, $m['district']]));
 @endphp
-<a class="mab__match" data-sport="{{ $m['sport'] ?? 'cricket' }}" href="{{ route('site.gamehub.actionboard.match', ['id' => $m['id']]) }}">
+<a class="mab__match{{ ($m['isFinished'] ?? false) ? ' is-done' : '' }}" data-sport="{{ $m['sport'] ?? 'cricket' }}" href="{{ route('site.gamehub.actionboard.match', ['id' => $m['id']]) }}">
     <div class="mab__mctx">
         {{-- Admin-featured: a star, not a section. Visible to everyone. --}}
         @if ($m['isFeatured'] ?? false)
@@ -31,7 +32,9 @@
             <span class="mab__beacon"><span></span></span>
             <span class="mab__mlive">LIVE</span>
         @else
-            <span class="mab__msched">{{ strtoupper($m['status'] ?: 'SCHEDULED') }}</span>
+            {{-- A finished match's result line lives in the right column; up here it
+                 crowded out the format and the place. --}}
+            <span class="mab__msched">{{ ($m['isFinished'] ?? false) ? 'RESULT' : strtoupper($m['status'] ?: 'SCHEDULED') }}</span>
         @endif
         <span class="mab__mdot"></span>
         <span class="mab__mcomp">{{ strtoupper($m['competition'] !== '' ? $m['competition'] : 'Match') }}</span>

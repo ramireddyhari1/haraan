@@ -29,14 +29,16 @@
     $hubLive = ($selectedSport === 'All' || $selectedSport === 'Cricket') ? $liveMatches : [];
     $hubFeatured = $hubLive[0] ?? null;
 
-    // Sport → inline glyph, mirroring the app's chip icons (venueSportIcon). Badminton
-    // and Tennis share the racket glyph there, so they collapse to one here too.
+    // Sport → inline glyph for the chips. Each racquet sport has its own drawing
+    // (App\Support\SportGlyph); one shared racket read as a magnifying glass.
     $hubGlyphKey = function (string $sport): string {
         $s = strtolower($sport);
         return match (true) {
             str_contains($s, 'cricket') => 'cricket',
             str_contains($s, 'football'), str_contains($s, 'soccer') => 'football',
-            str_contains($s, 'badminton'), str_contains($s, 'tennis'), str_contains($s, 'pickle') => 'racket',
+            str_contains($s, 'pickle') => 'pickleball',
+            str_contains($s, 'tennis') => 'tennis',
+            str_contains($s, 'badminton') => 'badminton',
             str_contains($s, 'volley') => 'volleyball',
             default => 'basketball',
         };
@@ -45,7 +47,9 @@
         'all'        => '<rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect>',
         'cricket'    => '<path d="M15.5 3.5a2.1 2.1 0 0 1 3 3L9 16l-3 1 1-3z"></path><circle cx="6.5" cy="17.5" r="3"></circle>',
         'football'   => '<circle cx="12" cy="12" r="9"></circle><path d="M12 7.5 8.5 10l1.3 4h4.4l1.3-4z"></path><path d="M12 3v4.5M4 9.5 8.5 10M20 9.5 15.5 10M7 20l2.8-6M17 20l-2.8-6"></path>',
-        'racket'     => '<ellipse cx="9.5" cy="9.5" rx="6.5" ry="5.5" transform="rotate(-45 9.5 9.5)"></ellipse><path d="M13.5 13.5 20 20"></path><path d="M6.5 6.5 12.5 12.5M6.5 12.5 12.5 6.5"></path>',
+        'badminton'  => \App\Support\SportGlyph::BADMINTON,
+        'tennis'     => \App\Support\SportGlyph::TENNIS,
+        'pickleball' => \App\Support\SportGlyph::PICKLEBALL,
         'volleyball' => '<circle cx="12" cy="12" r="9"></circle><path d="M12 3a15 15 0 0 0 0 18M3.5 8.5a15 15 0 0 1 17 7M3.5 15.5a15 15 0 0 0 17-7"></path>',
         'basketball' => '<circle cx="12" cy="12" r="9"></circle><path d="M12 3v18M3 12h18M5.6 5.6a12 12 0 0 0 12.8 12.8M18.4 5.6A12 12 0 0 1 5.6 18.4"></path>',
     ];
@@ -102,18 +106,44 @@
 
         /* Chips: light, with a hairline and a contact shadow; selected = blue tint
            with a blue edge (a filter, not a second primary button). */
-        .mhub .mhub__chips { gap: 8px; padding-bottom: 4px; }
-        .mhub .mhub__chip {
-            height: 36px; padding: 0 14px 0 12px; background: #fff; border: 1px solid #E2E8F0; color: #334155; font-weight: 600;
-            box-shadow: 0 1px 0 rgba(15, 23, 42, .05);
-            transition: transform .08s, border-color .15s, color .15s;
+        /* Chips: each icon sits in its own round well; the picked chip's well turns
+           solid blue (a filter state — tint + edge on the chip, never a solid pill).
+           The row fades at the right edge so a cut chip reads as "scroll for more". */
+        .mhub .mhub__chips {
+            gap: 8px; padding-top: 2px; padding-bottom: 6px;
+            -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent);
+            mask-image: linear-gradient(90deg, #000 calc(100% - 36px), transparent);
         }
-        .mhub .mhub__chip svg { color: #64748B; }
-        .mhub .mhub__chip:active { transform: translateY(1px); box-shadow: none; }
-        .mhub .mhub__chip.is-on { background: #EEF4FF; border-color: #2563EB; color: #1E40AF; box-shadow: none; }
-        .mhub .mhub__chip.is-on svg { color: #2563EB; }
+        .mhub .mhub__chip {
+            height: 40px; gap: 8px; padding: 0 15px 0 4px; background: #fff; border: 1px solid #E2E8F0; color: #334155;
+            font-size: 14px; font-weight: 700; letter-spacing: -.005em;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 4px 10px -8px rgba(15, 23, 42, .35);
+            transition: transform .09s ease, box-shadow .12s ease, border-color .15s, color .15s, background-color .15s;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .mhub .mhub__chip-well {
+            display: inline-flex; align-items: center; justify-content: center; flex: none;
+            width: 30px; height: 30px; border-radius: 50%; background: #F1F5F9; color: #475569;
+            box-shadow: 0 1px 1px rgba(15, 23, 42, .06) inset;
+            transition: background-color .15s, color .15s, transform .2s cubic-bezier(.2, .9, .3, 1.3);
+        }
+        .mhub .mhub__chip-well svg { color: inherit; }
+        .mhub .mhub__chip:active { transform: translateY(1px) scale(.97); box-shadow: 0 1px 1px rgba(15, 23, 42, .08); }
+        .mhub .mhub__chip.is-on {
+            background: #EEF4FF; border-color: #2563EB; color: #1E3A8A;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, .10), 0 6px 14px -10px rgba(37, 99, 235, .7);
+        }
+        .mhub .mhub__chip.is-on .mhub__chip-well {
+            background: #2563EB; color: #fff; box-shadow: 0 1px 0 rgba(255, 255, 255, .25) inset, 0 2px 6px -2px rgba(37, 99, 235, .7);
+        }
 
-        .mhub .mhub__head h3 { font-size: 17px; font-weight: 800; letter-spacing: -.015em; }
+        .mhub .mhub__head { padding-top: 18px; }
+        .mhub .mhub__head h3 { font-size: 18px; font-weight: 800; letter-spacing: -.02em; }
+        .mhub .mhub__head p { margin-top: 3px; font-size: 12.5px; color: #64748B; }
+        .mhub .mhub__head p .is-live { display: inline-flex; align-items: center; gap: 5px; color: #15803D; font-weight: 700; }
+        .mhub .mhub__head p .is-live::before {
+            content: ""; width: 6px; height: 6px; border-radius: 50%; background: #16A34A; box-shadow: 0 0 0 3px rgba(22, 163, 74, .16);
+        }
 
         /* Venue reel: the photo speaks; no label pill or scrim painted on it. */
         .mhub .mhub__arena-scrim, .mhub .mhub__arena-cat { display: none; }
@@ -122,6 +152,85 @@
             background: rgba(255, 255, 255, .95); color: #0F172A; box-shadow: 0 1px 3px rgba(15, 23, 42, .2);
         }
         .mhub .mhub__arena:active, .mhub .mhub__vcard:active { transform: scale(.985); }
+
+        /* Reel card v2: facts, not glyphs. Words for sports, today's hours on the
+           photo, a price on its own baseline and a real Book key. Physical: the photo
+           sits in an inset frame, the card has a contact shadow plus a 1px top light,
+           and a press sinks it 2px while the key's lip closes. */
+        /* Venue cards carry the same fine blue edge as the hero panel above them. */
+        .mhub .mhub__arena--v2,
+        .mhub .mhub__vcard {
+            border: 1.5px solid #2563EB;
+            box-shadow: 0 10px 24px -14px rgba(37, 99, 235, .45), 0 2px 4px -2px rgba(15, 23, 42, .08);
+        }
+        .mhub .mhub__arena--v2 {
+            width: 244px; padding: 6px; border-radius: 22px; background: #fff;
+            transition: transform .12s cubic-bezier(.2, .7, .3, 1), box-shadow .12s;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .mhub .mhub__arena--v2:active,
+        .mhub .mhub__vcard:active {
+            transform: translateY(2px) scale(.99);
+            box-shadow: 0 3px 8px -6px rgba(37, 99, 235, .5);
+        }
+        .mhub .mhub__arena--v2 .mhub__arena-img {
+            height: 138px; border-radius: 17px; overflow: hidden; background: #E7ECF3;
+        }
+        .mhub .mhub__arena--v2 .mhub__arena-img > img { transition: transform .5s cubic-bezier(.2, .7, .3, 1); }
+        .mhub .mhub__arena--v2:active .mhub__arena-img > img { transform: scale(1.03); }
+        /* A soft band of shade at the top so the white chips never float on a bright sky. */
+        .mhub .mhub__arena--v2 .mhub__arena-img::after {
+            content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+            background: linear-gradient(180deg, rgba(15, 23, 42, .22) 0%, transparent 34%);
+            box-shadow: 0 0 0 1px rgba(15, 23, 42, .06) inset;
+        }
+        .mhub__arena-open {
+            position: absolute; z-index: 1; top: 8px; left: 8px; display: inline-flex; align-items: center; gap: 6px;
+            height: 24px; padding: 0 9px 0 8px; border-radius: 999px; background: rgba(255, 255, 255, .94);
+            font-size: 11px; font-weight: 700; color: #475569; letter-spacing: -.005em;
+            box-shadow: 0 1px 2px rgba(15, 23, 42, .18);
+        }
+        .mhub__arena-open i { width: 6px; height: 6px; border-radius: 50%; background: #94A3B8; }
+        .mhub__arena-open.is-open { color: #0F172A; }
+        .mhub__arena-open.is-open i { background: #16A34A; box-shadow: 0 0 0 3px rgba(22, 163, 74, .18); }
+        .mhub .mhub__arena--v2 .mhub__arena-rate { z-index: 1; }
+        .mhub .mhub__arena--v2 .mhub__arena-body { padding: 11px 6px 4px; }
+        .mhub .mhub__arena--v2 .mhub__arena-title { font-size: 15px; font-weight: 800; letter-spacing: -.015em; color: #0F172A; }
+        .mhub__arena-meta { display: flex; align-items: center; gap: 4px; margin-top: 3px; min-width: 0; font-size: 12px; color: #64748B; }
+        .mhub__arena-meta svg { flex: none; color: #94A3B8; }
+        .mhub__arena-meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .mhub__arena-tags { display: flex; gap: 5px; margin-top: 9px; overflow: hidden; }
+        .mhub__arena-tags em {
+            flex: none; height: 22px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: 7px;
+            background: #F1F5F9; color: #334155; font-style: normal; font-size: 11px; font-weight: 600;
+        }
+        .mhub__arena-tags em.is-more { background: transparent; color: #64748B; padding: 0 2px; }
+        .mhub .mhub__arena--v2 .mhub__arena-foot {
+            justify-content: space-between; margin-top: 11px; padding-top: 10px; border-top: 1px dashed #E2E8F0;
+        }
+        .mhub__arena-price { display: inline-flex; align-items: baseline; gap: 3px; color: #0F172A; }
+        .mhub__arena-price small { font-size: 11px; font-weight: 500; color: #64748B; }
+        .mhub__arena-price b { font-size: 17px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+        .mhub__arena-price i { font-size: 11px; font-style: normal; color: #64748B; }
+        /* The key: blue like every action, with a lip under it that a press closes. */
+        /* Same language as the sheet's Checkout key: the word, then a white round
+           arrow seated in the blue. A press closes the lip and the arrow steps on. */
+        .mhub__arena-go {
+            display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 4px 0 14px; border-radius: 999px;
+            background: #2563EB; color: #fff; font-size: 13.5px; font-weight: 800; letter-spacing: -.005em;
+            box-shadow: 0 1px 0 rgba(255, 255, 255, .25) inset, 0 2px 0 #1D4ED8, 0 6px 12px -6px rgba(37, 99, 235, .75);
+            transition: transform .08s, box-shadow .08s;
+        }
+        .mhub__arena-go i {
+            display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%;
+            background: #fff; color: #2563EB; box-shadow: 0 1px 2px rgba(15, 23, 42, .18);
+            transition: transform .22s cubic-bezier(.2, .9, .3, 1.2);
+        }
+        .mhub .mhub__arena--v2:active .mhub__arena-go { transform: translateY(2px); box-shadow: 0 0 0 #1D4ED8, 0 1px 3px -1px rgba(37, 99, 235, .5); }
+        .mhub .mhub__arena--v2:active .mhub__arena-go i { transform: translateX(3px); }
+        @media (prefers-reduced-motion: reduce) {
+            .mhub .mhub__arena--v2, .mhub .mhub__arena--v2 .mhub__arena-img > img { transition: none; }
+        }
 
         /* Nothing listed near the viewer: a small map of their area — the pin
            carries the real place name, the dashed ring is the search radius, and
@@ -247,7 +356,7 @@
             @php $key = $chip === 'All' ? 'all' : $hubGlyphKey($chip); @endphp
             <a class="mhub__chip {{ $chip === $selectedSport ? 'is-on' : '' }}"
                href="{{ $chip === 'All' ? '/gamehub' : '/gamehub?sport=' . urlencode($chip) }}">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $hubIcons[$key] !!}</svg>
+                <span class="mhub__chip-well"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $hubIcons[$key] !!}</svg></span>
                 {{ $chip }}
             </a>
         @endforeach
@@ -257,11 +366,28 @@
     @php $hubTotal = $popularVenues->count() + $moreVenues->count(); @endphp
     <div class="mhub__head">
         <div>
-            <h3>Popular Venues</h3>
+            <h3>Popular venues</h3>
             {{-- The app's contextual subtitle, minus its two GPS branches: without a fix
                  it says "N venues • top rated", which is exactly how these are ranked.
                  Pluralised, which the app's string isn't — that's its bug, not its design. --}}
-            @if($hubTotal)<p>{{ $hubTotal . ' ' . \Illuminate\Support\Str::plural('venue', $hubTotal) . ' • top rated' }}</p>@endif
+            {{-- "top rated" only once something here has ratings — with none it was a
+                 claim nothing backed. --}}
+            @php $hubRated = $popularVenues->contains(fn ($v) => $v->reviews > 0); @endphp
+            {{-- The fact that matters next: how many are open right now, from each
+                 venue's own hours on the venue clock. --}}
+            @php
+                $hubAll = $popularVenues->concat($moreVenues);
+                $hubOpenNow = $hubAll->where('open_now', true)->count();
+                $hubHasHours = $hubAll->contains(fn ($v) => !empty($v->open_state));
+                // Nothing open yet: say when the first one opens today ("Opens 5 AM").
+                $hubFirstOpen = $hubAll->pluck('open_state')
+                    ->filter(fn ($s) => is_string($s) && str_starts_with($s, 'Opens '))
+                    ->map(fn ($s) => substr($s, 6))
+                    ->sortBy(fn ($t) => strtotime($t) ?: PHP_INT_MAX)
+                    ->first();
+                $hubNowLine = $hubOpenNow ? $hubOpenNow . ' open now' : ($hubFirstOpen ? 'first opens ' . $hubFirstOpen : 'closed for today');
+            @endphp
+            @if($hubTotal)<p>{{ $hubTotal . ' ' . \Illuminate\Support\Str::plural('venue', $hubTotal) }}{{ $selectedCity ? ' near ' . $selectedCity : '' }}@if($hubHasHours) · <span class="{{ $hubOpenNow ? 'is-live' : '' }}">{{ $hubNowLine }}</span>@elseif($hubRated) · top rated @endif</p>@endif
         </div>
         {{-- Only when there's somewhere to go. The app's "View all" opens its search
              overlay, which the web answers with the header's search; with ≤5 venues the
@@ -274,21 +400,45 @@
     @if($popularVenues->count())
         <div class="mhub__reel">
             @foreach($popularVenues as $venue)
-                <a class="mhub__arena" href="{{ \App\Support\SeoUrl::venue($venue) }}">
+                @php
+                    $arenaSports = collect($venue->sports ?? [])->filter()->values();
+                    $arenaMeta = collect([
+                        $venue->location ?: $venue->city,
+                        ($venue->courts ?? 0) > 1 ? $venue->courts . ' courts' : null,
+                        $venue->distance ?: null,
+                    ])->filter()->implode(' · ');
+                    $arenaFrom = ($venue->courts ?? 0) > 1;
+                @endphp
+                <a class="mhub__arena mhub__arena--v2" href="{{ \App\Support\SeoUrl::venue($venue) }}">
                     <span class="mhub__arena-img">
                         <img src="{{ $venue->image }}" alt="{{ $venue->title }}" loading="lazy" decoding="async">
-                        <span class="mhub__arena-scrim"></span>
-                        <span class="mhub__arena-cat">{{ $venue->category }}</span>
+                        {{-- Today's hours from the venue's own week, on the venue clock. --}}
+                        @if(!empty($venue->open_state))
+                            <span class="mhub__arena-open {{ $venue->open_now ? 'is-open' : '' }}"><i></i>{{ $venue->open_state }}</span>
+                        @endif
                         @if($venue->reviews > 0)
                             <span class="mhub__arena-rate"><i>★</i>{{ $venue->rating }}</span>
                         @endif
                     </span>
                     <span class="mhub__arena-body">
                         <strong class="mhub__arena-title">{{ $venue->title }}</strong>
-                        <span class="mhub__arena-sub">{{ $venue->tagline ?: $venue->location }}@if(!empty($venue->distance)) • {{ $venue->distance }}@endif</span>
+                        <span class="mhub__arena-meta">
+                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                            <span>{{ $arenaMeta }}</span>
+                        </span>
+                        {{-- Sports as words: the racket glyph next to the price read as a magnifier. --}}
+                        @if($arenaSports->count())
+                            <span class="mhub__arena-tags">
+                                @foreach($arenaSports->take(2) as $sport)<em>{{ $sport }}</em>@endforeach
+                                @if($arenaSports->count() > 2)<em class="is-more">+{{ $arenaSports->count() - 2 }}</em>@endif
+                            </span>
+                        @endif
                         <span class="mhub__arena-foot">
-                            <span class="mhub__price">₹{{ number_format($venue->price) }}<i>/hr</i></span>
-                            @include('site.partials.hub-sports', ['sports' => $venue->sports, 'glyphKey' => $hubGlyphKey, 'icons' => $hubIcons])
+                            <span class="mhub__arena-price">
+                                @if($arenaFrom)<small>from</small>@endif
+                                <b>₹{{ number_format($venue->from_price ?: $venue->price) }}</b><i>/hr</i>
+                            </span>
+                            <span class="mhub__arena-go">Book<i aria-hidden="true"><svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"></path></svg></i></span>
                         </span>
                     </span>
                 </a>

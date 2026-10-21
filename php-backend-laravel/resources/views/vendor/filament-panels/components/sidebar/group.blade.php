@@ -15,6 +15,13 @@
         'GameHub' => 'Game Hub',
         default => $label,
     };
+    // /control draws each area with its own glyph and runs the groups as an accordion;
+    // the partner and employee panels keep the plain heroicon header.
+    $isControl = filament()->getId() === 'control';
+    $glyph = $isControl ? \App\Filament\Support\ControlMasthead::areaForGroup($label) : null;
+    // What is waiting inside a closed group: the sum of its items' numeric badges
+    // (unread support, pending reviews). Shown only while the group is folded.
+    $waiting = collect($items)->sum(fn ($item) => is_numeric($item->getBadge()) ? (int) $item->getBadge() : 0);
 @endphp
 
 <li
@@ -25,6 +32,7 @@
         $attributes->class([
             'fi-sidebar-group hrn-sb-group',
             'hrn-sb-group-standalone' => blank($label),
+            'hrn-sb-group-drawn' => filled($glyph),
             'fi-active' => $active,
             'fi-collapsible' => $collapsible,
         ])
@@ -33,7 +41,7 @@
     @if ($label)
         <div
             @if ($collapsible)
-                x-on:click="$store.sidebar.toggleCollapsedGroup(label)"
+                x-on:click="{{ $isControl ? 'window.hrnSbOpenGroup(label)' : '$store.sidebar.toggleCollapsedGroup(label)' }}"
             @endif
             @if ($sidebarCollapsible)
                 x-show="$store.sidebar.isOpen"
@@ -45,12 +53,16 @@
             role="{{ $collapsible ? 'button' : 'presentation' }}"
             tabindex="{{ $collapsible ? '0' : '-1' }}"
             @if ($collapsible)
-                x-on:keydown.enter.prevent="$store.sidebar.toggleCollapsedGroup(label)"
-                x-on:keydown.space.prevent="$store.sidebar.toggleCollapsedGroup(label)"
+                x-on:keydown.enter.prevent="{{ $isControl ? 'window.hrnSbOpenGroup(label)' : '$store.sidebar.toggleCollapsedGroup(label)' }}"
+                x-on:keydown.space.prevent="{{ $isControl ? 'window.hrnSbOpenGroup(label)' : '$store.sidebar.toggleCollapsedGroup(label)' }}"
             @endif
         >
             <div class="hrn-sb-group-title-ctn">
-                @if ($icon)
+                @if ($glyph)
+                    <span class="hrn-sb-glyph-tile">
+                        <x-hrn-glyph :name="$glyph" />
+                    </span>
+                @elseif ($icon)
                     <span class="hrn-sb-group-icon">
                         {{ \Filament\Support\generate_icon_html($icon, size: \Filament\Support\Enums\IconSize::Medium) }}
                     </span>
@@ -60,6 +72,10 @@
                     {{ $displayLabel }}
                 </span>
             </div>
+
+            @if ($glyph && $waiting > 0)
+                <span class="hrn-sb-group-waiting" x-show="$store.sidebar.groupIsCollapsed(label)" title="{{ $waiting }} waiting inside">{{ $waiting > 99 ? '99+' : $waiting }}</span>
+            @endif
 
             @if ($collapsible)
                 <button
@@ -101,7 +117,11 @@
                     class="fi-sidebar-group-dropdown-trigger-btn hrn-sb-rail-trigger"
                     aria-label="{{ $displayLabel }}"
                 >
-                    {{ \Filament\Support\generate_icon_html($icon, size: \Filament\Support\Enums\IconSize::Medium) }}
+                    @if ($glyph)
+                        <x-hrn-glyph :name="$glyph" class="hrn-sb-rail-glyph" />
+                    @else
+                        {{ \Filament\Support\generate_icon_html($icon, size: \Filament\Support\Enums\IconSize::Medium) }}
+                    @endif
                 </button>
             </x-slot>
 
@@ -208,6 +228,7 @@
                 :child-items="$itemChildItems"
                 :first="$loop->first"
                 :grouped="filled($label)"
+                :drawn="filled($glyph)"
                 :icon="$itemIcon"
                 :last="$loop->last"
                 :should-open-url-in-new-tab="$shouldItemOpenUrlInNewTab"

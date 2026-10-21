@@ -532,6 +532,30 @@ final class VenueBookingController extends Controller
     /**
      * POST /gamehub/{id}/release — Release held slots if user cancels payment checkout.
      */
+    /**
+     * POST /gamehub/{id}/review {rating, text?} — the website's RATE VENUE form. It was a
+     * client-side mock that drew the card in the page and saved nothing.
+     */
+    public function review(Request $request, string $id, \App\Services\VenueReviewService $reviews): JsonResponse
+    {
+        $data = $request->validate([
+            'rating' => ['required', 'integer', 'between:1,5'],
+            'text' => ['nullable', 'string', 'max:1000'],
+        ]);
+        $venue = Venue::query()->published()->findOrFail((int) $id);
+        $review = $reviews->submit($request->user(), $venue, (int) $data['rating'], $data['text'] ?? null, \App\Models\VenueReview::SOURCE_WEB);
+        $venue->refresh();
+
+        return response()->json([
+            'review' => [
+                'name' => $review->name, 'rating' => (int) $review->rating, 'text' => (string) $review->text,
+                'ago' => $review->agoLabel(), 'played' => $review->isFromBooker(), 'visible' => (bool) $review->is_active,
+                'updated' => ! $review->wasRecentlyCreated,
+            ],
+            'venue' => ['rating' => (float) $venue->rating, 'reviews' => (int) $venue->reviews_count],
+        ], $review->wasRecentlyCreated ? 201 : 200);
+    }
+
     public function release(Request $request, string $id): JsonResponse
     {
         $user = $request->user();

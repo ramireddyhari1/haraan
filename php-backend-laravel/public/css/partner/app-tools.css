@@ -376,3 +376,40 @@ html.ha-app.ha-tool body { padding-bottom: 0; }
     html.ha-printing .ha-pdfdoc { max-width: none; box-shadow: none; border-radius: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     html.ha-printing .ha-pdfdoc tr { break-inside: avoid; }
 }
+
+/* Reviews (app-tools.js 'reviews'): score hero with the 5→1 spread as filter bars, then the feed. */
+@media (max-width: 767px) {
+.ha-rvhero { display: flex; gap: 16px; align-items: center; padding: 16px; border-radius: 18px; background: #fff; border: 1.5px solid #2563EB; box-shadow: 0 10px 24px -16px rgba(37, 99, 235, .5); }
+.ha-rvscore { flex: none; display: flex; flex-direction: column; align-items: center; gap: 4px; min-width: 96px; }
+.ha-rvscore > b { font-size: 40px; font-weight: 800; letter-spacing: -.03em; line-height: 1; color: var(--ha-ink); font-variant-numeric: tabular-nums; }
+.ha-rvscore small { font-size: 12px; color: var(--ha-muted); text-align: center; }
+.ha-rvscore small em { font-style: normal; font-weight: 700; color: #15803D; }
+.ha-rvstars { display: inline-flex; gap: 1px; }
+.ha-rvstars i { display: inline-flex; color: #E2E8F0; }
+.ha-rvstars i.is-on { color: #F59E0B; }
+.ha-rvstars svg { width: 14px; height: 14px; fill: currentColor; }
+.ha-rvbars { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ha-rvbar { display: flex; align-items: center; gap: 8px; padding: 3px 6px; border: 0; border-radius: 8px; background: none; font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.ha-rvbar span { flex: none; width: 24px; font-size: 12px; font-weight: 700; color: var(--ha-ink); }
+.ha-rvbar i { flex: 1; height: 7px; border-radius: 99px; background: #EEF2F7; overflow: hidden; }
+.ha-rvbar i b { display: block; height: 100%; border-radius: inherit; background: #F59E0B; transition: width .4s cubic-bezier(.2, .8, .3, 1); }
+.ha-rvbar em { flex: none; min-width: 18px; text-align: right; font-style: normal; font-size: 12px; font-weight: 600; color: var(--ha-muted); font-variant-numeric: tabular-nums; }
+.ha-rvbar.is-on { background: #FFF7E0; }
+.ha-rvbar.is-zero { opacity: .45; cursor: default; }
+.ha-rvbar:active:not(:disabled) { transform: scale(.98); }
+.ha-rvcard { padding: 14px; border-radius: 16px; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 6px 14px -12px rgba(15, 23, 42, .3); }
+.ha-rvcard > .ha-row { gap: 10px; align-items: center; }
+.ha-rvcard .ha-cav { width: 38px; height: 38px; font-size: 15px; }
+.ha-rvwho { gap: 6px; }
+.ha-rvwho b { font-size: 14.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ha-rvwho em { flex: none; padding: 2px 6px; border-radius: 5px; background: #ECFDF3; color: #15803D; font-style: normal; font-size: 10px; font-weight: 800; }
+.ha-rvcard small { display: block; font-size: 12px; color: var(--ha-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ha-rvcard p { margin: 10px 0 0; font-size: 14px; line-height: 1.5; color: var(--ha-ink); }
+.ha-rvcard p.is-quiet { color: var(--ha-muted); font-size: 13px; }
+.ha-rvnone { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 40px 20px; text-align: center; border-radius: 18px; background: #fff; }
+.ha-rvnone-art { display: inline-flex; gap: 4px; color: #F59E0B; margin-bottom: 6px; }
+.ha-rvnone-art svg { width: 28px; height: 28px; fill: currentColor; opacity: .35; }
+.ha-rvnone-art svg:nth-child(2) { opacity: .7; transform: translateY(-6px) scale(1.15); }
+.ha-rvnone b { font-size: 16px; font-weight: 800; color: var(--ha-ink); }
+.ha-rvnone small { max-width: 300px; font-size: 13px; line-height: 1.5; color: var(--ha-muted); }
+}

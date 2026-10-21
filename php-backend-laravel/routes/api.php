@@ -176,6 +176,8 @@ Route::prefix('venues')->controller(VenuesController::class)->group(function ():
     // Real per-slot bookability for a day (bookings + holds + blocks), polled by the venue page.
     // Optional JWT: a member's priority-booking perk extends how far ahead they can see and book.
     Route::get('/{id}/availability', 'availability')->whereNumber('id')->middleware('auth.jwt.optional');
+    // RATE VENUE on the app's venue page — one review per player per venue (re-rating edits it).
+    Route::post('/{id}/reviews', 'storeReview')->whereNumber('id')->middleware(['auth.jwt', 'throttle:10,1']);
 });
 
 // Home feed content (ads + For You / Trending), managed in Filament admin.
@@ -576,6 +578,8 @@ Route::middleware(['auth.jwt', 'auth.partner'])
         Route::get('/overview', 'overview');
         Route::get('/today', 'today');
         Route::get('/insights', 'insights');
+        // What players said: average, 5→1 spread, latest live reviews.
+        Route::get('/reviews', 'reviews');
         Route::get('/insights/customers', 'insightCustomers');
         Route::get('/events', 'events');
         Route::get('/events/{id}', 'showEvent')->whereNumber('id');

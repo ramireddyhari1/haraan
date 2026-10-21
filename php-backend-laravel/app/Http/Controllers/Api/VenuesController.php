@@ -103,14 +103,43 @@ final class VenuesController extends Controller
                 // picking a sport shouldn't be offered a time that doesn't run it.
                 'sports' => $s->sportsList(),
             ]),
-            'reviews' => $venue->reviews->map(fn ($r) => [
+            'reviews' => $venue->reviews->sortByDesc('created_at')->values()->map(fn ($r) => [
                 'name' => $r->name,
                 'rating' => $r->rating,
                 'text' => $r->text,
                 'avatar' => $r->avatar,
-                'ago' => $r->ago,
+                'ago' => $r->agoLabel(),
+                // Tied to a real booking at this venue.
+                'played' => $r->isFromBooker(),
             ]),
         ]]);
+    }
+
+    /**
+     * POST /api/venues/{id}/reviews {rating 1–5, text?} — the app's RATE VENUE sheet.
+     * The sheet always posted here; the route never existed, so every rating 404'd.
+     */
+    public function storeReview(\Illuminate\Http\Request $request, int $id, \App\Services\VenueReviewService $reviews): JsonResponse
+    {
+        $user = $request->attributes->get('auth_user');
+        if (! $user instanceof \App\Models\User) {
+            return response()->json(['message' => 'Sign in to rate this venue.'], 401);
+        }
+        $data = $request->validate([
+            'rating' => ['required', 'integer', 'between:1,5'],
+            'text' => ['nullable', 'string', 'max:1000'],
+        ]);
+        $venue = Venue::query()->published()->findOrFail($id);
+
+        $review = $reviews->submit($user, $venue, (int) $data['rating'], $data['text'] ?? null, \App\Models\VenueReview::SOURCE_APP);
+
+        return response()->json([
+            'message' => $review->is_active ? 'Thanks for rating this venue.' : 'Saved.',
+            'data' => [
+                'name' => $review->name, 'rating' => $review->rating, 'text' => $review->text,
+                'ago' => $review->agoLabel(), 'played' => $review->isFromBooker(),
+            ],
+        ], $review->wasRecentlyCreated ? 201 : 200);
     }
 
     /**

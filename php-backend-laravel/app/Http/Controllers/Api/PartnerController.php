@@ -591,6 +591,48 @@ class PartnerController extends Controller
      * week's bars against last week, busy hours and tomorrow's open slots.
      * Scoped like Home: every branch the caller may see, or `?venue_id=`.
      */
+    /**
+     * GET /api/partner/reviews?venue_id=&stars= — what players said about this partner's
+     * venues: the average and 5→1 spread, plus the latest reviews. Live reviews only —
+     * a review Haraan hid or deleted doesn't reach the partner, and partners never edit
+     * a customer's words. The partner app and web app had no way to read these at all.
+     */
+    public function reviews(Request $request): JsonResponse
+    {
+        $venues = $request->user()->branches()
+            ->when($this->branchFilter($request), fn ($q, $id) => $q->where('id', $id))
+            ->get(['id', 'name']);
+        $ids = $venues->pluck('id');
+
+        $base = \App\Models\VenueReview::query()->whereIn('venue_id', $ids)->where('is_active', true);
+        $spread = (clone $base)->selectRaw('rating, count(*) n')->groupBy('rating')->pluck('n', 'rating');
+        $count = (int) $spread->sum();
+        $stars = (int) $request->query('stars', 0);
+
+        $rows = (clone $base)
+            ->when($stars >= 1 && $stars <= 5, fn ($q) => $q->where('rating', $stars))
+            ->latest()
+            ->limit(60)
+            ->get();
+        $names = $venues->pluck('name', 'id');
+
+        return response()->json(['data' => [
+            'average' => $count > 0 ? round((float) (clone $base)->avg('rating'), 1) : null,
+            'count' => $count,
+            'spread' => collect([5, 4, 3, 2, 1])->mapWithKeys(fn (int $s) => [$s => (int) ($spread[$s] ?? 0)]),
+            'this_month' => (clone $base)->where('created_at', '>=', now()->subDays(30))->count(),
+            'reviews' => $rows->map(fn (\App\Models\VenueReview $r) => [
+                'id' => $r->id,
+                'name' => $r->name,
+                'rating' => (int) $r->rating,
+                'text' => (string) ($r->text ?? ''),
+                'ago' => $r->agoLabel(),
+                'played' => $r->isFromBooker(),
+                'venue' => (string) ($names[$r->venue_id] ?? ''),
+            ])->values(),
+        ]]);
+    }
+
     public function insights(Request $request): JsonResponse
     {
         $venues = $request->user()->branches()

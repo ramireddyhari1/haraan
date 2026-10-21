@@ -6,6 +6,7 @@
     'badgeColor' => null,
     'badgeTooltip' => null,
     'childItems' => [],
+    'drawn' => false,
     'first' => false,
     'grouped' => false,
     'icon' => null,
@@ -32,6 +33,7 @@
             'hrn-sb-item-parent-active' => $hasActiveChild,
             'fi-sidebar-item-has-active-child-items' => $activeChildItems,
             'fi-sidebar-item-has-url' => filled($url),
+            'hrn-sb-item-drawn' => $drawn,
         ])
     }}
 >
@@ -57,7 +59,9 @@
         <span class="hrn-sb-indicator" aria-hidden="true"></span>
 
         {{-- Icon --}}
-        @if (filled($icon) && ((! $subGrouped) || ($sidebarCollapsible && (! $subNavigation))))
+        {{-- In a drawn /control group the group's glyph names the area, so its pages are
+             plain text on a guide line rather than thirty more stock icons. --}}
+        @if (filled($icon) && (! $drawn) && ((! $subGrouped) || ($sidebarCollapsible && (! $subNavigation))))
             <span class="hrn-sb-item-icon-wrapper">
                 {{
                     \Filament\Support\generate_icon_html(($active && $activeIcon) ? $activeIcon : $icon, attributes: (new \Illuminate\View\ComponentAttributeBag([
@@ -68,7 +72,7 @@
         @endif
 
         {{-- Subgrouped Connector Line (Tree Guide) --}}
-        @if ((blank($icon) && $grouped) || $subGrouped)
+        @if (((blank($icon) || $drawn) && $grouped) || $subGrouped)
             <div
                 @if (filled($icon) && $subGrouped && $sidebarCollapsible && (! $subNavigation))
                     x-show="$store.sidebar.isOpen"

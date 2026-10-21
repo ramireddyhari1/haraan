@@ -460,6 +460,7 @@ final class PublicWebController extends Controller
         [$userLat, $userLng] = $this->viewerLatLng();
 
         $allVenues = Venue::published()
+            ->with('courts')
             ->orderByDesc('is_featured')
             ->orderBy('sort_order')
             ->get();
@@ -1181,7 +1182,26 @@ final class PublicWebController extends Controller
                     }
                 }
                 $overs = (string) ($m->overs ?? '');
-                $scoreText = (string) ($m->score_text ?: '');
+                // Same rules as Api\LiveMatchController::index, so the web card can't read
+                // differently from the app's. score_text is a CRICKET line ("120/4"); every
+                // other sport derives home_score/away_score and keeps the whole scoreline
+                // in score_text ("2 - 1"), which printed as team 1's score here.
+                $isCricket = strtolower((string) ($m->sport ?: 'cricket')) === 'cricket';
+                $setRally = ['', ''];
+                if (! $isCricket) {
+                    // A set sport's big number is sets won; the current game's points sit
+                    // in the small slot cricket uses for overs ("1 (17)").
+                    $state = is_array($m->sport_state) ? $m->sport_state : [];
+                    $current = $state['current'] ?? null;
+                    $points = $state['points'] ?? null;
+                    if (is_array($points) && count($points) >= 2) {
+                        $setRally = [(string) $points[0], (string) $points[1]];
+                    } elseif (is_array($current) && count($current) >= 2 && ((int) $current[0] > 0 || (int) $current[1] > 0)) {
+                        $setRally = [(string) $current[0], (string) $current[1]];
+                    }
+                }
+                $scoreText = $isCricket ? (string) ($m->score_text ?: '') : '';
+                $finished = $m->isFinished() || LiveMatch::statusMeansFinished((string) $m->status);
 
                 return [
                     'id' => (string) $m->id,
@@ -1191,6 +1211,10 @@ final class PublicWebController extends Controller
                     'sport' => strtolower((string) ($m->sport ?: 'cricket')),
                     'team1' => (string) $m->home,
                     'team2' => (string) $m->away,
+                    // The names people know the sides by; `home`/`away` are 2–3 letter codes.
+                    'team1Full' => (string) ($m->home_full ?: $m->home),
+                    'team2Full' => (string) ($m->away_full ?: $m->away),
+                    'crr' => (string) ($m->crr ?? ''),
                     // Team crests: uploaded logo path/URL + default emblem key (action1..4)
                     // so the list can render real icons, not just monograms.
                     'team1Logo' => (string) ($m->home_logo ?? ''),
@@ -1199,13 +1223,19 @@ final class PublicWebController extends Controller
                     'team2Emblem' => (string) ($m->away_emblem ?? ''),
                     'score1' => ($battingTeam === 1 && $scoreText !== '') ? $scoreText : (string) ($m->home_score ?? 0),
                     'score2' => ($battingTeam === 2 && $scoreText !== '') ? $scoreText : (string) ($m->away_score ?? 0),
-                    'overs1' => $battingTeam === 2 ? '' : $overs,
-                    'overs2' => $battingTeam === 2 ? $overs : '',
-                    'battingTeam' => $battingTeam,
+                    'overs1' => $isCricket ? ($battingTeam === 2 ? '' : $overs) : $setRally[0],
+                    'overs2' => $isCricket ? ($battingTeam === 2 ? $overs : '') : $setRally[1],
+                    'battingTeam' => $isCricket ? $battingTeam : 1,
+                    'isCricket' => $isCricket,
                     'status' => (string) ($m->status ?? ''),
                     'venue' => (string) ($m->venue ?? ''),
                     'competition' => (string) ($m->competition ?? ''),
-                    'isLive' => strtolower((string) $m->status) === 'live',
+                    // In play = live and not ended (the app's isInPlay). Cricket writes its
+                    // result into status, so "finished" is completed_at / a result line.
+                    'isLive' => ! $finished && strtolower((string) $m->status) === 'live',
+                    'isFinished' => $finished,
+                    'isScheduled' => ! $finished && strtolower((string) $m->status) === 'scheduled',
+                    'scheduledAt' => $m->scheduled_at?->toIso8601String(),
                     'visibility' => (string) ($m->visibility ?? LiveMatch::VIS_LOCAL),
                     'district' => (string) ($m->district ?? ''),
                     'locality' => (string) ($m->locality ?? ''),
@@ -2147,7 +2177,48 @@ final class PublicWebController extends Controller
             // shape predates them. Additive — the desktop markup ignores both.
             'tagline' => (string) ($v->tagline ?? ''),
             'sports' => $v->sportsList(),
+            // Facts for the mobile reel card, all read from the venue's own setup:
+            // how many courts it sells, its cheapest court rate, and today's hours.
+            ...$this->venueCardFacts($v),
         ];
+    }
+
+    /**
+     * Court count, lowest hourly rate and an "open now" line for a venue card.
+     * Hours come from the venue's structured week (venue clock, IST), so the line
+     * says exactly what the slot board will offer — no hours set means no line.
+     *
+     * @return array{courts: int, from_price: int, open_state: ?string, open_now: bool}
+     */
+    private function venueCardFacts(Venue $v): array
+    {
+        $courts = $v->courts->where('is_active', true);
+        $rates = $courts->pluck('price')->map(fn ($p) => (int) $p)->filter(fn (int $p) => $p > 0);
+        $from = $rates->isNotEmpty() ? (int) $rates->min() : (int) ($v->price ?? 0);
+
+        $state = null;
+        $openNow = false;
+        if (is_array($v->hours_json) && $v->hours_json !== []) {
+            $now = \App\Support\BusinessClock::now();
+            $minute = (int) $now->format('G') * 60 + (int) $now->format('i');
+            $label = static fn (int $m): string => $m >= 1440 ? 'midnight' : date('g:i A', mktime(0, $m));
+            $short = static fn (string $l): string => str_replace(':00 ', ' ', $l);
+
+            foreach ($v->windowsForWeekday($now->format('D')) as [$open, $close]) {
+                if ($minute >= $open && $minute < $close) {
+                    $state = 'Open till ' . $short($label($close));
+                    $openNow = true;
+                    break;
+                }
+                if ($minute < $open) {
+                    $state = 'Opens ' . $short($label($open));
+                    break;
+                }
+            }
+            $state ??= 'Closed now';
+        }
+
+        return ['courts' => $courts->count(), 'from_price' => $from, 'open_state' => $state, 'open_now' => $openNow];
     }
 
     /** Great-circle distance in km between two lat/lng points (haversine, Earth R = 6371 km). */
@@ -2250,10 +2321,15 @@ final class PublicWebController extends Controller
 
         $reviewsList = $v->reviews->map(fn ($r) => (object) [
             'user' => $r->name,
-            'date' => $r->ago ?: 'recently',
+            'date' => $r->agoLabel(),
             'rating' => (int) $r->rating,
             'comment' => $r->text ?: '',
+            'played' => $r->isFromBooker(),
         ])->all();
+        // The signed-in viewer's own review (visible or hidden), to prefill RATE VENUE.
+        $mine = auth()->check()
+            ? \App\Models\VenueReview::query()->where('venue_id', $v->id)->where('user_id', auth()->id())->first()
+            : null;
 
         return (object) [
             'id' => $v->id,
@@ -2265,6 +2341,8 @@ final class PublicWebController extends Controller
             'rating' => ($v->ratings_count > 0 && $v->rating) ? $v->rating : null,
             'reviews' => (int) ($v->reviews_count ?? 0),
             'reviews_list' => $reviewsList,
+            'my_review' => $mine ? ['rating' => (int) $mine->rating, 'text' => (string) $mine->text] : null,
+            'is_owner' => auth()->check() && (int) $v->partner_id === (int) auth()->id(),
             'price' => (int) ($v->price ?? 0),
             // The booking sheet estimates the total from these; the server recomputes it.
             'convenience_fee_type' => (string) ($v->convenience_fee_type ?? 'none'),

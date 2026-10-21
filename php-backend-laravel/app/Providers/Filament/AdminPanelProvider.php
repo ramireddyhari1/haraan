@@ -102,7 +102,7 @@ class AdminPanelProvider extends PanelProvider
                     ->collapsed(),
             ])
             ->sidebarCollapsibleOnDesktop()
-            ->sidebarWidth('20rem')
+            ->sidebarWidth('18rem')
             ->collapsedSidebarWidth('4.5rem')
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverClusters(in: app_path('Filament/Clusters'), for: 'App\Filament\Clusters')

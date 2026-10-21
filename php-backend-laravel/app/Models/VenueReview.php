@@ -6,6 +6,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
  * A customer review — of a venue, or (since the post-event journey started asking)
@@ -17,8 +18,17 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 final class VenueReview extends Model
 {
+    // Deleted from /control is recoverable ("see deleted" → restore); the rating
+    // refresh below ignores trashed rows because the relation scope does.
+    use SoftDeletes;
+
+    public const SOURCE_APP = 'app';
+    public const SOURCE_WEB = 'web';
+    public const SOURCE_LINK = 'link';
+
     protected $fillable = [
-        'venue_id', 'event_id', 'booking_id', 'name', 'rating', 'text', 'avatar', 'ago', 'is_active',
+        'venue_id', 'event_id', 'booking_id', 'user_id', 'source', 'hidden_reason',
+        'name', 'rating', 'text', 'avatar', 'ago', 'is_active',
     ];
 
     protected $casts = [
@@ -38,6 +48,24 @@ final class VenueReview extends Model
 
         static::saved($refresh);
         static::deleted($refresh);
+        static::restored($refresh);
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    /** "Played here": the review is tied to a real booking at the venue. */
+    public function isFromBooker(): bool
+    {
+        return $this->booking_id !== null;
+    }
+
+    /** "2 days ago" from the real timestamp; the legacy `ago` text only for seeded rows. */
+    public function agoLabel(): string
+    {
+        return $this->created_at?->diffForHumans() ?? ($this->ago ?: 'recently');
     }
 
     public function venue(): BelongsTo

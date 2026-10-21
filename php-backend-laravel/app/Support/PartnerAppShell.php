@@ -54,6 +54,7 @@ final class PartnerAppShell
         'staff' => 'filament.partner.resources.partner-staff.index',
         'payouts' => 'filament.partner.pages.partner-payouts',
         'reports' => 'filament.partner.game-hub.pages.reports',
+        'reviews' => 'filament.partner.pages.partner-reviews',
         'notifications' => 'filament.partner.pages.partner-notifications',
         'support' => 'filament.partner.pages.partner-support',
         'settings' => 'filament.partner.auth.profile',
@@ -71,7 +72,7 @@ final class PartnerAppShell
      */
     public const SPA_SCREENS = [
         'home', 'venues', 'matches', 'bookings', 'payments', 'scan', 'operations', 'settlement', 'pricing',
-        'standing', 'packages', 'academy', 'customers', 'staff', 'payouts', 'reports',
+        'standing', 'packages', 'academy', 'customers', 'staff', 'payouts', 'reports', 'reviews',
         'notifications', 'support',
     ];
 

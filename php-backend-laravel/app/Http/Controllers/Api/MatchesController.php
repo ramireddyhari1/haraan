@@ -918,6 +918,7 @@ final class MatchesController extends Controller
             $innings = (int) DB::table('match_actions')->where('match_id', $match->id)
                 ->where('action_type', 'start')->count();
             self::maybeCompleteMatch($match, max(1, $innings));
+            self::stampScoreLine($match);
             $completion = app(MatchCompletion::class);
             if (LiveMatch::statusMeansFinished($match->status)) {
                 $match->save();
@@ -944,6 +945,7 @@ final class MatchesController extends Controller
             self::applyAction($match, $type, $request->all());
             // End the match the moment the chase is won / the 2nd innings is over.
             self::maybeCompleteMatch($match, $currentInnings);
+            self::stampScoreLine($match);
             if (! $wasFinished && LiveMatch::statusMeansFinished($match->status)) {
                 // The same completion path the Finish button takes: stats, careers,
                 // rankings, the ground's record and verification all follow.
@@ -1074,6 +1076,31 @@ final class MatchesController extends Controller
         $n = is_array($squad) ? count($squad) : 0;
 
         return $n >= 2 ? max(1, min(10, $n - 1)) : 10;
+    }
+
+    /**
+     * The batting side's line, "68/2", into `score_text` — what every feed and card reads
+     * for a cricket score. Live scoring never wrote it (only the admin panel and seed
+     * commands did), so a match scored from the app showed runs alone ("68") on the
+     * ActionBoard, the website and the partner screens. Wickets come from the action log,
+     * the same count the result line uses, so an undo can't leave a stale figure.
+     */
+    private static function stampScoreLine(LiveMatch $match): void
+    {
+        if (strtolower((string) ($match->sport ?: 'cricket')) !== 'cricket') {
+            return;
+        }
+        $innings = (int) DB::table('match_actions')->where('match_id', $match->id)->where('action_type', 'start')->count();
+        if ($innings === 0) {
+            $match->score_text = null;
+
+            return;
+        }
+        $summary = is_array($match->over_summary) ? $match->over_summary : [];
+        $last = $summary === [] ? [] : (array) end($summary);
+        $battingTeam = (($last['batting'] ?? 'home') === 'away') ? 2 : 1;
+        $runs = $battingTeam === 2 ? (int) $match->away_score : (int) $match->home_score;
+        $match->score_text = $runs . '/' . self::countInningsWickets($match, $innings);
     }
 
     /** Count wickets that fell in a given innings from the action log. */

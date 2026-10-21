@@ -46,7 +46,7 @@
         if ($event.key === 'Escape') { $wire.closeSheets() }
      ">
 
-    {{-- ── Venue + day ─────────────────────────────────────────────────── --}}
+    {{-- ── Venue + Day Context Header ───────────────────────────────────── --}}
     <div class="vdb-top">
         <div class="vdb-where">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7-5.6-7-11a7 7 0 0 1 14 0c0 5.4-7 11-7 11Z"/><circle cx="12" cy="10" r="2.6"/></svg>
@@ -57,21 +57,22 @@
                     @endforeach
                 </select>
             @else
-                <span>{{ $this->venueOptions()->first() ?? 'No venue yet' }}</span>
+                <span class="vdb-venue-name">{{ $this->venueOptions()->first() ?? 'No venue yet' }}</span>
             @endif
         </div>
         <div class="vdb-top-end">
             <span class="vdb-dayname">{{ $dayLabel }}</span>
             @if ($this->venue())
-                <button type="button" class="vdb-quiet" wire:click="toggleClosed"
+                <button type="button" @class(['vdb-day-status', 'is-closed' => $blocked]) wire:click="toggleClosed"
                         wire:confirm="{{ $blocked ? 'Reopen this day for bookings?' : 'Close this day? Nothing can be booked while it is closed.' }}">
-                    <svg class="vdb-ph-only" viewBox="0 0 16 16" aria-hidden="true"><rect x="2.5" y="3.5" width="11" height="10" rx="2"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3"/>@unless ($blocked)<path d="m6.5 9 3 3m0-3-3 3"/>@endunless</svg>
-                    {{ $blocked ? 'Reopen day' : 'Close day' }}
+                    <span class="vdb-status-dot"></span>
+                    <span>{{ $blocked ? 'Reopen day' : 'Close day' }}</span>
                 </button>
             @endif
         </div>
     </div>
 
+    {{-- ── Date Navigator Strip ────────────────────────────────────────── --}}
     <div class="vdb-strip-wrap">
         <button type="button" class="vdb-arrow" wire:click="shiftDay(-1)" aria-label="Previous day">
             <svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg>
@@ -83,6 +84,7 @@
                     <span class="vdb-day-dow">{{ $d['dow'] }}</span>
                     <span class="vdb-day-num">{{ $d['day'] }}</span>
                     <span class="vdb-day-count">{{ $d['count'] > 0 ? $d['count'] . ' booked' : $d['month'] }}</span>
+                    @if ($d['is_today'])<i class="vdb-today-indicator" title="Today"></i>@endif
                 </button>
             @endforeach
         </div>
@@ -99,7 +101,7 @@
         </section>
     @else
 
-    {{-- ── The day, in one card ────────────────────────────────────────── --}}
+    {{-- ── Executive Day KPI Card ───────────────────────────────────────── --}}
     <section class="vdb-card" wire:key="card-{{ $this->venueId }}-{{ $this->date }}">
         @if ($blocked)
             <div class="vdb-closed-row">
@@ -109,49 +111,44 @@
             </div>
         @endif
 
-        <div class="vdb-card-main">
-            <div class="vdb-ring" role="img" aria-label="{{ $s['occupancy'] }}% of court-hours booked">
-                <svg viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="40" class="vdb-ring-track"/>
-                    @if ($s['occupancy'] > 0)
-                        <circle cx="50" cy="50" r="40" class="vdb-ring-fill"
-                                style="--len: {{ $ring }}; --off: {{ $ring * (1 - $s['occupancy'] / 100) }}"/>
-                    @endif
-                </svg>
-                <div class="vdb-ring-txt">
-                    <b><span data-count-to="{{ $s['occupancy'] }}" data-count-key="occ">{{ $s['occupancy'] }}</span><i>%</i></b>
-                    <span>Full</span>
+        <div class="vdb-card-kpi">
+            <div class="vdb-kpi-main">
+                <div class="vdb-kpi-row">
+                    <div class="vdb-money-group">
+                        <div class="vdb-lab">Expected</div>
+                        <div class="vdb-big" data-count-to="{{ (int) round($s['expected']) }}" data-count-prefix="₹" data-count-key="exp">{{ $inr($s['expected']) }}</div>
+                    </div>
+                    <div class="vdb-occ-badge" title="{{ $s['occupancy'] }}% booked">
+                        <span class="vdb-occ-pct"><span data-count-to="{{ $s['occupancy'] }}" data-count-key="occ">{{ $s['occupancy'] }}</span>%</span>
+                        <span class="vdb-occ-tag">Full</span>
+                    </div>
                 </div>
-            </div>
 
-            <div class="vdb-money">
-                <div class="vdb-lab">Expected</div>
-                <div class="vdb-big" data-count-to="{{ (int) round($s['expected']) }}" data-count-prefix="₹" data-count-key="exp">{{ $inr($s['expected']) }}</div>
-                @if ($s['expected'] > 0)
-                    <div class="vdb-bar"><i style="width: {{ $s['collected_share'] }}%"></i></div>
-                @endif
-                <div class="vdb-collected">
-                    <b @class(['is-in' => $s['collected'] > 0])>{{ $inr($s['collected']) }}</b> collected
-                    @if ($s['split'])<span> · {{ $s['split'] }}</span>@endif
+                <div class="vdb-bar-section">
+                    <div class="vdb-bar" aria-label="Collected share"><i style="width: {{ $s['collected_share'] }}%"></i></div>
+                    <div class="vdb-collected-info">
+                        <span class="vdb-collected-sum"><b @class(['is-in' => $s['collected'] > 0])>{{ $inr($s['collected']) }}</b> collected</span>
+                        @if ($s['split'])<span class="vdb-split-details">· {{ $s['split'] }}</span>@endif
+                    </div>
                 </div>
             </div>
         </div>
 
         @if ($s['due'] > 0)
             <button type="button" wire:click="toggleDue" data-press @class(['vdb-due', 'is-on' => $this->filter === 'due'])>
-                <i></i>
-                <span>
+                <i class="vdb-due-beacon"></i>
+                <span class="vdb-due-label">
                     <b>{{ $inr($s['due']) }} still to collect</b>
                     <em>{{ $s['due_count'] }} {{ \Illuminate\Support\Str::plural('booking', $s['due_count']) }} unpaid</em>
                 </span>
-                <strong>{{ $this->filter === 'due' ? 'Show all' : 'Show them' }}</strong>
+                <strong class="vdb-due-action">{{ $this->filter === 'due' ? 'Show all' : 'Show them' }}</strong>
             </button>
         @endif
 
         <div class="vdb-counts">
-            <div><b>{{ $s['total'] }}</b><span>Court-hours</span></div>
-            <div><b @class(['is-blue' => $s['booked'] > 0])>{{ $s['booked'] }}</b><span>Booked</span></div>
-            <div><b @class(['is-green' => $s['open'] > 0])>{{ $s['open'] }}</b><span>@if ($s['open'] > 0)<i></i>@endif Open</span></div>
+            <div class="vdb-count-box"><b>{{ $s['total'] }}</b><span>Court-hours</span></div>
+            <div class="vdb-count-box"><b @class(['is-blue' => $s['booked'] > 0])>{{ $s['booked'] }}</b><span>Booked</span></div>
+            <div class="vdb-count-box"><b @class(['is-green' => $s['open'] > 0])>{{ $s['open'] }}</b><span>@if ($s['open'] > 0)<i class="vdb-open-pip"></i>@endif Open</span></div>
         </div>
     </section>
 
@@ -301,6 +298,7 @@
                    x-transition:enter="vdb-sheet-in" x-transition:enter-start="vdb-sheet-from" x-transition:enter-end="vdb-sheet-to"
                    x-transition:leave="vdb-sheet-out" x-transition:leave-start="vdb-sheet-to" x-transition:leave-end="vdb-sheet-from"
                    role="dialog" aria-label="Seat a walk-in">
+                <div class="vdb-sheet-handle" aria-hidden="true"></div>
                 <header class="vdb-sheet-head">
                     <div>
                         <div class="vdb-lab">{{ $this->sheetMode === 'block' ? 'Block court' : 'Walk-in' }}</div>
@@ -419,6 +417,7 @@
                    x-transition:enter="vdb-sheet-in" x-transition:enter-start="vdb-sheet-from" x-transition:enter-end="vdb-sheet-to"
                    x-transition:leave="vdb-sheet-out" x-transition:leave-start="vdb-sheet-to" x-transition:leave-end="vdb-sheet-from"
                    role="dialog" aria-label="Blocked court">
+                <div class="vdb-sheet-handle" aria-hidden="true"></div>
                 <header class="vdb-sheet-head">
                     <div class="vdb-who">
                         <span class="vdb-av vdb-lockav"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3.5" y="7" width="9" height="6.5" rx="1.6"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7"/></svg></span>
@@ -464,6 +463,7 @@
                    x-transition:enter="vdb-sheet-in" x-transition:enter-start="vdb-sheet-from" x-transition:enter-end="vdb-sheet-to"
                    x-transition:leave="vdb-sheet-out" x-transition:leave-start="vdb-sheet-to" x-transition:leave-end="vdb-sheet-from"
                    role="dialog" aria-label="Booking">
+                <div class="vdb-sheet-handle" aria-hidden="true"></div>
                 <header class="vdb-sheet-head">
                     <div class="vdb-who">
                         <span class="vdb-av" style="background: hsl({{ $hue }} 48% 46%)">{{ mb_strtoupper(mb_substr((string) $booking['customer'], 0, 1)) }}</span>
@@ -521,245 +521,835 @@
 </div>
 
 <style>
-    .vdb,.vdb-sheet-wrap{--ink:#0f172a;--ink2:#334155;--ink3:#64748b;--ink4:#94a3b8;--line:#e6e9f0;--line2:#eef1f6;
-        --blue:#2563eb;--blue2:#1d4ed8;--green:#16a34a;--green-bg:#f2fbf5;--green-line:#c7ebd3;
-        --amber:#b45309;--red:#dc2626;--ease:cubic-bezier(.2,.8,.2,1);color:var(--ink);}
-    .vdb{display:flex;flex-direction:column;gap:14px;}
-    .vdb button,.vdb-sheet-wrap button{font:inherit;cursor:pointer;}
-    .vdb svg,.vdb-sheet-wrap svg{fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;}
-    .vdb-ph-only{display:none;}
-    .vdb-code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px !important;color:var(--ink3);letter-spacing:.02em;word-break:break-all;max-width:60%;}
-
-    /* venue + day line */
-    .vdb-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;}
-    .vdb-where{display:inline-flex;align-items:center;gap:8px;font-weight:650;font-size:14.5px;}
-    .vdb-where svg{width:18px;height:18px;color:var(--blue);}
-    .vdb-where select{border:1px solid var(--line);border-radius:10px;padding:7px 30px 7px 10px;font-weight:650;background-color:#fff;}
-    .vdb-top-end{display:flex;align-items:center;gap:14px;}
-    .vdb-dayname{font-size:13px;color:var(--ink3);}
-    .vdb-quiet{background:none;border:0;color:var(--ink3);font-size:13px;font-weight:600;padding:6px 8px;border-radius:8px;}
-    .vdb-quiet:hover{color:var(--red);background:#fef2f2;}
-
-    /* date strip */
-    .vdb-strip-wrap{display:flex;align-items:center;gap:6px;}
-    .vdb-arrow{flex:none;width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:#fff;display:grid;place-items:center;color:var(--ink2);transition:transform .12s var(--ease);}
-    .vdb-arrow svg{width:16px;height:16px;}
-    .vdb-strip{flex:1;display:flex;gap:8px;overflow-x:auto;scroll-behavior:smooth;scrollbar-width:none;padding:2px;scroll-snap-type:x proximity;}
-    .vdb-strip::-webkit-scrollbar{display:none;}
-    .vdb-day{flex:none;width:68px;display:flex;flex-direction:column;align-items:center;gap:1px;padding:8px 4px 9px;border-radius:14px;
-        border:1px solid var(--line);background:#fff;scroll-snap-align:center;transition:background-color .18s var(--ease),border-color .18s,transform .12s var(--ease);}
-    .vdb-day:hover{border-color:#cfd6e3;}
-    .vdb-day-dow{font-size:10.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--ink3);}
-    .vdb-day-num{font-size:20px;font-weight:760;letter-spacing:-.03em;line-height:1.15;font-variant-numeric:tabular-nums;}
-    .vdb-day-count{font-size:10.5px;color:var(--ink4);white-space:nowrap;}
-    .vdb-day.is-today:not(.is-on) .vdb-day-dow{color:var(--blue);}
-    .vdb-day.is-on{background:var(--blue);border-color:var(--blue);color:#fff;box-shadow:0 8px 18px -10px rgba(37,99,235,.9);}
-    .vdb-day.is-on .vdb-day-dow,.vdb-day.is-on .vdb-day-count{color:rgba(255,255,255,.82);}
-
-    /* day card */
-    .vdb-card{background:#fff;border:1px solid var(--line);border-radius:20px;padding:18px 20px 14px;box-shadow:0 1px 2px rgba(15,23,42,.04);}
-    .vdb-card-main{display:flex;align-items:center;gap:22px;}
-    .vdb-ring{position:relative;width:96px;height:96px;flex:none;}
-    .vdb-ring svg{width:100%;height:100%;transform:rotate(-90deg);}
-    .vdb-ring-track{stroke:#eef2f7;stroke-width:9;}
-    .vdb-ring-fill{stroke:var(--blue);stroke-width:9;stroke-dasharray:var(--len);stroke-dashoffset:var(--off);
-        animation:vdb-sweep .8s var(--ease) both;}
-    @keyframes vdb-sweep{from{stroke-dashoffset:var(--len);}}
-    .vdb-ring-txt{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;}
-    .vdb-ring-txt b{font-size:24px;font-weight:780;letter-spacing:-.03em;line-height:1;font-variant-numeric:tabular-nums;}
-    .vdb-ring-txt b i{font-style:normal;font-size:12px;font-weight:700;color:var(--ink3);margin-left:1px;}
-    .vdb-ring-txt > span{font-size:9.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3);margin-top:3px;}
-    .vdb-money{flex:1;min-width:0;}
-    .vdb-lab{font-size:10.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3);}
-    .vdb-big{font-size:30px;font-weight:780;letter-spacing:-.04em;line-height:1.1;margin-top:2px;font-variant-numeric:tabular-nums;}
-    .vdb-bar{height:6px;border-radius:99px;background:#eef2f7;margin-top:10px;overflow:hidden;max-width:420px;}
-    .vdb-bar i{display:block;height:100%;border-radius:99px;background:var(--green);transform-origin:left;animation:vdb-grow .8s var(--ease) .1s both;}
-    @keyframes vdb-grow{from{transform:scaleX(0);}}
-    .vdb-collected{font-size:12.5px;color:var(--ink3);margin-top:7px;}
-    .vdb-collected b{color:var(--ink);font-weight:760;font-variant-numeric:tabular-nums;}
-    .vdb-collected b.is-in{color:var(--green);}
-    .vdb-due{display:flex;align-items:center;gap:11px;width:100%;margin-top:14px;padding:11px 14px;border-radius:14px;border:1px solid #fecaca;
-        background:#fef2f2;text-align:left;transition:transform .12s var(--ease),background-color .15s;}
-    .vdb-due > i{width:8px;height:8px;border-radius:50%;background:var(--red);flex:none;}
-    .vdb-due span{flex:1;display:flex;flex-direction:column;}
-    .vdb-due b{color:#b91c1c;font-size:13.5px;font-weight:760;font-variant-numeric:tabular-nums;}
-    .vdb-due em{font-style:normal;color:#dc2626;opacity:.8;font-size:12px;}
-    .vdb-due strong{color:#b91c1c;font-size:12.5px;}
-    .vdb-due.is-on{background:#fee2e2;}
-    .vdb-counts{display:grid;grid-template-columns:repeat(3,1fr);margin-top:14px;padding-top:12px;border-top:1px solid var(--line2);}
-    .vdb-counts > div{display:flex;flex-direction:column;align-items:center;gap:1px;}
-    .vdb-counts > div + div{border-left:1px solid var(--line2);}
-    .vdb-counts b{font-size:20px;font-weight:780;font-variant-numeric:tabular-nums;}
-    .vdb-counts b.is-blue{color:var(--blue2);}
-    .vdb-counts b.is-green{color:var(--green);}
-    .vdb-counts span{font-size:11.5px;font-weight:600;color:var(--ink3);display:inline-flex;align-items:center;gap:5px;}
-    .vdb-counts span i{width:6px;height:6px;border-radius:50%;background:var(--green);}
-    .vdb-closed-row{display:flex;align-items:center;gap:9px;padding:8px 8px 8px 12px;border-radius:12px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-size:13px;font-weight:650;margin-bottom:14px;}
-    .vdb-closed-row svg{width:17px;height:17px;}
-    .vdb-closed-row span{flex:1;}
-    .vdb-closed-row button{border:0;background:none;color:var(--blue);font-weight:700;padding:6px 10px;border-radius:8px;}
-
-    /* the grid */
-    .vdb-grid-card{width:fit-content;max-width:100%;background:#fff;border:1px solid var(--line);border-radius:18px;overflow:auto;max-height:calc(100vh - 150px);
-        box-shadow:0 1px 2px rgba(15,23,42,.04);overscroll-behavior:contain;}
-    .vdb-grid{display:grid;grid-template-columns:78px repeat(var(--cols),minmax(136px,200px));gap:8px;padding:0 10px 12px 0;min-width:min-content;}
-    .vdb-corner,.vdb-court{position:sticky;top:0;z-index:3;background:#f8fafc;padding:12px 8px 10px;border-bottom:1px solid var(--line);}
-    .vdb-corner{left:0;z-index:4;font-size:10px;font-weight:800;letter-spacing:.12em;text-transform:uppercase;color:var(--ink3);display:flex;align-items:flex-end;justify-content:center;}
-    .vdb-court{display:flex;flex-direction:column;align-items:center;text-align:center;margin:0 -4px;}
-    .vdb-court b{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;}
-    .vdb-court span{font-size:10.5px;color:var(--ink3);}
-    .vdb-time{position:sticky;left:0;z-index:2;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;
-        font-size:12px;font-weight:760;font-variant-numeric:tabular-nums;border-right:1px solid var(--line2);}
-    .vdb-time em{font-style:normal;margin-top:3px;font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#fff;background:var(--blue);padding:1px 6px;border-radius:99px;}
-    .vdb-time.is-now{color:var(--blue);box-shadow:inset 3px 0 0 var(--blue);}
-    .vdb-time.is-past{color:var(--ink4);}
-
-    .vdb-cell{position:relative;height:86px;border-radius:13px;border:1px solid var(--line);background:#fff;padding:9px 10px;text-align:left;
-        display:flex;flex-direction:column;justify-content:space-between;min-width:0;
-        transition:transform .14s var(--ease),box-shadow .18s var(--ease),opacity .2s;}
-    button.vdb-cell:hover{transform:translateY(-1px);box-shadow:0 8px 18px -12px rgba(15,23,42,.35);}
-    .vdb-cell.is-open{background:var(--green-bg);border-color:var(--green-line);}
-    .vdb-open{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700;color:#15803d;}
-    .vdb-open i{width:6px;height:6px;border-radius:50%;background:var(--green);}
-    .vdb-open.is-peak{color:var(--amber);}
-    .vdb-open.is-peak i{background:#e8a33d;}
-    .vdb-price{font-size:19px;font-weight:780;letter-spacing:-.02em;font-variant-numeric:tabular-nums;}
-    .vdb-plus{position:absolute;right:9px;bottom:9px;width:28px;height:28px;border-radius:50%;background:var(--blue);color:#fff;display:grid;place-items:center;
-        box-shadow:0 6px 12px -6px rgba(37,99,235,.9);transition:transform .16s var(--ease);}
-    .vdb-plus svg{width:14px;height:14px;stroke-width:2.4;}
-    
-    .vdb-cell.is-booked{background:#eff6ff;border-color:#bfdbfe;}
-    .vdb-cell.is-walkin{background:#f0f9ff;border-color:#bae6fd;}
-    .vdb-kicker{display:flex;align-items:center;justify-content:space-between;font-size:9.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--blue2);}
-    .vdb-cell.is-walkin .vdb-kicker{color:#0369a1;}
-    .vdb-in{display:inline-flex;align-items:center;gap:2px;font-style:normal;color:var(--green);background:#dcfce7;border-radius:5px;padding:1px 5px 1px 3px;letter-spacing:.04em;}
-    .vdb-in svg{width:10px;height:10px;stroke-width:2.4;}
-    .vdb-name{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-    .vdb-amt{display:flex;align-items:baseline;justify-content:space-between;gap:6px;font-size:12px;font-weight:650;color:var(--ink3);font-variant-numeric:tabular-nums;}
-    .vdb-amt em{font-style:normal;font-size:10.5px;font-weight:750;}
-    .vdb-amt em.is-due{color:var(--red);}
-    .vdb-amt em.is-paid{color:var(--green);}
-    .vdb-cell.is-held{background:#fffbeb;border-color:#fde68a;align-items:center;justify-content:center;gap:2px;color:var(--amber);}
-    .vdb-cell.is-held svg{width:15px;height:15px;}
-    .vdb-cell.is-held b{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;}
-    .vdb-cell.is-held span{font-size:10.5px;color:var(--ink3);}
-    .vdb-cell.is-blocked{background:repeating-linear-gradient(135deg,#f1f5f9 0 6px,#e9eef5 6px 12px);border:1px solid #d5dce7;align-items:center;justify-content:center;gap:1px;color:#475569;text-align:center;}
-    .vdb-cell.is-blocked svg{width:15px;height:15px;}
-    .vdb-cell.is-blocked b{font-size:10.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;}
-    .vdb-cell.is-blocked span{font-size:10.5px;color:var(--ink3);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-    .vdb-modes{display:flex;gap:4px;padding:4px;border-radius:14px;background:#f1f4f9;}
-    .vdb-modes button{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:42px;border:0;border-radius:11px;background:none;font-size:13.5px;font-weight:700;color:var(--ink3);transition:background-color .18s,color .18s,box-shadow .18s;}
-    .vdb-modes button svg{width:16px;height:16px;}
-    .vdb-modes button.is-on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(15,23,42,.12);}
-    .vdb-dur{display:grid;grid-template-columns:repeat(auto-fit,minmax(70px,1fr));gap:6px;}
-    .vdb-dur button{display:flex;flex-direction:column;align-items:center;gap:2px;min-height:54px;padding:6px 4px;border-radius:12px;border:1px solid var(--line);background:#fff;color:var(--ink);transition:background-color .15s,border-color .15s,color .15s,transform .12s var(--ease);}
-    .vdb-dur button b{font-size:14px;font-weight:750;}
-    .vdb-dur button small{font-size:10.5px;color:var(--ink3);font-variant-numeric:tabular-nums;}
-    .vdb-dur button.is-on{background:#eef3ff;border-color:var(--blue);}
-    .vdb-dur button.is-on b{color:var(--blue2);}
-    .vdb-dur button.is-off{opacity:.45;cursor:not-allowed;text-decoration:line-through;}
-    .vdb-reasons{display:grid;grid-template-columns:1fr 1fr;}
-    .vdb-primary.is-ink{background:#0f172a;}
-    .vdb-lockav{background:#334155 !important;}
-    .vdb-lockav svg{width:20px;height:20px;stroke:#fff;}
-    .vdb-cell.is-off{background:repeating-linear-gradient(135deg,#f8fafc 0 7px,#f1f5f9 7px 14px);border-style:dashed;align-items:center;justify-content:center;}
-    .vdb-cell.is-off span{font-size:10.5px;font-weight:700;color:var(--ink4);}
-    .vdb-cell.is-gone{background:#fafbfc;border-color:var(--line2);align-items:center;justify-content:center;color:#cbd5e1;}
-    .vdb-cell.is-past.is-booked{opacity:.62;}
-    .vdb-cell.is-new{animation:vdb-land .7s var(--ease) both;}
-    @keyframes vdb-land{0%{transform:scale(.86);box-shadow:0 0 0 0 rgba(37,99,235,.5);}55%{transform:scale(1.03);box-shadow:0 0 0 8px rgba(37,99,235,0);}100%{transform:none;}}
-    .vdb-grid-card.is-due .vdb-cell:not(.is-owing){opacity:.28;}
-    .vdb-grid-card.is-due .vdb-cell.is-owing{border-color:#fca5a5;box-shadow:0 0 0 2px #fee2e2;}
-    .vdb-grid-card.hide-past [data-past]{display:none;}
-    .vdb-grid-block{display:flex;flex-direction:column;gap:8px;}
-    .vdb-earlier{display:flex;align-items:center;gap:9px;align-self:flex-start;border:1px solid var(--line);background:#fff;border-radius:99px;
-        padding:7px 14px 7px 11px;font-size:12.5px;color:var(--ink3);transition:transform .12s var(--ease),border-color .15s;}
-    .vdb-earlier:hover{border-color:#cfd6e3;}
-    .vdb-earlier svg{width:15px;height:15px;}
-    .vdb-earlier b{color:var(--blue);font-weight:700;}
-    @media (hover:hover){
-        .vdb-cell.is-open .vdb-plus{opacity:0;transform:scale(.7);transition:opacity .15s,transform .18s var(--ease);}
-        button.vdb-cell.is-open:hover .vdb-plus,button.vdb-cell.is-open:focus-visible .vdb-plus{opacity:1;transform:none;}
+    /* ── Design Tokens: Premium, Restrained, Sports-Authoritative ───────── */
+    .vdb, .vdb-sheet-wrap {
+        --ink: #0F172A;
+        --ink2: #334155;
+        --ink3: #64748B;
+        --ink4: #94A3B8;
+        --surface: #FFFFFF;
+        --line: #E2E8F0;
+        --line2: #F1F5F9;
+        --blue: #1D4ED8;
+        --blue2: #1E40AF;
+        --blue-subtle: #EFF6FF;
+        --blue-line: #BFDBFE;
+        --green: #059669;
+        --green-bg: #F0FDF4;
+        --green-line: #BBF7D0;
+        --amber: #D97706;
+        --amber-bg: #FFFBEB;
+        --amber-line: #FDE68A;
+        --red: #E11D48;
+        --red-bg: #FFF1F2;
+        --red-line: #FECDD3;
+        --ease: cubic-bezier(0.22, 0.9, 0.24, 1);
+        --spring: cubic-bezier(0.18, 1.25, 0.4, 1);
+        color: var(--ink);
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        touch-action: manipulation;
     }
-    .vdb-hint{font-size:12px;color:var(--ink4);text-align:center;margin:0;}
 
-    /* empty + closed */
-    .vdb-empty{background:#fff;border:1px solid var(--line);border-radius:18px;padding:34px 20px 30px;text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px;}
-    .vdb-empty img,.vdb-illo{width:170px;height:auto;margin-bottom:8px;}
-    .vdb-empty h3{font-size:16px;font-weight:700;margin:0;}
-    .vdb-empty p{font-size:13px;color:var(--ink3);max-width:46ch;margin:0 0 8px;line-height:1.5;}
-
-    /* sheets */
-    .vdb-sheet-wrap{position:fixed;inset:0;z-index:60;}
-    .vdb-scrim{position:absolute;inset:0;background:rgba(15,23,42,.32);backdrop-filter:blur(2px);}
-    .vdb-sheet{position:absolute;top:10px;right:10px;bottom:10px;width:min(420px,calc(100vw - 20px));background:#fff;border-radius:20px;
-        box-shadow:0 24px 60px -20px rgba(15,23,42,.45);display:flex;flex-direction:column;overflow:auto;}
-    .vdb-sheet-in{transition:transform .26s var(--ease),opacity .2s;}
-    .vdb-sheet-out{transition:transform .18s ease-in,opacity .16s;}
-    .vdb-sheet-from{transform:translateX(24px);opacity:0;}
-    .vdb-sheet-to{transform:none;opacity:1;}
-    .vdb-sheet-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:20px 20px 14px;border-bottom:1px solid var(--line2);}
-    .vdb-sheet-head h3{font-size:18px;font-weight:740;letter-spacing:-.02em;margin:2px 0 0;}
-    .vdb-sheet-head p,.vdb-sheet-head a{font-size:13px;color:var(--ink3);margin:2px 0 0;display:block;}
-    .vdb-sheet-head a{color:var(--blue);font-weight:600;font-variant-numeric:tabular-nums;}
-    .vdb-x{flex:none;width:34px;height:34px;border-radius:50%;border:0;background:#f1f5f9;display:grid;place-items:center;color:var(--ink2);}
-    .vdb-x svg{width:14px;height:14px;stroke-width:2.2;}
-    .vdb-who{display:flex;align-items:center;gap:12px;min-width:0;}
-    .vdb-av{width:44px;height:44px;border-radius:50%;flex:none;display:grid;place-items:center;color:#fff;font-weight:760;font-size:17px;}
-    .vdb-form{padding:16px 20px 20px;display:flex;flex-direction:column;gap:14px;flex:1;}
-    .vdb-field{display:flex;flex-direction:column;gap:6px;}
-    .vdb-field > span{font-size:12px;font-weight:700;color:var(--ink2);}
-    .vdb-field > span small{font-weight:500;color:var(--ink4);margin-left:4px;}
-    .vdb-field input{height:46px;border:1px solid #d9dee8;border-radius:12px;padding:0 12px;font-size:15px;color:var(--ink);background:#fff;width:100%;}
-    .vdb-field input:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.16);}
-    .vdb-field em{font-style:normal;font-size:12px;color:var(--red);}
-    .vdb-phone{display:flex;align-items:center;border:1px solid #d9dee8;border-radius:12px;overflow:hidden;}
-    .vdb-phone:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px rgba(37,99,235,.16);}
-    .vdb-phone b{padding:0 10px 0 12px;font-size:15px;font-weight:650;color:var(--ink3);border-right:1px solid var(--line);}
-    .vdb-phone input{border:0;box-shadow:none !important;letter-spacing:.02em;font-variant-numeric:tabular-nums;}
-    .vdb-seg{display:flex;gap:6px;flex-wrap:wrap;}
-    .vdb-seg button{flex:1;min-height:42px;padding:0 12px;border-radius:11px;border:1px solid var(--line);background:#fff;font-size:13.5px;font-weight:650;color:var(--ink2);
-        transition:background-color .15s,border-color .15s,color .15s,transform .12s var(--ease);}
-    .vdb-seg button.is-on{background:#eef3ff;border-color:var(--blue);color:var(--blue2);}
-    .vdb-sheet-foot{margin-top:auto;display:flex;align-items:center;gap:14px;padding-top:14px;border-top:1px solid var(--line2);}
-    .vdb-total{flex:1;display:flex;flex-direction:column;}
-    .vdb-total span{font-size:12px;color:var(--ink3);}
-    .vdb-total b{font-size:22px;font-weight:780;letter-spacing:-.03em;font-variant-numeric:tabular-nums;}
-    .vdb-primary{min-height:48px;padding:0 20px;border:0;border-radius:13px;background:var(--blue);color:#fff;font-size:14.5px;font-weight:700;
-        box-shadow:0 1px 0 rgba(255,255,255,.18) inset,0 10px 20px -12px rgba(37,99,235,.9);transition:background-color .15s,transform .12s var(--ease);}
-    .vdb-primary:hover{background:var(--blue2);}
-    .vdb-primary[disabled]{opacity:.7;}
-    .vdb-fine{font-size:11.5px;color:var(--ink4);margin:0;line-height:1.5;}
-    .vdb-facts{margin:0;padding:8px 20px;}
-    .vdb-facts div{display:flex;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid var(--line2);}
-    .vdb-facts dt{font-size:13px;color:var(--ink3);}
-    .vdb-facts dd{margin:0;font-size:13.5px;font-weight:650;text-align:right;font-variant-numeric:tabular-nums;}
-    .vdb-facts dd.is-in{color:var(--green);}
-    .vdb-facts dd.is-due{color:var(--red);}
-    .vdb-actions{padding:14px 20px 20px;display:flex;flex-direction:column;gap:12px;margin-top:auto;}
-    .vdb-actions .vdb-primary{width:100%;}
-    .vdb-collect{display:flex;flex-direction:column;gap:7px;}
-    .vdb-collect > span{font-size:12px;font-weight:700;color:var(--ink2);}
-    .vdb-cancel{border:0;background:none;color:var(--red);font-size:13.5px;font-weight:650;padding:10px;border-radius:10px;}
-    .vdb-cancel:hover{background:#fef2f2;}
-
-    @media (max-width:767px){
-        .vdb-card{padding:16px;}
-        .vdb-card-main{gap:16px;}
-        .vdb-ring{width:84px;height:84px;}
-        .vdb-big{font-size:26px;}
-        .vdb-grid{grid-template-columns:64px repeat(var(--cols),minmax(124px,1fr));}
-        .vdb-arrow{display:none;}
-        .vdb-hint{display:none;}
-        .vdb-dayname{display:none;}
-        .vdb-sheet{top:auto;left:0;right:0;bottom:0;width:auto;max-height:92vh;border-radius:22px 22px 0 0;}
-        .vdb-sheet-from{transform:translateY(40px);}
+    .vdb {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
     }
-    @media (prefers-reduced-motion:reduce){
-        .vdb *{animation:none !important;transition:none !important;}
+    .vdb button, .vdb-sheet-wrap button { font: inherit; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+    .vdb svg, .vdb-sheet-wrap svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .vdb-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11.5px !important; color: var(--ink3); letter-spacing: .02em; word-break: break-all; }
+
+    /* ── Venue + Day Header ─────────────────────────────────────────────── */
+    .vdb-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+        padding: 2px 2px;
     }
-    .dark .vdb{--ink:#f1f5f9;--ink2:#cbd5e1;--ink3:#94a3b8;--line:#1f2937;--line2:#1f2937;}
-    .dark .vdb-card,.dark .vdb-grid-card,.dark .vdb-empty,.dark .vdb-day,.dark .vdb-arrow,.dark .vdb-sheet,.dark .vdb-time,.dark .vdb-cell{background-color:#111827;}
-    .dark .vdb-corner,.dark .vdb-court{background:#0f172a;}
+    .vdb-where {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        font-weight: 700;
+        font-size: 14.5px;
+        color: var(--ink);
+    }
+    .vdb-where svg { width: 17px; height: 17px; color: var(--blue); flex: none; }
+    .vdb-where select {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 6px 28px 6px 10px;
+        font-weight: 700;
+        font-size: 14px;
+        background-color: #fff;
+        color: var(--ink);
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .03);
+    }
+    .vdb-venue-name { font-weight: 750; font-size: 15px; letter-spacing: -.2px; }
+    .vdb-top-end {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .vdb-dayname {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--ink3);
+        letter-spacing: -.1px;
+    }
+    .vdb-day-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: #fff;
+        border: 1px solid var(--line);
+        color: var(--ink2);
+        font-size: 12px;
+        font-weight: 650;
+        padding: 5px 10px;
+        border-radius: 99px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .03);
+        transition: transform .12s var(--ease), background-color .15s, border-color .15s;
+    }
+    .vdb-day-status:active { transform: scale(.95); }
+    .vdb-day-status.is-closed {
+        background: var(--red-bg);
+        border-color: var(--red-line);
+        color: var(--red);
+    }
+    .vdb-status-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--green);
+        flex: none;
+    }
+    .vdb-day-status.is-closed .vdb-status-dot { background: var(--red); }
+
+    /* ── Date Navigator Strip ────────────────────────────────────────── */
+    .vdb-strip-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .vdb-arrow {
+        flex: none;
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        border: 1px solid var(--line);
+        background: #fff;
+        display: grid;
+        place-items: center;
+        color: var(--ink2);
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .03);
+        transition: transform .12s var(--ease), background-color .15s;
+    }
+    .vdb-arrow:active { transform: scale(.9); }
+    .vdb-arrow svg { width: 15px; height: 15px; stroke-width: 2.2; }
+    .vdb-strip {
+        flex: 1;
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        scroll-behavior: smooth;
+        scrollbar-width: none;
+        padding: 2px 1px 4px;
+        scroll-snap-type: x mandatory;
+        -webkit-overflow-scrolling: touch;
+    }
+    .vdb-strip::-webkit-scrollbar { display: none; }
+    .vdb-day {
+        position: relative;
+        flex: none;
+        width: 66px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        padding: 8px 3px 9px;
+        border-radius: 14px;
+        border: 1px solid var(--line);
+        background: #fff;
+        scroll-snap-align: center;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .03);
+        transition: background-color .18s var(--ease), border-color .18s, transform .12s var(--ease), color .18s;
+    }
+    .vdb-day:active { transform: scale(.94); }
+    .vdb-day-dow {
+        font-size: 10px;
+        font-weight: 750;
+        letter-spacing: .06em;
+        text-transform: uppercase;
+        color: var(--ink3);
+    }
+    .vdb-day-num {
+        font-size: 19px;
+        font-weight: 800;
+        letter-spacing: -.03em;
+        line-height: 1.1;
+        font-variant-numeric: tabular-nums;
+        color: var(--ink);
+    }
+    .vdb-day-count {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--ink4);
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+    }
+    .vdb-today-indicator {
+        position: absolute;
+        bottom: 3px;
+        width: 4px;
+        height: 4px;
+        border-radius: 50%;
+        background: var(--blue);
+    }
+    .vdb-day.is-today:not(.is-on) .vdb-day-dow { color: var(--blue); }
+    /* Authoritative, handcrafted active day state */
+    .vdb-day.is-on {
+        background: var(--ink);
+        border-color: var(--ink);
+        color: #fff;
+        box-shadow: 0 8px 20px -8px rgba(15, 23, 42, .45);
+    }
+    .vdb-day.is-on .vdb-day-dow { color: rgba(255, 255, 255, .7); }
+    .vdb-day.is-on .vdb-day-num { color: #fff; }
+    .vdb-day.is-on .vdb-day-count { color: rgba(255, 255, 255, .82); font-weight: 700; }
+    .vdb-day.is-on .vdb-today-indicator { background: #60A5FA; }
+
+    /* ── Executive Day KPI Card ───────────────────────────────────────── */
+    .vdb-card {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 16px 18px 14px;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, .04), 0 4px 12px -2px rgba(15, 23, 42, .02);
+    }
+    .vdb-card-kpi { display: flex; flex-direction: column; gap: 10px; }
+    .vdb-kpi-main { display: flex; flex-direction: column; gap: 8px; }
+    .vdb-kpi-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+    .vdb-lab {
+        font-size: 10px;
+        font-weight: 750;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: var(--ink3);
+    }
+    .vdb-big {
+        font-size: 26px;
+        font-weight: 800;
+        letter-spacing: -.03em;
+        line-height: 1.1;
+        margin-top: 1px;
+        font-variant-numeric: tabular-nums;
+        color: var(--ink);
+    }
+    .vdb-occ-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 5px 10px;
+        border-radius: 99px;
+        background: var(--blue-subtle);
+        border: 1px solid var(--blue-line);
+        color: var(--blue2);
+    }
+    .vdb-occ-pct { font-size: 13.5px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+    .vdb-occ-tag { font-size: 10px; font-weight: 750; text-transform: uppercase; letter-spacing: .05em; opacity: .85; }
+    .vdb-bar-section { display: flex; flex-direction: column; gap: 6px; }
+    .vdb-bar {
+        height: 5px;
+        border-radius: 99px;
+        background: var(--line2);
+        overflow: hidden;
+    }
+    .vdb-bar i {
+        display: block;
+        height: 100%;
+        border-radius: 99px;
+        background: var(--green);
+        transform-origin: left;
+        animation: vdb-grow .7s var(--ease) .08s both;
+    }
+    @keyframes vdb-grow { from { transform: scaleX(0); } }
+    .vdb-collected-info {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 12px;
+        color: var(--ink3);
+    }
+    .vdb-collected-sum b { color: var(--ink); font-weight: 750; font-variant-numeric: tabular-nums; }
+    .vdb-collected-sum b.is-in { color: var(--green); }
+    .vdb-split-details { font-size: 11.5px; color: var(--ink4); }
+
+    /* Due Alert Banner */
+    .vdb-due {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        width: 100%;
+        margin-top: 10px;
+        padding: 9px 12px;
+        border-radius: 12px;
+        border: 1px solid var(--red-line);
+        background: var(--red-bg);
+        text-align: left;
+        transition: transform .12s var(--ease), background-color .15s;
+    }
+    .vdb-due:active { transform: scale(.985); }
+    .vdb-due-beacon { width: 7px; height: 7px; border-radius: 50%; background: var(--red); flex: none; }
+    .vdb-due-label { flex: 1; display: flex; flex-direction: column; }
+    .vdb-due-label b { color: #BE123C; font-size: 13px; font-weight: 750; font-variant-numeric: tabular-nums; }
+    .vdb-due-label em { font-style: normal; color: #E11D48; opacity: .85; font-size: 11.5px; }
+    .vdb-due-action { color: #BE123C; font-size: 12px; font-weight: 700; }
+    .vdb-due.is-on { background: #FFE4E6; }
+
+    /* Compact 3-Stat Metric Row */
+    .vdb-counts {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        margin-top: 12px;
+        padding-top: 10px;
+        border-top: 1px solid var(--line2);
+    }
+    .vdb-count-box {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1px;
+    }
+    .vdb-count-box + .vdb-count-box { border-left: 1px solid var(--line2); }
+    .vdb-count-box b { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--ink); }
+    .vdb-count-box b.is-blue { color: var(--blue); }
+    .vdb-count-box b.is-green { color: var(--green); }
+    .vdb-count-box span { font-size: 11px; font-weight: 600; color: var(--ink3); display: inline-flex; align-items: center; gap: 4px; }
+    .vdb-open-pip { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
+
+    .vdb-closed-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-radius: 12px;
+        background: var(--red-bg);
+        border: 1px solid var(--red-line);
+        color: var(--red);
+        font-size: 12.5px;
+        font-weight: 650;
+        margin-bottom: 12px;
+    }
+    .vdb-closed-row svg { width: 16px; height: 16px; flex: none; }
+    .vdb-closed-row span { flex: 1; }
+    .vdb-closed-row button { border: 0; background: none; color: var(--blue); font-weight: 700; padding: 4px 8px; border-radius: 6px; }
+
+    /* ── Earlier Completed Slots Divider ─────────────────────────────── */
+    .vdb-grid-block { display: flex; flex-direction: column; gap: 8px; }
+    .vdb-earlier {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        align-self: flex-start;
+        border: 1px solid var(--line);
+        background: #fff;
+        border-radius: 99px;
+        padding: 5px 12px 5px 9px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--ink3);
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .03);
+        transition: transform .12s var(--ease), border-color .15s;
+    }
+    .vdb-earlier:active { transform: scale(.95); }
+    .vdb-earlier svg { width: 14px; height: 14px; }
+    .vdb-earlier b { color: var(--blue); font-weight: 700; }
+
+    /* ── Courts × Times Grid ─────────────────────────────────────────── */
+    .vdb-grid-card {
+        width: fit-content;
+        max-width: 100%;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        overflow: auto;
+        max-height: calc(100vh - 140px);
+        box-shadow: 0 1px 3px rgba(15, 23, 42, .04), 0 4px 12px -2px rgba(15, 23, 42, .02);
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+    .vdb-grid {
+        display: grid;
+        grid-template-columns: 74px repeat(var(--cols), minmax(132px, 190px));
+        gap: 8px;
+        padding: 0 10px 12px 0;
+        min-width: min-content;
+    }
+    .vdb-corner, .vdb-court {
+        position: sticky;
+        top: 0;
+        z-index: 3;
+        background: #F8FAFC;
+        padding: 10px 8px;
+        border-bottom: 1px solid var(--line);
+    }
+    .vdb-corner {
+        left: 0;
+        z-index: 4;
+        font-size: 9.5px;
+        font-weight: 800;
+        letter-spacing: .12em;
+        text-transform: uppercase;
+        color: var(--ink3);
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        border-right: 1px solid var(--line2);
+    }
+    .vdb-court {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        gap: 2px;
+    }
+    .vdb-court b {
+        font-size: 13px;
+        font-weight: 750;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+        color: var(--ink);
+    }
+    .vdb-court span {
+        font-size: 9.5px;
+        font-weight: 650;
+        color: var(--ink3);
+        padding: 1px 6px;
+        border-radius: 6px;
+        background: #EEF2F7;
+        text-transform: capitalize;
+    }
+
+    /* Time Gutter Column */
+    .vdb-time {
+        position: sticky;
+        left: 0;
+        z-index: 2;
+        background: #fff;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        font-size: 12px;
+        font-weight: 750;
+        font-variant-numeric: tabular-nums;
+        color: var(--ink2);
+        border-right: 1px solid var(--line2);
+    }
+    .vdb-time em {
+        font-style: normal;
+        margin-top: 3px;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: #fff;
+        background: var(--blue);
+        padding: 1px 6px;
+        border-radius: 99px;
+    }
+    .vdb-time.is-now {
+        color: var(--blue);
+        box-shadow: inset 3px 0 0 var(--blue);
+        background: #F8FAFC;
+    }
+    .vdb-time.is-past { color: var(--ink4); }
+
+    /* ── Slot Cell Redesign: Handcrafted State Machine ───────────────── */
+    .vdb-cell {
+        position: relative;
+        height: 84px;
+        border-radius: 12px;
+        border: 1px solid var(--line);
+        background: #fff;
+        padding: 8px 10px;
+        text-align: left;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        min-width: 0;
+        user-select: none;
+        transition: transform .12s var(--ease), box-shadow .15s var(--ease), border-color .15s;
+    }
+    button.vdb-cell:active { transform: scale(.965); }
+
+    /* State 1: Open / Available Slot */
+    .vdb-cell.is-open {
+        background: #FFFFFF;
+        border-color: rgba(5, 150, 105, .3);
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .02);
+    }
+    .vdb-cell.is-open:hover {
+        border-color: var(--green);
+        box-shadow: 0 4px 12px -3px rgba(5, 150, 105, .15);
+    }
+    .vdb-open {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--green);
+    }
+    .vdb-open i { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
+    .vdb-open.is-peak { color: var(--amber); }
+    .vdb-open.is-peak i { background: var(--amber); }
+    .vdb-price {
+        font-size: 18px;
+        font-weight: 800;
+        letter-spacing: -.02em;
+        font-variant-numeric: tabular-nums;
+        color: var(--ink);
+    }
+    /* Integrated tactile touch target */
+    .vdb-plus {
+        position: absolute;
+        right: 8px;
+        bottom: 8px;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        background: var(--blue);
+        color: #fff;
+        display: grid;
+        place-items: center;
+        box-shadow: 0 4px 10px -3px rgba(29, 78, 216, .7);
+        transition: transform .15s var(--spring);
+    }
+    .vdb-plus svg { width: 13px; height: 13px; stroke-width: 2.5; }
+    button.vdb-cell.is-open:hover .vdb-plus { transform: scale(1.1); }
+
+    /* State 2: Booked (Walk-in vs Online) */
+    .vdb-cell.is-booked {
+        background: #F0F7FF;
+        border-color: #BAE6FD;
+    }
+    .vdb-cell.is-walkin {
+        background: #F0F9FF;
+        border-color: #BAE6FD;
+    }
+    .vdb-kicker {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 9px;
+        font-weight: 800;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+        color: var(--blue2);
+    }
+    .vdb-cell.is-walkin .vdb-kicker { color: #0284C7; }
+    .vdb-in {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        font-style: normal;
+        color: var(--green);
+        background: #DCFCE7;
+        border-radius: 4px;
+        padding: 1px 4px;
+        letter-spacing: .02em;
+        font-size: 8.5px;
+    }
+    .vdb-in svg { width: 9px; height: 9px; stroke-width: 2.5; }
+    .vdb-name {
+        font-size: 12.5px;
+        font-weight: 750;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--ink);
+    }
+    .vdb-amt {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 4px;
+        font-size: 11.5px;
+        font-weight: 650;
+        color: var(--ink3);
+        font-variant-numeric: tabular-nums;
+    }
+    .vdb-amt em { font-style: normal; font-size: 10px; font-weight: 750; }
+    .vdb-amt em.is-due { color: var(--red); }
+    .vdb-amt em.is-paid { color: var(--green); }
+
+    /* State 3: Held / In Checkout */
+    .vdb-cell.is-held {
+        background: #FFFBEB;
+        border-color: #FDE68A;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+        color: var(--amber);
+    }
+    .vdb-cell.is-held svg { width: 14px; height: 14px; }
+    .vdb-cell.is-held b { font-size: 9.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+    .vdb-cell.is-held span { font-size: 10px; color: var(--ink3); }
+
+    /* State 4: Blocked / Maintenance */
+    .vdb-cell.is-blocked {
+        background: #F1F5F9;
+        border: 1px solid #CBD5E1;
+        align-items: center;
+        justify-content: center;
+        gap: 1px;
+        color: #475569;
+        text-align: center;
+    }
+    .vdb-cell.is-blocked svg { width: 14px; height: 14px; }
+    .vdb-cell.is-blocked b { font-size: 9.5px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+    .vdb-cell.is-blocked span { font-size: 10px; color: var(--ink3); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Inactive / Past Slots */
+    .vdb-cell.is-off {
+        background: #F8FAFC;
+        border: 1px dashed var(--line);
+        align-items: center;
+        justify-content: center;
+    }
+    .vdb-cell.is-off span { font-size: 10px; font-weight: 650; color: var(--ink4); }
+    .vdb-cell.is-gone { background: #FAFBFD; border-color: var(--line2); align-items: center; justify-content: center; color: #CBD5E1; }
+    .vdb-cell.is-past.is-booked { opacity: .55; }
+    .vdb-grid-card.is-due .vdb-cell:not(.is-owing) { opacity: .25; }
+    .vdb-grid-card.is-due .vdb-cell.is-owing { border-color: #FDA4AF; box-shadow: 0 0 0 2px #FFE4E6; }
+    .vdb-grid-card.hide-past [data-past] { display: none; }
+    .vdb-hint { font-size: 11.5px; color: var(--ink4); text-align: center; margin: 4px 0 0; }
+
+    /* ── Action Sheets: Handcrafted iOS / Mobile Modal ───────────────── */
+    .vdb-sheet-wrap { position: fixed; inset: 0; z-index: 60; }
+    .vdb-scrim { position: absolute; inset: 0; background: rgba(15, 23, 42, .36); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+    .vdb-sheet {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        bottom: 12px;
+        width: min(430px, calc(100vw - 24px));
+        background: #fff;
+        border-radius: 22px;
+        box-shadow: 0 24px 60px -15px rgba(15, 23, 42, .35);
+        display: flex;
+        flex-direction: column;
+        overflow: auto;
+    }
+    .vdb-sheet-handle { display: none; width: 36px; height: 4px; border-radius: 99px; background: #CBD5E1; margin: 10px auto 4px; flex: none; }
+    .vdb-sheet-in { transition: transform .26s var(--ease), opacity .2s; }
+    .vdb-sheet-out { transition: transform .18s ease-in, opacity .16s; }
+    .vdb-sheet-from { transform: translateX(24px); opacity: 0; }
+    .vdb-sheet-to { transform: none; opacity: 1; }
+    .vdb-sheet-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 18px 20px 14px;
+        border-bottom: 1px solid var(--line2);
+    }
+    .vdb-sheet-head h3 { font-size: 17px; font-weight: 750; letter-spacing: -.02em; margin: 2px 0 0; color: var(--ink); }
+    .vdb-sheet-head p, .vdb-sheet-head a { font-size: 12.5px; color: var(--ink3); margin: 2px 0 0; display: block; }
+    .vdb-sheet-head a { color: var(--blue); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .vdb-x {
+        flex: none;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        border: 0;
+        background: #F1F5F9;
+        display: grid;
+        place-items: center;
+        color: var(--ink2);
+        transition: transform .12s;
+    }
+    .vdb-x:active { transform: scale(.9); }
+    .vdb-x svg { width: 14px; height: 14px; stroke-width: 2.2; }
+    .vdb-who { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .vdb-av { width: 42px; height: 42px; border-radius: 50%; flex: none; display: grid; place-items: center; color: #fff; font-weight: 750; font-size: 16px; }
+    .vdb-form { padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 14px; flex: 1; }
+    .vdb-field { display: flex; flex-direction: column; gap: 6px; }
+    .vdb-field > span { font-size: 12px; font-weight: 700; color: var(--ink2); }
+    .vdb-field > span small { font-weight: 500; color: var(--ink4); margin-left: 4px; }
+    .vdb-field input {
+        height: 44px;
+        border: 1px solid #CBD5E1;
+        border-radius: 12px;
+        padding: 0 12px;
+        font-size: 14.5px;
+        color: var(--ink);
+        background: #fff;
+        width: 100%;
+        transition: border-color .15s, box-shadow .15s;
+    }
+    .vdb-field input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(29, 78, 216, .14); }
+    .vdb-field em { font-style: normal; font-size: 12px; color: var(--red); }
+    .vdb-phone { display: flex; align-items: center; border: 1px solid #CBD5E1; border-radius: 12px; overflow: hidden; background: #fff; }
+    .vdb-phone:focus-within { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(29, 78, 216, .14); }
+    .vdb-phone b { padding: 0 10px 0 12px; font-size: 14px; font-weight: 700; color: var(--ink3); border-right: 1px solid var(--line); }
+    .vdb-phone input { border: 0; box-shadow: none !important; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+    .vdb-modes { display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: #F1F5F9; }
+    .vdb-modes button {
+        flex: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        min-height: 40px;
+        border: 0;
+        border-radius: 9px;
+        background: none;
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--ink3);
+        transition: background-color .15s, color .15s, box-shadow .15s;
+    }
+    .vdb-modes button svg { width: 15px; height: 15px; }
+    .vdb-modes button.is-on { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(15, 23, 42, .08); }
+    .vdb-dur { display: grid; grid-template-columns: repeat(auto-fit, minmax(70px, 1fr)); gap: 6px; }
+    .vdb-dur button {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 2px;
+        min-height: 52px;
+        padding: 6px 4px;
+        border-radius: 11px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--ink);
+        transition: background-color .15s, border-color .15s, color .15s, transform .1s var(--ease);
+    }
+    .vdb-dur button:active { transform: scale(.96); }
+    .vdb-dur button b { font-size: 13.5px; font-weight: 750; }
+    .vdb-dur button small { font-size: 10px; color: var(--ink3); font-variant-numeric: tabular-nums; }
+    .vdb-dur button.is-on { background: var(--blue-subtle); border-color: var(--blue); color: var(--blue2); }
+    .vdb-dur button.is-off { opacity: .45; cursor: not-allowed; text-decoration: line-through; }
+    .vdb-seg { display: flex; gap: 6px; flex-wrap: wrap; }
+    .vdb-seg button {
+        flex: 1;
+        min-height: 40px;
+        padding: 0 12px;
+        border-radius: 10px;
+        border: 1px solid var(--line);
+        background: #fff;
+        font-size: 13px;
+        font-weight: 650;
+        color: var(--ink2);
+        transition: background-color .15s, border-color .15s, color .15s, transform .1s;
+    }
+    .vdb-seg button:active { transform: scale(.96); }
+    .vdb-seg button.is-on { background: var(--blue-subtle); border-color: var(--blue); color: var(--blue2); font-weight: 750; }
+    .vdb-sheet-foot { margin-top: auto; display: flex; align-items: center; gap: 12px; padding-top: 14px; border-top: 1px solid var(--line2); }
+    .vdb-total { flex: 1; display: flex; flex-direction: column; }
+    .vdb-total span { font-size: 11.5px; color: var(--ink3); }
+    .vdb-total b { font-size: 21px; font-weight: 800; letter-spacing: -.03em; font-variant-numeric: tabular-nums; color: var(--ink); }
+    .vdb-primary {
+        min-height: 46px;
+        padding: 0 20px;
+        border: 0;
+        border-radius: 12px;
+        background: var(--blue);
+        color: #fff;
+        font-size: 14px;
+        font-weight: 700;
+        box-shadow: 0 4px 14px -3px rgba(29, 78, 216, .6);
+        transition: background-color .15s, transform .1s var(--ease);
+    }
+    .vdb-primary:active { transform: scale(.96); }
+    .vdb-primary:hover { background: var(--blue2); }
+    .vdb-primary[disabled] { opacity: .65; cursor: not-allowed; }
+    .vdb-facts { margin: 0; padding: 6px 20px; }
+    .vdb-facts div { display: flex; justify-content: space-between; gap: 14px; padding: 9px 0; border-bottom: 1px solid var(--line2); }
+    .vdb-facts dt { font-size: 12.5px; color: var(--ink3); }
+    .vdb-facts dd { margin: 0; font-size: 13px; font-weight: 650; text-align: right; font-variant-numeric: tabular-nums; color: var(--ink); }
+    .vdb-facts dd.is-in { color: var(--green); font-weight: 750; }
+    .vdb-facts dd.is-due { color: var(--red); font-weight: 750; }
+    .vdb-actions { padding: 12px 20px 20px; display: flex; flex-direction: column; gap: 10px; margin-top: auto; }
+    .vdb-actions .vdb-primary { width: 100%; }
+    .vdb-collect { display: flex; flex-direction: column; gap: 6px; }
+    .vdb-collect > span { font-size: 12px; font-weight: 700; color: var(--ink2); }
+    .vdb-cancel { border: 0; background: none; color: var(--red); font-size: 13px; font-weight: 650; padding: 9px; border-radius: 9px; }
+    .vdb-cancel:hover { background: var(--red-bg); }
+
+    /* Empty states */
+    .vdb-empty {
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 36px 20px;
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+    }
+    .vdb-empty img, .vdb-illo { width: 160px; height: auto; margin-bottom: 8px; }
+    .vdb-empty h3 { font-size: 16px; font-weight: 750; margin: 0; color: var(--ink); }
+    .vdb-empty p { font-size: 13px; color: var(--ink3); max-width: 44ch; margin: 0 0 10px; line-height: 1.5; }
+
+    /* ── Mobile-First Responsive Breakpoint ───────────────────────────── */
+    @media (max-width: 767px) {
+        .vdb { gap: 10px; padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px)); }
+        .vdb-top { flex-direction: column; align-items: stretch; gap: 6px; }
+        .vdb-top-end { justify-content: space-between; }
+        .vdb-card { padding: 14px 15px 12px; border-radius: 16px; }
+        .vdb-big { font-size: 24px; }
+        .vdb-grid { grid-template-columns: 66px repeat(var(--cols), minmax(126px, 1fr)); }
+        .vdb-arrow { display: none; }
+        .vdb-hint { display: none; }
+        .vdb-sheet {
+            top: auto;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100%;
+            max-height: 88vh;
+            border-radius: 24px 24px 0 0;
+            padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+        }
+        .vdb-sheet-handle { display: block; }
+        .vdb-sheet-from { transform: translateY(100%); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .vdb * { animation: none !important; transition: none !important; }
+    }
+
+    /* ── Dark Mode Support ────────────────────────────────────────────── */
+    .dark .vdb, .dark .vdb-sheet-wrap {
+        --ink: #F1F5F9;
+        --ink2: #CBD5E1;
+        --ink3: #94A3B8;
+        --ink4: #64748B;
+        --line: #1E293B;
+        --line2: #1E293B;
+        --surface: #0F172A;
+        --blue-subtle: #1E293B;
+        --blue-line: #1D4ED8;
+    }
+    .dark .vdb-card, .dark .vdb-grid-card, .dark .vdb-empty, .dark .vdb-day,
+    .dark .vdb-arrow, .dark .vdb-sheet, .dark .vdb-time, .dark .vdb-cell, .dark .vdb-where select {
+        background-color: #0F172A;
+    }
+    .dark .vdb-corner, .dark .vdb-court { background: #0B1120; }
+    .dark .vdb-cell.is-open { background: #0F172A; border-color: rgba(5, 150, 105, .3); }
+    .dark .vdb-cell.is-booked, .dark .vdb-cell.is-walkin { background: #13233D; border-color: #1E3A8A; }
+    .dark .vdb-modes, .dark .vdb-x { background: #1E293B; }
+    .dark .vdb-modes button.is-on { background: #0F172A; color: #fff; }
 </style>
 </x-filament-panels::page>

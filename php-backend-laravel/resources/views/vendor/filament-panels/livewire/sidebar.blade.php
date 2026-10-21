@@ -17,7 +17,7 @@
             x-cloak="-lg"
         @endif
         x-bind:class="{ 'fi-sidebar-open': $store.sidebar.isOpen }"
-        class="fi-sidebar fi-main-sidebar hrn-linear-sidebar fi-sidebar-open"
+        @class(['fi-sidebar fi-main-sidebar hrn-linear-sidebar fi-sidebar-open', 'hrn-sb-v2' => filament()->getId() === 'control'])
     >
         {{ \Filament\Support\Facades\FilamentView::renderHook(\Filament\View\PanelsRenderHook::SIDEBAR_START) }}
 
@@ -175,18 +175,17 @@
 
                         <div class="hrn-ws-pop-divider"></div>
 
-                        {{-- Quick Operations --}}
+                        {{-- Quick Operations. (A hardcoded "Status: Healthy" used to sit here and
+                             said so even with the queue down; the real check is one click away.) --}}
                         <div class="hrn-ws-pop-footer">
                             <a href="{{ url('/control/command-center') }}" class="hrn-ws-pop-action">
                                 <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" class="w-3.5 h-3.5 text-indigo-500">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M2 4h12M2 8h12M2 12h8" />
                                 </svg>
                                 <span>Command Center</span>
-                                <kbd class="hrn-ws-kbd-micro">⌘K</kbd>
                             </a>
                             <a href="{{ url('/control/server-status') }}" class="hrn-ws-pop-action">
-                                <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                                <span>Status: Healthy</span>
+                                <span>Server status</span>
                             </a>
                         </div>
                     </div>
@@ -256,27 +255,48 @@
                 @endforeach
             </ul>
 
+            @php
+                $groupLabels = collect($navigation)->map(fn ($g) => $g->getLabel())->filter()->values()->all();
+                $activeGroup = collect($navigation)->first(fn ($g) => filled($g->getLabel()) && $g->isActive())?->getLabel();
+            @endphp
             <script>
-                var collapsedGroups = JSON.parse(
-                    localStorage.getItem('collapsedGroups'),
-                )
-
-                if (collapsedGroups === null || collapsedGroups === 'null') {
-                    localStorage.setItem(
-                        'collapsedGroups',
-                        JSON.stringify(@js(
-                        collect($navigation)
-                            ->filter(fn (\Filament\Navigation\NavigationGroup $group): bool => $group->isCollapsed())
-                            ->map(fn (\Filament\Navigation\NavigationGroup $group): string => $group->getLabel())
-                            ->values()
-                            ->all()
-                    )),
+                @if (filament()->getId() === 'control')
+                    // /control runs its groups as an accordion: the area you are in is open,
+                    // every other area is one drawn row. Fifty always-open links read as an
+                    // old admin template; this reads as a map of the business.
+                    window.hrnSbLabels = @js($groupLabels);
+                    window.hrnSbOpenGroup = function (label) {
+                        const store = window.Alpine && Alpine.store('sidebar');
+                        if (! store) return;
+                        const wasOpen = ! store.groupIsCollapsed(label);
+                        store.collapsedGroups = wasOpen
+                            ? window.hrnSbLabels.slice()
+                            : window.hrnSbLabels.filter((l) => l !== label);
+                    };
+                    var collapsedGroups = window.hrnSbLabels.filter((l) => l !== @js($activeGroup));
+                    localStorage.setItem('collapsedGroups', JSON.stringify(collapsedGroups));
+                @else
+                    var collapsedGroups = JSON.parse(
+                        localStorage.getItem('collapsedGroups'),
                     )
-                }
 
-                collapsedGroups = JSON.parse(
-                    localStorage.getItem('collapsedGroups'),
-                )
+                    if (collapsedGroups === null || collapsedGroups === 'null') {
+                        localStorage.setItem(
+                            'collapsedGroups',
+                            JSON.stringify(@js(
+                            collect($navigation)
+                                ->filter(fn (\Filament\Navigation\NavigationGroup $group): bool => $group->isCollapsed())
+                                ->map(fn (\Filament\Navigation\NavigationGroup $group): string => $group->getLabel())
+                                ->values()
+                                ->all()
+                        )),
+                        )
+                    }
+
+                    collapsedGroups = JSON.parse(
+                        localStorage.getItem('collapsedGroups'),
+                    )
+                @endif
 
                 document
                     .querySelectorAll('.fi-sidebar-group')

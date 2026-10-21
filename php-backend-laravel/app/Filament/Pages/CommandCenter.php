@@ -46,6 +46,12 @@ class CommandCenter extends Page
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-command-line';
 
+    /** The sidebar draws this page with the same hand as the areas below it (a scoreboard). */
+    public static function getNavigationIcon(): string|BackedEnum|\Illuminate\Contracts\Support\Htmlable|null
+    {
+        return new \Illuminate\Support\HtmlString(\Illuminate\Support\Facades\Blade::render('<x-hrn-glyph name="command" class="fi-sidebar-item-icon hrn-sb-item-icon" />'));
+    }
+
     protected static ?string $title = 'Command Center';
 
     protected static ?string $navigationLabel = 'Command Center';

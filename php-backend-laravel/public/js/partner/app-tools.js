@@ -104,6 +104,69 @@
         leave: function () { clearTimeout(cust.timer); cust.host = null; },
     });
 
+    /* =================================================================== REVIEWS === */
+    // What players said about this partner's venues (GET /api/partner/reviews). Read-only:
+    // partners never edit a customer's words; hiding/removing is Haraan's job in /control.
+    // The 5→1 bars double as the star filter, like the console's reviews page.
+
+    var rev = { host: null, stars: 0, seq: 0 };
+    var STAR = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 17.3 6.2 3.7-1.6-7 5.4-4.7-7.1-.6L12 2 9.1 8.7 2 9.3l5.4 4.7-1.6 7z"/></svg>';
+
+    function starRow(n) {
+        var out = '';
+        for (var i = 1; i <= 5; i++) out += '<i class="' + (i <= n ? 'is-on' : '') + '">' + STAR + '</i>';
+        return '<span class="ha-rvstars">' + out + '</span>';
+    }
+
+    function loadReviews() {
+        var host = rev.host;
+        if (!host) return;
+        var seq = ++rev.seq;
+        A.api('reviews', rev.stars ? { stars: rev.stars } : {}).then(function (r) {
+            if (seq !== rev.seq || !rev.host) return;
+            renderReviews(r.data || r);
+        }, function () { if (seq === rev.seq && rev.host) failed(rev.host, 'Reviews', loadReviews); });
+    }
+
+    function renderReviews(d) {
+        var host = rev.host;
+        var total = d.count || 0;
+        var hero;
+        if (!total) {
+            hero = '<div class="ha-rvnone">' + '<span class="ha-rvnone-art">' + STAR + STAR + STAR + '</span>'
+                + '<b>No ratings yet</b><small>Players rate your venue from its page in the Haraan app and website, and from the link after a booking. They land here the moment they’re posted.</small></div>';
+        } else {
+            var max = Math.max.apply(null, [5, 4, 3, 2, 1].map(function (s) { return d.spread[s] || 0; })) || 1;
+            hero = '<div class="ha-rvhero"><div class="ha-rvscore"><b>' + Number(d.average).toFixed(1) + '</b>' + starRow(Math.round(d.average))
+                + '<small>' + total + ' ' + (total === 1 ? 'rating' : 'ratings') + (d.this_month ? ' · <em>' + d.this_month + ' this month</em>' : '') + '</small></div>'
+                + '<div class="ha-rvbars">' + [5, 4, 3, 2, 1].map(function (s) {
+                    var n = d.spread[s] || 0;
+                    return '<button type="button" class="ha-rvbar' + (rev.stars === s ? ' is-on' : '') + (n ? '' : ' is-zero') + '" data-stars="' + s + '"' + (n ? '' : ' disabled') + '>'
+                        + '<span>' + s + '★</span><i><b style="width:' + Math.round(n / max * 100) + '%"></b></i><em>' + n + '</em></button>';
+                }).join('') + '</div></div>';
+        }
+        var rows = d.reviews || [];
+        var feed = rows.length ? rows.map(function (x) {
+            return '<article class="ha-rvcard"><div class="ha-row"><span class="ha-cav">' + esc(String(x.name || '?').charAt(0).toUpperCase()) + '</span>'
+                + '<span class="ha-grow"><span class="ha-row ha-rvwho"><b>' + esc(x.name) + '</b>' + (x.played ? '<em>Played here</em>' : '') + '</span>'
+                + '<small>' + esc(x.ago) + (x.venue ? ' · ' + esc(x.venue) : '') + '</small></span>' + starRow(x.rating) + '</div>'
+                + (x.text ? '<p>' + esc(x.text) + '</p>' : '<p class="is-quiet">Rated ' + x.rating + ' ' + (x.rating === 1 ? 'star' : 'stars') + ', no comment.</p>') + '</article>';
+        }).join('') : (total ? empty('No ' + rev.stars + '-star reviews.') : '');
+        var clear = rev.stars ? '<button type="button" class="ha-textbtn" data-clear>Show all</button>' : '';
+        host.innerHTML = page('Reviews', clear, hero + feed);
+        host.onclick = function (e) {
+            var b = e.target.closest('[data-stars]');
+            if (b && !b.disabled) { var s = +b.dataset.stars; rev.stars = rev.stars === s ? 0 : s; vibrate(6); loadReviews(); return; }
+            if (e.target.closest('[data-clear]')) { rev.stars = 0; loadReviews(); }
+        };
+    }
+
+    A.register('reviews', {
+        tool: true,
+        enter: function (host) { rev.host = host; host.innerHTML = page('Reviews', '', loading()); loadReviews(); },
+        leave: function () { rev.host = null; },
+    });
+
     /* ===================================================================== STAFF === */
 
     var PERMS = [['bookings', 'Bookings & walk-ins'], ['checkin', 'Ticket / slot check-in'], ['pricing', 'Pricing & slots'], ['reports', 'Reports']];

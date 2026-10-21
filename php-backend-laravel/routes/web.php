@@ -221,6 +221,8 @@ Route::middleware('auth')->controller(VenueBookingController::class)->group(func
     Route::post('/gamehub/{id}/book/quote', 'quote')->whereNumber('id')->middleware('throttle:30,1')->name('site.gamehub.quote');
     Route::post('/gamehub/{id}/confirm', 'confirm')->whereNumber('id')->name('site.gamehub.confirm');
     Route::post('/gamehub/{id}/release', 'release')->whereNumber('id')->name('site.gamehub.release');
+    // RATE VENUE on the venue page — same write path as the app (VenueReviewService).
+    Route::post('/gamehub/{id}/review', 'review')->whereNumber('id')->middleware('throttle:10,1')->name('site.gamehub.review');
 });
 
 // Membership — Pro and Hero are bought here (the app shows plans but doesn't sell them).

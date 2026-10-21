@@ -178,9 +178,35 @@
     // "Matches near you" heading forever; they belong on the Finished tab, which was a
     // hardcoded empty state even though the data was already in hand (the app fixed the
     // same bug on its side — see MainScreen.kt's Finished tab).
-    $abIsDone = fn (array $m): bool => in_array(strtolower((string) ($m['status'] ?? '')), ['completed', 'finished'], true);
-    $abLiveRows     = $abFeedRows->reject($abIsDone)->values();
+    // Finished = completed_at stamped or a result line ("X won by 6 wickets") — matching
+    // only "completed" left every cricket result on the Live tab. Live = in play only (the
+    // app's isInPlay): not-yet-started matches belong on Scheduled, not under LIVE.
+    $abIsDone = fn (array $m): bool => (bool) ($m['isFinished'] ?? in_array(strtolower((string) ($m['status'] ?? '')), ['completed', 'finished'], true));
+    $abLiveRows     = $abFeedRows->filter(fn (array $m): bool => ($m['isLive'] ?? false) && ! $abIsDone($m))->values();
     $abFinishedRows = $abFeedRows->filter($abIsDone)->values();
+
+    // The empty Live tab names the next real fixture (yours first, then open ones near
+    // you) rather than leaving a blank — only matches still ahead of now.
+    $abNext = collect(array_merge($abScheduledMine ?? [], $abScheduledOpen ?? []))
+        ->map(function ($m) {
+            try {
+                $at = ! empty($m['scheduledAt']) ? \Illuminate\Support\Carbon::parse($m['scheduledAt']) : null;
+            } catch (\Throwable) {
+                $at = null;
+            }
+            return $at && $at->gte(now()->subMinutes(30)) ? $m + ['_at' => $at] : null;
+        })
+        ->filter()
+        ->sortBy(fn ($m) => $m['_at']->getTimestamp())
+        ->map(fn ($m) => [
+            // "Mine" rows name the sides teamA/teamB; "Open near me" rows say team1/team2.
+            'label' => trim((($m['teamA'] ?? $m['team1'] ?? '') ?: 'Team A') . ' vs ' . (($m['teamB'] ?? $m['team2'] ?? '') ?: 'Team B')),
+            'when' => \App\Support\BusinessClock::local($m['_at'])->isToday()
+                ? 'Today · ' . \App\Support\BusinessClock::local($m['_at'])->format('g:i A')
+                : \App\Support\BusinessClock::local($m['_at'])->format('D, j M · g:i A'),
+            'sport' => strtolower((string) ($m['sport'] ?? 'cricket')),
+        ])
+        ->first();
 
     // Port of SportFilterRow. Sport is a FILTER over the one list, not a destination —
     // it used to be three slots in the bottom bar (Cricket / Badminton / Football), which
@@ -313,9 +339,14 @@
             </div>
             {{-- The sport must not leak into the sentence: with "All" active the line
                  would otherwise read "No live All matches right now". --}}
-            <div class="mab__empty" data-all="No live matches right now"
-                 data-tpl="No live {sport} matches right now"
-                 @if ($abLiveRows->isNotEmpty()) hidden @endif>No live matches right now</div>
+            @include('site.partials.actionboard-empty', [
+                'kind' => 'live',
+                'title' => 'No live matches right now',
+                'tpl' => 'No live {sport} matches right now',
+                'next' => $abNext,
+                'results' => $abFinishedRows->isNotEmpty(),
+                'hidden' => $abLiveRows->isNotEmpty(),
+            ])
         </div>
 
         {{-- ── TAB 1: FINISHED — results, from the SAME feed the Live tab reads ── --}}
@@ -328,9 +359,12 @@
                     @include('site.partials.actionboard-match-card', ['m' => $m])
                 @endforeach
             </div>
-            <div class="mab__empty" data-all="No finished matches yet"
-                 data-tpl="No finished {sport} matches yet"
-                 @if ($abFinishedRows->isNotEmpty()) hidden @endif>No finished matches yet</div>
+            @include('site.partials.actionboard-empty', [
+                'kind' => 'finished',
+                'title' => 'No finished matches yet',
+                'tpl' => 'No finished {sport} matches yet',
+                'hidden' => $abFinishedRows->isNotEmpty(),
+            ])
         </div>
 
         @include('site.partials.actionboard-scheduled', ['mine' => $abScheduledMine ?? [], 'open' => $abScheduledOpen ?? []])
@@ -2686,7 +2720,11 @@ main.container {
     .actionboard-root-theme:has(.mab.is-board) { background: #EBEBF0 !important; }
 
     .mab {
-        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        /* The site's face (Pulse, venues, events) — Inter here made this tab read as a
+           different product. Antialiased for crisp weights on high-DPI phones. */
+        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+        text-rendering: optimizeLegibility;
         color: #0F172A;
         min-height: 100vh;
         padding-bottom: 108px; /* clears the floating bottom bar */
@@ -2801,6 +2839,49 @@ main.container {
     .mab__panel.is-on { display: block; }
     .mab__empty { text-align: center; color: #94A3B8; font-size: 13px; padding: 40px 0; }
 
+    /* ── Drawn empty state (Live / Finished) — same piece as the app's BoardEmpty ── */
+    .mab__nil {
+        display: flex; flex-direction: column; align-items: center; margin: 14px 16px 0; padding: 12px 12px 18px;
+        background: #fff; border: 1px solid #E6ECF4; border-radius: 22px;
+        box-shadow: 0 1px 0 #fff inset, 0 10px 24px -16px rgba(15, 23, 42, .28), 0 1px 2px rgba(15, 23, 42, .05);
+        color: #0F172A;
+    }
+    .mab__nil-art { display: block; width: 100%; max-width: 360px; height: auto; border-radius: 16px; }
+    .mab__nil-title { display: block; margin-top: 14px; font-size: 16px; font-weight: 800; letter-spacing: -.015em; color: #0F172A; text-wrap: balance; }
+    .mab__nil-sub { margin: 4px auto 0; max-width: 270px; font-size: 13px; line-height: 1.45; color: #64748B; text-wrap: balance; }
+    .mab__nil-next {
+        display: flex; align-items: center; gap: 8px; width: 100%; max-width: 320px; margin-top: 12px; padding: 10px 10px 10px 12px;
+        border: 1px solid #DCE6F8; border-radius: 14px; background: #F5F8FF; color: #0F172A; text-align: left; font: inherit; cursor: pointer;
+        -webkit-tap-highlight-color: transparent; transition: transform .09s ease;
+    }
+    .mab__nil-next[hidden] { display: none; }
+    .mab__nil-next:active { transform: translateY(1px) scale(.99); }
+    .mab__nil-next-k { flex: none; font-size: 10px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; color: #2563EB; }
+    .mab__nil-next-v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13.5px; font-weight: 800; }
+    .mab__nil-next-w { flex: none; font-size: 12px; font-weight: 600; color: #64748B; }
+    .mab__nil-next svg { flex: none; color: #94A3B8; }
+    .mab__nil-actions { display: flex; align-items: center; justify-content: center; gap: 14px; margin-top: 16px; }
+    /* The one action, blue with a lip a press closes (same key as Book / Checkout). */
+    .mab__nil-go {
+        display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 18px 0 6px; border-radius: 999px;
+        background: #2563EB; color: #fff !important; font-size: 14px; font-weight: 800; text-decoration: none;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, .25) inset, 0 2px 0 #1D4ED8, 0 8px 16px -8px rgba(37, 99, 235, .75);
+        transition: transform .08s, box-shadow .08s; -webkit-tap-highlight-color: transparent;
+    }
+    .mab__nil-go i { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; background: #fff; color: #2563EB; }
+    .mab__nil-go:active { transform: translateY(2px); box-shadow: 0 0 0 #1D4ED8, 0 2px 4px -2px rgba(37, 99, 235, .6); }
+    .mab__nil-alt { border: 0; background: none; padding: 8px 2px; font: inherit; font-size: 13.5px; font-weight: 700; color: #1E40AF; cursor: pointer; }
+    .mab__nil-alt:active { opacity: .6; }
+    /* Quiet life in the drawing: the board's dashes wait, the ball settles. */
+    @media (prefers-reduced-motion: no-preference) {
+        .mab__nil-dash { animation: mab-nil-wait 2.4s ease-in-out infinite; }
+        .mab__nil-ball { transform-box: fill-box; transform-origin: 50% 100%; animation: mab-nil-rock 3.2s ease-in-out infinite; }
+        .mab__nil-pencil { animation: mab-nil-pencil 3.6s ease-in-out infinite; }
+        @keyframes mab-nil-wait { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+        @keyframes mab-nil-rock { 0%, 100% { transform: rotate(0); } 30% { transform: translateX(1.5px) rotate(14deg); } 60% { transform: translateX(-.5px) rotate(-5deg); } }
+        @keyframes mab-nil-pencil { 0%, 100% { translate: 0 0; } 50% { translate: 0 -2px; } }
+    }
+
     /* League title (CrexLeagueTitle) */
     .mab__ltitle { display: flex; align-items: center; padding: 10px 0; }
     .mab__ldot { width: 8px; height: 8px; border-radius: 50%; background: #2563EB; margin-right: 9px; }
@@ -2882,6 +2963,44 @@ main.container {
     .mab__mstat { width: 90px; flex: 0 0 auto; text-align: center; }
     .mab__mstat b { display: block; font-size: 13px; font-weight: 800; color: #1D4ED8; }
     .mab__mstat span { display: block; margin-top: 3px; font-size: 11px; line-height: 15px; color: #94A3B8; }
+
+    /* ── Match card, sharpened (2026-10-21) ─────────────────────────────────
+       Same layout as before (codes, score column, status column on the right).
+       Sharpness comes from edges and contrast, not new parts: the Pulse cards'
+       fine blue edge, a tight contact shadow instead of a soft blur, crisper
+       hairlines, and dimmed text that is still legible (#B0BAC8 read as blur).
+       A press sinks the card 1px and closes its shadow. */
+    .mab__group { gap: 12px; }
+    .mab__match {
+        border: 1.5px solid #2563EB; border-radius: 14px;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .08), 0 8px 18px -12px rgba(37, 99, 235, .5);
+        transition: transform .1s ease, box-shadow .12s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .mab__match:active { transform: translateY(1px); box-shadow: 0 1px 1px rgba(15, 23, 42, .1); transition: transform .08s ease, box-shadow .08s ease; }
+    .mab__match.is-done { border-color: #BFD0F3; box-shadow: 0 1px 2px rgba(15, 23, 42, .07), 0 6px 14px -12px rgba(15, 23, 42, .35); }
+    .mab__mctx { padding: 10px 14px; }
+    .mab__mlive { font-weight: 800; letter-spacing: .08em; }
+    .mab__msched { font-weight: 800; letter-spacing: .08em; color: #64748B; }
+    .mab__mcomp { font-weight: 800; letter-spacing: .06em; }
+    .mab__mloc, .mab__mkm { color: #8592A6; }
+    .mab__hair { background: #E8EDF4; }
+    .mab__tlogo { box-shadow: 0 1px 2px rgba(15, 23, 42, .1); }
+    .mab__tlogo.is-dim { opacity: .55; }
+    .mab__tname { letter-spacing: -.01em; }
+    .mab__tname.is-dim, .mab__tscore.is-dim { color: #8592A6; }
+    .mab__tscore { font-size: 19px; letter-spacing: -.02em; }
+    .mab__tscore.is-bat { font-weight: 800; color: #0B1220; }
+    .mab__tscore small { font-size: 11px; font-weight: 600; letter-spacing: 0; color: #94A3B8; }
+    .mab__tyet { font-weight: 600; color: #94A3B8; }
+    .mab__vdiv { background: #E8EDF4; }
+    .mab__mstat b { font-size: 12.5px; letter-spacing: .02em; }
+    .mab__mstat span { color: #64748B; font-weight: 500; }
+    /* A finished match's right column carries its result line — ink, not "live" blue. */
+    .mab__match.is-done .mab__mstat b {
+        color: #0F172A; font-size: 12px; line-height: 1.3; letter-spacing: 0;
+        display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+    }
 
     /* ── District Home card (DistrictHomeCard) ───────────────────────── */
     .mab__dcard {
@@ -3054,9 +3173,15 @@ main.container {
             var empty = panel.querySelector('.mab__empty');
             if (empty) {
                 empty.hidden = shown > 0;
-                empty.textContent = currentSport === 'All'
+                var line = currentSport === 'All'
                     ? empty.dataset.all
                     : empty.dataset.tpl.replace('{sport}', currentSportLabel);
+                // The drawn empty state keeps its art and actions; only the sentence changes.
+                var t = empty.querySelector('.mab__nil-title');
+                if (t) t.textContent = line; else empty.textContent = line;
+                // "Next up" only when it's the sport being looked at.
+                var nx = empty.querySelector('[data-next-sport]');
+                if (nx) nx.hidden = currentSport !== 'All' && nx.dataset.nextSport !== currentSport;
             }
         });
     }
