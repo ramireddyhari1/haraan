@@ -16,6 +16,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.LocalOffer
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -1282,10 +1287,21 @@ internal fun BookingSheet(
   var isPaidOnline by remember { mutableStateOf(false) }
   val venueRepo = remember { VenueRepository() }
   var sheetAvailability by remember { mutableStateOf<Map<Int, SlotAvailability>?>(null) }
+  // True until the first live read for the picked day lands: the grid shows a skeleton,
+  // not the previous day's states.
+  var availLoading by remember { mutableStateOf(true) }
 
+  // The live read, then a quiet re-check every 15s while the sheet is open — the same
+  // cadence as the website's slot board — so a slot someone else takes turns "Booked".
   LaunchedEffect(venue.id, selectedDate) {
-    venueRepo.getSlotAvailability(venue.id, selectedDate, TokenStore.getSignedInToken(ctx))?.let {
-      sheetAvailability = it
+    sheetAvailability = null
+    availLoading = true
+    while (true) {
+      venueRepo.getSlotAvailability(venue.id, selectedDate, TokenStore.getSignedInToken(ctx))?.let {
+        sheetAvailability = it
+      }
+      availLoading = false
+      kotlinx.coroutines.delay(15_000)
     }
   }
 
@@ -1316,34 +1332,94 @@ internal fun BookingSheet(
   }
   val courtNeeded = courtsForSport.isNotEmpty()
 
-  // The slot rows are keyed by a free-text "day" label (Today / Tomorrow / weekday), so we
-  // map the calendar date back to that label to find its availability.
-  val selectedDayLabel = dayLabelFor(selectedDate)
-  // Bookable start times for the chosen date. Once a court is chosen the list narrows to
-  // the times that actually run its sport — offering a 6 AM turf slot the server refuses
-  // wastes the tap and reads as a bug. Either side listing no sports means no restriction,
-  // so a single-sport venue sees exactly what it saw before.
-  val startTimes = remember(venue, selectedDayLabel, selectedCourt, sheetAvailability) {
+  // The base rate the rate line states once: the court's own, else the venue's.
+  val baseRate = selectedCourt?.price?.takeIf { it > 0 } ?: venue.price
+  // Every time card for the chosen day — open, booked and closed alike, like the website's
+  // grid — so a taken hour reads as taken instead of silently missing. Once a court is
+  // chosen the cards narrow to the times that run its sport; either side listing no sports
+  // means no restriction. Today, the hours already gone are dropped (checkout refuses them).
+  val dayTiles: List<SlotTile> = remember(venue, selectedDate, selectedSport, selectedCourt, sheetAvailability) {
     val courtSports = selectedCourt?.sports.orEmpty()
+    val nowMin = LocalTime.now().let { it.hour * 60 + it.minute }
+    val isToday = selectedDate == LocalDate.now()
     // Same day rule as the slot rail and the website: that weekday's rows, else the
     // every-day rows. Matching the weekday alone made "Every day" slots unbookable here.
-    val dayRows = slotsForDay(venue.slots, selectedDate).toSet()
-    venue.slots.filter { slot ->
-      val slotState = sheetAvailability?.get(slot.id)
-      val isAvailable = if (slotState != null) {
-        slotState.state == SlotAvailability.State.OPEN && slotState.courtsFree > 0
-      } else {
-        slot.available
+    slotsForDay(venue.slots, selectedDate).mapNotNull { slot ->
+      val start = timeToMinutes(slot.time) ?: return@mapNotNull null
+      if (isToday && start <= nowMin) return@mapNotNull null
+      val forSport = slot.sports.isEmpty() || slot.sports.any { it.equals(selectedSport, ignoreCase = true) }
+      val forCourt = slot.sports.isEmpty() || courtSports.isEmpty() || slot.sports.any { it in courtSports }
+      if (!forSport || !forCourt) return@mapNotNull null
+      val live = sheetAvailability?.get(slot.id)
+      val state = when {
+        live == null -> if (slot.available) SlotTileState.OPEN else SlotTileState.CLOSED
+        live.state == SlotAvailability.State.CLOSED -> SlotTileState.CLOSED
+        live.state == SlotAvailability.State.OPEN && live.courtsFree > 0 -> SlotTileState.OPEN
+        else -> SlotTileState.BOOKED
       }
-      slot in dayRows && isAvailable &&
-        (slot.sports.isEmpty() || courtSports.isEmpty() || slot.sports.any { it in courtSports })
+      val rate = selectedCourt?.let { courtRate(it, selectedDate, slot.time, venue.price) }
+        ?: slot.price.takeIf { it > 0 } ?: venue.price
+      SlotTile(slot, start, state, rate, isPeak = rate > baseRate)
     }
   }
-  // Court can be chosen after the time. If that narrowing drops the time already picked,
-  // let it go rather than submit a pair the server will refuse.
-  LaunchedEffect(startTimes) {
-    if (selectedSlot != null && startTimes.none { it.id == selectedSlot?.id }) selectedSlot = null
+  // The venue's slot length (30 or 60 min): the smallest gap between two cards of the day.
+  val slotLenMin = remember(dayTiles) {
+    dayTiles.zipWithNext { a, b -> b.startMin - a.startMin }.filter { it > 0 }.minOrNull()?.coerceAtMost(60) ?: 60
   }
+  // The booking is ONE run of back-to-back open slots: [selectedSlot] for [duration] slots
+  // (what the server's `duration` means — VenueSlot lengths, not hours).
+  val pickedTiles: List<SlotTile> = run {
+    val si = dayTiles.indexOfFirst { it.slot.id == selectedSlot?.id }
+    if (si < 0) emptyList() else dayTiles.subList(si, (si + duration).coerceAtMost(dayTiles.size))
+  }
+  // Court can be chosen after the time, and the grid re-checks live. If that drops the time
+  // already picked, let it go; if it breaks the run, keep the part that still holds — never
+  // submit a pair the server will refuse.
+  LaunchedEffect(dayTiles) {
+    // On the review page — and while our own checkout hold is open — the live read shows
+    // OUR hold as booked. Dropping the pick then would blank the order being paid for.
+    if (reviewing || submitting) return@LaunchedEffect
+    val si = dayTiles.indexOfFirst { it.slot.id == selectedSlot?.id }
+    if (selectedSlot != null && (si < 0 || dayTiles[si].state != SlotTileState.OPEN)) {
+      selectedSlot = null; duration = 1
+    } else if (si >= 0) {
+      var run = 1
+      while (run < duration && si + run < dayTiles.size &&
+        dayTiles[si + run].state == SlotTileState.OPEN &&
+        dayTiles[si + run].startMin - dayTiles[si + run - 1].startMin == slotLenMin
+      ) run++
+      if (run != duration) duration = run
+    }
+  }
+  // Tap rules for the grid, so a range is built the way people expect: the first tap picks
+  // a start, the card right after the run (or right before it) grows it, tapping either end
+  // shrinks it, and any other card starts again from there. Twelve slots at most.
+  val onTileTap: (SlotTile) -> Unit = tap@{ t ->
+    val ti = dayTiles.indexOf(t)
+    val si = dayTiles.indexOfFirst { it.slot.id == selectedSlot?.id }
+    fun joined(a: Int, b: Int) = a in dayTiles.indices && b in dayTiles.indices &&
+      dayTiles[a].state == SlotTileState.OPEN && dayTiles[b].state == SlotTileState.OPEN &&
+      dayTiles[b].startMin - dayTiles[a].startMin == slotLenMin
+    if (si < 0) { selectedSlot = t.slot; duration = 1; return@tap }
+    val ei = si + duration - 1
+    when {
+      ti == ei + 1 && joined(ei, ti) && duration < 12 -> duration += 1
+      ti == si - 1 && joined(ti, si) && duration < 12 -> { selectedSlot = t.slot; duration += 1 }
+      ti == si && duration == 1 -> { selectedSlot = null; duration = 1 }
+      ti == si -> { selectedSlot = dayTiles[si + 1].slot; duration -= 1 }
+      ti == ei -> duration -= 1
+      else -> { selectedSlot = t.slot; duration = 1 }
+    }
+  }
+  // Which part of the day the grid shows. Follows the pick; else the first part with an
+  // open card. Reset when the day or court changes.
+  var activePart by remember { mutableStateOf<DayPart?>(null) }
+  LaunchedEffect(selectedDate, selectedCourt, selectedSport, dayTiles.isEmpty()) {
+    activePart = pickedTiles.firstOrNull()?.let { partOf(it.startMin) }
+      ?: dayTiles.firstOrNull { it.state == SlotTileState.OPEN }?.let { partOf(it.startMin) }
+      ?: dayTiles.firstOrNull()?.let { partOf(it.startMin) }
+  }
+  var showCalendar by remember { mutableStateOf(false) }
   // Per-court price wins over the slot/venue price when a court is chosen, and peak pricing
   // wins over that when the picked day/time falls in the court's peak window.
   val perHour = selectedCourt?.let { courtRate(it, selectedDate, selectedSlot?.time, venue.price) }
@@ -1374,16 +1450,22 @@ internal fun BookingSheet(
     }
   }
   val canBook = selectedSlot != null && (!courtNeeded || selectedCourt != null) && !submitting
+  // The picked run in minutes: start, end, length.
+  val runStart = pickedTiles.firstOrNull()?.startMin ?: selectedSlot?.let { timeToMinutes(it.time) }
+  val runLen = duration * slotLenMin
   // The chosen window as "7:00 PM – 8:00 PM" (null when the time string can't be parsed).
-  val endLabel = selectedSlot?.let { slotWindowLabel(it.time, duration) }
-  // What the primary button should say — a disabled button always names the next step
-  // instead of leaving the user guessing why it's greyed out.
+  val endLabel = runStart?.let { s ->
+    val (a, ap) = clockParts(s); val (b, bp) = clockParts(s + runLen)
+    "$a $ap – $b $bp"
+  }
+  val signedIn = remember(success, reviewing) { TokenStore.getSignedInToken(ctx) != null }
+  // What the Checkout key says — a disabled key always names the next step instead of
+  // leaving the user guessing why it's greyed out.
   val bookLabel = when {
-    selectedSlot == null -> "Select a start time"
-    courtNeeded && selectedCourt == null -> "Select a court"
-    // The form's button reviews; only the summary's button commits, and it says so.
-    !reviewing -> "Review booking  ·  ₹$total"
-    else -> "Confirm booking  ·  ₹$total"
+    courtNeeded && selectedCourt == null -> "Choose a court"
+    selectedSlot == null -> "Pick a time"
+    !signedIn -> "Sign in to checkout"
+    else -> "Checkout"
   }
 
   // The commit itself, hoisted out of the form's button so the order-summary PAGE can
@@ -1547,16 +1629,14 @@ internal fun BookingSheet(
     // back. Same shape as the event order summary.
     if (reviewing) {
       BackHandler(enabled = true) { reviewing = false }
-      VenueOrderSummaryPage(
+      VenueReviewPage(
         venue = venue,
         sport = selectedSport,
-        dateLabel = "${dayLabelFor(selectedDate)} · ${selectedDate.dayOfMonth} ${
-          selectedDate.month.getDisplayName(TextStyle.SHORT, Locale.getDefault())
-        }",
-        timeLabel = endLabel ?: (selectedSlot?.time ?: ""),
+        date = selectedDate,
         courtName = selectedCourt?.name,
-        duration = duration,
-        perHour = perHour,
+        windowLabel = endLabel ?: (selectedSlot?.time ?: ""),
+        lengthMin = runLen,
+        slotCount = duration,
         subtotal = subtotalRs,
         fee = feeRs,
         feeLines = feeLines,
@@ -1612,171 +1692,232 @@ internal fun BookingSheet(
       return@Dialog
     }
 
+    // ── The slot sheet — the website's phone sheet, drawn natively ─────────────
+    // Date strip → court cards → one Morning/Afternoon/Evening control over one grid of
+    // time cards; the foot is a ticket stub of what you picked and the Checkout key. No
+    // money in the foot (the bill is the review page's job), the rate said once above
+    // the grid, and a card only carries a price when it differs (peak).
+    val isToday = selectedDate == LocalDate.now()
+    val nowMin = LocalTime.now().let { it.hour * 60 + it.minute }
     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
+      // Tap above the sheet to close it, like the site's backdrop.
+      Box(
+        Modifier
+          .fillMaxSize()
+          .clickable(
+            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+            indication = null,
+            onClick = onDismiss,
+          ),
+      )
       Column(
         modifier = Modifier
           .fillMaxWidth()
+          .fillMaxHeight(0.9f)
+          .shadow(24.dp, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
           .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
           .background(Color.White)
-          .navigationBarsPadding()
-          .verticalScroll(rememberScrollState())
-          .padding(20.dp)
+          // Swallow taps on the sheet so they don't reach the backdrop.
+          .clickable(
+            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+            indication = null,
+            onClick = {},
+          ),
       ) {
-        Text(
-          "Book a slot",
-          color = HaraanColors.TextPrimary, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp
+        BookSheetHead(
+          title = "Book a slot",
+          sub = listOf(venue.name, venue.location).filter { it.isNotBlank() }.joinToString(" · "),
+          onClose = onDismiss,
         )
-        Spacer(Modifier.height(4.dp))
-        Text(venue.name, color = HaraanColors.TextSecondary, fontSize = 13.sp)
-        Spacer(Modifier.height(18.dp))
 
-        Text(
-          "Pick a time and how long you'll play — we'll reserve it for you.",
-          color = HaraanColors.TextMuted, fontSize = 12.sp, lineHeight = 16.sp
-        )
-        Spacer(Modifier.height(14.dp))
-
-        run {
-          // Sport — each option carries its sport icon so it's recognisable at a glance.
-          // Changing sport clears the court, since courts are filtered to the chosen sport.
-          FormField("Sport") {
-            FormDropdown(
-              value = selectedSport, placeholder = "Select sport", options = sports,
-              leadingIcon = { sportIcon(it) },
-            ) { picked -> selectedSport = picked; selectedCourt = null }
+        Column(
+          modifier = Modifier
+            .weight(1f)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        ) {
+          Spacer(Modifier.height(10.dp))
+          BookDateStrip(
+            selected = selectedDate,
+            lastDate = bookingWindow?.lastDate,
+            onPick = { selectedDate = it; selectedSlot = null; duration = 1 },
+            onOpenCalendar = { showCalendar = true },
+          )
+          bookingWindow?.takeIf { it.priorityDays > 0 }?.let { w ->
+            Text(
+              "Book up to ${w.days + w.priorityDays} days ahead, including ${w.priorityDays} priority ${if (w.priorityDays == 1) "day" else "days"} from your plan.",
+              color = BookInk.Muted, fontSize = 12.sp, lineHeight = 16.sp,
+              modifier = Modifier.padding(top = 8.dp),
+            )
           }
-          // Date — opens a calendar (no past dates).
-          FormField("Date") {
-            DateField(selected = selectedDate, lastDate = bookingWindow?.lastDate) { selectedDate = it; selectedSlot = null }
-            bookingWindow?.let { w ->
-              Text(
-                if (w.priorityDays > 0) "Book up to ${w.days + w.priorityDays} days ahead, including ${w.priorityDays} priority ${if (w.priorityDays == 1) "day" else "days"} from your plan."
-                else "Book up to ${w.days} days ahead.",
-                color = HaraanColors.TextMuted, fontSize = 12.sp, lineHeight = 16.sp,
-                modifier = Modifier.padding(top = 6.dp),
-              )
+
+          // Sport — only when there's a choice to make. Changing it re-picks the court,
+          // since courts are filtered to the chosen sport.
+          if (sports.size > 1) {
+            Spacer(Modifier.height(18.dp))
+            BookLabel("Sport")
+            Spacer(Modifier.height(8.dp))
+            BookSportChips(sports, selectedSport, icon = { sportIcon(it) }) { picked ->
+              selectedSport = picked
+              selectedCourt = venue.courts
+                .filter { it.sports.isEmpty() || it.sports.any { s -> s.equals(picked, ignoreCase = true) } }
+                .singleOrNull()
             }
           }
-          // Start time
-          FormField("Start Time") {
-            FormDropdown(
-              value = selectedSlot?.time,
-              placeholder = if (startTimes.isEmpty()) "No slots for this day" else "Select time",
-              options = startTimes.map { it.time },
-              enabled = startTimes.isNotEmpty(),
-            ) { picked -> selectedSlot = startTimes.firstOrNull { it.time == picked } }
-          }
-          // Duration
-          FormField("Duration") {
-            DurationStepper(duration) { duration = it }
-            endLabel?.let {
-              Spacer(Modifier.height(8.dp))
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Schedule, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(13.dp))
-                Spacer(Modifier.width(5.dp))
-                Text(it, color = HaraanColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-              }
-            }
-          }
-          // Court — only when the chosen sport has bookable courts. Each label shows its own
-          // price when it differs from the venue price, so the choice is never a surprise.
+
+          // Court — a card per court with its drawing and its own rate, because the
+          // court decides the price.
           if (courtNeeded) {
-            FormField("Court") {
-              FormDropdown(
-                value = selectedCourt?.name,
-                placeholder = "Select Court",
-                options = courtsForSport.map { it.name },
-              ) { picked -> selectedCourt = courtsForSport.firstOrNull { it.name == picked } }
-            }
-          }
-
-          Spacer(Modifier.height(16.dp))
-          SectionDivider()
-          Spacer(Modifier.height(12.dp))
-          // Price summary — show the math (rate × hours) so the total is never a surprise.
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Column {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Total", color = HaraanColors.TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                if (isPeakNow) {
-                  Spacer(Modifier.width(8.dp))
-                  Text(
-                    "PEAK",
-                    color = HaraanColors.GameHubDeep,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 10.sp,
-                    modifier = Modifier
-                      .clip(RoundedCornerShape(4.dp))
-                      .background(HaraanColors.GameHubGreen.copy(alpha = 0.15f))
-                      .padding(horizontal = 6.dp, vertical = 2.dp)
-                  )
-                }
+            Spacer(Modifier.height(18.dp))
+            BookLabel("Choose a court", if (courtsForSport.size > 1) "${courtsForSport.size} courts" else null)
+            Spacer(Modifier.height(2.dp))
+            Row(
+              modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 8.dp),
+              horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+              courtsForSport.forEach { c ->
+                val rate = c.price.takeIf { it > 0 } ?: venue.price
+                CourtCard(
+                  name = c.name,
+                  rate = rate,
+                  peakRate = c.peakPrice?.takeIf { it > rate },
+                  active = c.id == selectedCourt?.id,
+                ) { selectedCourt = c }
               }
-              Text(
-                "₹$perHour × $duration hr",
-                color = HaraanColors.TextMuted, fontSize = 12.sp
-              )
             }
-            Text("₹$total", color = HaraanColors.TextPrimary, fontWeight = FontWeight.ExtraBold, fontSize = 20.sp)
           }
 
           Spacer(Modifier.height(14.dp))
+          val note: @Composable (String) -> Unit = { text ->
+            Text(text, color = BookInk.Muted, fontSize = 13.5.sp, lineHeight = 19.sp, modifier = Modifier.padding(vertical = 8.dp))
+          }
+          when {
+            courtNeeded && selectedCourt == null -> note("Choose a court to see its open times.")
+            availLoading && sheetAvailability == null -> SlotTileSkeleton()
+            dayTiles.isEmpty() -> note(if (isToday) "No more slots today. Pick another day." else "No slots on this day. Pick another day.")
+            else -> {
+              val parts = DayPart.values().map { p ->
+                val ts = dayTiles.filter { partOf(it.startMin) == p }
+                PartSummary(
+                  part = p,
+                  total = ts.size,
+                  open = ts.count { it.state == SlotTileState.OPEN },
+                  booked = ts.count { it.state == SlotTileState.BOOKED },
+                  hasPick = pickedTiles.any { partOf(it.startMin) == p },
+                )
+              }
+              DayPartControl(parts, activePart) { activePart = it }
+              Spacer(Modifier.height(12.dp))
+              // The price once, and the peak rate only where this court has one.
+              val peakCourt = selectedCourt?.takeIf { (it.peakPrice ?: 0) > baseRate }
+              Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
+                verticalAlignment = Alignment.Bottom,
+              ) {
+                Text("₹${inr(baseRate)}", color = BookInk.Ink, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+                Text(" / hour", color = BookInk.Muted, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+                if (peakCourt != null) {
+                  Text(
+                    "Peak ₹${inr(peakCourt.peakPrice ?: 0)} · ${courtPeakWhen(peakCourt)}",
+                    color = BookInk.Amber, fontWeight = FontWeight.SemiBold, fontSize = 12.sp,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                  )
+                }
+              }
+              Spacer(Modifier.height(10.dp))
+              // Today only: how soon the first open slot starts — a real clock.
+              val soon = if (isToday) {
+                dayTiles.firstOrNull { it.state == SlotTileState.OPEN }?.takeIf { it.startMin - nowMin <= 240 }
+              } else null
+              val shown = dayTiles.filter { partOf(it.startMin) == activePart }
+              if (shown.isEmpty()) {
+                note("Nothing on in the ${activePart?.label?.lowercase() ?: "day"}. Try another part of the day.")
+              } else {
+                SlotTileGrid(
+                  tiles = shown,
+                  picked = pickedTiles.map { it.slot.id }.toSet(),
+                  soonId = soon?.slot?.id,
+                  soonText = soon?.let { startsIn(it.startMin - nowMin) },
+                  onTap = onTileTap,
+                )
+              }
+            }
+          }
+          Spacer(Modifier.height(20.dp))
+        }
+
+        // ── Foot: the stub and the key, outside the scroll, under the thumb ──
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .shadow(elevation = 14.dp, clip = false)
+            .background(Color.White)
+            .navigationBarsPadding()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        ) {
+          val start = runStart?.takeIf { selectedSlot != null }
+          val stubRange = start?.let { s ->
+            val (a, ap) = clockParts(s); val (b, bp) = clockParts(s + runLen)
+            (if (ap == bp) "$a – $b" else "$a $ap – $b") to bp
+          }
+          TicketStub(
+            date = selectedDate,
+            what = listOfNotNull(selectedSport.takeIf { it.isNotBlank() }, selectedCourt?.name).joinToString(" · ").ifBlank { "Your slot" },
+            range = stubRange?.first,
+            ampm = stubRange?.second,
+            facts = start?.let { s ->
+              "${lengthLabel(runLen)} of play" + if (isToday && s > nowMin) " · starts ${startsIn(s - nowMin)}" else ""
+            },
+            courtName = selectedCourt?.name,
+            onClear = { selectedSlot = null; duration = 1 },
+          )
+          Spacer(Modifier.height(12.dp))
           result?.let {
-            Text(it, color = HaraanColors.LiveRed, fontSize = 12.sp)
+            Text(it, color = BookInk.Red, fontSize = 12.5.sp, lineHeight = 17.sp)
             Spacer(Modifier.height(8.dp))
           }
-          Button(
-            onClick = {
-              // The form only ever advances. Committing is the summary page's job.
-              if (selectedSlot != null) reviewing = true
-            },
-            enabled = canBook,
-            colors = ButtonDefaults.buttonColors(
-              containerColor = HaraanColors.GameHubGreen,
-              disabledContainerColor = Color(0xFFBFC8D2),
-            ),
-            shape = RoundedCornerShape(50),
-            modifier = Modifier.fillMaxWidth().height(52.dp)
-          ) {
-            if (submitting) {
-              CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-            } else {
-              Text(bookLabel, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+          CheckoutKey(label = bookLabel, enabled = canBook, busy = submitting) {
+            val slot = selectedSlot
+            if (slot != null) {
+              // Sign in first, with the selection in hand; the sheet comes straight back.
+              if (TokenStore.getSignedInToken(ctx) == null) {
+                onNeedsLogin(PendingBooking(slot, selectedDate, selectedCourt, duration))
+              } else {
+                result = null
+                reviewing = true
+              }
             }
           }
         }
       }
     }
+
+    if (showCalendar) {
+      BookCalendarDialog(
+        selected = selectedDate,
+        lastDate = bookingWindow?.lastDate,
+        onDismiss = { showCalendar = false },
+      ) { selectedDate = it; selectedSlot = null; duration = 1 }
+    }
   }
 }
 
 /**
- * The order summary — what you're about to book, priced, before anything is committed.
- *
- * Deliberately NOT a second copy of the form: no dropdowns, no steppers, nothing to
- * fiddle with. It reads as a statement with one way back (Edit) and one way on. The
- * price is broken down rather than asserted, because "₹500" with no arithmetic is the
- * thing people distrust — and when a court's peak rate is what's driving it, that's
- * named too.
- */
-/**
- * The order summary as its own screen: opaque, full height, app bar on top, the commit
- * pinned to the bottom. Nothing of the venue page shows through, because a screen that
- * decides money should not look like something floating over what you were just doing.
+ * "Review booking" — what you're about to book, priced, before anything is committed.
+ * The website's review page (`.vco`) drawn natively: a grey page, a white bar with a round
+ * back key, then three cards — the booking, the price details, the venue's own policies —
+ * and the pay key pinned to the bottom. Every amount is the one the charge will use: the
+ * venue's fee rules, the server's coupon quote, Pulse tax on top, as reserveVenue does.
  */
 @Composable
-private fun VenueOrderSummaryPage(
+private fun VenueReviewPage(
   venue: VenueDetailData,
   sport: String,
-  dateLabel: String,
-  timeLabel: String,
+  date: LocalDate,
   courtName: String?,
-  duration: Int,
-  perHour: Int,
+  windowLabel: String,
+  lengthMin: Int,
+  slotCount: Int,
   subtotal: Int,
   fee: Int,
   feeLines: List<VenueFeeLine> = emptyList(),
@@ -1796,178 +1937,355 @@ private fun VenueOrderSummaryPage(
   onBack: () -> Unit,
   onConfirm: () -> Unit,
 ) {
+  var couponOpen by remember { mutableStateOf(couponInput.isNotBlank()) }
+  var breakupOpen by remember { mutableStateOf(false) }
+
   Column(
     modifier = Modifier
       .fillMaxSize()
-      .background(HaraanColors.Background),
+      .background(BookInk.Page),
   ) {
-    // App bar
+    // Bar
     Row(
       modifier = Modifier
         .fillMaxWidth()
         .background(Color.White)
         .statusBarsPadding()
-        .padding(horizontal = 8.dp, vertical = 10.dp),
+        .padding(horizontal = 12.dp, vertical = 10.dp),
       verticalAlignment = Alignment.CenterVertically,
     ) {
       Box(
         modifier = Modifier
           .pressable(haptic = Feel.SELECT, onClick = onBack)
-          .size(40.dp)
-          .clip(CircleShape),
+          .size(38.dp)
+          .clip(CircleShape)
+          .background(BookInk.Chip),
         contentAlignment = Alignment.Center,
       ) {
-        Icon(Icons.Default.ArrowBack, "Back", tint = HaraanColors.TextPrimary, modifier = Modifier.size(22.dp))
+        Icon(Icons.Default.ArrowBack, "Back to slots", tint = BookInk.Ink, modifier = Modifier.size(20.dp))
       }
-      Spacer(Modifier.width(4.dp))
-      Text(
-        "Order summary",
-        color = HaraanColors.TextPrimary,
-        fontWeight = FontWeight.ExtraBold,
-        fontSize = 19.sp,
-      )
+      Spacer(Modifier.width(10.dp))
+      Text("Review booking", color = BookInk.Ink, fontWeight = FontWeight.Bold, fontSize = 18.sp, letterSpacing = (-0.36).sp)
     }
 
     Column(
       modifier = Modifier
         .weight(1f)
         .verticalScroll(rememberScrollState())
-        .padding(horizontal = 16.dp),
+        .padding(12.dp),
+      verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-      Spacer(Modifier.height(16.dp))
-
-      // The venue, with its photo. A checkout that names a place but doesn't show it
-      // reads as a form; the thumbnail is what makes this feel like buying a real thing.
-      Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .premiumCardShadow(radius = 18.dp, ambient = 14.dp, contact = 2.dp)
-          .clip(RoundedCornerShape(18.dp))
-          .background(Color.White)
-          .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-      ) {
-        Box(
-          modifier = Modifier
-            .size(60.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color(0xFFEFF3F8)),
-          contentAlignment = Alignment.Center,
-        ) {
-          venue.images.firstOrNull()?.takeIf { it.isNotBlank() }?.let { img ->
-            AsyncImage(
-              model = img,
-              contentDescription = venue.name,
-              contentScale = ContentScale.Crop,
-              modifier = Modifier.fillMaxSize(),
+      // ── What you're booking ──
+      ReviewCard {
+        Row(verticalAlignment = Alignment.Top) {
+          Column(Modifier.weight(1f)) {
+            Text(venue.name, color = BookInk.Ink, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, lineHeight = 21.sp)
+            venue.location.takeIf { it.isNotBlank() }?.let {
+              Text(it, color = BookInk.Muted, fontSize = 13.sp, modifier = Modifier.padding(top = 2.dp))
+            }
+          }
+          if (sport.isNotBlank()) {
+            Spacer(Modifier.width(12.dp))
+            Text(
+              sport,
+              color = BookInk.BlueDeep, fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1,
+              modifier = Modifier
+                .clip(RoundedCornerShape(99.dp))
+                .background(Color(0xFFEFF6FF))
+                .padding(horizontal = 10.dp, vertical = 5.dp),
             )
-          } ?: Icon(
-            sportIcon(venue.category), null,
-            tint = HaraanColors.EventsBlue,
-            modifier = Modifier.size(24.dp),
-          )
+          }
         }
-        Spacer(Modifier.width(12.dp))
-        Column(Modifier.weight(1f)) {
-          Text(
-            venue.name,
-            color = HaraanColors.TextPrimary,
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = 15.5.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-          )
-          Spacer(Modifier.height(3.dp))
-          Text(
-            venue.address.takeIf { it.isNotBlank() } ?: venue.location,
-            color = HaraanColors.TextSecondary,
-            fontSize = 12.sp,
-            lineHeight = 16.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-          )
-        }
-      }
-
-      Spacer(Modifier.height(14.dp))
-
-      OrderSummaryBody(
-        venue = venue,
-        sport = sport,
-        dateLabel = dateLabel,
-        timeLabel = timeLabel,
-        courtName = courtName,
-        duration = duration,
-        perHour = perHour,
-        subtotal = subtotal,
-        fee = fee,
-        feeLines = feeLines,
-        discount = discount,
-        tax = tax,
-        appliedCode = appliedCode,
-        total = total,
-        isPeak = isPeak,
-        couponInput = couponInput,
-        couponBusy = couponBusy,
-        couponMessage = couponMessage,
-        onCouponChange = onCouponChange,
-        onApplyCoupon = onApplyCoupon,
-        onRemoveCoupon = onRemoveCoupon,
-        onEdit = onBack,
-      )
-
-      if (!error.isNullOrBlank()) {
         Spacer(Modifier.height(14.dp))
-        Text(error, color = HaraanColors.LiveRed, fontSize = 12.5.sp, lineHeight = 17.sp)
+        Box(Modifier.fillMaxWidth().height(1.dp).background(BookInk.Hair))
+        Column(
+          modifier = Modifier.padding(top = 14.dp, bottom = 6.dp),
+          verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(18.dp), contentAlignment = Alignment.Center) {
+              CourtDrawing(color = BookInk.Muted, modifier = Modifier.size(width = 13.dp, height = 17.dp))
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(courtName ?: "Any court", color = BookInk.Ink2, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+          }
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.CalendarMonth, null, tint = BookInk.Muted, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(
+              date.format(DateTimeFormatter.ofPattern("d MMMM yyyy, EEEE", Locale.ENGLISH)),
+              color = BookInk.Ink2, fontWeight = FontWeight.SemiBold, fontSize = 14.sp,
+            )
+          }
+        }
+        Row(
+          modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(vertical = 8.dp),
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Icon(Icons.Default.Schedule, null, tint = BookInk.Muted, modifier = Modifier.size(18.dp))
+          Spacer(Modifier.width(10.dp))
+          Column(Modifier.weight(1f)) {
+            Text(windowLabel, color = BookInk.Ink, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            Text(
+              lengthLabel(lengthMin) + if (slotCount > 1) " · $slotCount slots" else "",
+              color = BookInk.Muted, fontSize = 12.sp, modifier = Modifier.padding(top = 1.dp),
+            )
+          }
+          Text("₹${inr(subtotal)}", color = BookInk.Ink2, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+        }
       }
-      Spacer(Modifier.height(24.dp))
+
+      // ── Price details ──
+      ReviewCard {
+        Text("Price details", color = BookInk.Ink, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, letterSpacing = (-0.34).sp)
+        Spacer(Modifier.height(8.dp))
+        if (!error.isNullOrBlank()) {
+          Text(
+            error, color = Color(0xFFB91C1C), fontSize = 13.sp, lineHeight = 18.sp,
+            modifier = Modifier
+              .padding(top = 4.dp, bottom = 4.dp)
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(12.dp))
+              .background(Color(0xFFFEF2F2))
+              .padding(horizontal = 12.dp, vertical = 10.dp),
+          )
+        }
+        ReviewRow("Court price ($slotCount slot${if (slotCount == 1) "" else "s"})", "₹${inr(subtotal)}")
+
+        // Coupon — checked against the SERVER, and the discount shown is the one it
+        // returned; the app never computes an offer it then can't honour at the charge.
+        when {
+          appliedCode != null -> Row(
+            modifier = Modifier
+              .padding(vertical = 4.dp)
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(12.dp))
+              .background(Color(0xFFF0FDF4))
+              .border(1.dp, Color(0xFFBBF7D0), RoundedCornerShape(12.dp))
+              .padding(horizontal = 12.dp, vertical = 11.dp),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Icon(Icons.Default.Check, null, tint = BookInk.Save, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(10.dp))
+            Column(Modifier.weight(1f)) {
+              Row {
+                Text(appliedCode, color = BookInk.Ink, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, letterSpacing = 0.5.sp)
+                Text(" applied", color = BookInk.Ink2, fontSize = 14.sp)
+              }
+              Text("You save ₹${inr(discount)}", color = BookInk.Save, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Text(
+              "Remove", color = BookInk.Blue, fontWeight = FontWeight.Bold, fontSize = 13.sp,
+              modifier = Modifier.pressable(haptic = Feel.SELECT, onClick = onRemoveCoupon).padding(6.dp),
+            )
+          }
+          !couponOpen -> Row(
+            modifier = Modifier
+              .padding(vertical = 4.dp)
+              .pressable(haptic = Feel.SELECT) { couponOpen = true }
+              .fillMaxWidth()
+              .height(50.dp)
+              .clip(RoundedCornerShape(12.dp))
+              .background(Color(0xFFF8FBFF))
+              .drawBehind {
+                drawRoundRect(
+                  Color(0xFFBFDBFE), cornerRadius = androidx.compose.ui.geometry.CornerRadius(12.dp.toPx()),
+                  style = androidx.compose.ui.graphics.drawscope.Stroke(
+                    1.dp.toPx(),
+                    pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(8f, 6f)),
+                  ),
+                )
+              }
+              .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Icon(Icons.Default.LocalOffer, null, tint = BookInk.BlueDeep, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(10.dp))
+            Text("Apply coupon", color = BookInk.BlueDeep, fontWeight = FontWeight.Bold, fontSize = 14.5.sp, modifier = Modifier.weight(1f))
+            Icon(Icons.Default.KeyboardArrowRight, null, tint = BookInk.BlueDeep, modifier = Modifier.size(20.dp))
+          }
+          else -> Row(
+            modifier = Modifier.padding(vertical = 4.dp).fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+          ) {
+            Row(
+              modifier = Modifier
+                .weight(1f)
+                .height(46.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.White)
+                .border(1.3.dp, Color(0xFFDBE3EE), RoundedCornerShape(12.dp))
+                .padding(horizontal = 14.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              BasicTextField(
+                value = couponInput,
+                onValueChange = { onCouponChange(it.uppercase()) },
+                singleLine = true,
+                cursorBrush = SolidColor(BookInk.Blue),
+                // Fully qualified: this file's `TextStyle` is java.time.format's, used for
+                // the date labels.
+                textStyle = androidx.compose.ui.text.TextStyle(
+                  fontSize = 16.sp,
+                  color = BookInk.Ink,
+                  fontWeight = FontWeight.Bold,
+                  letterSpacing = 0.64.sp,
+                ),
+                modifier = Modifier.weight(1f),
+                decorationBox = { inner ->
+                  if (couponInput.isEmpty()) {
+                    Text("Enter coupon code", color = BookInk.Faint, fontSize = 15.sp)
+                  }
+                  inner()
+                },
+              )
+            }
+            Spacer(Modifier.width(8.dp))
+            Box(
+              modifier = Modifier
+                .then(
+                  if (couponBusy || couponInput.isBlank()) Modifier
+                  else Modifier.pressable(haptic = Feel.SELECT, onClick = onApplyCoupon)
+                )
+                .height(46.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (couponInput.isBlank()) Color(0xFFCBD5E1) else BookInk.Blue)
+                .padding(horizontal = 18.dp),
+              contentAlignment = Alignment.Center,
+            ) {
+              if (couponBusy) {
+                CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
+              } else {
+                Text("Apply", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 14.5.sp)
+              }
+            }
+          }
+        }
+        if (!couponMessage.isNullOrBlank()) {
+          Text(
+            couponMessage,
+            color = if (appliedCode != null) BookInk.Save else BookInk.Red,
+            fontSize = 12.5.sp, lineHeight = 17.sp,
+            modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
+          )
+        }
+
+        // Fees and tax as one line, with the breakup a tap away — the site's shape.
+        // One line per fee while they add up to what the server quoted; if a coupon quote
+        // came back with a different fee, show that one number rather than lines that disagree.
+        val lines = if (feeLines.isNotEmpty() && feeLines.sumOf { it.amount } == fee) feeLines.map { it.label to it.amount }
+        else if (fee > 0) listOf("Booking fee" to fee) else emptyList()
+        if (fee + tax > 0) {
+          val title = when {
+            tax > 0 -> if (lines.isNotEmpty()) "Fees & taxes" else "Taxes"
+            lines.size == 1 -> lines.first().first
+            else -> "Fees"
+          }
+          ReviewRow(title, "₹${inr(fee + tax)}", sub = {
+            Text(
+              if (breakupOpen) "Hide breakup" else "See breakup",
+              color = BookInk.Blue, fontWeight = FontWeight.Bold, fontSize = 13.sp,
+              modifier = Modifier.padding(top = 2.dp).pressable(haptic = Feel.SELECT) { breakupOpen = !breakupOpen },
+            )
+          })
+          if (breakupOpen) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
+              Box(Modifier.width(2.dp).height((((lines.size + if (tax > 0) 1 else 0)) * 26).dp).background(BookInk.Line))
+              Column(Modifier.padding(start = 12.dp)) {
+                lines.forEach { (label, amount) -> BreakupLine(label, "₹${inr(amount)}") }
+                if (tax > 0) BreakupLine(venue.taxLabel, "₹${inr(tax)}")
+              }
+            }
+          }
+        }
+        if (discount > 0) {
+          ReviewRow(
+            appliedCode?.let { "Coupon $it" } ?: "Discount", "−₹${inr(discount)}",
+            labelColor = BookInk.Save, valueColor = BookInk.Save,
+          )
+        }
+        if (isPeak) {
+          Text(
+            "Peak rate applies at this time", color = BookInk.Amber, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.padding(bottom = 4.dp),
+          )
+        }
+
+        Box(Modifier.padding(top = 6.dp).fillMaxWidth().height(1.dp).background(BookInk.Line))
+        Row(
+          Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 10.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically,
+        ) {
+          Text("Total amount", color = BookInk.Ink, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
+          Text("₹${inr(total)}", color = BookInk.Ink, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
+        }
+        Row(
+          Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 10.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+          Text("Payable now", color = BookInk.Muted, fontSize = 13.5.sp)
+          Text("₹${inr(total)}", color = BookInk.BlueDeep, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+        }
+        Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+          Icon(Icons.Default.Lock, null, tint = BookInk.Faint, modifier = Modifier.size(13.dp))
+          Spacer(Modifier.width(4.dp))
+          Text("Secure payment via Razorpay", color = BookInk.Faint, fontSize = 12.sp)
+        }
+      }
+
+      // ── The venue's own policies — nothing invented ──
+      val rules = venue.rules.filter { it.isNotBlank() }
+      if (venue.cancellation.isNotBlank() || rules.isNotEmpty()) {
+        ReviewCard {
+          if (venue.cancellation.isNotBlank()) {
+            Text("Cancellation policy", color = BookInk.Ink, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+            Spacer(Modifier.height(6.dp))
+            Text(venue.cancellation, color = BookInk.Slate, fontSize = 13.5.sp, lineHeight = 20.sp)
+          }
+          if (rules.isNotEmpty()) {
+            if (venue.cancellation.isNotBlank()) Spacer(Modifier.height(14.dp))
+            Text("Venue rules", color = BookInk.Ink, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
+            Spacer(Modifier.height(6.dp))
+            rules.forEach { rule ->
+              Row(Modifier.padding(vertical = 2.dp)) {
+                Text("•", color = BookInk.Faint, fontSize = 13.5.sp, modifier = Modifier.padding(end = 8.dp))
+                Text(rule, color = BookInk.Slate, fontSize = 13.5.sp, lineHeight = 20.sp)
+              }
+            }
+          }
+        }
+      }
+      Spacer(Modifier.height(8.dp))
     }
 
-    // Commit, pinned — the total stays in view next to the button that charges it.
+    // Pay, pinned — the total stays in the key that charges it.
     Column(
       modifier = Modifier
         .fillMaxWidth()
         .shadow(elevation = 14.dp, clip = false)
         .background(Color.White)
-        .navigationBarsPadding()
-        .padding(horizontal = 16.dp, vertical = 12.dp),
+        .navigationBarsPadding(),
     ) {
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        // The number stays beside the button that commits it — a full-width CTA with the
-        // price buried in its label is the generic pattern this screen kept falling into.
-        Column(Modifier.weight(1f)) {
+      Box(Modifier.fillMaxWidth().height(1.dp).background(BookInk.Line))
+      Box(
+        modifier = Modifier
+          .padding(horizontal = 16.dp, vertical = 12.dp)
+          .then(if (submitting) Modifier else Modifier.pressable(haptic = Feel.COMMIT, onClick = onConfirm))
+          .fillMaxWidth()
+          .height(52.dp)
+          .then(if (submitting) Modifier else Modifier.shadow(10.dp, RoundedCornerShape(14.dp), ambientColor = BookInk.Blue, spotColor = BookInk.Blue.copy(alpha = 0.5f)))
+          .clip(RoundedCornerShape(14.dp))
+          .background(if (submitting) Color(0xFFCBD5E1) else BookInk.Blue),
+        contentAlignment = Alignment.Center,
+      ) {
+        if (submitting) {
+          CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+        } else {
           Text(
-            "₹$total",
-            color = HaraanColors.TextPrimary,
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = 22.sp,
+            if (total > 0) "Proceed ₹${inr(total)}" else "Confirm booking",
+            color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, maxLines = 1,
           )
-          Text(
-            "Pay at the venue",
-            color = HaraanColors.TextMuted,
-            fontSize = 11.5.sp,
-          )
-        }
-        Spacer(Modifier.width(14.dp))
-        Box(
-          modifier = Modifier
-            .then(if (submitting) Modifier else Modifier.pressable(haptic = Feel.COMMIT, onClick = onConfirm))
-            .clip(RoundedCornerShape(50))
-            .background(if (submitting) Color(0xFFBFC8D2) else HaraanColors.GameHubGreen)
-            .padding(horizontal = 28.dp, vertical = 15.dp),
-          contentAlignment = Alignment.Center,
-        ) {
-          if (submitting) {
-            CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
-          } else {
-            Text(
-              "Confirm booking",
-              color = Color.White,
-              fontWeight = FontWeight.Bold,
-              fontSize = 15.sp,
-              maxLines = 1,
-            )
-          }
         }
       }
     }
@@ -1975,335 +2293,14 @@ private fun VenueOrderSummaryPage(
 }
 
 @Composable
-private fun OrderSummaryBody(
-  venue: VenueDetailData,
-  sport: String,
-  dateLabel: String,
-  timeLabel: String,
-  courtName: String?,
-  duration: Int,
-  perHour: Int,
-  subtotal: Int,
-  fee: Int,
-  feeLines: List<VenueFeeLine> = emptyList(),
-  discount: Int,
-  tax: Int,
-  appliedCode: String?,
-  total: Int,
-  isPeak: Boolean,
-  couponInput: String,
-  couponBusy: Boolean,
-  couponMessage: String?,
-  onCouponChange: (String) -> Unit,
-  onApplyCoupon: () -> Unit,
-  onRemoveCoupon: () -> Unit,
-  onEdit: () -> Unit,
-) {
-  Column(
-    modifier = Modifier
-      .fillMaxWidth()
-      .premiumCardShadow(radius = 18.dp, ambient = 14.dp, contact = 2.dp)
-      .clip(RoundedCornerShape(18.dp))
-      .background(Color.White)
-      .padding(16.dp),
-  ) {
-    Text(
-      "YOUR SLOT",
-      color = HaraanColors.TextMuted,
-      fontSize = 10.sp,
-      fontWeight = FontWeight.Bold,
-      letterSpacing = 1.3.sp,
-    )
-    Spacer(Modifier.height(10.dp))
-    SummaryLine("Sport", sport)
-    SummaryLine("When", "$dateLabel  ·  $timeLabel")
-    if (!courtName.isNullOrBlank()) SummaryLine("Court", courtName)
-    SummaryLine("Duration", if (duration == 1) "1 hour" else "$duration hours")
-
-    Spacer(Modifier.height(12.dp))
-    Box(Modifier.fillMaxWidth().height(1.dp).background(HaraanColors.BorderLight))
-    Spacer(Modifier.height(12.dp))
-
-    // The arithmetic, shown — every line the server used to reach the charge.
-    SummaryLine("₹$perHour × $duration hr", "₹$subtotal", muted = true)
-    // One line per fee while they add up to what the server quoted; if a coupon quote
-    // came back with a different fee, show that one number rather than lines that disagree.
-    if (feeLines.isNotEmpty() && feeLines.sumOf { it.amount } == fee) {
-      feeLines.forEach { SummaryLine(it.label, "₹${it.amount}", muted = true) }
-    } else if (fee > 0) {
-      SummaryLine("Booking fee", "₹$fee", muted = true)
-    }
-    if (discount > 0) {
-      Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-      ) {
-        Text(
-          appliedCode?.let { "Coupon $it" } ?: "Discount",
-          color = HaraanColors.Success,
-          fontSize = 13.sp,
-          fontWeight = FontWeight.Medium,
-        )
-        Text(
-          "− ₹$discount",
-          color = HaraanColors.Success,
-          fontSize = 13.sp,
-          fontWeight = FontWeight.Bold,
-        )
-      }
-    }
-    if (tax > 0) SummaryLine(venue.taxLabel, "₹$tax", muted = true)
-    if (isPeak) {
-      Spacer(Modifier.height(2.dp))
-      Text(
-        "Peak rate applies at this time",
-        color = Color(0xFF9A6700),
-        fontSize = 11.5.sp,
-        fontWeight = FontWeight.Medium,
-      )
-    }
-
-    Spacer(Modifier.height(12.dp))
-    Box(Modifier.fillMaxWidth().height(1.dp).background(HaraanColors.BorderLight))
-    Spacer(Modifier.height(12.dp))
-
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      Column {
-        Text("Total", color = HaraanColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-        Text("Pay at the venue", color = HaraanColors.TextMuted, fontSize = 11.5.sp)
-      }
-      Text("₹$total", color = HaraanColors.TextPrimary, fontWeight = FontWeight.ExtraBold, fontSize = 22.sp)
-    }
-  }
-
-  Spacer(Modifier.height(14.dp))
-
-  // ── Coupon ─────────────────────────────────────────────────────────────────
-  // The code is checked against the SERVER (venue rules, min-order, per-customer cap)
-  // and the discount shown is the one it returned — the app never computes an offer it
-  // then can't honour at the charge.
-  Column(
-    modifier = Modifier
-      .fillMaxWidth()
-      .premiumCardShadow(radius = 18.dp, ambient = 14.dp, contact = 2.dp)
-      .clip(RoundedCornerShape(18.dp))
-      .background(Color.White)
-      .padding(14.dp),
-  ) {
-    if (appliedCode != null) {
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Default.Check, null, tint = HaraanColors.Success, modifier = Modifier.size(17.dp))
-        Spacer(Modifier.width(8.dp))
-        Column(Modifier.weight(1f)) {
-          Text(
-            appliedCode,
-            color = HaraanColors.TextPrimary,
-            fontWeight = FontWeight.ExtraBold,
-            fontSize = 14.sp,
-            letterSpacing = 0.6.sp,
-          )
-          Text("₹$discount off", color = HaraanColors.Success, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-        }
-        Text(
-          "Remove",
-          color = HaraanColors.TextSecondary,
-          fontWeight = FontWeight.Bold,
-          fontSize = 12.5.sp,
-          modifier = Modifier.pressable(haptic = Feel.SELECT, onClick = onRemoveCoupon).padding(6.dp),
-        )
-      }
-    } else {
-      Text(
-        "HAVE A COUPON?",
-        color = HaraanColors.TextMuted,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.Bold,
-        letterSpacing = 1.3.sp,
-      )
-      Spacer(Modifier.height(9.dp))
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Row(
-          modifier = Modifier
-            .weight(1f)
-            .height(44.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFFF4F7FB))
-            .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(12.dp))
-            .padding(horizontal = 12.dp),
-          verticalAlignment = Alignment.CenterVertically,
-        ) {
-          BasicTextField(
-            value = couponInput,
-            onValueChange = { onCouponChange(it.uppercase()) },
-            singleLine = true,
-            cursorBrush = SolidColor(HaraanColors.EventsBlue),
-            // Fully qualified: this file's `TextStyle` is java.time.format's, used for
-            // the date labels.
-            textStyle = androidx.compose.ui.text.TextStyle(
-              fontSize = 14.sp,
-              color = HaraanColors.TextPrimary,
-              fontWeight = FontWeight.Bold,
-              letterSpacing = 0.8.sp,
-            ),
-            modifier = Modifier.weight(1f),
-            decorationBox = { inner ->
-              if (couponInput.isEmpty()) {
-                Text("Enter code", color = HaraanColors.TextMuted, fontSize = 14.sp)
-              }
-              inner()
-            },
-          )
-        }
-        Spacer(Modifier.width(10.dp))
-        Box(
-          modifier = Modifier
-            .then(
-              if (couponBusy || couponInput.isBlank()) Modifier
-              else Modifier.pressable(haptic = Feel.SELECT, onClick = onApplyCoupon)
-            )
-            .clip(RoundedCornerShape(12.dp))
-            .background(
-              if (couponInput.isBlank()) Color(0xFFE2E8F0) else HaraanColors.EventsBlue
-            )
-            .padding(horizontal = 18.dp, vertical = 13.dp),
-          contentAlignment = Alignment.Center,
-        ) {
-          if (couponBusy) {
-            CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(16.dp))
-          } else {
-            Text(
-              "Apply",
-              color = if (couponInput.isBlank()) HaraanColors.TextMuted else Color.White,
-              fontWeight = FontWeight.Bold,
-              fontSize = 13.sp,
-            )
-          }
-        }
-      }
-    }
-    if (!couponMessage.isNullOrBlank()) {
-      Spacer(Modifier.height(8.dp))
-      Text(
-        couponMessage,
-        color = if (appliedCode != null) HaraanColors.Success else HaraanColors.LiveRed,
-        fontSize = 12.sp,
-        lineHeight = 16.sp,
-      )
-    }
-  }
-
-  Spacer(Modifier.height(14.dp))
-  // A real control, not a naked blue word floating on the page.
+private fun BreakupLine(label: String, value: String) {
   Row(
-    modifier = Modifier
-      .pressable(haptic = Feel.SELECT, onClick = onEdit)
-      .clip(RoundedCornerShape(50))
-      .background(Color.White)
-      .border(BorderStroke(1.dp, HaraanColors.BorderLight), RoundedCornerShape(50))
-      .padding(horizontal = 16.dp, vertical = 10.dp),
+    Modifier.fillMaxWidth().height(26.dp),
+    horizontalArrangement = Arrangement.SpaceBetween,
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    Icon(
-      Icons.Default.ArrowBack, null,
-      tint = HaraanColors.EventsBlue,
-      modifier = Modifier.size(15.dp),
-    )
-    Spacer(Modifier.width(7.dp))
-    Text(
-      "Change time or court",
-      color = HaraanColors.EventsBlue,
-      fontWeight = FontWeight.Bold,
-      fontSize = 13.sp,
-    )
-  }
-}
-
-@Composable
-private fun SummaryLine(label: String, value: String, muted: Boolean = false) {
-  Row(
-    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-    horizontalArrangement = Arrangement.SpaceBetween,
-    verticalAlignment = Alignment.Top,
-  ) {
-    Text(
-      label,
-      color = HaraanColors.TextSecondary,
-      fontSize = 13.sp,
-      modifier = Modifier.weight(1f),
-    )
-    Spacer(Modifier.width(12.dp))
-    Text(
-      value,
-      color = if (muted) HaraanColors.TextSecondary else HaraanColors.TextPrimary,
-      fontWeight = if (muted) FontWeight.Medium else FontWeight.SemiBold,
-      fontSize = 13.sp,
-    )
-  }
-}
-
-/** A labelled form row: caption above, the control below. */
-@Composable
-private fun FormField(label: String, content: @Composable () -> Unit) {
-  Spacer(Modifier.height(14.dp))
-  Text(label, color = HaraanColors.TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-  Spacer(Modifier.height(6.dp))
-  content()
-}
-
-/**
- * Bordered dropdown that shows [value] (or [placeholder]) and opens a menu of [options].
- * When [leadingIcon] is supplied, the icon for the current value (and for each option) is
- * shown before its label — used to make the Sport list recognisable at a glance.
- */
-@Composable
-private fun FormDropdown(
-  value: String?,
-  placeholder: String,
-  options: List<String>,
-  enabled: Boolean = true,
-  leadingIcon: ((String) -> androidx.compose.ui.graphics.vector.ImageVector)? = null,
-  onSelect: (String) -> Unit,
-) {
-  var open by remember { mutableStateOf(false) }
-  Box {
-    Row(
-      modifier = Modifier
-        .fillMaxWidth()
-        .clip(RoundedCornerShape(12.dp))
-        .border(BorderStroke(1.dp, HaraanColors.BorderLight), RoundedCornerShape(12.dp))
-        .clickable(enabled = enabled && options.isNotEmpty()) { open = true }
-        .padding(horizontal = 14.dp, vertical = 14.dp),
-      verticalAlignment = Alignment.CenterVertically,
-    ) {
-      if (leadingIcon != null && value != null) {
-        Icon(leadingIcon(value), null, tint = HaraanColors.GameHubDeep, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(10.dp))
-      }
-      Text(
-        value ?: placeholder,
-        color = if (value != null) HaraanColors.TextPrimary else HaraanColors.TextMuted,
-        fontSize = 14.sp,
-        fontWeight = if (value != null) FontWeight.SemiBold else FontWeight.Normal,
-        maxLines = 1, overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.weight(1f),
-      )
-      Icon(Icons.Default.KeyboardArrowDown, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(20.dp))
-    }
-    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-      options.forEach { opt ->
-        DropdownMenuItem(
-          text = { Text(opt, fontSize = 14.sp, color = HaraanColors.TextPrimary) },
-          leadingIcon = leadingIcon?.let { icon ->
-            { Icon(icon(opt), null, tint = HaraanColors.GameHubDeep, modifier = Modifier.size(20.dp)) }
-          },
-          onClick = { onSelect(opt); open = false },
-        )
-      }
-    }
+    Text(label, color = BookInk.Muted, fontSize = 13.sp)
+    Text(value, color = BookInk.Slate, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
   }
 }
 
@@ -2333,105 +2330,39 @@ private fun dayLabelFor(date: LocalDate): String =
   date.dayOfWeek.getDisplayName(TextStyle.FULL, Locale.ENGLISH)
 
 /**
- * A bordered field that reads "Today · 14 Jul" and opens a Material date picker on tap.
- * Past dates are disabled — you can only book today onward.
+ * The "Pick a date" calendar. Past dates are disabled, and so is anything past the
+ * last day the server will take a booking from this person.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DateField(selected: LocalDate, lastDate: LocalDate? = null, onPick: (LocalDate) -> Unit) {
-  var open by remember { mutableStateOf(false) }
-  val label = "${dayLabelFor(selected)}  ·  ${selected.format(DateTimeFormatter.ofPattern("d MMM", Locale.ENGLISH))}"
-
-  Row(
-    modifier = Modifier
-      .fillMaxWidth()
-      .clip(RoundedCornerShape(12.dp))
-      .border(BorderStroke(1.dp, HaraanColors.BorderLight), RoundedCornerShape(12.dp))
-      .clickable { open = true }
-      .padding(horizontal = 14.dp, vertical = 14.dp),
-    verticalAlignment = Alignment.CenterVertically,
+private fun BookCalendarDialog(
+  selected: LocalDate,
+  lastDate: LocalDate?,
+  onDismiss: () -> Unit,
+  onPick: (LocalDate) -> Unit,
+) {
+  val todayUtc = LocalDate.now().atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+  // The last day the server will take a booking from this person; null = no known limit.
+  val lastUtc = lastDate?.atStartOfDay(ZoneOffset.UTC)?.toInstant()?.toEpochMilli()
+  val state = rememberDatePickerState(
+    initialSelectedDateMillis = selected.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+    selectableDates = object : SelectableDates {
+      override fun isSelectableDate(utcTimeMillis: Long): Boolean =
+        utcTimeMillis >= todayUtc && (lastUtc == null || utcTimeMillis <= lastUtc)
+    },
+  )
+  DatePickerDialog(
+    onDismissRequest = onDismiss,
+    confirmButton = {
+      TextButton(onClick = {
+        state.selectedDateMillis?.let { onPick(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }
+        onDismiss()
+      }) { Text("OK", color = BookInk.Blue, fontWeight = FontWeight.Bold) }
+    },
+    dismissButton = {
+      TextButton(onClick = onDismiss) { Text("Cancel", color = HaraanColors.TextSecondary) }
+    },
   ) {
-    Icon(Icons.Default.CalendarMonth, null, tint = HaraanColors.GameHubDeep, modifier = Modifier.size(20.dp))
-    Spacer(Modifier.width(10.dp))
-    Text(
-      label, color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
-      maxLines = 1, modifier = Modifier.weight(1f),
-    )
-    Icon(Icons.Default.KeyboardArrowDown, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(20.dp))
+    DatePicker(state = state, showModeToggle = false)
   }
-
-  if (open) {
-    val todayUtc = LocalDate.now().atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
-    // The last day the server will take a booking from this person; null = no known limit.
-    val lastUtc = lastDate?.atStartOfDay(ZoneOffset.UTC)?.toInstant()?.toEpochMilli()
-    val state = rememberDatePickerState(
-      initialSelectedDateMillis = selected.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
-      selectableDates = object : SelectableDates {
-        override fun isSelectableDate(utcTimeMillis: Long): Boolean =
-          utcTimeMillis >= todayUtc && (lastUtc == null || utcTimeMillis <= lastUtc)
-      },
-    )
-    DatePickerDialog(
-      onDismissRequest = { open = false },
-      confirmButton = {
-        TextButton(onClick = {
-          state.selectedDateMillis?.let { onPick(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }
-          open = false
-        }) { Text("OK", color = HaraanColors.GameHubDeep, fontWeight = FontWeight.Bold) }
-      },
-      dismissButton = {
-        TextButton(onClick = { open = false }) { Text("Cancel", color = HaraanColors.TextSecondary) }
-      },
-    ) {
-      DatePicker(state = state, showModeToggle = false)
-    }
-  }
-}
-
-/** −  N Hr  +  stepper, 1..12 hours. */
-@Composable
-private fun DurationStepper(value: Int, onChange: (Int) -> Unit) {
-  Row(
-    modifier = Modifier.fillMaxWidth(),
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(18.dp),
-  ) {
-    StepperButton(Icons.Default.Remove, enabled = value > 1) { onChange((value - 1).coerceAtLeast(1)) }
-    Text(
-      "$value Hr", color = HaraanColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp,
-      modifier = Modifier.weight(1f), textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-    )
-    StepperButton(Icons.Default.Add, enabled = value < 12) { onChange((value + 1).coerceAtMost(12)) }
-  }
-}
-
-@Composable
-private fun StepperButton(icon: androidx.compose.ui.graphics.vector.ImageVector, enabled: Boolean, onClick: () -> Unit) {
-  Box(
-    modifier = Modifier
-      .size(38.dp)
-      .clip(CircleShape)
-      .background(if (enabled) HaraanColors.GameHubGreen else Color(0xFFE2E8F0))
-      .clickable(enabled = enabled) { onClick() },
-    contentAlignment = Alignment.Center,
-  ) {
-    Icon(icon, null, tint = Color.White, modifier = Modifier.size(20.dp))
-  }
-}
-
-/**
- * "7:00 PM – 8:00 PM" for a start-time string plus a duration in hours. Tries the common
- * clock formats; returns null (caller hides the line) when the string can't be parsed.
- */
-private fun slotWindowLabel(start: String, hours: Int): String? {
-  val out = DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH)
-  val patterns = listOf("h:mm a", "hh:mm a", "H:mm", "HH:mm", "h a", "ha")
-  val cleaned = start.trim().uppercase(Locale.ENGLISH)
-  for (p in patterns) {
-    try {
-      val t = LocalTime.parse(cleaned, DateTimeFormatter.ofPattern(p, Locale.ENGLISH))
-      return "${t.format(out)} – ${t.plusHours(hours.toLong()).format(out)}"
-    } catch (_: Exception) { /* try the next pattern */ }
-  }
-  return null
 }
