@@ -1510,6 +1510,8 @@ internal fun BookingSheet(
         modifier = Modifier
           .fillMaxSize()
           .background(Color(0xFF0B0F14).copy(alpha = 0.97f))
+          // A soft key light on the stage, so the machine sits in a pool rather than a void.
+          .background(Brush.radialGradient(listOf(Color(0xFF2A3644).copy(alpha = 0.55f), Color.Transparent)))
           .navigationBarsPadding()
           .verticalScroll(rememberScrollState()),
         contentAlignment = Alignment.Center,
@@ -1528,6 +1530,11 @@ internal fun BookingSheet(
           // Only show 'Pay at the venue' if not paid online and amount > 0.
           payAtVenue = !isPaidOnline && total > 0,
           onDone = onDismiss,
+          venueAddress = venue.address.ifBlank { venue.location }.trim().ifBlank { null },
+          onOpenMap = {
+            val lat = venue.latitude; val lng = venue.longitude
+            openMap(ctx, venue.mapLink, if (lat != null && lng != null) "$lat,$lng(${venue.name})" else "${venue.name} ${venue.address}")
+          },
         )
       }
       return@Dialog
