@@ -236,6 +236,13 @@ Route::middleware('auth')->prefix('membership')->controller(MembershipController
     Route::post('/cancel', 'cancel')->name('site.membership.cancel');
 });
 
+// "Become a partner" — owners apply here; /control turns an application into an account.
+// Kept off the /partner prefix: Filament owns /partner/{page} (same-URI shadowing).
+Route::get('/become-a-partner', [\App\Http\Controllers\Web\PartnerApplicationController::class, 'show'])->name('site.partner.apply');
+Route::post('/become-a-partner', [\App\Http\Controllers\Web\PartnerApplicationController::class, 'store'])
+    ->middleware('throttle:6,10')
+    ->name('site.partner.apply.store');
+
 // The app's two social destinations, now that the ActionBoard's bottom bar points at
 // them: Home is the photo feed, Chat is player-to-player DMs. Both read the same tables
 // the JWT API serves the app — a session instead of a token is the only difference.

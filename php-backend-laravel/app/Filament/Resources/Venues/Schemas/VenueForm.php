@@ -35,7 +35,7 @@ class VenueForm
     }
 
     /** The sports the app knows how to icon + filter. Category and courts draw from this too. */
-    private const SPORTS = [
+    public const SPORTS = [
         'Cricket' => 'Cricket',
         'Football' => 'Football',
         'Badminton' => 'Badminton',
@@ -53,7 +53,7 @@ class VenueForm
      *
      * @var array<string, array<int, string>>
      */
-    private const AMENITIES = [
+    public const AMENITIES = [
         'Parking' => ['park'],
         'Washroom' => ['wash', 'toilet', 'restroom'],
         'Shower' => ['shower'],
@@ -70,7 +70,7 @@ class VenueForm
     ];
 
     /** Common "Good to know" presets offered as quick-tick chips (plus free-text for the rest). */
-    private const RULE_PRESETS = [
+    public const RULE_PRESETS = [
         'Non-marking shoes mandatory',
         'Carry your own racket / gear',
         'No smoking',

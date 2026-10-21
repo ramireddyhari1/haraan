@@ -97,6 +97,13 @@
         <button type="submit" class="plgn__submit">Sign in</button>
     </form>
 
+    @if (\App\Support\PlatformRules::bool('partner_onboarding.login_link') && \App\Support\PlatformRules::bool('partner_onboarding.enabled'))
+        <a class="plgn__apply" href="{{ route('site.partner.apply', ['from' => 'partner_login']) }}">
+            <span>New to Haraan? <b>Apply to become a partner</b></span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+    @endif
+
     <p class="plgn__foot">By signing in, you agree to our
         <a href="{{ route('site.legal', 'terms') }}">Terms</a> and
         <a href="{{ route('site.legal', 'privacy') }}">Privacy Policy</a>.
@@ -207,6 +214,11 @@
     .plgn__input:focus { outline: none; border-color: var(--plgn-blue); box-shadow: 0 0 0 4px rgba(37,99,235,.12); }
     .plgn__submit { margin-top: 4px; }
 
+    .plgn__apply { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 18px; padding: 13px 15px; border: 1px dashed #CBD5E1; border-radius: 14px; font-size: 13.5px; color: #475569; text-decoration: none; transition: border-color .2s, background .2s; }
+    .plgn__apply b { color: var(--plgn-blue); font-weight: 700; }
+    .plgn__apply svg { width: 18px; height: 18px; flex: none; stroke: var(--plgn-blue); stroke-width: 2.2; fill: none; stroke-linecap: round; stroke-linejoin: round; transition: transform .2s var(--plgn-ease); }
+    .plgn__apply:hover { border-color: var(--plgn-blue); background: #F5F8FF; }
+    .plgn__apply:hover svg { transform: translateX(3px); }
     .plgn__foot { margin: 22px 0 0; text-align: center; font-size: 11.5px; color: #94A3B8; line-height: 1.7; }
     .plgn__foot a { color: #64748B; text-decoration: underline; text-decoration-color: #CBD5E1; text-underline-offset: 2px; font-weight: 600; }
     .plgn__foot a:hover { color: var(--plgn-blue); text-decoration-color: currentColor; }
