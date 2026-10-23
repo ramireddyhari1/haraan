@@ -196,6 +196,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.zIndex
 import androidx.compose.foundation.shape.CircleShape
@@ -2376,9 +2377,8 @@ private fun GameHubTabScreen(
         title = "Popular venues",
         subtitle = when {
           isVenuesLoading -> "Finding venues near you…"
-          filteredVenues.isEmpty() && userLat != null && searchRadiusKm > 0 ->
-            "None within ${searchRadiusKm} km — widen the radius"
-          filteredVenues.isEmpty() -> "No venues yet"
+          // The empty card below says it in full.
+          filteredVenues.isEmpty() -> null
           else -> buildString {
             append(uniqueVenues.size)
             append(if (uniqueVenues.size == 1) " venue" else " venues")
@@ -2399,18 +2399,12 @@ private fun GameHubTabScreen(
     item {
       when {
         isVenuesLoading -> GameHubVenuesSkeleton()
-        filteredVenues.isEmpty() -> Box(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 20.dp),
-          contentAlignment = Alignment.Center
-        ) {
-          Text(
-            text = "No venues match this filter yet.",
-            color = HaraanColors.TextSecondary,
-            style = HaraanTypography.BodyMedium
-          )
-        }
+        filteredVenues.isEmpty() -> PulseNoVenues(
+          place = nearPlace,
+          sport = selectedSport,
+          radiusKm = if (userLat != null && searchRadiusKm > 0) searchRadiusKm else null,
+          onChangeLocation = onLocationClick,
+        )
         else -> androidx.compose.foundation.lazy.LazyRow(
           // Vertical room so the cards' blue drop shadow isn't clipped by the row.
           contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 14.dp),
@@ -2525,6 +2519,197 @@ private fun rememberShimmerBrush(): Brush {
 // Loading placeholder for the venues reel — a row of shimmering card shells matching
 // PopularArenaCard's footprint (220dp wide, 120dp image), so the section reserves its space
 // instead of popping in (and no fake seed venues are shown while the API resolves).
+/**
+ * Pulse with nothing listed nearby. A drawn ground waiting for its first booking: mowing
+ * stripes, white lines, two floodlights that come on, and the Haraan H painted on the centre
+ * spot the way a club paints its crest. It is a ground, not a map — nothing here pretends to
+ * be the viewer's real streets. Every line under it is a fact or a door: where we looked, and
+ * two real ways on (change the location, or list a ground on the partner page).
+ */
+@Composable
+private fun PulseNoVenues(
+  place: String,
+  sport: String,
+  radiusKm: Int?,
+  onChangeLocation: () -> Unit,
+) {
+  val ctx = LocalContext.current
+  val blue = Color(0xFF2563EB)
+  val mark = painterResource(id = com.haraan.app.R.drawable.ic_haraan_ribbon_mark)
+
+  // One entrance, never looping: lines chalk in, the lights come on, then the crest lands.
+  val lines = remember { Animatable(0f) }
+  val lights = remember { Animatable(0f) }
+  val crest = remember { Animatable(0f) }
+  LaunchedEffect(Unit) {
+    lines.animateTo(1f, tween(700, easing = FastOutSlowInEasing))
+    launch { lights.animateTo(1f, tween(450)) }
+    crest.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = 260f))
+  }
+
+  val sportWord = if (sport == "All") "" else sportDisplayName(sport).lowercase() + " "
+  val where = place.ifBlank { "you" }
+  val title = if (radiusKm != null) "No ${sportWord}venues within $radiusKm km of $where"
+    else "No ${sportWord}venues near $where yet"
+
+  val cardShape = RoundedCornerShape(22.dp)
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(horizontal = 16.dp, vertical = 4.dp)
+      .shadow(10.dp, cardShape, ambientColor = blue.copy(alpha = 0.18f), spotColor = blue.copy(alpha = 0.28f))
+      .background(Color.White, cardShape)
+      .border(1.5.dp, blue, cardShape)
+      .padding(6.dp),
+    horizontalAlignment = Alignment.CenterHorizontally
+  ) {
+    Canvas(
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(168.dp)
+        .clip(RoundedCornerShape(17.dp))
+    ) {
+      val w = size.width
+      val h = size.height
+      // Night sky over the ground, so the floodlights have something to light.
+      drawRect(Brush.verticalGradient(listOf(Color(0xFF1E3A8A), Color(0xFF2B4FB8))))
+
+      // The ground in gentle perspective: a trapezoid, narrower at the far end.
+      val top = h * 0.30f
+      val bottom = h * 1.04f
+      val farHalf = w * 0.30f
+      val nearHalf = w * 0.60f
+      val cx = w / 2f
+      fun pt(u: Float, v: Float): Offset {
+        val y = top + (bottom - top) * v
+        val half = farHalf + (nearHalf - farHalf) * v
+        return Offset(cx + (u - 0.5f) * 2f * half, y)
+      }
+      fun quad(u0: Float, v0: Float, u1: Float, v1: Float) = androidx.compose.ui.graphics.Path().apply {
+        val a = pt(u0, v0); val b = pt(u1, v0); val c = pt(u1, v1); val d = pt(u0, v1)
+        moveTo(a.x, a.y); lineTo(b.x, b.y); lineTo(c.x, c.y); lineTo(d.x, d.y); close()
+      }
+
+      // Mowing stripes — the grass reads as a looked-after ground, not a flat slab.
+      val stripes = 8
+      for (i in 0 until stripes) {
+        drawPath(
+          quad(-0.06f, i / stripes.toFloat(), 1.06f, (i + 1) / stripes.toFloat()),
+          if (i % 2 == 0) Color(0xFF3B6FE0) else Color(0xFF3467D6)
+        )
+      }
+
+      // Floodlight pools on the grass — faint, they only lift the turf where the lamps aim.
+      for (side in listOf(0.08f, 0.92f)) {
+        val pool = pt(side, 0.45f)
+        drawCircle(
+          brush = Brush.radialGradient(
+            listOf(Color.White.copy(alpha = 0.16f * lights.value), Color.Transparent),
+            center = pool, radius = w * 0.32f
+          ),
+          radius = w * 0.32f, center = pool
+        )
+      }
+
+      // Chalk lines: boundary, halfway, centre circle and the two boxes.
+      val chalk = Color.White.copy(alpha = 0.92f * lines.value)
+      val sw = 1.6.dp.toPx()
+      val lineStyle = androidx.compose.ui.graphics.drawscope.Stroke(width = sw)
+      drawPath(quad(0.04f, 0.06f, 0.96f, 0.96f), chalk, style = lineStyle)
+      drawLine(chalk, pt(0.04f, 0.5f), pt(0.96f, 0.5f), sw)
+      drawPath(quad(0.32f, 0.06f, 0.68f, 0.18f), chalk, style = lineStyle)
+      drawPath(quad(0.30f, 0.84f, 0.70f, 0.96f), chalk, style = lineStyle)
+      val centre = pt(0.5f, 0.5f)
+      val rx = (pt(0.66f, 0.5f).x - centre.x)
+      val ry = rx * 0.42f
+      drawOval(chalk, Offset(centre.x - rx, centre.y - ry), Size(rx * 2, ry * 2), style = lineStyle)
+
+      // The crest on the centre spot, painted flat onto the grass (squashed by the same
+      // perspective) and landing with a small settle.
+      val markH = ry * 1.45f
+      val markW = markH * (mark.intrinsicSize.width / mark.intrinsicSize.height)
+      val settle = 1.25f - 0.25f * crest.value
+      withTransform({
+        translate(centre.x - markW / 2f, centre.y - markH / 2f)
+        scale(settle, settle * 0.92f, pivot = Offset(markW / 2f, markH / 2f))
+      }) {
+        with(mark) {
+          draw(Size(markW, markH), alpha = crest.value.coerceIn(0f, 1f), colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(Color.White))
+        }
+      }
+
+      // Two floodlight masts at the far corners; their heads warm up once.
+      for (side in listOf(-1f, 1f)) {
+        val base = pt(if (side < 0) -0.02f else 1.02f, 0.02f)
+        val headY = h * 0.08f
+        drawLine(Color(0xFF93B4F5), base, Offset(base.x, headY + 6.dp.toPx()), 1.6.dp.toPx())
+        val headW = 18.dp.toPx(); val headH = 7.dp.toPx()
+        val head = Offset(base.x - headW / 2f, headY)
+        drawCircle(
+          brush = Brush.radialGradient(
+            listOf(Color.White.copy(alpha = 0.35f * lights.value), Color.Transparent),
+            center = Offset(base.x, headY + headH / 2f), radius = 26.dp.toPx()
+          ),
+          radius = 26.dp.toPx(), center = Offset(base.x, headY + headH / 2f)
+        )
+        drawRoundRect(
+          color = androidx.compose.ui.graphics.lerp(Color(0xFF5B7FD0), Color(0xFFFFFBEB), lights.value),
+          topLeft = head, size = Size(headW, headH),
+          cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.dp.toPx())
+        )
+      }
+    }
+
+    Text(
+      text = title,
+      color = Color(0xFF0F172A),
+      fontSize = 15.5.sp,
+      fontWeight = FontWeight.ExtraBold,
+      textAlign = TextAlign.Center,
+      modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 14.dp)
+    )
+    Text(
+      text = "The lights are on. Grounds show up here the moment one opens on Haraan.",
+      color = Color(0xFF64748B),
+      fontSize = 13.sp,
+      lineHeight = 18.sp,
+      textAlign = TextAlign.Center,
+      modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp)
+    )
+    Spacer(modifier = Modifier.height(14.dp))
+    Row(
+      modifier = Modifier
+        .height(40.dp)
+        .clip(CircleShape)
+        .background(blue)
+        .clickable { onChangeLocation() }
+        .padding(horizontal = 18.dp),
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+      Icon(Icons.Outlined.LocationOn, contentDescription = null, tint = Color.White, modifier = Modifier.size(17.dp))
+      Text(text = "Change location", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold)
+    }
+    Text(
+      text = "Own a ground? List it on Haraan",
+      color = Color(0xFF1E3A8A),
+      fontSize = 13.sp,
+      fontWeight = FontWeight.Bold,
+      modifier = Modifier
+        .padding(top = 6.dp, bottom = 10.dp)
+        .clip(RoundedCornerShape(8.dp))
+        .clickable {
+          runCatching {
+            ctx.startActivity(
+              android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://haraan.app/become-a-partner"))
+            )
+          }
+        }
+        .padding(horizontal = 10.dp, vertical = 8.dp)
+    )
+  }
+}
+
 @Composable
 private fun GameHubVenuesSkeleton() {
   androidx.compose.foundation.lazy.LazyRow(
