@@ -237,6 +237,37 @@ final class Venue extends Model
     }
 
     /**
+     * schema.org `OpeningHoursSpecification` rows from the weekly hours, one per run of
+     * days sharing the same times. Closed days are left out (schema reads absence as
+     * closed); open == close is "24 hours" → 00:00–23:59. Empty when hours aren't set.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function openingHoursSchema(): array
+    {
+        $byTimes = [];
+        foreach (self::WEEKDAYS as $key => $dayName) {
+            $day = $this->hoursForWeekday($key);
+            $open = $day ? self::toMinutes($day['open']) : null;
+            $close = $day ? self::toMinutes($day['close']) : null;
+            if ($open === null || $close === null) {
+                continue;
+            }
+            $hm = static fn (int $m): string => sprintf('%02d:%02d', intdiv($m, 60) % 24, $m % 60);
+            [$opens, $closes] = $open === $close ? ['00:00', '23:59'] : [$hm($open), $hm($close)];
+            $byTimes[$opens.'-'.$closes]['days'][] = $dayName;
+            $byTimes[$opens.'-'.$closes]['times'] = [$opens, $closes];
+        }
+
+        return array_values(array_map(static fn (array $g) => [
+            '@type' => 'OpeningHoursSpecification',
+            'dayOfWeek' => $g['days'],
+            'opens' => $g['times'][0],
+            'closes' => $g['times'][1],
+        ], $byTimes));
+    }
+
+    /**
      * The bookable windows on a weekday, as [startMinute, endMinute] pairs within that day.
      *
      * A day's own hours give one window; a closing time of 12:00 AM means midnight at the

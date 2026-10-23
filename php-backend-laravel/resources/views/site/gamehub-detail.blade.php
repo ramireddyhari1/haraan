@@ -569,10 +569,16 @@
         @endif
 
         {{-- ── 6. About ───────────────────────────────────────────────────── --}}
+        {{-- The owner's text (often a slogan) plus an overview written from the venue's
+             own data (PublicWebController::venueSummary), so the page says in words what
+             it offers — sports, area, hours, facilities, price. --}}
+        <div class="mven__rule"></div>
+        <h2 class="mven__h2">About this venue</h2>
         @if($venue->description)
-            <div class="mven__rule"></div>
-            <h2 class="mven__h2">About this venue</h2>
             <p class="mven__body">{{ $venue->description }}</p>
+        @endif
+        @if(!empty($venueSummary))
+            <p class="mven__body">{{ $venueSummary }}</p>
         @endif
 
         @if($hostProfile ?? null)
@@ -649,6 +655,32 @@
                 .mven__faq summary::after { content: '+'; color: #2563EB; font-weight: 800; }
                 .mven__faq details[open] summary::after { content: '–'; }
                 .mven__faq p { margin: 8px 0 0; font-size: 14px; line-height: 1.55; color: #475569; }
+            </style>
+        @endif
+
+        {{-- ── 9c. Explore — this venue's sports in its city, and other venues there. ── --}}
+        @if(!empty($venueLinks['sports']) || !empty($venueLinks['nearby']))
+            <div class="mven__rule"></div>
+            <h2 class="mven__h2">Explore near {{ $venue->title }}</h2>
+            @if(!empty($venueLinks['nearby']))
+                <ul class="mven__near">
+                    @foreach($venueLinks['nearby'] as $near)
+                        <li><a href="{{ $near['url'] }}"><strong>{{ $near['name'] }}</strong>@if($near['area'])<small>{{ $near['area'] }}</small>@endif</a></li>
+                    @endforeach
+                </ul>
+            @endif
+            <div class="mven__explore">
+                @foreach($venueLinks['sports'] as $link)
+                    <a href="{{ $link['url'] }}">{{ $link['label'] }}</a>
+                @endforeach
+            </div>
+            <style>
+                .mven__near { list-style: none; margin: 0 0 12px; padding: 0; }
+                .mven__near li { border-bottom: 1px solid #E2E8F0; }
+                .mven__near a { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; text-decoration: none; color: #0F172A; font-size: 14px; }
+                .mven__near small { color: #64748B; font-size: 13px; text-align: right; }
+                .mven__explore { display: flex; flex-wrap: wrap; gap: 8px; }
+                .mven__explore a { padding: 8px 12px; border: 1px solid #E2E8F0; border-radius: 999px; font-size: 13px; font-weight: 600; color: #2563EB; text-decoration: none; }
             </style>
         @endif
     </div>
@@ -835,7 +867,8 @@
                 <span class="detail-badge detail-badge--dark">{{ $venue->badge }}</span>
             @endif
         </div>
-        <h1 class="detail-header__title">{{ $venue->title }}</h1>
+        {{-- Not an <h1>: the phone block above carries the page's one H1. --}}
+        <div class="detail-header__title">{{ $venue->title }}</div>
         <div class="detail-header__meta">
             <span class="detail-meta-item">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
@@ -864,7 +897,7 @@
         <div class="gallery-thumbs-wrapper">
             @foreach(array_slice($venue->gallery ?? [], 0, 2) as $index => $galImage)
                 <div class="gallery-thumb-wrapper">
-                    <img class="gallery-thumb-img" src="{{ $galImage }}" alt="Gallery view {{ $index + 1 }}">
+                    <img class="gallery-thumb-img" src="{{ $galImage }}" alt="{{ $venue->title }} photo {{ $index + 2 }}">
                 </div>
             @endforeach
         </div>
@@ -878,7 +911,12 @@
             <!-- About Section -->
             <div class="detail-card-panel">
                 <h3 class="detail-card-panel__title">About This Facility</h3>
-                <p class="detail-card-panel__text">{{ $venue->description }}</p>
+                @if($venue->description)
+                    <p class="detail-card-panel__text">{{ $venue->description }}</p>
+                @endif
+                @if(!empty($venueSummary))
+                    <p class="detail-card-panel__text">{{ $venueSummary }}</p>
+                @endif
             </div>
 
             <!-- Court Booking Scheduler (Core Widget) -->

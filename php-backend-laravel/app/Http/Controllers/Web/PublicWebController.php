@@ -674,15 +674,137 @@ final class PublicWebController extends Controller
         $hostProfile = $venue->partner?->hostProfile;
         $hostProfile = $hostProfile && $hostProfile->isLive() ? $hostProfile : null;
 
+        $decorated = $this->decorateVenueDetail($venue);
+        $faqs = $this->venueFaqs($venue, $decorated);
+        $seo = $this->venueSeo($venue, $decorated, $faqs);
+
         return view('site.gamehub-detail', [
             'hostProfile' => $hostProfile,
-            'title' => $venue->name.($venue->city ? ' — '.$venue->city : ''),
+            'title' => $seo['title'],
             // Numeric — the page posts to /gamehub/{id}/book with it.
             'id' => (string) $venue->id,
-            'venue' => $decorated = $this->decorateVenueDetail($venue),
-            'venueFaqs' => $faqs = $this->venueFaqs($venue, $decorated),
-            'seo' => $this->venueSeo($venue, $faqs),
+            'venue' => $decorated,
+            'venueFaqs' => $faqs,
+            'venueSummary' => $this->venueSummary($venue, $decorated),
+            'venueLinks' => $this->venueLinks($venue),
+            'seo' => $seo,
         ]);
+    }
+
+    /**
+     * Sport pages under /venues/{city}/{sport}, slug => label. The city hub only
+     * answers these; a venue page links to the ones its own sports map onto.
+     */
+    private const CITY_VENUE_SPORTS = [
+        'cricket' => 'Cricket',
+        'box-cricket' => 'Box Cricket',
+        'football' => 'Football',
+        'badminton' => 'Badminton',
+        'basketball' => 'Basketball',
+        'tennis' => 'Tennis',
+        'pickleball' => 'Pickleball',
+        'volleyball' => 'Volleyball',
+    ];
+
+    /**
+     * The venue's area ("Tadepalle") for titles and copy, or null when it's blank,
+     * just the city again, or a full street address pasted into the field.
+     */
+    private static function venueArea(Venue $venue): ?string
+    {
+        $city = trim((string) $venue->city);
+        $area = trim((string) $venue->location);
+        if ($city !== '') {
+            // "Benz Circle, Vijayawada" → "Benz Circle"
+            $area = trim((string) preg_replace('/[,\s]*'.preg_quote($city, '/').'\s*$/iu', '', $area), " ,");
+        }
+
+        if ($area === '' || mb_strlen($area) > 40 || strcasecmp($area, $city) === 0) {
+            return null;
+        }
+
+        // Typed all-lowercase in /control ("tadepalle") — it leads the page title.
+        return mb_strtolower($area) === $area ? mb_convert_case($area, MB_CASE_TITLE) : $area;
+    }
+
+    /** Lowest hourly rate across courts, else the venue price; 0 when unpriced. */
+    private static function venueFromPrice(object $d): int
+    {
+        $prices = array_filter(array_map('intval', array_values((array) $d->court_prices)), static fn (int $p) => $p > 0);
+
+        return $prices !== [] ? min($prices) : (int) $d->price;
+    }
+
+    /**
+     * A plain overview written from the venue's data (sports, courts, hours,
+     * amenities, price) — shown under "About" next to the owner's own text, which
+     * is often just a slogan. Nothing is stated that the venue hasn't set.
+     */
+    private function venueSummary(Venue $venue, object $d): string
+    {
+        $where = implode(', ', array_filter([self::venueArea($venue), trim((string) $venue->city)]));
+        $sports = array_values(array_filter((array) $d->sports));
+        $courtCount = array_sum(array_map('count', (array) $d->courts));
+        $amenities = array_slice(array_values(array_filter((array) $d->amenities)), 0, 5);
+        $from = self::venueFromPrice($d);
+        $and = static fn (array $l): string => (string) Str::of(implode(', ', $l))->replaceLast(', ', ' and ');
+
+        $lines = [
+            $venue->name.($where !== '' ? " in {$where}" : '')
+                .($sports !== [] ? ' offers '.$and($sports) : ' is a sports venue')
+                .($courtCount > 1 ? " across {$courtCount} courts" : '').'.',
+        ];
+        if (filled($d->hours)) {
+            $lines[] = "It is open {$d->hours}.";
+        }
+        if ($amenities !== []) {
+            $lines[] = 'Facilities include '.$and($amenities).'.';
+        }
+        if ($from > 0) {
+            $lines[] = 'Slots start from ₹'.number_format($from).' per hour'
+                .($d->is_bookable ? ', and you can book online on Haraan with instant confirmation.' : '.');
+        }
+
+        return implode(' ', $lines);
+    }
+
+    /**
+     * Internal links from a venue page: its sports' city pages, the city hub, and
+     * other published venues in the same city.
+     *
+     * @return array{sports: list<array{label: string, url: string}>, nearby: list<array{name: string, area: ?string, url: string}>}
+     */
+    private function venueLinks(Venue $venue): array
+    {
+        $city = trim((string) $venue->city);
+        if ($city === '') {
+            return ['sports' => [], 'nearby' => []];
+        }
+        $citySlug = SeoUrl::city($city);
+
+        $sports = [];
+        foreach ($venue->sportsList() as $sport) {
+            $slug = Str::slug($sport);
+            if (isset(self::CITY_VENUE_SPORTS[$slug])) {
+                $sports[$slug] = [
+                    'label' => self::CITY_VENUE_SPORTS[$slug].' turfs in '.$city,
+                    'url' => route('site.venues.city.sport', ['city' => $citySlug, 'sport' => $slug]),
+                ];
+            }
+        }
+        $sports[] = ['label' => 'All turfs in '.$city, 'url' => route('site.venues.city', ['city' => $citySlug])];
+
+        $nearby = Venue::published()
+            ->whereKeyNot($venue->id)
+            ->whereRaw('lower(city) = ?', [Str::lower($city)])
+            ->orderByDesc('is_featured')
+            ->orderBy('sort_order')
+            ->limit(4)
+            ->get()
+            ->map(fn (Venue $v) => ['name' => $v->name, 'area' => self::venueArea($v), 'url' => SeoUrl::venue($v)])
+            ->all();
+
+        return ['sports' => array_values($sports), 'nearby' => $nearby];
     }
 
     /**
@@ -695,16 +817,7 @@ final class PublicWebController extends Controller
         $cityName = CityResolver::detect($cityRaw) ?: ucfirst($cityRaw);
         $citySlug = strtolower(preg_replace('/[^a-zA-Z0-9]+/', '-', $cityName) ?: 'kadapa');
 
-        $sportMap = [
-            'cricket' => 'Cricket',
-            'box-cricket' => 'Box Cricket',
-            'football' => 'Football',
-            'badminton' => 'Badminton',
-            'basketball' => 'Basketball',
-            'tennis' => 'Tennis',
-            'pickleball' => 'Pickleball',
-            'volleyball' => 'Volleyball',
-        ];
+        $sportMap = self::CITY_VENUE_SPORTS;
 
         $sportSlug = $sport ? strtolower(trim(urldecode($sport))) : null;
         $sportLabel = $sportSlug && isset($sportMap[$sportSlug]) ? $sportMap[$sportSlug] : ($sportSlug ? ucfirst($sportSlug) : null);
@@ -845,24 +958,49 @@ final class PublicWebController extends Controller
      *
      * @return array<string, mixed>
      */
-    private function venueSeo(Venue $venue, array $faqs = []): array
+    private function venueSeo(Venue $venue, object $d, array $faqs = []): array
     {
         $sports = implode(', ', array_slice($venue->sportsList(), 0, 3));
-        $image = MediaUrl::resolveMany(is_array($venue->images) ? $venue->images : [])[0] ?? null;
+        $images = MediaUrl::resolveMany(is_array($venue->images) ? $venue->images : []);
+        $image = $images[0] ?? null;
+        $where = implode(', ', array_filter([self::venueArea($venue), trim((string) $venue->city)]));
+        $from = self::venueFromPrice($d);
 
-        $desc = trim(strip_tags((string) ($venue->tagline ?: $venue->about))) ?: trim(
-            'Book '.($sports ?: 'a slot').' at '.$venue->name
-            .($venue->city ? ' in '.$venue->city : '')
-            .($venue->price ? ' from ₹'.$venue->price.'/hr' : '').' on Haraan.'
-        );
+        // Searchers type "<venue> <area>", "box cricket turf <city>", "<venue> timings" —
+        // the title and snippet carry those words. The owner's tagline is a slogan, so
+        // it's no longer the snippet (it stays on the page).
+        $title = $venue->name.($where !== '' ? ' - '.$where : '').' - Book Online';
+        $desc = 'Book '.$venue->name.($where !== '' ? ', '.$where : '').' online.'
+            .($sports !== '' ? ' '.$sports.($from > 0 ? ' from ₹'.number_format($from).'/hr' : '').'.' : '')
+            .' Check photos, timings, amenities and live slot availability on Haraan.';
 
         $schema = array_filter([
             '@context' => 'https://schema.org',
             '@type' => 'SportsActivityLocation',
             'name' => $venue->name,
             'url' => SeoUrl::venue($venue),
-            'description' => Str::limit($desc, 300),
-            'image' => $image,
+            'description' => Str::limit($this->venueSummary($venue, $d), 600),
+            'image' => count($images) > 1 ? array_slice($images, 0, 10) : $image,
+            'openingHoursSpecification' => $venue->openingHoursSchema() ?: null,
+            'amenityFeature' => array_values(array_map(static fn ($a) => [
+                '@type' => 'LocationFeatureSpecification',
+                'name' => (string) $a,
+                'value' => true,
+            ], array_filter((array) $d->amenities))) ?: null,
+            'potentialAction' => $d->is_bookable ? [
+                '@type' => 'ReserveAction',
+                'target' => [
+                    '@type' => 'EntryPoint',
+                    'urlTemplate' => SeoUrl::venue($venue),
+                    'inLanguage' => 'en-IN',
+                    'actionPlatform' => [
+                        'https://schema.org/DesktopWebPlatform',
+                        'https://schema.org/MobileWebPlatform',
+                        'https://schema.org/AndroidPlatform',
+                    ],
+                ],
+                'result' => ['@type' => 'Reservation', 'name' => 'Book a slot at '.$venue->name],
+            ] : null,
             'address' => array_filter([
                 '@type' => 'PostalAddress',
                 'streetAddress' => $venue->address ?: $venue->location ?: null,
@@ -874,16 +1012,19 @@ final class PublicWebController extends Controller
                 'latitude' => $venue->latitude,
                 'longitude' => $venue->longitude,
             ] : null,
-            'priceRange' => $venue->price ? '₹'.$venue->price : null,
-            'aggregateRating' => ($venue->ratings_count ?? 0) > 0 ? [
+            'priceRange' => $from > 0 ? '₹'.number_format($from).'+ per hour' : null,
+            // Ratings are derived from real, visible reviews only (Venue::refreshRating).
+            'aggregateRating' => ($venue->ratings_count ?? 0) > 0 && (float) $venue->rating > 0 ? [
                 '@type' => 'AggregateRating',
                 'ratingValue' => (string) round((float) $venue->rating, 1),
-                'reviewCount' => (int) $venue->ratings_count,
+                'ratingCount' => (int) $venue->ratings_count,
+                'bestRating' => '5',
+                'worstRating' => '1',
             ] : null,
         ], static fn ($v) => $v !== null && $v !== []);
 
         return [
-            'title' => $venue->name.($venue->city ? ' — '.$venue->city : ''),
+            'title' => $title,
             'description' => $desc,
             'image' => $image,
             'canonical' => SeoUrl::venue($venue),
@@ -924,8 +1065,7 @@ final class PublicWebController extends Controller
             ];
         }
 
-        $prices = array_filter(array_map('intval', array_values((array) $d->court_prices)), static fn (int $p) => $p > 0);
-        $from = $prices !== [] ? min($prices) : (int) $d->price;
+        $from = self::venueFromPrice($d);
         if ($from > 0) {
             $faqs[] = [
                 'question' => "How much does it cost to book {$name}?",
