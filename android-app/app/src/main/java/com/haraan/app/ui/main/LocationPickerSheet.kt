@@ -13,6 +13,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -215,12 +216,29 @@ fun LocationPickerSheet(
                 contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                itemsIndexed(cityResults) { index, city ->
-                    CityRow(
-                        city = city,
-                        current = city.name.equals(currentCity, ignoreCase = true),
-                        onSelect = onSelectCity,
-                    )
+                if (q.isBlank()) {
+                    // Nothing typed: the cities as their landmarks, four to a row.
+                    items(cityResults.chunked(4)) { row ->
+                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                            row.forEach { city ->
+                                CityTile(
+                                    city = city,
+                                    current = city.name.equals(currentCity, ignoreCase = true),
+                                    onSelect = onSelectCity,
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            repeat(4 - row.size) { Spacer(Modifier.weight(1f)) }
+                        }
+                    }
+                } else {
+                    itemsIndexed(cityResults) { _, city ->
+                        CityRow(
+                            city = city,
+                            current = city.name.equals(currentCity, ignoreCase = true),
+                            onSelect = onSelectCity,
+                        )
+                    }
                 }
                 if (placeResults.isNotEmpty()) {
                     item {
@@ -482,6 +500,7 @@ private fun PlaceListRow(
     chosen: Boolean,
     loading: Boolean,
     onClick: () -> Unit,
+    landmarkOf: String? = null,
 ) {
     val tint by animateColorAsState(
         if (chosen) Accent.copy(alpha = 0.035f) else Color.Transparent,
@@ -499,7 +518,11 @@ private fun PlaceListRow(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        RowPin(active = loading, highlighted = chosen)
+        if (landmarkOf != null && CityLandmarks.has(landmarkOf)) {
+            CityLandmark(landmarkOf, selected = chosen, modifier = Modifier.size(34.dp))
+        } else {
+            RowPin(active = loading, highlighted = chosen)
+        }
         Column(Modifier.weight(1f)) {
             Text(
                 title,
@@ -562,7 +585,48 @@ private fun CityRow(city: CityOption, current: Boolean, onSelect: (CityOption) -
         chosen = current,
         loading = false,
         onClick = { onSelect(city) },
+        landmarkOf = city.name,
     )
+}
+
+/**
+ * A popular city as its landmark over its name. The chosen one re-inks in blue and
+ * carries the corner light; a city with no drawing yet shows the pin, never a stand-in.
+ */
+@Composable
+private fun CityTile(
+    city: CityOption,
+    current: Boolean,
+    onSelect: (CityOption) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier
+            .pressable(haptic = Feel.SELECT) { onSelect(city) }
+            .padding(horizontal = 4.dp)
+            .edgeLight(current, 16.dp)
+            .clip(RoundedCornerShape(16.dp))
+            .background(if (current) Accent.copy(alpha = 0.035f) else Color.Transparent)
+            .padding(top = 10.dp, bottom = 9.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(Modifier.size(56.dp), contentAlignment = Alignment.Center) {
+            if (CityLandmarks.has(city.name)) {
+                CityLandmark(city.name, selected = current, modifier = Modifier.fillMaxSize())
+            } else {
+                RowPin(active = false, highlighted = current, modifier = Modifier.size(width = 24.dp, height = 30.dp))
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            city.name,
+            fontSize = 13.sp,
+            fontWeight = if (current) FontWeight.Bold else FontWeight.Medium,
+            color = if (current) Accent else Ink,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }
 
 /** A Google Places result: the area's name over its "District, State" line. */
