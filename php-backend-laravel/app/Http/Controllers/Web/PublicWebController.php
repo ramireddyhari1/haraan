@@ -2334,7 +2334,7 @@ final class PublicWebController extends Controller
      * Hours come from the venue's structured week (venue clock, IST), so the line
      * says exactly what the slot board will offer — no hours set means no line.
      *
-     * @return array{courts: int, from_price: int, open_state: ?string, open_now: bool, today_windows: list<array{int, int}>, now_minute: ?int}
+     * @return array{courts: int, from_price: int, open_state: ?string, open_now: bool}
      */
     private function venueCardFacts(Venue $v): array
     {
@@ -2344,12 +2344,9 @@ final class PublicWebController extends Controller
 
         $state = null;
         $openNow = false;
-        $windows = [];
-        $nowMinute = null;
         if (is_array($v->hours_json) && $v->hours_json !== []) {
             $now = \App\Support\BusinessClock::now();
-            $windows = $v->windowsForWeekday($now->format('D'));
-            $minute = $nowMinute = (int) $now->format('G') * 60 + (int) $now->format('i');
+            $minute = (int) $now->format('G') * 60 + (int) $now->format('i');
             $label = static fn (int $m): string => $m >= 1440 ? 'midnight' : date('g:i A', mktime(0, $m));
             $short = static fn (string $l): string => str_replace(':00 ', ' ', $l);
 
@@ -2367,11 +2364,7 @@ final class PublicWebController extends Controller
             $state ??= 'Closed now';
         }
 
-        return [
-            'courts' => $courts->count(), 'from_price' => $from, 'open_state' => $state, 'open_now' => $openNow,
-            // Today's opening windows in venue-clock minutes, for the desktop card's hours strip.
-            'today_windows' => $windows, 'now_minute' => $nowMinute,
-        ];
+        return ['courts' => $courts->count(), 'from_price' => $from, 'open_state' => $state, 'open_now' => $openNow];
     }
 
     /** Great-circle distance in km between two lat/lng points (haversine, Earth R = 6371 km). */

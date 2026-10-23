@@ -250,139 +250,166 @@
     }
 </style>
 
-{{-- Desktop / tablet Pulse (.dhub). Hidden on phones, where .mhub renders. --}}
+{{-- Desktop / tablet Pulse (.dhub). Hidden on phones, where .mhub renders.
+     Same material as the phone page: a grey canvas, a white panel with one fine
+     blue edge, chips with icon wells, and the phone's framed venue card. --}}
 <style>
-    .dhub { --ink: #0F172A; --muted: #64748B; --faint: #94A3B8; --line: #E6EAF0; --blue: #2563EB; --cta: #1E3A8A; --cta-down: #172554; color: var(--ink); }
+    .dhub { --ink: #0F172A; --muted: #64748B; --faint: #94A3B8; --line: #E2E8F0; --blue: #2563EB; --blue-lip: #1D4ED8; --deep: #1E3A8A; color: var(--ink); }
     @media (max-width: 720px) { .dhub { display: none; } }
+    @media (min-width: 721px) {
+        /* site.css paints every Pulse page plain white (`body.aurora-hub`, !important);
+           this page alone takes the phone's grey canvas so its white panels lift. */
+        html body.aurora-hub:has(.dhub) { background: #EEF2F7 !important; }
+        body:has(.dhub) main.container { padding-top: 18px; }
+    }
 
-    /* Head: words and facts, no banner. */
-    .dhub__head { padding: 10px 0 18px; }
+    /* Head panel: the phone's hero band, as a panel. */
+    .dhub__panel {
+        padding: 22px 26px 20px; background: #fff; border: 1.5px solid var(--blue); border-radius: 28px;
+        box-shadow: 0 10px 24px -14px rgba(37, 99, 235, .45), 0 2px 4px -2px rgba(15, 23, 42, .08);
+    }
     .dhub__crumbs { display: flex; gap: 8px; font-size: 13px; color: var(--muted); }
     .dhub__crumbs a { color: var(--muted); text-decoration: none; }
     .dhub__crumbs a:hover { color: var(--ink); }
     .dhub__crumbs span { color: #CBD5E1; }
-    .dhub__head h1 { margin: 10px 0 0; font-size: clamp(28px, 2.6vw, 38px); line-height: 1.12; font-weight: 800; letter-spacing: -.03em; color: var(--ink); text-wrap: balance; }
-    .dhub__facts { display: flex; flex-wrap: wrap; align-items: center; margin: 10px 0 0; font-size: 14.5px; color: var(--muted); }
+    .dhub__panel h1 { margin: 8px 0 0; font-size: clamp(28px, 2.5vw, 36px); line-height: 1.12; font-weight: 800; letter-spacing: -.03em; color: var(--ink); text-wrap: balance; }
+    .dhub__facts { display: flex; flex-wrap: wrap; align-items: center; margin: 8px 0 0; font-size: 14.5px; color: var(--muted); }
     .dhub__facts span + span::before { content: ""; display: inline-block; width: 3px; height: 3px; margin: 0 10px 3px; border-radius: 50%; background: #CBD5E1; }
     .dhub__facts b { color: var(--ink); font-weight: 800; font-variant-numeric: tabular-nums; }
-    .dhub__facts .is-live { color: #15803D; font-weight: 700; }
-    .dhub__facts .is-live::after { content: ""; display: inline-block; width: 7px; height: 7px; margin-left: 7px; border-radius: 50%; background: #16A34A; box-shadow: 0 0 0 3px rgba(22, 163, 74, .18); vertical-align: 1px; }
+    .dhub__facts .is-live { display: inline-flex; align-items: center; gap: 6px; color: #15803D; font-weight: 700; }
+    .dhub__facts .is-live::after { content: ""; order: -1; width: 7px; height: 7px; border-radius: 50%; background: #16A34A; box-shadow: 0 0 0 3px rgba(22, 163, 74, .18); }
 
-    /* Sport bar: sticks under the site topbar; a hairline appears once it's stuck. */
-    .dhub__bar {
-        position: sticky; top: var(--dhub-top, 78px); z-index: 20;
-        display: flex; align-items: center; gap: 16px;
-        margin: 0 -2px; padding: 12px 2px;
-        /* Solid white edge to edge: the shadow paints the gutters, clip-path keeps it
-           from bleeding above or below the bar. */
-        background: #fff; box-shadow: 0 0 0 100vmax #fff; clip-path: inset(0 -100vmax);
-        border-bottom: 1px solid var(--line);
+    /* Chips: the phone's — icon in a round well; picked = blue tint + edge, well turns solid. */
+    .dhub__chips {
+        display: flex; gap: 8px; margin: 18px -26px 0; padding: 2px 26px 4px; overflow-x: auto; scrollbar-width: none;
+        -webkit-mask-image: linear-gradient(90deg, transparent, #000 26px, #000 calc(100% - 40px), transparent);
+        mask-image: linear-gradient(90deg, transparent, #000 26px, #000 calc(100% - 40px), transparent);
     }
-    .dhub__chips { display: flex; gap: 8px; min-width: 0; flex: 1; overflow-x: auto; scrollbar-width: none; }
     .dhub__chips::-webkit-scrollbar { display: none; }
     .dhub__chip {
-        flex: none; display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 15px;
+        flex: none; display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 15px 0 5px;
         border-radius: 999px; border: 1px solid var(--line); background: #fff;
-        font-size: 14px; font-weight: 700; color: #334155; text-decoration: none;
-        transition: border-color .15s, background .15s, color .15s;
+        font-size: 14px; font-weight: 700; letter-spacing: -.005em; color: #334155; text-decoration: none;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .06), 0 4px 10px -8px rgba(15, 23, 42, .35);
+        transition: transform .09s ease, box-shadow .12s ease, border-color .15s, color .15s, background-color .15s;
     }
-    .dhub__chip svg { color: var(--faint); }
+    .dhub__chip-well {
+        flex: none; display: inline-flex; align-items: center; justify-content: center; width: 31px; height: 31px; border-radius: 50%;
+        background: #F1F5F9; color: #475569; box-shadow: 0 1px 1px rgba(15, 23, 42, .06) inset;
+        transition: background-color .15s, color .15s;
+    }
     .dhub__chip em { font-style: normal; font-size: 12px; font-weight: 700; color: var(--faint); font-variant-numeric: tabular-nums; }
     .dhub__chip:hover { border-color: #C7D2E3; color: var(--ink); }
-    .dhub__chip.is-on { background: #EFF4FF; border-color: var(--blue); color: var(--cta); }
-    .dhub__chip.is-on svg, .dhub__chip.is-on em { color: var(--blue); }
+    .dhub__chip:active { transform: translateY(1px) scale(.97); box-shadow: 0 1px 1px rgba(15, 23, 42, .08); }
+    .dhub__chip.is-on {
+        background: #EEF4FF; border-color: var(--blue); color: var(--deep);
+        box-shadow: 0 0 0 3px rgba(37, 99, 235, .10), 0 6px 14px -10px rgba(37, 99, 235, .7);
+    }
+    .dhub__chip.is-on .dhub__chip-well { background: var(--blue); color: #fff; box-shadow: 0 1px 0 rgba(255, 255, 255, .25) inset, 0 2px 6px -2px rgba(37, 99, 235, .7); }
+    .dhub__chip.is-on em { color: var(--blue); }
+
+    /* Body: grid + rail on the grey canvas. */
+    .dhub__body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 28px; align-items: start; padding: 26px 0 36px; }
+    .dhub__sechead { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+    .dhub__sechead h2 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -.02em; }
+    .dhub__sechead p { margin: 3px 0 0; font-size: 13px; color: var(--muted); }
     .dhub__sort { flex: none; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
     .dhub__sort select {
-        height: 40px; padding: 0 34px 0 14px; border-radius: 12px; border: 1px solid var(--line);
+        height: 40px; padding: 0 34px 0 14px; border-radius: 999px; border: 1px solid var(--line);
         font: inherit; font-size: 14px; font-weight: 700; color: var(--ink); cursor: pointer;
-        background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
-        appearance: none;
+        background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 13px center;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, .06); appearance: none;
     }
     .dhub__sort select:focus-visible { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37, 99, 235, .15); }
+    .dhub__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 22px; }
 
-    /* Body: grid + rail. */
-    .dhub__body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 32px; align-items: start; padding: 24px 0 32px; }
-    .dhub__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 28px 22px; }
-
-    /* Venue card: clean photo, then facts in order of decision. */
-    .dvc { display: flex; flex-direction: column; min-width: 0; color: inherit; text-decoration: none; }
-    .dvc__img { position: relative; display: block; aspect-ratio: 4 / 3; border-radius: 16px; overflow: hidden; background: #EEF2F7; }
-    .dvc__img img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .5s cubic-bezier(.2, .7, .3, 1); }
-    .dvc:hover .dvc__img img { transform: scale(1.035); }
-    .dvc__img::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .06); pointer-events: none; }
-    .dvc__rate {
-        position: absolute; top: 10px; right: 10px; display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 9px;
-        border-radius: 8px; background: rgba(255, 255, 255, .95); font-size: 12.5px; font-weight: 800; color: var(--ink);
-        box-shadow: 0 1px 3px rgba(15, 23, 42, .12);
+    /* Venue card: the phone's reel card. Photo in an inset frame, white chips on a
+       soft top shade, words for sports, dashed seam, price + round-arrow Book key. */
+    .dvc {
+        display: flex; flex-direction: column; min-width: 0; padding: 7px; border-radius: 24px; background: #fff;
+        border: 1.5px solid var(--blue); color: inherit; text-decoration: none;
+        box-shadow: 0 10px 24px -14px rgba(37, 99, 235, .45), 0 2px 4px -2px rgba(15, 23, 42, .08);
+        transition: transform .16s cubic-bezier(.2, .7, .3, 1), box-shadow .16s;
     }
+    .dvc:hover { transform: translateY(-3px); box-shadow: 0 18px 32px -16px rgba(37, 99, 235, .55), 0 2px 4px -2px rgba(15, 23, 42, .08); }
+    .dvc:active { transform: translateY(1px) scale(.995); box-shadow: 0 3px 8px -6px rgba(37, 99, 235, .5); }
+    .dvc:focus-visible { outline: none; box-shadow: 0 0 0 4px rgba(37, 99, 235, .25); }
+    .dvc__img { position: relative; display: block; aspect-ratio: 16 / 10; border-radius: 18px; overflow: hidden; background: #E7ECF3; }
+    .dvc__img img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .5s cubic-bezier(.2, .7, .3, 1); }
+    .dvc:hover .dvc__img img { transform: scale(1.04); }
+    .dvc__img::after {
+        content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+        background: linear-gradient(180deg, rgba(15, 23, 42, .22) 0%, transparent 34%);
+        box-shadow: 0 0 0 1px rgba(15, 23, 42, .06) inset;
+    }
+    .dvc__open, .dvc__rate {
+        position: absolute; z-index: 1; top: 10px; display: inline-flex; align-items: center; height: 26px; border-radius: 999px;
+        background: rgba(255, 255, 255, .95); font-size: 12px; font-weight: 700; box-shadow: 0 1px 3px rgba(15, 23, 42, .2);
+    }
+    .dvc__open { left: 10px; gap: 6px; padding: 0 10px 0 9px; color: #475569; }
+    .dvc__open i { width: 6px; height: 6px; border-radius: 50%; background: #94A3B8; }
+    .dvc__open.is-open { color: var(--ink); }
+    .dvc__open.is-open i { background: #16A34A; box-shadow: 0 0 0 3px rgba(22, 163, 74, .18); }
+    .dvc__rate { right: 10px; gap: 4px; padding: 0 9px; font-weight: 800; color: var(--ink); }
     .dvc__rate i { font-style: normal; color: #EAB308; }
     .dvc__rate small { font-size: 11px; font-weight: 600; color: var(--muted); }
-    .dvc__body { display: flex; flex-direction: column; flex: 1; padding: 13px 2px 0; }
+
+    .dvc__body { display: flex; flex-direction: column; flex: 1; padding: 13px 8px 5px; }
     .dvc__title { font-size: 16.5px; font-weight: 800; letter-spacing: -.015em; line-height: 1.3; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-    .dvc:hover .dvc__title { color: var(--cta); }
-    .dvc__meta { display: flex; align-items: center; gap: 5px; margin-top: 5px; min-width: 0; font-size: 13px; color: var(--muted); }
+    .dvc__meta { display: flex; align-items: center; gap: 5px; margin-top: 4px; min-width: 0; font-size: 13px; color: var(--muted); }
     .dvc__meta svg { flex: none; color: var(--faint); }
     .dvc__meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .dvc__sports { margin-top: 3px; font-size: 13px; color: #475569; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .dvc__sports i { font-style: normal; color: var(--faint); }
-
-    /* Today's hours on a 24h rail; the tick is the venue-clock now. */
-    .dvc__hours { display: flex; align-items: center; gap: 10px; margin-top: 11px; }
-    /* Notches at 6 AM, noon and 6 PM so the rail reads as a day. */
-    .dvc__rail {
-        position: relative; flex: 1; height: 6px; border-radius: 3px; background: #EEF1F5;
+    .dvc__tags { display: flex; gap: 6px; margin-top: 11px; overflow: hidden; }
+    .dvc__tags em {
+        flex: none; display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: 8px;
+        background: #F1F5F9; color: #334155; font-style: normal; font-size: 12px; font-weight: 600;
     }
-    .dvc__rail::after {
-        content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-        background: linear-gradient(90deg, transparent calc(25% - .5px), #fff calc(25% - .5px), #fff calc(25% + .5px), transparent calc(25% + .5px),
-            transparent calc(50% - .5px), #fff calc(50% - .5px), #fff calc(50% + .5px), transparent calc(50% + .5px),
-            transparent calc(75% - .5px), #fff calc(75% - .5px), #fff calc(75% + .5px), transparent calc(75% + .5px));
-    }
-    .dvc__rail b { z-index: 1; }
-    .dvc__rail i { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: #BFD3FB; }
-    .dvc__rail b { position: absolute; top: -4px; width: 2px; height: 14px; margin-left: -1px; border-radius: 1px; background: var(--ink); }
-    .dvc__hours em { flex: none; font-style: normal; font-size: 12px; font-weight: 700; color: var(--muted); }
-    .dvc__hours em.is-open { color: #15803D; }
-
-    .dvc__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; padding-top: 14px; }
+    .dvc__tags em.is-more { background: transparent; color: var(--muted); padding: 0 2px; }
+    .dvc__info { display: block; padding-bottom: 13px; }
+    .dvc__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; padding-top: 12px; border-top: 1px dashed var(--line); }
     .dvc__price { display: inline-flex; align-items: baseline; gap: 3px; }
-    .dvc__price b { font-size: 18px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+    .dvc__price b { font-size: 19px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
     .dvc__price small { font-size: 12px; color: var(--muted); }
     .dvc__go {
-        display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; border-radius: 11px;
-        background: var(--cta); color: #fff; font-size: 13.5px; font-weight: 800;
-        box-shadow: 0 1px 0 rgba(255, 255, 255, .16) inset, 0 2px 0 var(--cta-down);
-        transition: background .15s, transform .1s, box-shadow .1s;
+        display: inline-flex; align-items: center; gap: 9px; height: 38px; padding: 0 4px 0 15px; border-radius: 999px;
+        background: var(--blue); color: #fff; font-size: 14px; font-weight: 800; letter-spacing: -.005em;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, .25) inset, 0 2px 0 var(--blue-lip), 0 6px 12px -6px rgba(37, 99, 235, .75);
+        transition: transform .08s, box-shadow .08s;
     }
-    .dvc__go svg { transition: transform .2s; }
-    .dvc:hover .dvc__go { background: var(--cta-down); }
-    .dvc:hover .dvc__go svg { transform: translateX(2px); }
-    .dvc:active .dvc__go { transform: translateY(2px); box-shadow: none; }
-    .dvc:focus-visible { outline: none; }
-    .dvc:focus-visible .dvc__img { box-shadow: 0 0 0 3px #fff, 0 0 0 5px var(--blue); }
+    .dvc__go i {
+        display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%;
+        background: #fff; color: var(--blue); box-shadow: 0 1px 2px rgba(15, 23, 42, .18);
+        transition: transform .22s cubic-bezier(.2, .9, .3, 1.2);
+    }
+    .dvc:hover .dvc__go i { transform: translateX(3px); }
+    .dvc:active .dvc__go { transform: translateY(2px); box-shadow: 0 0 0 var(--blue-lip), 0 1px 3px -1px rgba(37, 99, 235, .5); }
+    @media (prefers-reduced-motion: reduce) { .dvc, .dvc__img img, .dvc__go i { transition: none; } }
 
     /* No venues. */
-    .dhub__none { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 48px 24px 56px; border: 1px dashed #D5DEEA; border-radius: 20px; background: #FBFCFE; }
+    .dhub__none { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 44px 24px 50px; border-radius: 24px; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .06); }
     .dhub__none strong { margin-top: 16px; font-size: 18px; font-weight: 800; letter-spacing: -.015em; }
     .dhub__none p { margin: 6px 0 0; font-size: 14px; color: var(--muted); }
     .dhub__none-links { display: flex; gap: 18px; margin-top: 16px; }
     .dhub__none-links a { font-size: 14px; font-weight: 700; color: var(--blue); text-decoration: none; }
     .dhub__none-links a:hover { text-decoration: underline; }
 
-    /* Rail. */
-    .dhub__rail { position: sticky; top: calc(var(--dhub-top, 78px) + 84px); display: flex; flex-direction: column; gap: 16px; }
-    .dab, .dtp { border: 1px solid var(--line); border-radius: 18px; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .04); }
-    .dab__head, .dtp__head { display: flex; align-items: center; gap: 9px; padding: 15px 16px 0; }
+    /* Rail: white panels with the phone's ambient + contact shadow. */
+    .dhub__rail { position: sticky; top: calc(var(--dhub-top, 67px) + 18px); display: flex; flex-direction: column; gap: 16px; }
+    .dab, .dtp, .down {
+        border-radius: 22px; background: #fff;
+        box-shadow: 0 12px 28px -18px rgba(15, 23, 42, .28), 0 1px 2px rgba(15, 23, 42, .07);
+    }
+    .dab__head, .dtp__head { display: flex; align-items: center; gap: 9px; padding: 16px 18px 0; }
     .dab__head img { width: 22px; height: 22px; object-fit: contain; }
-    .dab__head strong, .dtp__head strong { font-size: 15px; font-weight: 800; letter-spacing: -.01em; }
+    .dab__head strong, .dtp__head strong { font-size: 15.5px; font-weight: 800; letter-spacing: -.01em; }
     .dab__live { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 800; color: #DC2626; text-transform: uppercase; letter-spacing: .04em; }
     .dab__live i { width: 7px; height: 7px; border-radius: 50%; background: #DC2626; animation: dab-pulse 1.6s ease-out infinite; }
     @keyframes dab-pulse { 0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, .45); } 100% { box-shadow: 0 0 0 7px rgba(220, 38, 38, 0); } }
     @media (prefers-reduced-motion: reduce) { .dab__live i { animation: none; } }
-    .dab__list { display: flex; flex-direction: column; padding: 8px 8px 0; }
-    .dab__match { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 12px; color: inherit; text-decoration: none; }
-    .dab__match + .dab__match { border-top: 1px solid #F1F4F8; border-radius: 0 0 12px 12px; }
-    .dab__match:hover { background: #F7F9FC; }
+    .dab__list { display: flex; flex-direction: column; padding: 8px 10px 0; }
+    .dab__match { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 14px; color: inherit; text-decoration: none; }
+    .dab__match + .dab__match { margin-top: 2px; }
+    .dab__match:hover { background: #F5F8FD; }
     .dab__comp { font-size: 11.5px; font-weight: 700; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .dab__row { display: flex; align-items: center; gap: 9px; font-size: 14px; color: var(--muted); }
     .dab__row.is-batting { color: var(--ink); font-weight: 700; }
@@ -391,43 +418,45 @@
     .dab__name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .dab__score { flex: none; font-weight: 800; font-variant-numeric: tabular-nums; color: inherit; }
     .dab__score small { margin-left: 4px; font-size: 11.5px; font-weight: 600; color: var(--faint); }
-    .dab__empty { margin: 0; padding: 10px 16px 2px; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+    .dab__empty { margin: 10px 18px 0; padding: 12px 14px; border-radius: 14px; background: #F5F8FD; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
     .dab__empty strong { display: block; margin-bottom: 2px; font-size: 14px; color: var(--ink); }
-    .dab__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px 16px; }
+    .dab__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 18px 18px; }
     .dab__foot a { font-size: 13.5px; font-weight: 700; color: var(--blue); text-decoration: none; }
     .dab__foot a:hover { text-decoration: underline; }
     .dab__foot .dab__start {
-        display: inline-flex; align-items: center; height: 36px; padding: 0 14px; border-radius: 11px;
-        background: var(--cta); color: #fff; box-shadow: 0 1px 0 rgba(255, 255, 255, .16) inset, 0 2px 0 var(--cta-down);
+        display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 4px 0 15px; border-radius: 999px;
+        background: var(--blue); color: #fff; font-weight: 800;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, .25) inset, 0 2px 0 var(--blue-lip), 0 6px 12px -6px rgba(37, 99, 235, .75);
     }
-    .dab__foot .dab__start:hover { background: var(--cta-down); text-decoration: none; }
-    .dab__foot .dab__start:active { transform: translateY(2px); box-shadow: none; }
+    .dab__start i { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; background: #fff; color: var(--blue); transition: transform .22s cubic-bezier(.2, .9, .3, 1.2); }
+    .dab__foot .dab__start:hover { text-decoration: none; }
+    .dab__start:hover i { transform: translateX(3px); }
+    .dab__start:active { transform: translateY(2px); box-shadow: 0 0 0 var(--blue-lip); }
 
     .dtp__head a { margin-left: auto; font-size: 13px; font-weight: 700; color: var(--blue); text-decoration: none; }
     .dtp__head a:hover { text-decoration: underline; }
-    .dtp__row { display: flex; align-items: center; gap: 12px; margin: 8px 8px 8px; padding: 8px; border-radius: 12px; color: inherit; text-decoration: none; }
-    .dtp__row:hover { background: #F7F9FC; }
-    .dtp__avatar { position: relative; flex: none; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; background: #EFF4FF; color: var(--cta); font-weight: 800; font-size: 17px; }
+    .dtp__row { display: flex; align-items: center; gap: 12px; margin: 8px 10px 10px; padding: 8px; border-radius: 14px; color: inherit; text-decoration: none; }
+    .dtp__row:hover { background: #F5F8FD; }
+    .dtp__avatar { position: relative; flex: none; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; background: #EFF4FF; color: var(--deep); font-weight: 800; font-size: 17px; box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px var(--blue); }
     .dtp__avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
-    .dtp__avatar i { position: absolute; right: -3px; bottom: -3px; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #EAB308; border: 2px solid #fff; font-style: normal; font-size: 10.5px; font-weight: 800; color: #fff; }
+    .dtp__avatar i { position: absolute; right: -4px; bottom: -4px; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #EAB308; border: 2px solid #fff; font-style: normal; font-size: 10.5px; font-weight: 800; color: #fff; }
     .dtp__id { display: flex; flex-direction: column; min-width: 0; }
     .dtp__id b { font-size: 15px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .dtp__id small { margin-top: 2px; font-size: 12.5px; color: var(--muted); }
-    .dtp__empty { margin: 0; padding: 8px 16px 16px; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+    .dtp__empty { margin: 10px 18px 18px; padding: 12px 14px; border-radius: 14px; background: #F5F8FD; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
 
-    .down { display: flex; flex-direction: column; gap: 4px; padding: 16px; border-radius: 18px; background: #F5F7FB; color: inherit; text-decoration: none; }
-    .down strong { font-size: 15px; font-weight: 800; letter-spacing: -.01em; }
+    .down { display: flex; flex-direction: column; gap: 4px; padding: 18px; color: inherit; text-decoration: none; }
+    .down strong { font-size: 15.5px; font-weight: 800; letter-spacing: -.01em; }
     .down span { font-size: 13.5px; line-height: 1.45; color: var(--muted); }
     .down em { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; font-style: normal; font-size: 13.5px; font-weight: 700; color: var(--blue); }
-    .down:hover em svg { transform: translateX(2px); }
     .down em svg { transition: transform .2s; }
+    .down:hover em svg { transform: translateX(2px); }
 
-    /* Tablet: the rail drops under the grid as a row of panels. */
+    /* Tablet: the rail moves above the grid as a row of panels. */
     @media (max-width: 1100px) {
-        .dhub__bar { position: static; }
         .dhub__body { grid-template-columns: minmax(0, 1fr); }
         .dhub__rail { position: static; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); align-items: start; order: -1; }
-        .dhub__grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+        .dhub__grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
     }
 </style>
 
@@ -685,15 +714,15 @@
 {{-- ================================================================= --}}
 {{-- DESKTOP / TABLET PULSE (>720px)                                     --}}
 {{--                                                                    --}}
-{{-- One catalogue page, Playo-shaped: a plain head that states real     --}}
-{{-- facts, a sticky sport bar, the venue grid, and a sticky rail that   --}}
-{{-- carries the live side of Pulse (ActionBoard, top player). Every     --}}
-{{-- number on it is read from the venues or matches below — no counts   --}}
-{{-- for sports with no venues, no hero art, no invented claims.         --}}
+{{-- The phone page's material at desktop width: a white head panel with --}}
+{{-- the fine blue edge, the phone's chips, the phone's framed venue     --}}
+{{-- card in a grid, and a sticky rail for the live side of Pulse        --}}
+{{-- (ActionBoard, top player). Every number is read from the venues or  --}}
+{{-- matches below — no counts for sports with no venues, no hero art.   --}}
 {{-- ================================================================= --}}
 @php
     // Chips: every sport some venue here sells (a venue counts for each of its
-    // sports), plus whatever is selected so the bar never loses the active chip.
+    // sports), plus whatever is selected so the row never loses the active chip.
     $dSportCounts = collect($venues ?? [])
         ->flatMap(fn ($v) => collect($v->sports ?: [$v->category])->filter()->unique())
         ->countBy()
@@ -707,13 +736,11 @@
     $dHasDistance = $hubAll->contains(fn ($v) => !empty($v->distance_km));
     $dWhere = $selectedCity ?: null;
     $dSportWord = $selectedSport === 'All' ? null : strtolower($selectedSport);
-
-    // Minutes → "6 AM" for the hours strip's tooltip.
-    $dClock = static fn (int $m): string => $m >= 1440 ? 'midnight' : str_replace(':00 ', ' ', date('g:i A', mktime(0, $m)));
+    $dCricketish = $selectedSport === 'All' || $selectedSport === 'Cricket';
 @endphp
 
 <section class="dhub" aria-label="Pulse venues">
-    <header class="dhub__head">
+    <header class="dhub__panel">
         <nav class="dhub__crumbs" aria-label="Breadcrumb"><a href="/">Haraan</a><span aria-hidden="true">/</span>Pulse</nav>
         <h1>
             {{ $dSportWord ? ucfirst($dSportWord) . ' venues' : 'Turfs & courts' }}
@@ -730,40 +757,45 @@
                 @endif
             </p>
         @endif
-    </header>
 
-    {{-- Sport bar: ?sport= links (the split and the live board are recomputed
-         server-side, same as the phone chips), plus a client-side sort. --}}
-    <div class="dhub__bar">
+        {{-- ?sport= links: the split and the live board are recomputed server-side,
+             same as the phone chips. --}}
         <nav class="dhub__chips" aria-label="Filter by sport">
             <a class="dhub__chip {{ $selectedSport === 'All' ? 'is-on' : '' }}" href="/gamehub">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $hubIcons['all'] !!}</svg>
+                <span class="dhub__chip-well"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $hubIcons['all'] !!}</svg></span>
                 All<em>{{ $dTotalAll }}</em>
             </a>
             @foreach($dSportCounts as $sport => $count)
                 <a class="dhub__chip {{ strcasecmp($sport, $selectedSport) === 0 ? 'is-on' : '' }}" href="/gamehub?sport={{ urlencode($sport) }}">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $hubIcons[$hubGlyphKey((string) $sport)] !!}</svg>
+                    <span class="dhub__chip-well"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $hubIcons[$hubGlyphKey((string) $sport)] !!}</svg></span>
                     {{ $sport }}@if($count > 0)<em>{{ $count }}</em>@endif
                 </a>
             @endforeach
         </nav>
-        @if($hubTotal > 1)
-            <label class="dhub__sort">
-                <span>Sort</span>
-                <select id="dhubSort">
-                    <option value="order">Recommended</option>
-                    @if($hubAll->contains(fn ($v) => $v->reviews > 0))<option value="rating">Top rated</option>@endif
-                    <option value="price">Price: low to high</option>
-                    @if($dHasDistance)<option value="dist">Nearest</option>@endif
-                    @if($hubHasHours)<option value="open">Open now first</option>@endif
-                </select>
-            </label>
-        @endif
-    </div>
+    </header>
 
     <div class="dhub__body">
         <div class="dhub__main">
             @if($hubTotal)
+                <div class="dhub__sechead">
+                    <div>
+                        <h2>{{ $dSportWord ? ucfirst($dSportWord) . ' venues' : 'All venues' }}</h2>
+                        <p>Pick a ground to see its courts and open slots.</p>
+                    </div>
+                    @if($hubTotal > 1)
+                        <label class="dhub__sort">
+                            <span>Sort</span>
+                            <select id="dhubSort">
+                                <option value="order">Recommended</option>
+                                @if($hubAll->contains(fn ($v) => $v->reviews > 0))<option value="rating">Top rated</option>@endif
+                                <option value="price">Price: low to high</option>
+                                @if($dHasDistance)<option value="dist">Nearest</option>@endif
+                                @if($hubHasHours)<option value="open">Open now first</option>@endif
+                            </select>
+                        </label>
+                    @endif
+                </div>
+
                 <div class="dhub__grid" id="dhubGrid">
                     @foreach($hubAll as $i => $venue)
                         @php
@@ -774,48 +806,37 @@
                                 $venue->distance ?: null,
                             ])->filter()->implode(' · ');
                             $dPrice = $venue->from_price ?: $venue->price;
-                            $dWindows = collect($venue->today_windows ?? [])
-                                ->map(fn ($w) => [max(0, (int) $w[0]), min(1440, (int) $w[1])])
-                                ->filter(fn ($w) => $w[1] > $w[0]);
                         @endphp
                         <a class="dvc" href="{{ \App\Support\SeoUrl::venue($venue) }}"
                            data-order="{{ $i }}" data-rating="{{ $venue->reviews > 0 ? (float) $venue->rating : 0 }}"
                            data-price="{{ $dPrice ?: 999999 }}" data-open="{{ $venue->open_now ? 1 : 0 }}"
                            data-dist="{{ $venue->distance_km ?? 99999 }}">
                             <span class="dvc__img">
-                                <img src="{{ $venue->image }}"{!! \App\Support\VenuePhoto::imgAttrs($venue->image, '(min-width: 1280px) 300px, (min-width: 1025px) 28vw, 45vw') !!} alt="{{ $venue->title }}" loading="{{ $i < 6 ? 'eager' : 'lazy' }}" decoding="async">
+                                <img src="{{ $venue->image }}"{!! \App\Support\VenuePhoto::imgAttrs($venue->image, '(min-width: 1280px) 320px, (min-width: 1025px) 30vw, 45vw') !!} alt="{{ $venue->title }}" loading="{{ $i < 6 ? 'eager' : 'lazy' }}" decoding="async">
+                                {{-- Today's hours from the venue's own week, on the venue clock. --}}
+                                @if(!empty($venue->open_state))
+                                    <span class="dvc__open {{ $venue->open_now ? 'is-open' : '' }}"><i></i>{{ $venue->open_state }}</span>
+                                @endif
                                 @if($venue->reviews > 0)
                                     <span class="dvc__rate"><i aria-hidden="true">★</i>{{ $venue->rating }}<small>({{ $venue->reviews }})</small></span>
                                 @endif
                             </span>
                             <span class="dvc__body">
-                                <strong class="dvc__title">{{ $venue->title }}</strong>
-                                @if($dMeta)
-                                    <span class="dvc__meta">
-                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"></path><circle cx="12" cy="9.5" r="2.5"></circle></svg>
-                                        <span>{{ $dMeta }}</span>
-                                    </span>
-                                @endif
-                                @if($dSports->count())
-                                    <span class="dvc__sports">{{ $dSports->take(3)->implode(' · ') }}@if($dSports->count() > 3) <i>+{{ $dSports->count() - 3 }}</i>@endif</span>
-                                @endif
-
-                                {{-- Today's hours drawn on a 24-hour rail, with a tick at the
-                                     venue-clock now. Only for venues that set their hours. --}}
-                                @if(!empty($venue->open_state))
-                                    <span class="dvc__hours">
-                                        <span class="dvc__rail" role="img" aria-label="Today: {{ $dWindows->map(fn ($w) => $dClock($w[0]) . ' to ' . $dClock($w[1]))->implode(', ') ?: 'closed' }}">
-                                            @foreach($dWindows as $w)
-                                                <i style="left: {{ round($w[0] / 14.4, 2) }}%; width: {{ round(($w[1] - $w[0]) / 14.4, 2) }}%"></i>
-                                            @endforeach
-                                            @if($venue->now_minute !== null)
-                                                <b style="left: {{ round($venue->now_minute / 14.4, 2) }}%"></b>
-                                            @endif
+                                <span class="dvc__info">
+                                    <strong class="dvc__title">{{ $venue->title }}</strong>
+                                    @if($dMeta)
+                                        <span class="dvc__meta">
+                                            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"></path><circle cx="12" cy="9.5" r="2.5"></circle></svg>
+                                            <span>{{ $dMeta }}</span>
                                         </span>
-                                        <em class="{{ $venue->open_now ? 'is-open' : '' }}">{{ $venue->open_state }}</em>
-                                    </span>
-                                @endif
-
+                                    @endif
+                                    @if($dSports->count())
+                                        <span class="dvc__tags">
+                                            @foreach($dSports->take(3) as $sport)<em>{{ $sport }}</em>@endforeach
+                                            @if($dSports->count() > 3)<em class="is-more">+{{ $dSports->count() - 3 }}</em>@endif
+                                        </span>
+                                    @endif
+                                </span>
                                 <span class="dvc__foot">
                                     <span class="dvc__price">
                                         @if($dPrice)
@@ -825,7 +846,7 @@
                                             <small>See prices</small>
                                         @endif
                                     </span>
-                                    <span class="dvc__go">Book<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"></path></svg></span>
+                                    <span class="dvc__go">Book<i aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"></path></svg></i></span>
                                 </span>
                             </span>
                         </a>
@@ -882,13 +903,13 @@
                     </div>
                 @else
                     <p class="dab__empty">
-                        <strong>{{ $selectedSport === 'All' || $selectedSport === 'Cricket' ? 'No live matches right now' : 'No live ' . strtolower($selectedSport) . ' matches right now' }}</strong>
-                        {{ $selectedSport === 'All' || $selectedSport === 'Cricket' ? 'Scores land here ball by ball' : 'Scores land here' }} as soon as someone starts scoring.
+                        <strong>{{ $dCricketish ? 'No live matches right now' : 'No live ' . $dSportWord . ' matches right now' }}</strong>
+                        {{ $dCricketish ? 'Scores land here ball by ball' : 'Scores land here' }} as soon as someone starts scoring.
                     </p>
                 @endif
                 <footer class="dab__foot">
                     <a href="/gamehub/actionboard">Open the board</a>
-                    <a class="dab__start" href="/gamehub/actionboard/create">Start a match</a>
+                    <a class="dab__start" href="/gamehub/actionboard/create">Start a match<i aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"></path></svg></i></a>
                 </footer>
             </section>
 
@@ -928,8 +949,8 @@
 <script>
 /* Desktop sort: reorders the cards already on the page; filters stay server-side. */
 document.addEventListener('DOMContentLoaded', () => {
-    // The sport bar and rail stick under the site topbar, whose height changes with
-    // the viewport (it wraps on narrower screens), so read it rather than guess.
+    // The rail sticks under the site topbar, whose height changes with the
+    // viewport (it wraps on narrower screens), so read it rather than guess.
     const dhub = document.querySelector('.dhub');
     const topbar = document.querySelector('.topbar');
     const setTop = () => {
