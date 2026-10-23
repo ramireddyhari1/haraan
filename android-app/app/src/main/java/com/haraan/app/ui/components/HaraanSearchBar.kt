@@ -43,6 +43,10 @@ fun HaraanSearchBar(
     rotatingHints: List<String> = emptyList(),
     // Trailing mic affordance; shown only when a handler is supplied.
     onVoiceClick: (() -> Unit)? = null,
+    // Recessed "well" look (Pulse hero): a tinted fill and its own resting edge, no lift.
+    fillColor: Color = HaraanColors.Surface,
+    restingBorder: Color = HaraanColors.BorderLight,
+    raised: Boolean = true,
 ) {
     var isFocused by remember { mutableStateOf(false) }
 
@@ -66,17 +70,17 @@ fun HaraanSearchBar(
             .fillMaxWidth()
             .height(48.dp)
             .shadow(
-                elevation = if (isFocused) 6.dp else 2.dp,
+                elevation = if (!raised) 0.dp else if (isFocused) 6.dp else 2.dp,
                 shape = RoundedCornerShape(HaraanRadius.Large),
                 clip = false,
                 ambientColor = Color.Black.copy(alpha = 0.03f),
                 spotColor = Color.Black.copy(alpha = 0.08f)
             )
-            .background(HaraanColors.Surface, RoundedCornerShape(HaraanRadius.Large))
+            .background(if (isFocused) HaraanColors.Surface else fillColor, RoundedCornerShape(HaraanRadius.Large))
             .border(
                 BorderStroke(
                     width = if (isFocused) 1.5.dp else 1.dp,
-                    color = if (isFocused) activeColor else HaraanColors.BorderLight
+                    color = if (isFocused) activeColor else restingBorder
                 ),
                 RoundedCornerShape(HaraanRadius.Large)
             )

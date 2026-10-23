@@ -133,6 +133,7 @@ import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.outlined.AccountCircle
@@ -194,6 +195,7 @@ import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.zIndex
 import androidx.compose.foundation.shape.CircleShape
@@ -1991,20 +1993,35 @@ private fun GameHubTabScreen(
     // the calmer, premium look (Airbnb/Linear/Playo territory).
     item {
       val pulseTakeover = sectionTheme.campaign != null
+      // Same panel as the mobile web (.mhub__hero): white, rounded bottom corners, and one
+      // fine blue edge that follows them, with a soft blue drop onto the grey page. The
+      // takeover keeps its own deep band and ends in scallops instead.
+      val heroShape = RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp)
+      val heroEdge = Color(0xFF2563EB)
       Box(
         modifier = Modifier
           .fillMaxWidth()
-          .background(if (pulseTakeover) sectionTheme.deep else Color.White)
-          // Hairline seam so the white hero separates cleanly from the light content canvas
-          // below without a heavy band or shadow. The takeover ends in scallops instead.
-          .drawBehind {
-            if (!pulseTakeover) drawLine(
-              color = Color(0xFFECEEF2),
-              start = Offset(0f, size.height),
-              end = Offset(size.width, size.height),
-              strokeWidth = 1f
-            )
-          }
+          .then(
+            if (pulseTakeover) Modifier.background(sectionTheme.deep)
+            else Modifier
+              .shadow(10.dp, heroShape, ambientColor = heroEdge.copy(alpha = 0.25f), spotColor = heroEdge.copy(alpha = 0.35f))
+              .background(Color.White, heroShape)
+              // Edge on the sides and bottom only — the top runs under the status bar.
+              .drawWithContent {
+                drawContent()
+                val w = 1.5.dp.toPx()
+                val r = 28.dp.toPx()
+                val path = androidx.compose.ui.graphics.Path().apply {
+                  moveTo(w / 2, 0f)
+                  lineTo(w / 2, size.height - r)
+                  arcTo(androidx.compose.ui.geometry.Rect(w / 2, size.height - 2 * r + w / 2, 2 * r - w / 2, size.height - w / 2), 180f, -90f, false)
+                  lineTo(size.width - r, size.height - w / 2)
+                  arcTo(androidx.compose.ui.geometry.Rect(size.width - 2 * r + w / 2, size.height - 2 * r + w / 2, size.width - w / 2, size.height - w / 2), 90f, -90f, false)
+                  lineTo(size.width - w / 2, 0f)
+                }
+                drawPath(path, heroEdge, style = androidx.compose.ui.graphics.drawscope.Stroke(width = w))
+              }
+          )
       ) {
       Column(
         modifier = Modifier
@@ -2018,6 +2035,7 @@ private fun GameHubTabScreen(
           avatarUrl = avatarUrl,
           locationState = locationState,
           onDark = pulseTakeover,
+          outlinedIcons = !pulseTakeover,
           onAvatarClick = onProfileClick,
           onLocationClick = onLocationClick,
           onChatClick = onSupportClick,
@@ -2033,16 +2051,13 @@ private fun GameHubTabScreen(
           HaraanSearchBar(
             query = searchQuery,
             onQueryChange = onSearchQueryChange,
-            placeholder = "Search grounds, matches, players...",
+            placeholder = "Search grounds, matches, players…",
             activeColor = sectionTheme.primary,
             modifier = Modifier.fillMaxWidth(),
-            rotatingHints = listOf(
-              "Search grounds near you",
-              "Search live matches",
-              "Search players",
-              "Search venues"
-            ),
-            onVoiceClick = { showSearch = true }
+            // A recessed well on the white panel, one steady hint — as on the mobile web.
+            fillColor = Color(0xFFF4F7FC),
+            restingBorder = Color(0xFFE1E8F3),
+            raised = false,
           )
           // Transparent tap layer — the header bar behaves as a button into search.
           Box(
@@ -2244,7 +2259,7 @@ private fun GameHubTabScreen(
     item {
       androidx.compose.foundation.lazy.LazyRow(
         contentPadding = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         modifier = Modifier.fillMaxWidth()
       ) {
         items(sports.size) { i ->
@@ -2273,15 +2288,28 @@ private fun GameHubTabScreen(
             animationSpec = spring(dampingRatio = 0.72f, stiffness = 380f),
             label = "chipScale"
           )
+          // Mobile web chips (.mhub__chip): white with a hairline; the icon sits in its own
+          // round well. Picked = blue tint + blue edge with the well turning solid blue — a
+          // filter state, never a second solid primary button.
           val chipBg by androidx.compose.animation.animateColorAsState(
-            // Filled slate for unselected (was white) so chips read as solid pills against the
-            // near-white page instead of floating with a faint hairline.
-            targetValue = if (isSelected) sectionTheme.deep else Color(0xFFF1F5F9),
+            targetValue = if (isSelected) Color(0xFFEEF4FF) else Color.White,
             animationSpec = tween(200), label = "chipBg"
           )
-          val chipContent by androidx.compose.animation.animateColorAsState(
-            targetValue = if (isSelected) sectionTheme.onDeep else HaraanColors.TextSecondary,
-            animationSpec = tween(200), label = "chipContent"
+          val chipEdge by androidx.compose.animation.animateColorAsState(
+            targetValue = if (isSelected) Color(0xFF2563EB) else Color(0xFFE2E8F0),
+            animationSpec = tween(200), label = "chipEdge"
+          )
+          val chipText by androidx.compose.animation.animateColorAsState(
+            targetValue = if (isSelected) Color(0xFF1E3A8A) else Color(0xFF334155),
+            animationSpec = tween(200), label = "chipText"
+          )
+          val wellBg by androidx.compose.animation.animateColorAsState(
+            targetValue = if (isSelected) Color(0xFF2563EB) else Color(0xFFF1F5F9),
+            animationSpec = tween(200), label = "chipWell"
+          )
+          val wellInk by androidx.compose.animation.animateColorAsState(
+            targetValue = if (isSelected) Color.White else Color(0xFF475569),
+            animationSpec = tween(200), label = "chipWellInk"
           )
 
           Surface(
@@ -2289,30 +2317,34 @@ private fun GameHubTabScreen(
             interactionSource = chipInteraction,
             shape = RoundedCornerShape(50.dp),
             color = chipBg,
-            border = BorderStroke(
-              width = 1.dp,
-              color = if (isSelected) Color.Transparent else HaraanColors.BorderLight
-            ),
+            border = BorderStroke(width = 1.dp, color = chipEdge),
+            shadowElevation = if (isSelected) 0.dp else 1.dp,
             modifier = Modifier
-              .height(36.dp)
+              .padding(vertical = 3.dp)
+              .height(40.dp)
               .graphicsLayer { scaleX = chipScale; scaleY = chipScale }
           ) {
             Row(
-              modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+              modifier = Modifier.padding(start = 4.dp, end = 15.dp),
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(6.dp)
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-              Icon(
-                imageVector = icon,
-                contentDescription = sport,
-                tint = chipContent,
-                modifier = Modifier.size(16.dp)
-              )
+              Box(
+                modifier = Modifier.size(30.dp).background(wellBg, CircleShape),
+                contentAlignment = Alignment.Center
+              ) {
+                Icon(
+                  imageVector = icon,
+                  contentDescription = null,
+                  tint = wellInk,
+                  modifier = Modifier.size(16.dp)
+                )
+              }
               Text(
                 text = sportLabel,
-                color = chipContent,
+                color = chipText,
                 fontSize = 14.sp,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Bold
               )
             }
           }
@@ -2322,13 +2354,17 @@ private fun GameHubTabScreen(
 
     },
     "venues" to {
-    // Two presentations of one catalogue. The reel is a top-rated highlight; "All Venues" is the
-    // complete, location-ordered list the user scrolls straight into — no separate section breaks
-    // the venue flow. The reel's picks do appear again in the full list, on purpose: the list is
-    // the catalogue, and a venue vanishing from it because it was highlighted reads as missing.
-    val popularVenues = filteredVenues.filter { (it.rating.toFloatOrNull() ?: 0f) > 0f }.sortedByDescending { it.rating.toFloatOrNull() ?: 0f }.take(5)
-    // distinctBy guards the lazy keys below — a duplicated id from the API must not crash the tab.
-    val allVenues = filteredVenues.distinctBy { it.id }
+    // The reel is a top-rated highlight; "More venues" is the location-ordered rest the user
+    // scrolls straight into (the mobile web's split — a reel pick never repeats below).
+    // Same split as the mobile web: the reel is the top five by rating (unrated venues still
+    // count, so a new town's only ground isn't hidden), and "More venues" is strictly the rest,
+    // so nothing repeats. distinctBy guards the lazy keys — a duplicated API id must not crash.
+    val uniqueVenues = filteredVenues.distinctBy { it.id }
+    val popularVenues = uniqueVenues.sortedByDescending { it.rating.toFloatOrNull() ?: 0f }.take(5)
+    val popularIds = popularVenues.map { it.id }.toSet()
+    val allVenues = uniqueVenues.filterNot { it.id in popularIds }
+    val nearPlace = (locationState as? com.haraan.app.data.LocationState.Resolved)
+      ?.let { it.area.ifBlank { it.city } }.orEmpty()
 
     // 4. Header
     item {
@@ -2337,18 +2373,21 @@ private fun GameHubTabScreen(
       // dead band between the chips and this title.
       Box(modifier = Modifier.overlapAbove(12.dp)) {
       GameHubSectionHeader(
-        title = "Popular Venues",
+        title = "Popular venues",
         subtitle = when {
           isVenuesLoading -> "Finding venues near you…"
           filteredVenues.isEmpty() && userLat != null && searchRadiusKm > 0 ->
             "None within ${searchRadiusKm} km — widen the radius"
           filteredVenues.isEmpty() -> "No venues yet"
-          // The reel is ranked by rating; "near you" is only claimed with a real GPS fix.
-          userLat != null -> "Top rated near you"
-          else -> "Top rated"
+          else -> buildString {
+            append(uniqueVenues.size)
+            append(if (uniqueVenues.size == 1) " venue" else " venues")
+            if (nearPlace.isNotBlank()) append(" near ").append(nearPlace)
+          }
         },
-        actionText = "View all",
-        onActionClick = { showSearch = true },
+        // Only when there's somewhere to go — with five or fewer the reel is the whole list.
+        actionText = if (allVenues.isNotEmpty()) "View all" else null,
+        onActionClick = if (allVenues.isNotEmpty()) ({ showSearch = true }) else null,
         // Bond to the sport-filter chips directly above (they filter these venues) — the default
         // 12dp top pad on top of the list's 16dp spacing left the dead band flagged on GameHub.
         topPadding = 2.dp,
@@ -2373,7 +2412,8 @@ private fun GameHubTabScreen(
           )
         }
         else -> androidx.compose.foundation.lazy.LazyRow(
-          contentPadding = PaddingValues(horizontal = 16.dp),
+          // Vertical room so the cards' blue drop shadow isn't clipped by the row.
+          contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 14.dp),
           horizontalArrangement = Arrangement.spacedBy(12.dp),
           modifier = Modifier.fillMaxWidth()
         ) {
@@ -2388,20 +2428,15 @@ private fun GameHubTabScreen(
       }
     }
 
-    // 6. "All Venues" — the full catalogue as a vertical list, continuing the page's own scroll
+    // 6. "More venues" — everything the reel didn't show, as a vertical list, continuing the page's own scroll
     // (items of this LazyColumn, not a nested scroller). Hidden while loading (the reel skeleton
     // holds the space) and when empty (the reel already shows the honest empty note).
     if (!isVenuesLoading && allVenues.isNotEmpty()) {
       item(key = "all-venues-header") {
         GameHubSectionHeader(
-          title = "All Venues",
-          subtitle = buildString {
-            append(allVenues.size)
-            append(if (allVenues.size == 1) " venue" else " venues")
-            // Order mirrors filteredVenues: distance-ranked with a fix, city-first without.
-            if (userLat != null) append(" · nearest first")
-            else if (!selectedCity.isNullOrBlank()) append(" · $selectedCity first")
-          },
+          title = "More venues",
+          subtitle = "${allVenues.size} more to explore",
+          topPadding = 0.dp,
         )
       }
       items(
@@ -2532,6 +2567,9 @@ private fun GreetingHeader(
   onDark: Boolean,
   onAvatarClick: () -> Unit,
   onLocationClick: () -> Unit,
+  // Pulse's white panel: the utility icons sit in outlined circles on a whisper of blue and
+  // the avatar gets a blue ring, matching the mobile web hero.
+  outlinedIcons: Boolean = false,
   onChatClick: () -> Unit = {},
   onNotificationClick: () -> Unit = {},
   onCalendarClick: () -> Unit = {},
@@ -2545,6 +2583,10 @@ private fun GreetingHeader(
   val sub = if (onDark) Color.White.copy(alpha = 0.85f) else HaraanColors.TextSecondary
   val iconTint = if (onDark) Color.White.copy(alpha = 0.92f) else HaraanColors.TextPrimary.copy(alpha = 0.85f)
   val ringColor = if (onDark) Color.White.copy(alpha = 0.35f) else HaraanColors.BorderLight
+  val iconInk = if (outlinedIcons) Color(0xFF1E3A8A) else iconTint
+  val iconWell: Modifier = if (outlinedIcons)
+    Modifier.background(Color(0xFFF5F8FE), CircleShape).border(1.dp, Color(0xFFDCE6F8), CircleShape)
+  else Modifier
 
   val firstName = name.trim().substringBefore(' ').takeIf { it.isNotBlank() } ?: "there"
 
@@ -2567,9 +2609,13 @@ private fun GreetingHeader(
     Box(
       modifier = Modifier
         .size(44.dp)
+        .then(
+          if (outlinedIcons) Modifier.border(1.5.dp, Color(0xFF2563EB), CircleShape).padding(3.dp)
+          else Modifier
+        )
         .clip(CircleShape)
         .background(if (onDark) Color.White.copy(alpha = 0.14f) else HaraanColors.BorderLight)
-        .border(1.5.dp, ringColor, CircleShape)
+        .border(1.5.dp, if (outlinedIcons) Color.Transparent else ringColor, CircleShape)
         .clickable { onAvatarClick() },
       contentAlignment = Alignment.Center
     ) {
@@ -2636,6 +2682,7 @@ private fun GreetingHeader(
       Box(
         modifier = Modifier
           .size(40.dp)
+          .then(iconWell)
           .clip(CircleShape)
           .clickable { onChatClick() },
         contentAlignment = Alignment.Center
@@ -2643,13 +2690,14 @@ private fun GreetingHeader(
         Icon(
           imageVector = Icons.Outlined.ChatBubbleOutline,
           contentDescription = "Messages",
-          tint = iconTint,
-          modifier = Modifier.size(24.dp)
+          tint = iconInk,
+          modifier = Modifier.size(if (outlinedIcons) 20.dp else 24.dp)
         )
       }
       Box(
         modifier = Modifier
           .size(40.dp)
+          .then(iconWell)
           .clip(CircleShape)
           .clickable { onNotificationClick() },
         contentAlignment = Alignment.Center
@@ -2657,8 +2705,8 @@ private fun GreetingHeader(
         Icon(
           imageVector = Icons.Outlined.Notifications,
           contentDescription = "Notifications",
-          tint = iconTint,
-          modifier = Modifier.size(24.dp)
+          tint = iconInk,
+          modifier = Modifier.size(if (outlinedIcons) 20.dp else 24.dp)
         )
         if (hasUnread) {
           Box(
@@ -2677,6 +2725,7 @@ private fun GreetingHeader(
       Box(
         modifier = Modifier
           .size(40.dp)
+          .then(iconWell)
           .clip(CircleShape)
           .clickable { onCalendarClick() },
         contentAlignment = Alignment.Center
@@ -2684,8 +2733,8 @@ private fun GreetingHeader(
         Icon(
           imageVector = Icons.Outlined.CalendarMonth,
           contentDescription = "Calendar",
-          tint = iconTint,
-          modifier = Modifier.size(24.dp)
+          tint = iconInk,
+          modifier = Modifier.size(if (outlinedIcons) 20.dp else 24.dp)
         )
       }
     }
@@ -3043,7 +3092,7 @@ private fun GameHubSegmentedSwitch(
   onLight: Boolean = false,
 ) {
   val tabs = listOf("Events" to "Events", "GameHub" to "Pulse")
-  val containerBg = if (onLight) Color(0xFFEDEFF3) else Color.White.copy(alpha = 0.15f)
+  val containerBg = if (onLight) Color(0xFFEEF2F8) else Color.White.copy(alpha = 0.15f)
   val activeBg = Color.White
 
   BoxWithConstraints(
@@ -3115,16 +3164,16 @@ private fun PopularArenaCard(
   onClick: () -> Unit,
   index: Int = 0
 ) {
-  // Tactile press-scale + layered "floating glass" depth.
+  // The mobile web's reel card (.mhub__arena--v2): the photo sits in an inset frame, the card
+  // carries the hero's fine blue edge, sports are words, and a real Book key closes the foot.
   val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
   val pressed by interaction.collectIsPressedAsState()
-  val scale by animateFloatAsState(
-    targetValue = if (pressed) 0.97f else 1f,
+  val press by animateFloatAsState(
+    targetValue = if (pressed) 1f else 0f,
     animationSpec = spring(dampingRatio = 0.72f, stiffness = 380f),
     label = "venuePress"
   )
-  // Staggered entrance — each card fades up with a small index-based delay so the carousel
-  // feels composed on load instead of appearing as a static block.
+  // Staggered entrance — each card fades up with a small index-based delay.
   var appeared by remember { mutableStateOf(false) }
   LaunchedEffect(Unit) {
     kotlinx.coroutines.delay(index * 70L)
@@ -3135,125 +3184,187 @@ private fun PopularArenaCard(
     animationSpec = spring(dampingRatio = 0.85f, stiffness = 220f),
     label = "venueEnter"
   )
-  Card(
+  val blue = Color(0xFF2563EB)
+  val cardShape = RoundedCornerShape(22.dp)
+  Column(
     modifier = Modifier
-      .width(220.dp)
+      .width(244.dp)
       .graphicsLayer {
-        scaleX = scale; scaleY = scale
+        // A press sinks the card 2dp and the Book key's lip closes with it.
+        val s = 1f - 0.01f * press
+        scaleX = s; scaleY = s
         alpha = enter
-        translationY = (1f - enter) * 24f
+        translationY = (1f - enter) * 24f + press * 2.dp.toPx()
       }
-      .premiumCardShadow(radius = UnifiedCornerRadius, ambient = 14.dp, contact = 2.dp)
-      .clickable(interactionSource = interaction, indication = null) { onClick() },
-    shape = RoundedCornerShape(UnifiedCornerRadius), // 20dp — same as the Featured list cards
-    colors = CardDefaults.cardColors(containerColor = Color.White),
-    // No border — the soft shadow alone separates the card (one unified card language).
+      .shadow(10.dp, cardShape, ambientColor = blue.copy(alpha = 0.25f), spotColor = blue.copy(alpha = 0.4f))
+      .background(Color.White, cardShape)
+      .border(1.5.dp, blue, cardShape)
+      .clip(cardShape)
+      .clickable(interactionSource = interaction, indication = null) { onClick() }
+      .padding(6.dp)
   ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-      // Clean photo hero. No floating category pill or "Tonight" badge slapped on top —
-      // the image just carries the venue. Identity (sport), quality (rating) and
-      // availability live in the typographic block below, where hierarchy + spacing do
-      // the work. This is the single biggest change away from the "template" look.
+    Box(
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(138.dp)
+        .clip(RoundedCornerShape(17.dp))
+        .background(rememberShimmerBrush())
+    ) {
+      AsyncImage(
+        model = venue.imageUrl,
+        contentDescription = venue.title,
+        contentScale = ContentScale.Crop,
+        modifier = Modifier.fillMaxSize().graphicsLayer { val z = 1f + 0.03f * press; scaleX = z; scaleY = z }
+      )
+      // A soft band of shade at the top so the white rating chip never floats on a bright sky.
       Box(
-        modifier = Modifier
-          .fillMaxWidth()
-          .height(140.dp)
-          .background(rememberShimmerBrush())
-      ) {
-        AsyncImage(
-          model = venue.imageUrl,
-          contentDescription = venue.title,
-          contentScale = ContentScale.Crop,
-          modifier = Modifier.fillMaxSize()
-        )
-      }
-
-      Column(modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 14.dp)) {
-        // Title + rating share the first line — the two things the eye scans first, weighted
-        // so the name leads and the rating is a quiet gold anchor on the right (Airbnb pattern).
+        Modifier
+          .matchParentSize()
+          .background(Brush.verticalGradient(0f to Color(0x380F172A), 0.34f to Color.Transparent))
+      )
+      val ratingValue = venue.rating.toFloatOrNull()
+      if (ratingValue != null && ratingValue > 0f) {
         Row(
-          modifier = Modifier.fillMaxWidth(),
+          modifier = Modifier
+            .align(Alignment.TopEnd)
+            .padding(8.dp)
+            .shadow(2.dp, CircleShape)
+            .background(Color.White.copy(alpha = 0.95f), CircleShape)
+            .padding(horizontal = 8.dp, vertical = 3.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Text(
-            text = venue.title,
-            color = HaraanColors.TextPrimary,
-            style = HaraanTypography.TitleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.Bold),
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-          )
-          val ratingValue = venue.rating.toFloatOrNull()
-          if (ratingValue != null && ratingValue > 0f) {
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(text = "★", color = HaraanColors.RatingGold, fontSize = 13.sp)
-            Spacer(modifier = Modifier.width(3.dp))
-            Text(
-              text = venue.rating,
-              color = HaraanColors.TextPrimary,
-              fontWeight = FontWeight.Bold,
-              fontSize = 13.sp
-            )
-          }
+          Text(text = "★", color = HaraanColors.RatingGold, fontSize = 11.sp)
+          Spacer(modifier = Modifier.width(3.dp))
+          Text(text = venue.rating, color = HaraanColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
         }
+      }
+    }
 
-        Spacer(modifier = Modifier.height(4.dp))
-
-        // Secondary line — the sport(s) you can play + the room detail, in one quiet muted row.
-        // Replaces the loud category pill that used to sit on the image.
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          if (venue.sports.isNotEmpty()) {
-            VenueSportsIcons(sports = venue.sports)
-            Spacer(modifier = Modifier.width(7.dp))
-          }
+    Column(modifier = Modifier.padding(start = 6.dp, end = 6.dp, top = 11.dp, bottom = 4.dp)) {
+      Text(
+        text = venue.title,
+        color = Color(0xFF0F172A),
+        style = HaraanTypography.TitleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.2).sp),
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+      )
+      // Where it is · how far — the distance only when there is one.
+      val distanceText = venue.distance.takeIf { it.isNotBlank() }
+        ?.let { if (it.endsWith("km") || it.endsWith(" m")) "$it away" else it }
+      val meta = listOfNotNull(venue.location.takeIf { it.isNotBlank() }, distanceText).joinToString(" · ")
+      if (meta.isNotBlank()) {
+        Row(modifier = Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+          Icon(
+            imageVector = Icons.Outlined.LocationOn,
+            contentDescription = null,
+            tint = Color(0xFF94A3B8),
+            modifier = Modifier.size(13.dp)
+          )
+          Spacer(modifier = Modifier.width(4.dp))
           Text(
-            text = venue.tagline,
-            color = HaraanColors.TextSecondary,
-            style = HaraanTypography.BodyMedium.copy(fontSize = 13.sp),
+            text = meta,
+            color = Color(0xFF64748B),
+            fontSize = 12.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
           )
         }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        // Price is the commitment signal (strong ink). Distance is quiet metadata — plain
-        // text, no slate pill, so nothing competes with the price for attention.
+      }
+      // Sports as words (two, then +N) — a lone racket glyph read as a magnifier.
+      val sports = venue.sports.ifEmpty { listOfNotNull(venue.category.takeIf { it.isNotBlank() }) }
+        .map { sportDisplayName(it) }.distinct()
+      if (sports.isNotEmpty()) {
         Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.SpaceBetween,
+          modifier = Modifier.padding(top = 9.dp),
+          horizontalArrangement = Arrangement.spacedBy(5.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Row(verticalAlignment = Alignment.Bottom) {
-            Text(
-              text = "₹${venue.price}",
-              color = HaraanColors.TextPrimary,
-              fontWeight = FontWeight.ExtraBold,
-              fontSize = 16.sp
-            )
-            Text(
-              text = " /hr",
-              color = HaraanColors.TextMuted,
-              fontSize = 12.sp,
-              modifier = Modifier.padding(bottom = 1.dp)
+          sports.take(2).forEach { sport ->
+            Box(
+              modifier = Modifier
+                .height(22.dp)
+                .background(Color(0xFFF1F5F9), RoundedCornerShape(7.dp))
+                .padding(horizontal = 8.dp),
+              contentAlignment = Alignment.Center
+            ) {
+              Text(text = sport, color = Color(0xFF334155), fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+            }
+          }
+          if (sports.size > 2) {
+            Text(text = "+${sports.size - 2}", color = Color(0xFF64748B), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+          }
+        }
+      }
+
+      // Foot: dashed rule, the price on its own baseline, and the Book key.
+      Spacer(modifier = Modifier.height(11.dp))
+      Box(
+        Modifier
+          .fillMaxWidth()
+          .height(1.dp)
+          .drawBehind {
+            drawLine(
+              color = Color(0xFFE2E8F0),
+              start = Offset(0f, size.height / 2),
+              end = Offset(size.width, size.height / 2),
+              strokeWidth = 1.dp.toPx(),
+              pathEffect = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx()))
             )
           }
-          if (venue.distance.isNotBlank()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+      )
+      Spacer(modifier = Modifier.height(10.dp))
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(verticalAlignment = Alignment.Bottom) {
+          Text(
+            text = "₹" + "%,d".format(venue.price),
+            color = Color(0xFF0F172A),
+            fontWeight = FontWeight.ExtraBold,
+            fontSize = 17.sp,
+            letterSpacing = (-0.3).sp
+          )
+          Text(
+            text = " /hr",
+            color = Color(0xFF64748B),
+            fontSize = 11.sp,
+            modifier = Modifier.padding(bottom = 2.dp)
+          )
+        }
+        // The key: blue like every action, with a 2dp lip under it that a press closes, and a
+        // white round arrow that steps on.
+        Box {
+          Box(
+            Modifier
+              .matchParentSize()
+              .graphicsLayer { translationY = (1f - press) * 2.dp.toPx() }
+              .background(Color(0xFF1D4ED8), CircleShape)
+          )
+          Row(
+            modifier = Modifier
+              .graphicsLayer { translationY = press * 2.dp.toPx() }
+              .height(36.dp)
+              .background(blue, CircleShape)
+              .padding(start = 14.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            Text(text = "Book", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold)
+            Box(
+              modifier = Modifier
+                .graphicsLayer { translationX = press * 3.dp.toPx() }
+                .size(28.dp)
+                .shadow(1.dp, CircleShape)
+                .background(Color.White, CircleShape),
+              contentAlignment = Alignment.Center
+            ) {
               Icon(
-                imageVector = Icons.Default.LocationOn,
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                 contentDescription = null,
-                tint = HaraanColors.TextMuted,
-                modifier = Modifier.size(12.dp)
-              )
-              Spacer(modifier = Modifier.width(3.dp))
-              Text(
-                text = venue.distance,
-                color = HaraanColors.TextSecondary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                softWrap = false
+                tint = blue,
+                modifier = Modifier.size(15.dp)
               )
             }
           }
