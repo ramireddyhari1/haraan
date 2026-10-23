@@ -62,6 +62,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Apartment
+import androidx.compose.material.icons.filled.WorkspacePremium
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.CheckCircle
@@ -6633,7 +6634,11 @@ private fun CrexTabsSection(
     TabItem("Finished", Icons.Default.CheckCircle),
     TabItem("Scheduled", Icons.Default.Event),
     TabItem("District", Icons.Default.Apartment),
-    TabItem("State", Icons.Default.AccountBalance)
+    TabItem("State", Icons.Default.AccountBalance),
+    // Pro / Hero, for everyone — free and brand-new players included. It is a door, not a
+    // page: the plans screen owns sign-in and checkout, so this tab opens it and the board
+    // stays on whichever tab the reader was on.
+    TabItem("Plans", Icons.Default.WorkspacePremium)
   )
 
   Column(
@@ -6656,11 +6661,15 @@ private fun CrexTabsSection(
         Column(
           modifier = Modifier
             .weight(1f)
-            .clickable { onTabSelected(index) }
+            .clickable {
+              if (index == plansIndex) com.haraan.app.data.membership.MembershipNav.open()
+              else onTabSelected(index)
+            }
             .padding(top = 8.dp),
           horizontalAlignment = Alignment.CenterHorizontally,
           verticalArrangement = Arrangement.Center
         ) {
+  val plansIndex = tabs.lastIndex
           // The active tab's icon sits in a soft blue chip — a physical highlight that lifts
           // the current tab out of the flat row.
           val chipBg by androidx.compose.animation.animateColorAsState(
@@ -6692,9 +6701,12 @@ private fun CrexTabsSection(
 
           Text(
             text = tab.title,
-            fontSize = 12.5.sp,
+            // Six tabs share a 360dp phone — "Scheduled" only fits its slot at 11sp.
+            fontSize = 11.sp,
             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-            color = tabColor
+            color = tabColor,
+            maxLines = 1,
+            softWrap = false,
           )
 
         }
