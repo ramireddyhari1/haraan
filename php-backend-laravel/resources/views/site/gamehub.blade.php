@@ -268,6 +268,74 @@
         padding: 22px 26px 20px; background: #fff; border: 1.5px solid var(--blue); border-radius: 28px;
         box-shadow: 0 10px 24px -14px rgba(37, 99, 235, .45), 0 2px 4px -2px rgba(15, 23, 42, .08);
     }
+    .dhub__panel { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 28px; align-items: end; }
+    .dhub__panel > * { position: relative; z-index: 1; }
+    .dhub__intro { grid-column: 1; align-self: start; }
+    .dhub__panel .dhub__chips { grid-column: 1 / -1; }
+
+    /* Pitch markings under the panel, fading out before they reach the title. */
+    .dhub__panel > .dhub__lines {
+        position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; pointer-events: none;
+        -webkit-mask-image: linear-gradient(90deg, transparent 35%, #000 70%);
+        mask-image: linear-gradient(90deg, transparent 35%, #000 70%);
+    }
+    .dhub__lines path { fill: none; stroke: #E6EDF9; stroke-width: 1.5; }
+    .dhub__lines circle { fill: #E6EDF9; }
+
+    /* The drawing: courts tilted back onto the ground, between two masts. */
+    .dhub__art { grid-column: 2; grid-row: 1; display: flex; align-items: flex-end; gap: 6px; margin-right: -6px; }
+    .dhub__courts { position: relative; display: flex; align-items: flex-end; gap: 18px; padding: 0 6px 2px; }
+    /* The ground they stand on: one hairline running mast to mast, under the plates. */
+    .dhub__courts::before { content: ""; position: absolute; left: -30px; right: -30px; bottom: 40px; height: 1px; background: linear-gradient(90deg, transparent, #CBD8EE 12%, #CBD8EE 88%, transparent); }
+    .dcourt { display: flex; flex-direction: column; align-items: center; width: 150px; color: var(--blue); }
+    .dcourt__plate {
+        width: 100%; aspect-ratio: 160 / 100; border-radius: 9px; background: #F7FAFF; border: 1.5px solid #BFD3FB;
+        transform: perspective(560px) rotateX(36deg); transform-origin: 50% 100%;
+        box-shadow: 0 5px 0 #D6E3FA, 0 22px 18px -12px rgba(37, 99, 235, .38);
+        transition: transform .3s cubic-bezier(.2, .8, .3, 1.2), background-color .2s, border-color .2s, box-shadow .3s;
+    }
+    .dcourt__plate svg { display: block; width: 100%; height: 100%; overflow: visible; }
+    .dcourt.is-on .dcourt__plate, .dcourt.is-hover .dcourt__plate {
+        background: #EEF4FF; border-color: var(--blue);
+        transform: perspective(560px) rotateX(28deg) translateY(-8px);
+        box-shadow: 0 5px 0 #BFD3FB, 0 30px 22px -12px rgba(37, 99, 235, .5);
+    }
+    .dcourt.is-empty { color: var(--faint); }
+    .dcourt.is-empty .dcourt__plate { border-style: dashed; background: #FBFCFE; box-shadow: none; }
+    .dcourt__label { display: flex; flex-direction: column; align-items: center; margin-top: 12px; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+    .dcourt__label b { font-size: 13px; font-weight: 800; color: var(--ink); letter-spacing: -.01em; }
+    .dcourt.is-on .dcourt__label b { color: var(--deep); }
+
+    .dc-ln, .dc-dash, .dc-net { fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; }
+    .dc-ln { stroke-width: 1.5; }
+    .dc-dash { stroke-width: 1.1; stroke-dasharray: 3 3; opacity: .7; }
+    .dc-net { stroke: var(--deep); stroke-width: 2.2; }
+    .dc-dot { fill: currentColor; }
+    .dcourt.is-on .dc-ln, .dcourt.is-hover .dc-ln { stroke-width: 1.9; }
+    @media (prefers-reduced-motion: no-preference) {
+        /* Lines draw themselves in, court by court. */
+        .dc-ln { stroke-dasharray: 1; stroke-dashoffset: 1; animation: dc-draw 1.1s cubic-bezier(.4, 0, .2, 1) forwards; animation-delay: calc(var(--i, 0) * .18s + .15s); }
+        .dc-net, .dc-dot { opacity: 0; animation: dc-fade .5s ease forwards; animation-delay: calc(var(--i, 0) * .18s + .9s); }
+        .dc-dash { opacity: 0; animation: dc-fade-dash .5s ease forwards; animation-delay: calc(var(--i, 0) * .18s + .9s); }
+        @keyframes dc-draw { to { stroke-dashoffset: 0; } }
+        @keyframes dc-fade { to { opacity: 1; } }
+        @keyframes dc-fade-dash { to { opacity: .7; } }
+    }
+
+    /* Masts: steel lines; the lamp head glows only while a venue here is open. */
+    .dmast { flex: none; display: block; overflow: visible; }
+    .dmast__pole, .dmast__grid { fill: none; stroke: #94A3B8; stroke-width: 1.2; stroke-linecap: round; }
+    .dmast__head { fill: #fff; stroke: #94A3B8; stroke-width: 1.5; }
+    .dmast__head.is-lit { fill: #FEF3C7; stroke: #F59E0B; }
+    .dhub__art.is-lit .dmast__grid { stroke: #F59E0B; }
+    .dmast__beam { fill: rgba(253, 230, 138, .32); }
+    @media (prefers-reduced-motion: no-preference) {
+        .dhub__art.is-lit .dmast__beam { animation: dmast-hum 3.2s ease-in-out infinite alternate; }
+        @keyframes dmast-hum { from { opacity: .75; } to { opacity: 1; } }
+    }
+    @media (max-width: 1280px) { .dcourt:nth-child(n+4) { display: none; } }
+    @media (max-width: 1000px) { .dhub__art, .dhub__panel > .dhub__lines { display: none; } }
+
     .dhub__crumbs { display: flex; gap: 8px; font-size: 13px; color: var(--muted); }
     .dhub__crumbs a { color: var(--muted); text-decoration: none; }
     .dhub__crumbs a:hover { color: var(--ink); }
@@ -737,10 +805,70 @@
     $dWhere = $selectedCity ?: null;
     $dSportWord = $selectedSport === 'All' ? null : strtolower($selectedSport);
     $dCricketish = $selectedSport === 'All' || $selectedSport === 'Cricket';
+
+    // The head panel's drawing: one line-art court per sport this city sells
+    // (most venues first, up to four), so the picture is the catalogue. The
+    // floodlights are lit only while a venue here is open right now.
+    $dArtSports = $dSportCounts->filter(fn ($c) => $c > 0)->take(4);
+    $dLit = $hubOpenNow > 0;
+    $dCourtLines = function (string $sport): string {
+        $s = strtolower($sport);
+        $ln = fn (string $d, string $cls = 'dc-ln') => '<path class="'.$cls.'" pathLength="1" d="'.$d.'"/>';
+        $ring = fn (float $cx, float $cy, float $rx, float $ry) => 'M'.($cx - $rx).' '.$cy.'a'.$rx.' '.$ry.' 0 1 0 '.(2 * $rx).' 0a'.$rx.' '.$ry.' 0 1 0 '.(-2 * $rx).' 0';
+        $box = 'M8 8h144v84H8z';
+        $net = '<path class="dc-net" d="M80 2v96"/><circle class="dc-dot" cx="80" cy="2" r="2"/><circle class="dc-dot" cx="80" cy="98" r="2"/>';
+
+        return match (true) {
+            str_contains($s, 'cricket') =>
+                $ln($ring(80, 50, 72, 42))
+                .'<path class="dc-dash" d="'.$ring(80, 50, 46, 26).'"/>'
+                .$ln('M60 45h40v10H60z').$ln('M64 41v18M96 41v18')
+                .'<circle class="dc-dot" cx="61.5" cy="50" r="1.6"/><circle class="dc-dot" cx="98.5" cy="50" r="1.6"/>',
+            str_contains($s, 'football') || str_contains($s, 'soccer') || str_contains($s, 'futsal') =>
+                $ln($box).$ln('M80 8v84').$ln($ring(80, 50, 13, 13))
+                .$ln('M8 28h22v44H8M152 28h-22v44h22').$ln('M8 40h8v20H8M152 40h-8v20h8')
+                .$ln('M30 43a9 9 0 0 1 0 14M130 43a9 9 0 0 0 0 14')
+                .'<circle class="dc-dot" cx="80" cy="50" r="1.6"/>',
+            str_contains($s, 'basket') =>
+                $ln($box).$ln('M80 8v84').$ln($ring(80, 50, 11, 11))
+                .$ln('M8 38h26v24H8M152 38h-26v24h26')
+                .$ln('M8 14a40 36 0 0 1 0 72M152 14a40 36 0 0 0 0 72')
+                .'<circle class="dc-dot" cx="14" cy="50" r="2.2"/><circle class="dc-dot" cx="146" cy="50" r="2.2"/>',
+            str_contains($s, 'volley') =>
+                $ln($box).$ln('M56 8v84M104 8v84').$net,
+            str_contains($s, 'swim') || str_contains($s, 'pool') =>
+                $ln($box).'<path class="dc-dash" d="M8 26h144M8 42h144M8 58h144M8 74h144"/>',
+            str_contains($s, 'pickle') =>
+                $ln($box).$ln('M64 8v84M96 8v84').$ln('M8 50h56M96 50h56').$net,
+            str_contains($s, 'tennis') && ! str_contains($s, 'table') =>
+                $ln($box).$ln('M8 20h144M8 80h144').$ln('M44 20v60M116 20v60').$ln('M44 50h72').$net,
+            str_contains($s, 'badminton') || str_contains($s, 'squash') || str_contains($s, 'padel') =>
+                $ln($box).$ln('M8 15h144M8 85h144').$ln('M16 8v84M144 8v84').$ln('M62 8v84M98 8v84').$ln('M8 50h54M98 50h54').$net,
+            default =>
+                $ln($box).$ln('M80 8v84').$ln($ring(80, 50, 12, 12)),
+        };
+    };
+    // A floodlight mast, line-drawn; $flip mirrors it for the right-hand side.
+    $dMast = function (bool $flip) use ($dLit): string {
+        $t = $flip ? ' transform="translate(48 0) scale(-1 1)"' : '';
+        return '<svg class="dmast" viewBox="0 0 48 150" width="48" height="150" aria-hidden="true"><g'.$t.'>'
+            .($dLit ? '<path class="dmast__beam" d="M14 26 L48 150 H0 Z"/>' : '')
+            .'<path class="dmast__pole" d="M11 150V28M17 150V28M11 34l6 12-6 12 6 12-6 12 6 12-6 12 6 12-6 12 6 12"/>'
+            .'<rect class="dmast__head'.($dLit ? ' is-lit' : '').'" x="2" y="12" width="26" height="16" rx="3"/>'
+            .'<path class="dmast__grid" d="M10.5 12v16M19.5 12v16M2 20h26"/>'
+            .'</g></svg>';
+    };
 @endphp
 
 <section class="dhub" aria-label="Pulse venues">
     <header class="dhub__panel">
+        {{-- Pitch markings run under the panel: a halfway line, centre circle and box. --}}
+        <svg class="dhub__lines" viewBox="0 0 1200 260" preserveAspectRatio="xMaxYMid slice" aria-hidden="true">
+            <path d="M1210 40h-96v180h96M1210 92h-40v76h40M1114 100a34 34 0 0 0 0 60"/>
+            <circle cx="1150" cy="130" r="3"/>
+        </svg>
+
+        <div class="dhub__intro">
         <nav class="dhub__crumbs" aria-label="Breadcrumb"><a href="/">Haraan</a><span aria-hidden="true">/</span>Pulse</nav>
         <h1>
             {{ $dSportWord ? ucfirst($dSportWord) . ' venues' : 'Turfs & courts' }}
@@ -757,6 +885,27 @@
                 @endif
             </p>
         @endif
+        </div>
+
+        {{-- The catalogue, drawn: each sport here as its own court standing on the
+             ground, between two floodlight masts. --}}
+        <div class="dhub__art {{ $dLit ? 'is-lit' : '' }}" aria-hidden="true">
+            {!! $dMast(false) !!}
+            <div class="dhub__courts">
+                @forelse($dArtSports as $sport => $count)
+                    <div class="dcourt {{ strcasecmp($sport, $selectedSport) === 0 ? 'is-on' : '' }}" data-k="{{ \Illuminate\Support\Str::slug($sport) }}" style="--i: {{ $loop->index }}">
+                        <div class="dcourt__plate"><svg viewBox="0 0 160 100">{!! $dCourtLines((string) $sport) !!}</svg></div>
+                        <span class="dcourt__label"><b>{{ $sport }}</b>{{ $count }} {{ \Illuminate\Support\Str::plural('venue', $count) }}</span>
+                    </div>
+                @empty
+                    <div class="dcourt is-empty" style="--i: 0">
+                        <div class="dcourt__plate"><svg viewBox="0 0 160 100">{!! $dCourtLines('') !!}</svg></div>
+                        <span class="dcourt__label"><b>No grounds yet</b>{{ $dWhere ?: 'nearby' }}</span>
+                    </div>
+                @endforelse
+            </div>
+            {!! $dMast(true) !!}
+        </div>
 
         {{-- ?sport= links: the split and the live board are recomputed server-side,
              same as the phone chips. --}}
@@ -766,7 +915,7 @@
                 All<em>{{ $dTotalAll }}</em>
             </a>
             @foreach($dSportCounts as $sport => $count)
-                <a class="dhub__chip {{ strcasecmp($sport, $selectedSport) === 0 ? 'is-on' : '' }}" href="/gamehub?sport={{ urlencode($sport) }}">
+                <a class="dhub__chip {{ strcasecmp($sport, $selectedSport) === 0 ? 'is-on' : '' }}" href="/gamehub?sport={{ urlencode($sport) }}" data-k="{{ \Illuminate\Support\Str::slug($sport) }}">
                     <span class="dhub__chip-well"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $hubIcons[$hubGlyphKey((string) $sport)] !!}</svg></span>
                     {{ $sport }}@if($count > 0)<em>{{ $count }}</em>@endif
                 </a>
@@ -960,6 +1109,18 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     setTop();
     addEventListener('resize', setTop, { passive: true });
+
+    // Pointing at a sport chip lifts that sport's court in the drawing.
+    document.querySelectorAll('.dhub__chip[data-k]').forEach(chip => {
+        const court = document.querySelector('.dcourt[data-k="' + chip.dataset.k + '"]');
+        if (!court) return;
+        const on = () => court.classList.add('is-hover');
+        const off = () => court.classList.remove('is-hover');
+        chip.addEventListener('mouseenter', on);
+        chip.addEventListener('mouseleave', off);
+        chip.addEventListener('focus', on);
+        chip.addEventListener('blur', off);
+    });
 
     const sort = document.getElementById('dhubSort');
     const grid = document.getElementById('dhubGrid');
