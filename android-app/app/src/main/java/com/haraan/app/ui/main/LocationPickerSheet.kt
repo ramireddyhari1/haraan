@@ -45,7 +45,10 @@ import com.haraan.app.data.LocationState
 import com.haraan.app.ui.Feel
 import com.haraan.app.ui.pressable
 import com.haraan.app.ui.theme.HaraanColors
+import com.haraan.app.ui.util.VenueMap
 import androidx.compose.ui.platform.LocalContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private val Accent = HaraanColors.EventsBlue
 private val Ink = HaraanColors.TextPrimary
@@ -78,6 +81,9 @@ fun LocationPickerSheet(
     // Sourced from the shared cities.json catalog; falls back to popular-only when empty.
     popularCities: List<CityOption> = emptyList(),
     allCities: List<CityOption> = emptyList(),
+    // A Google Places result was tapped. Returns false when it couldn't be resolved,
+    // which leaves the sheet open on the list.
+    onSelectPlace: (suspend (VenueMap.PlaceSuggestion, String) -> Boolean)? = null,
 ) {
     var citySearch by remember { mutableStateOf("") }
     val q = citySearch.trim()
@@ -85,6 +91,29 @@ fun LocationPickerSheet(
     // Blank query → the popular shortlist; typing → search the whole catalog.
     val cityResults = if (q.isBlank()) popularCities
         else allCities.filter { it.name.contains(q, ignoreCase = true) }
+
+    // The catalog only knows served cities. Typing also asks Google Places, the same as
+    // the web sheet, so an area or village outside cities.json can still be picked.
+    // One session token covers the keystrokes and the pick; it's renewed after a pick.
+    var sessionToken by remember { mutableStateOf(java.util.UUID.randomUUID().toString()) }
+    var placeResults by remember { mutableStateOf<List<VenueMap.PlaceSuggestion>>(emptyList()) }
+    var searchingPlaces by remember { mutableStateOf(false) }
+    var pickingPlaceId by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(q) {
+        if (onSelectPlace == null || q.length < 2) {
+            placeResults = emptyList()
+            searchingPlaces = false
+            return@LaunchedEffect
+        }
+        searchingPlaces = true
+        delay(250) // debounce: a new keystroke cancels this effect before it calls out
+        // Drop rows that just repeat a catalog city already listed above.
+        val catalogNames = cityResults.map { it.name.lowercase() }.toSet()
+        placeResults = VenueMap.autocomplete(q, sessionToken)
+            .filterNot { it.main.lowercase() in catalogNames }
+        searchingPlaces = false
+    }
 
     val resolved = state as? LocationState.Resolved
     val currentCity = resolved?.city.orEmpty()
@@ -144,12 +173,14 @@ fun LocationPickerSheet(
             }
 
             Spacer(Modifier.height(18.dp))
-            SectionLabel(
-                if (q.isBlank()) "Popular cities" else "Matches",
-                trailing = if (q.isBlank() || cityResults.isEmpty()) null
-                    else "${cityResults.size} found",
-            )
-            Spacer(Modifier.height(4.dp))
+            // No catalog hit while typing: the Places list below carries its own label.
+            if (q.isBlank() || cityResults.isNotEmpty()) {
+                SectionLabel(
+                    if (q.isBlank()) "Popular cities" else "Matches",
+                    trailing = if (q.isBlank()) null else "${cityResults.size} found",
+                )
+                Spacer(Modifier.height(4.dp))
+            }
 
             LazyColumn(
                 modifier = Modifier
@@ -166,11 +197,49 @@ fun LocationPickerSheet(
                         HorizontalDivider(thickness = 1.dp, color = Track)
                     }
                 }
-                if (cityResults.isEmpty()) {
+                if (placeResults.isNotEmpty()) {
+                    item {
+                        if (cityResults.isNotEmpty()) Spacer(Modifier.height(16.dp))
+                        SectionLabel("Areas & places")
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    itemsIndexed(placeResults) { index, place ->
+                        PlaceRow(
+                            place = place,
+                            picking = pickingPlaceId == place.placeId,
+                            onSelect = {
+                                val select = onSelectPlace ?: return@PlaceRow
+                                if (pickingPlaceId != null) return@PlaceRow
+                                pickingPlaceId = place.placeId
+                                scope.launch {
+                                    val ok = select(place, sessionToken)
+                                    sessionToken = java.util.UUID.randomUUID().toString()
+                                    if (!ok) pickingPlaceId = null
+                                }
+                            },
+                        )
+                        if (index < placeResults.lastIndex) {
+                            HorizontalDivider(thickness = 1.dp, color = Track)
+                        }
+                    }
+                }
+                if (q.isNotBlank() && cityResults.isEmpty() && placeResults.isEmpty() && searchingPlaces) {
+                    item {
+                        Row(
+                            Modifier.padding(top = 22.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp, color = Accent)
+                            Text("Searching places…", fontSize = 13.sp, color = Muted)
+                        }
+                    }
+                }
+                if (cityResults.isEmpty() && placeResults.isEmpty() && !searchingPlaces) {
                     item {
                         Column(Modifier.padding(top = 22.dp)) {
                             Text(
-                                "No city called “$q”",
+                                "No place called “$q”",
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = Ink,
@@ -399,7 +468,7 @@ private fun CitySearchField(
             decorationBox = { inner ->
                 if (value.isEmpty()) {
                     Text(
-                        "Search any city in India",
+                        "Search a city or area in India",
                         color = Faint,
                         fontSize = 14.5.sp,
                         maxLines = 1,
@@ -517,6 +586,50 @@ private fun CityRow(city: CityOption, current: Boolean, onSelect: (CityOption) -
                 tint = Accent,
                 modifier = Modifier.size(18.dp),
             )
+        }
+    }
+}
+
+/** A Google Places result: the area's name over its "District, State" line. */
+@Composable
+private fun PlaceRow(place: VenueMap.PlaceSuggestion, picking: Boolean, onSelect: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pressable(haptic = Feel.SELECT, onClick = onSelect)
+            .height(56.dp)
+            .padding(end = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(
+            Icons.Default.LocationOn,
+            contentDescription = null,
+            tint = Color(0xFFCBD5E1),
+            modifier = Modifier.size(18.dp),
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                place.main,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.Medium,
+                color = Ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (place.secondary.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    place.secondary,
+                    fontSize = 11.5.sp,
+                    color = Faint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        if (picking) {
+            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp, color = Accent)
         }
     }
 }

@@ -664,7 +664,15 @@ internal fun MainAppContainer(
       },
       onDismiss = { showLocationSheet = false },
       popularCities = locationRepository.popularCities(),
-      allCities = locationRepository.allCities()
+      allCities = locationRepository.allCities(),
+      onSelectPlace = { place, token ->
+        val resolved = locationRepository.selectPlace(place, token)
+        if (resolved != null) {
+          locationState = resolved
+          showLocationSheet = false
+        }
+        resolved != null
+      }
     )
   }
 

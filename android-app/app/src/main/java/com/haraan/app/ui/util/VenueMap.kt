@@ -145,4 +145,115 @@ object VenueMap {
             else Place(city, district, area)
         }.getOrNull()
     }
+
+    /** One row of a Places search: the place's own name and the "District, State" under it. */
+    data class PlaceSuggestion(val placeId: String, val main: String, val secondary: String)
+
+    /** A picked place, with the coordinates the search row doesn't carry. */
+    data class PickedPlace(
+        val name: String,
+        val city: String,
+        val district: String,
+        val lat: Double,
+        val lng: Double,
+    )
+
+    /**
+     * Google Places (New) autocomplete, India only — the same search the web location
+     * sheet runs, so a village or neighbourhood that isn't in cities.json is still
+     * findable. [sessionToken] ties the keystrokes and the final [placeDetails] call
+     * into one billed session. Empty on any failure.
+     */
+    suspend fun autocomplete(input: String, sessionToken: String): List<PlaceSuggestion> =
+        withContext(Dispatchers.IO) {
+            if (input.isBlank() || !hasKey) return@withContext emptyList()
+            runCatching {
+                val body = JSONObject()
+                    .put("input", input)
+                    .put("includedRegionCodes", org.json.JSONArray().put("in"))
+                    .put("languageCode", "en")
+                    .put("sessionToken", sessionToken)
+                val conn = (URL("https://places.googleapis.com/v1/places:autocomplete")
+                    .openConnection() as java.net.HttpURLConnection).apply {
+                    requestMethod = "POST"
+                    connectTimeout = 8_000
+                    readTimeout = 8_000
+                    doOutput = true
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("X-Goog-Api-Key", key)
+                }
+                try {
+                    conn.outputStream.use { it.write(body.toString().toByteArray()) }
+                    if (conn.responseCode !in 200..299) return@runCatching emptyList()
+                    val suggestions = JSONObject(conn.inputStream.bufferedReader().readText())
+                        .optJSONArray("suggestions") ?: return@runCatching emptyList()
+                    buildList {
+                        for (i in 0 until suggestions.length()) {
+                            val p = suggestions.getJSONObject(i).optJSONObject("placePrediction") ?: continue
+                            val id = p.optString("placeId")
+                            val fmt = p.optJSONObject("structuredFormat")
+                            val main = fmt?.optJSONObject("mainText")?.optString("text").orEmpty()
+                                .ifBlank { p.optJSONObject("text")?.optString("text").orEmpty() }
+                            val secondary = fmt?.optJSONObject("secondaryText")?.optString("text").orEmpty()
+                            if (id.isNotBlank() && main.isNotBlank()) add(PlaceSuggestion(id, main, secondary))
+                        }
+                    }
+                } finally {
+                    conn.disconnect()
+                }
+            }.getOrDefault(emptyList())
+        }
+
+    /**
+     * Coordinates and the town a picked suggestion belongs to. Areas often carry no
+     * `locality` (Vaddeswaram comes back as a neighbourhood under Guntur's
+     * administrative_area_level_3), so the town falls back down the admin levels.
+     */
+    suspend fun placeDetails(placeId: String, sessionToken: String): PickedPlace? =
+        withContext(Dispatchers.IO) {
+            if (placeId.isBlank() || !hasKey) return@withContext null
+            runCatching {
+                val url = Uri.parse("https://places.googleapis.com/v1/places/$placeId").buildUpon()
+                    .appendQueryParameter("languageCode", "en")
+                    .appendQueryParameter("sessionToken", sessionToken)
+                    .build()
+                    .toString()
+                val conn = (URL(url).openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = 8_000
+                    readTimeout = 8_000
+                    setRequestProperty("X-Goog-Api-Key", key)
+                    setRequestProperty("X-Goog-FieldMask", "displayName,location,addressComponents")
+                }
+                try {
+                    if (conn.responseCode !in 200..299) return@runCatching null
+                    val json = JSONObject(conn.inputStream.bufferedReader().readText())
+                    val loc = json.optJSONObject("location") ?: return@runCatching null
+                    val byType = mutableMapOf<String, String>()
+                    val components = json.optJSONArray("addressComponents")
+                    if (components != null) {
+                        for (i in 0 until components.length()) {
+                            val c = components.getJSONObject(i)
+                            val name = c.optString("longText")
+                            val types = c.optJSONArray("types") ?: continue
+                            for (t in 0 until types.length()) byType.putIfAbsent(types.optString(t), name)
+                        }
+                    }
+                    val name = json.optJSONObject("displayName")?.optString("text").orEmpty()
+                    val district = byType["administrative_area_level_2"].orEmpty()
+                    val city = byType["locality"]
+                        ?: byType["postal_town"]
+                        ?: byType["administrative_area_level_3"]
+                        ?: district.ifBlank { name }
+                    PickedPlace(
+                        name = name.ifBlank { city },
+                        city = city,
+                        district = district,
+                        lat = loc.getDouble("latitude"),
+                        lng = loc.getDouble("longitude"),
+                    )
+                } finally {
+                    conn.disconnect()
+                }
+            }.getOrNull()
+        }
 }

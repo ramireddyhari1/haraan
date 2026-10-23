@@ -180,6 +180,42 @@ class LocationRepository(private val context: Context) {
         )
     }
 
+    /**
+     * Select a Google Places search result — an area, village or neighbourhood the city
+     * catalog doesn't list. The place's own name becomes the area and its town (mapped
+     * through the catalog's aliases) the city, pinned to the place's exact coordinates.
+     * Saved as a manual pick so opening the app doesn't snap back to GPS. Null when the
+     * place can't be resolved, so the caller can keep the sheet open.
+     */
+    suspend fun selectPlace(
+        suggestion: com.haraan.app.ui.util.VenueMap.PlaceSuggestion,
+        sessionToken: String,
+    ): LocationState? {
+        val place = com.haraan.app.ui.util.VenueMap.placeDetails(suggestion.placeId, sessionToken)
+            ?: return null
+        val city = CityCatalog.normalize(place.city).ifBlank { place.name }
+        val area = place.name.takeUnless { it.equals(city, ignoreCase = true) }.orEmpty()
+        val plusCode = PlusCode.localCode(place.lat, place.lng)
+        prefs.edit()
+            .putString("city", city)
+            .putString("district", place.district)
+            .putString("area", area)
+            .putString("plusCode", plusCode)
+            .putString("lat", place.lat.toString())
+            .putString("lng", place.lng.toString())
+            .putString("source", SOURCE_MANUAL)
+            .apply()
+        addRecent(city)
+        return LocationState.Resolved(
+            city = city,
+            district = place.district,
+            area = area,
+            plusCode = plusCode,
+            latitude = place.lat,
+            longitude = place.lng,
+        )
+    }
+
     suspend fun detectCurrent(): LocationState {
         if (!hasPermission()) return LocationState.Denied
         // Ask BEFORE burning twelve seconds on a fix that cannot arrive.
