@@ -120,6 +120,9 @@ class LocationRepository(private val context: Context) {
         }
     }
 
+    /** The saved place was chosen in the picker rather than read from GPS. */
+    fun pickedByHand(): Boolean = prefs.getString("source", null) == SOURCE_MANUAL
+
     fun recents(): List<CityOption> {
         val raw = prefs.getString("recents", "") ?: return emptyList()
         return raw.split("|").filter { it.isNotBlank() }.map { CityOption(it) }

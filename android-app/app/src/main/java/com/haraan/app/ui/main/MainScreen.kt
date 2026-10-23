@@ -657,7 +657,11 @@ internal fun MainAppContainer(
         // so distance-based sorting (events) and the 30 km venue filter work for a
         // manually-picked city too — not just a GPS fix.
         locationState = locationRepository.selectCityQuick(option)
-        showLocationSheet = false
+        locationScope.launch {
+          // Held open just long enough to see the pin land on the new place.
+          kotlinx.coroutines.delay(PIN_LANDING_MS)
+          showLocationSheet = false
+        }
         locationScope.launch {
           locationState = locationRepository.selectCity(option)
         }
@@ -669,10 +673,12 @@ internal fun MainAppContainer(
         val resolved = locationRepository.selectPlace(place, token)
         if (resolved != null) {
           locationState = resolved
+          kotlinx.coroutines.delay(PIN_LANDING_MS)
           showLocationSheet = false
         }
         resolved != null
-      }
+      },
+      pickedByHand = locationRepository.pickedByHand()
     )
   }
 

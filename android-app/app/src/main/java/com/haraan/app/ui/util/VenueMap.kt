@@ -47,6 +47,27 @@ object VenueMap {
     }
 
     /**
+     * The real street map around [lat],[lng] for the location sheet: no marker (the app
+     * draws its own pin dead centre), English labels, shops/transit icons hidden so the
+     * roads and area names read. Size is in dp; scale 2 makes it sharp on the phone.
+     */
+    fun areaMapUrl(lat: Double, lng: Double, widthDp: Int, heightDp: Int, zoom: Int): String =
+        Uri.parse("https://maps.googleapis.com/maps/api/staticmap").buildUpon()
+            .appendQueryParameter("center", "$lat,$lng")
+            .appendQueryParameter("zoom", zoom.toString())
+            .appendQueryParameter("size", "${widthDp.coerceIn(1, 640)}x${heightDp.coerceIn(1, 640)}")
+            .appendQueryParameter("scale", "2")
+            .appendQueryParameter("language", "en")
+            .appendQueryParameter("style", "feature:poi|visibility:off")
+            .appendQueryParameter("style", "feature:transit|visibility:off")
+            .appendQueryParameter("style", "element:labels.icon|visibility:off")
+            // The town's own name would sit right under the pin; the card names it.
+            .appendQueryParameter("style", "feature:administrative.locality|element:labels|visibility:off")
+            .appendQueryParameter("key", key)
+            .build()
+            .toString()
+
+    /**
      * Pull `lat,lng` out of a Google Maps URL when it carries them — handles the
      * common `@lat,lng,zoom`, `?q=lat,lng`, `query=lat,lng` and `!3dlat!4dlng`
      * shapes. Returns null for place-name / shortened links that have no coords.
