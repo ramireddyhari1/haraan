@@ -243,7 +243,7 @@ final class Venue extends Model
      *
      * @return array<string, array{0: int, 1: int}|null> keyed Mon…Sun
      */
-    private function publicWeek(): array
+    public function publicWeek(): array
     {
         $hasHours = is_array($this->hours_json) && $this->hours_json !== [];
         $monday = Carbon::now()->startOfWeek(Carbon::MONDAY);

@@ -2491,6 +2491,8 @@ final class PublicWebController extends Controller
             'fee_rules' => $v->feeRules(),
             // Falls back to the slot times when the weekly hours aren't set.
             'hours' => $v->publicHours(),
+            // Mon…Sun [open, close] minutes — drawn as the desktop page's week of hours.
+            'week' => $v->publicWeek(),
             'cancellation' => $v->cancellationText(),
             // The app's VenueDetailScreen reads these (address line, "Show in Map"/
             // "Get directions", the "Good to know" checklist, the rating summary);

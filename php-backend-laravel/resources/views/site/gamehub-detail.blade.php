@@ -845,86 +845,228 @@
     </div>
 </div>
 
-<section class="page-shell gamehub-detail-container theme-gamehub">
-    
-    <!-- Breadcrumbs / Back navigation -->
-    <div class="detail-actions-row">
-        <div class="detail-actions-buttons">
-            <button onclick="toggleFavorite(this)" class="action-round-btn">
-                <svg id="fav-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
-            </button>
-            <button onclick="shareVenue()" class="action-round-btn">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
-            </button>
-        </div>
-    </div>
+{{-- ================================================================= --}}
+{{-- DESKTOP VENUE DETAIL (≥721px) — Playo's reading order, drawn       --}}
+{{--                                                                    --}}
+{{-- breadcrumb → name / area / rating → [photos · sports · slot board · --}}
+{{-- amenities · about · good to know · reviews · FAQ · related] beside  --}}
+{{-- a rail of [book · timing · location · your booking].               --}}
+{{--                                                                    --}}
+{{-- Every picture on it is drawn from the venue's own data: each sport  --}}
+{{-- tile is that sport's court, the timing card is the real week of    --}}
+{{-- hours with a now-line, the map card is an illustration only when   --}}
+{{-- there's no live map. Nothing is invented — a section without data  --}}
+{{-- is left out, not filled.                                           --}}
+{{--                                                                    --}}
+{{-- The phone page moves #booking-widget, .sticky-booking-card and     --}}
+{{-- .review-form-card into its sheet, so those keep their ids/classes. --}}
+{{-- ================================================================= --}}
+@php
+    $vdCrumbs = array_values(array_filter((array) ($seo['breadcrumbs'] ?? [])));
+    $vdSports = array_values(array_filter((array) $venue->sports)) ?: array_filter([$venue->category]);
+    $vdCourts = (array) $venue->courts;
+    $vdCourtPrices = (array) ($venue->court_prices ?? []);
 
-    <!-- Title & Location Header -->
-    <div class="detail-header">
-        <div class="detail-header__badges">
-            <span class="detail-badge">{{ $venue->category }}</span>
-            @if(isset($venue->badge))
-                <span class="detail-badge detail-badge--dark">{{ $venue->badge }}</span>
-            @endif
-        </div>
-        {{-- Not an <h1>: the phone block above carries the page's one H1. --}}
-        <div class="detail-header__title">{{ $venue->title }}</div>
-        <div class="detail-header__meta">
-            <span class="detail-meta-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
-                {{ $venue->location }}
-            </span>
-            <span class="detail-meta-divider">|</span>
-            <span class="detail-meta-item">
-                <span class="detail-meta-star">★</span>
-                <strong>{{ $venue->rating }}</strong> ({{ $venue->reviews }} verified reviews)
-            </span>
-            <span class="detail-meta-divider">|</span>
-            <span class="detail-meta-item">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
-                {{ $venue->hours }}
-            </span>
-        </div>
-    </div>
+    // "from ₹X/hr" per sport: the cheapest court that sport is sold on.
+    $vdFrom = function (string $sport) use ($vdCourts, $vdCourtPrices, $venue): int {
+        $prices = array_map(fn ($c) => (int) ($vdCourtPrices[$c] ?? $venue->price), (array) ($vdCourts[$sport] ?? []));
+        $prices = array_filter($prices, fn ($p) => $p > 0);
+        return $prices ? min($prices) : (int) $venue->price;
+    };
 
-    <!-- Gallery Grid (Airbnb Style) -->
-    <div class="gallery-airbnb-grid">
-        <!-- Large Featured Image -->
-        <div class="gallery-featured-wrapper">
-            <img class="gallery-featured-img" src="{{ $venue->image }}" alt="{{ $venue->title }} featured">
-        </div>
-        <!-- Right Column Gallery Images -->
-        <div class="gallery-thumbs-wrapper">
-            @foreach(array_slice($venue->gallery ?? [], 0, 2) as $index => $galImage)
-                <div class="gallery-thumb-wrapper">
-                    <img class="gallery-thumb-img" src="{{ $galImage }}" alt="{{ $venue->title }} photo {{ $index + 2 }}">
-                </div>
-            @endforeach
-        </div>
-    </div>
+    // A top-down drawing of the sport's own playing surface, landscape, 160×100.
+    $vdCourtArt = function (string $sport): string {
+        $s = strtolower($sport);
+        $w = 'fill="none" stroke="#fff" stroke-width="1.6"';
+        $bg = fn (string $outer, string $inner) => '<rect width="160" height="100" rx="10" fill="'.$outer.'"/><rect x="14" y="12" width="132" height="76" rx="2" fill="'.$inner.'"/>';
+        $net = '<path d="M80 6v88" stroke="#0F172A" stroke-opacity=".55" stroke-width="2"/><circle cx="80" cy="6" r="2.2" fill="#0F172A" fill-opacity=".6"/><circle cx="80" cy="94" r="2.2" fill="#0F172A" fill-opacity=".6"/>';
 
-    <!-- Two-Column Layout (Content vs Sticky Booking Sidebar) -->
-    <div class="detail-two-column">
-        
-        <!-- Left Column: Details, Slots, Amenities, Reviews -->
-        <div>
-            <!-- About Section -->
-            <div class="detail-card-panel">
-                <h3 class="detail-card-panel__title">About This Facility</h3>
-                @if($venue->description)
-                    <p class="detail-card-panel__text">{{ $venue->description }}</p>
+        return match (true) {
+            str_contains($s, 'net') && str_contains($s, 'cricket') =>
+                '<rect width="160" height="100" rx="10" fill="#2F8F55"/>'
+                .implode('', array_map(fn ($y) => '<rect x="10" y="'.$y.'" width="140" height="22" rx="2" fill="#3FA466"/>'
+                    .'<rect x="22" y="'.($y + 7).'" width="116" height="8" rx="1" fill="#D8BF8A"/>'
+                    .'<path d="M30 '.($y + 5).'v12M130 '.($y + 5).'v12" stroke="#fff" stroke-width="1.4"/>'
+                    .'<path d="M10 '.$y.'h140M10 '.($y + 22).'h140" stroke="#E2E8F0" stroke-opacity=".7" stroke-dasharray="2 2"/>', [8, 39, 70])),
+            str_contains($s, 'cricket') =>
+                '<rect width="160" height="100" rx="10" fill="#2F8F55"/>'
+                .implode('', array_map(fn ($x) => '<rect x="'.$x.'" y="8" width="12" height="84" fill="#36A060"/>', [8, 32, 56, 80, 104, 128]))
+                .'<rect x="8" y="8" width="144" height="84" rx="4" fill="none" stroke="#E2E8F0" stroke-opacity=".8" stroke-dasharray="3 2.5"/>'
+                .'<rect x="44" y="42" width="72" height="16" rx="1.5" fill="#D8BF8A"/>'
+                .'<path d="M52 40v20M108 40v20" stroke="#fff" stroke-width="1.6"/>'
+                .'<path d="M47 46v8M113 46v8" stroke="#7C2D12" stroke-width="2" stroke-linecap="round"/>',
+            str_contains($s, 'football') || str_contains($s, 'soccer') || str_contains($s, 'futsal') =>
+                '<rect width="160" height="100" rx="10" fill="#2F8F55"/>'
+                .implode('', array_map(fn ($x) => '<rect x="'.$x.'" y="10" width="11" height="80" fill="#36A060"/>', [12, 34, 56, 78, 100, 122, 144 - 11]))
+                .'<rect x="12" y="10" width="136" height="80" rx="1" '.$w.'/><path d="M80 10v80" '.$w.'/><circle cx="80" cy="50" r="12" '.$w.'/>'
+                .'<path d="M12 30h20v40H12M148 30h-20v40h20M12 40h8v20h-8M148 40h-8v20h8" '.$w.'/>'
+                .'<path d="M12 44H8v12h4M148 44h4v12h-4" stroke="#fff" stroke-width="1.6" fill="none"/>',
+            str_contains($s, 'basket') =>
+                $bg('#C9874F', '#E7B07A')
+                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><path d="M80 12v76" '.$w.'/><circle cx="80" cy="50" r="10" '.$w.'/>'
+                .'<path d="M14 38h26v24H14M146 38h-26v24h26" '.$w.' fill="#C2410C" fill-opacity=".25"/>'
+                .'<path d="M14 20a36 36 0 0 1 0 60M146 20a36 36 0 0 0 0 60" '.$w.'/>'
+                .'<circle cx="20" cy="50" r="2.5" stroke="#EA580C" stroke-width="1.6" fill="none"/><circle cx="140" cy="50" r="2.5" stroke="#EA580C" stroke-width="1.6" fill="none"/>',
+            str_contains($s, 'volley') =>
+                $bg('#3B82C4', '#E8834A')
+                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><path d="M58 12v76M102 12v76" '.$w.'/>'.$net,
+            str_contains($s, 'swim') || str_contains($s, 'pool') =>
+                '<rect width="160" height="100" rx="10" fill="#CBD5E1"/><rect x="10" y="10" width="140" height="80" rx="4" fill="#38A3D6"/>'
+                .implode('', array_map(fn ($y) => '<path d="M14 '.$y.'h132" stroke="#fff" stroke-width="1.3" stroke-dasharray="3 3"/>', [26, 42, 58, 74]))
+                .'<path d="M22 18c6 3 10 3 16 0s10-3 16 0" stroke="#fff" stroke-opacity=".5" fill="none"/>',
+            str_contains($s, 'pickle') =>
+                $bg('#7FA0C8', '#2F6FD0')
+                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><rect x="66" y="12" width="28" height="76" fill="#1E5BB8"/>'
+                .'<path d="M66 12v76M94 12v76M14 50h52M94 50h52" '.$w.'/>'.$net,
+            str_contains($s, 'tennis') && ! str_contains($s, 'table') =>
+                $bg('#4E9A6B', '#3E6FB5')
+                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><path d="M14 22h132M14 78h132M46 22v56M114 22v56M46 50h68" '.$w.'/>'.$net,
+            str_contains($s, 'table') =>
+                '<rect width="160" height="100" rx="10" fill="#E2E8F0"/><rect x="22" y="20" width="116" height="60" rx="2" fill="#1E4E8C"/>'
+                .'<rect x="22" y="20" width="116" height="60" rx="2" '.$w.'/><path d="M22 50h116" stroke="#fff" stroke-width=".8"/>'
+                .'<path d="M80 14v72" stroke="#0F172A" stroke-opacity=".55" stroke-width="2"/>',
+            str_contains($s, 'badminton') || str_contains($s, 'squash') || str_contains($s, 'padel') =>
+                $bg('#1F6E4E', '#2E8B57')
+                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><path d="M14 18h132M14 82h132M20 12v76M140 12v76M64 12v76M96 12v76M14 50h50M96 50h50" '.$w.'/>'.$net,
+            default =>
+                $bg('#94A3B8', '#64748B')
+                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><path d="M80 12v76" '.$w.'/><circle cx="80" cy="50" r="12" '.$w.'/>',
+        };
+    };
+
+    // Week of hours. publicWeek() gives Mon…Sun [open, close] in minutes, or null.
+    // Close at/before open means it runs past midnight; the bar stops at 24:00.
+    $vdWeek = (array) ($venue->week ?? []);
+    $vdHasWeek = count(array_filter($vdWeek)) > 0;
+    $vdNow = \App\Support\BusinessClock::now();
+    $vdToday = $vdNow->format('D');
+    $vdNowMin = $vdNow->hour * 60 + $vdNow->minute;
+    $vdSpan = function (?array $span): ?array {
+        if (! $span) return null;
+        [$o, $c] = $span;
+        if ($c <= $o) $c = $c === $o ? $o + 1440 : $c + 1440;
+        return [$o, min($c, 1440)];
+    };
+    $vdLabel = fn (int $m) => \Carbon\Carbon::today()->addMinutes($m % 1440)->format($m % 60 ? 'g:i A' : 'g A');
+    $vdStatus = null;
+    if ($vdHasWeek) {
+        $sp = $vdWeek[$vdToday] ?? null;
+        $tspan = $vdSpan($sp);
+        if ($tspan && $vdNowMin >= $tspan[0] && $vdNowMin < $tspan[1]) {
+            $vdStatus = ['open', 'Open now', 'closes '.$vdLabel($sp[1])];
+        } elseif ($tspan && $vdNowMin < $tspan[0]) {
+            $vdStatus = ['shut', 'Closed now', 'opens '.$vdLabel($tspan[0])];
+        } else {
+            $vdStatus = ['shut', 'Closed now', null];
+        }
+    }
+    $vdDayNames = ['Mon' => 'Mon', 'Tue' => 'Tue', 'Wed' => 'Wed', 'Thu' => 'Thu', 'Fri' => 'Fri', 'Sat' => 'Sat', 'Sun' => 'Sun'];
+@endphp
+
+<section class="page-shell gamehub-detail-container theme-gamehub vdk">
+
+    {{-- Trail: the same crumbs the page's BreadcrumbList markup carries. --}}
+    @if(count($vdCrumbs) > 1)
+        <nav class="vdk-crumbs" aria-label="Breadcrumb">
+            @foreach($vdCrumbs as $crumb)
+                @if(!empty($crumb['url']) && !$loop->last)
+                    <a href="{{ $crumb['url'] }}">{{ $crumb['name'] }}</a>
+                    <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+                @else
+                    <span aria-current="page">{{ $crumb['name'] }}</span>
                 @endif
-                @if(!empty($venueSummary))
-                    <p class="detail-card-panel__text">{{ $venueSummary }}</p>
+            @endforeach
+        </nav>
+    @endif
+
+    {{-- Name, area, rating. Not an <h1>: the phone block above carries the page's one H1. --}}
+    <header class="vdk-head">
+        <div class="vdk-head__copy">
+            <div class="vdk-head__title">{{ $venue->title }}</div>
+            <div class="vdk-head__meta">
+                @if($venue->location)<span>{{ $venue->location }}</span>@endif
+                @if($mvScore > 0)
+                    <span class="vdk-head__score">
+                        <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path fill="#F5A623" d="m12 17.3 6.2 3.7-1.6-7 5.4-4.7-7.1-.6L12 2 9.1 8.7 2 9.3l5.4 4.7-1.6 7z"/></svg>
+                        <b>{{ number_format($mvScore, 1) }}</b>
+                        @if($venue->ratings_count > 0)<i>({{ $venue->ratings_count }} {{ $venue->ratings_count === 1 ? 'rating' : 'ratings' }})</i>@endif
+                    </span>
+                @endif
+                @unless(!empty($venue->is_owner))
+                    <button type="button" class="vdk-link" data-vdk-rate>Rate venue</button>
+                @endunless
+            </div>
+        </div>
+        @if($venue->badge)<span class="vdk-head__badge">{{ $venue->badge }}</span>@endif
+    </header>
+
+    <div class="vdk-grid">
+        <div class="vdk-main">
+
+            {{-- Photos: one big frame with arrows, a filmstrip under it. --}}
+            <div class="vdk-photos" @if(count($mvImages) > 1) data-vdk-photos @endif>
+                @if(count($mvImages))
+                    <div class="vdk-photos__frame">
+                        @foreach($mvImages as $shot)
+                            <img src="{{ $shot }}" alt="{{ $venue->title }} photo {{ $loop->iteration }}" class="{{ $loop->first ? 'is-on' : '' }}"
+                                 @if($loop->first) fetchpriority="high" @else loading="lazy" @endif decoding="async">
+                        @endforeach
+                        @if(count($mvImages) > 1)
+                            <button type="button" class="vdk-photos__nav is-prev" data-vdk-step="-1" aria-label="Previous photo">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>
+                            </button>
+                            <button type="button" class="vdk-photos__nav is-next" data-vdk-step="1" aria-label="Next photo">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+                            </button>
+                            <span class="vdk-photos__count"><b data-vdk-at>1</b> / {{ count($mvImages) }}</span>
+                        @endif
+                    </div>
+                    @if(count($mvImages) > 1)
+                        <div class="vdk-photos__strip">
+                            @foreach($mvImages as $shot)
+                                <button type="button" class="{{ $loop->first ? 'is-on' : '' }}" data-vdk-go="{{ $loop->index }}" aria-label="Photo {{ $loop->iteration }}">
+                                    <img src="{{ $shot }}" alt="" loading="lazy" decoding="async">
+                                </button>
+                            @endforeach
+                        </div>
+                    @endif
+                @else
+                    {{-- No photos yet: the court it's for, drawn — never a stock picture. --}}
+                    <div class="vdk-photos__frame vdk-photos__frame--art">
+                        <svg viewBox="0 0 160 100" aria-hidden="true">{!! $vdCourtArt($vdSports[0] ?? '') !!}</svg>
+                        <span>Photos coming soon</span>
+                    </div>
                 @endif
             </div>
 
-            <!-- Court Booking Scheduler (Core Widget) -->
-            <div id="booking-widget" class="detail-card-panel">
-                <h3 class="detail-card-panel__title detail-card-panel__title--compact">Select Booking Slot</h3>
+            {{-- Sports: each tile is its court. Tapping one sets the slot board to it. --}}
+            @if(count($vdSports))
+                <section class="vdk-sec">
+                    <div class="vdk-sec__head">
+                        <h2>Sports available</h2>
+                        <span>Pick a sport to see its courts and open slots</span>
+                    </div>
+                    <div class="vdk-sports">
+                        @foreach($vdSports as $sport)
+                            @php $from = $vdFrom($sport); $n = count((array) ($vdCourts[$sport] ?? [])); @endphp
+                            <button type="button" class="vdk-sport {{ $loop->first ? 'is-on' : '' }}" data-vdk-sport="{{ $sport }}">
+                                <svg class="vdk-sport__art" viewBox="0 0 160 100" aria-hidden="true">{!! $vdCourtArt($sport) !!}</svg>
+                                <span class="vdk-sport__name">{{ $sport }}</span>
+                                <span class="vdk-sport__sub">
+                                    @if($from > 0)<b>₹{{ number_format($from) }}</b>/hr @endif
+                                    @if($n > 1)<i>· {{ $n }} courts</i>@endif
+                                </span>
+                            </button>
+                        @endforeach
+                    </div>
+                </section>
+            @endif
+
+            {{-- Court Booking Scheduler (Core Widget) — ids and classes are load-bearing. --}}
+            <div id="booking-widget" class="detail-card-panel vdk-sec">
+                <h3 class="detail-card-panel__title detail-card-panel__title--compact">Book a slot</h3>
                 <p class="detail-card-panel__subtitle">Tap one or more open slots to add them to your booking.</p>
 
-                <!-- Date Picker Strip -->
                 @php
                     $datePills = [];
                     for ($i = 0; $i < 7; $i++) {
@@ -933,8 +1075,6 @@
                         $dt = \App\Support\BusinessClock::todayDate()->addDays($i);
                         $datePills[] = [
                             'ymd' => $dt->toDateString(),
-                            'dayName' => $i === 0 ? 'Today' : ($i === 1 ? 'Tomorrow' : $dt->format('D')),
-                            'dateStr' => $dt->format('d M'),
                             'display' => $i === 0 ? 'Today' : ($i === 1 ? 'Tomorrow' : $dt->format('D, d M')),
                         ];
                     }
@@ -961,20 +1101,25 @@
                     <div class="dpick__cal" id="dpick-cal" hidden></div>
                 </div>
 
-                <!-- Sport Selector Tabs (if multiple sports exist) -->
+                {{-- Sport tabs (several sports): the line glyph, not a hotlinked PNG. --}}
                 @if(count($venue->sports) > 1)
                     <div class="mb-24">
                         <label class="sidebar-label">Select Sport</label>
                         <div class="sports-tab-strip">
                             @foreach($venue->sports as $sport)
+                                @php
+                                    $sc = strtolower($sport);
+                                    $glyph = match (true) {
+                                        str_contains($sc, 'cricket') => '<path d="M15.5 3.5a2.1 2.1 0 0 1 3 3L9 16l-3 1 1-3z"></path><circle cx="6.5" cy="17.5" r="3"></circle>',
+                                        str_contains($sc, 'football'), str_contains($sc, 'soccer') => '<circle cx="12" cy="12" r="9"></circle><path d="M12 7.5 8.5 10l1.3 4h4.4l1.3-4z"></path>',
+                                        str_contains($sc, 'basket') => '<circle cx="12" cy="12" r="9"></circle><path d="M12 3v18M3 12h18"></path>',
+                                        str_contains($sc, 'pickle') => \App\Support\SportGlyph::PICKLEBALL,
+                                        str_contains($sc, 'tennis') => \App\Support\SportGlyph::TENNIS,
+                                        default => \App\Support\SportGlyph::BADMINTON,
+                                    };
+                                @endphp
                                 <button onclick="selectSport('{{ $sport }}')" class="sport-tab" id="sport-tab-{{ $sport }}">
-                                    <img src="{{ 
-                                        $sport === 'Cricket' ? 'https://cdn-icons-png.flaticon.com/512/5140/5140374.png' : (
-                                        $sport === 'Football' ? 'https://cdn-icons-png.flaticon.com/512/7711/7711842.png' : (
-                                        $sport === 'Badminton' ? 'https://cdn-icons-png.flaticon.com/512/3012/3012437.png' : (
-                                        $sport === 'Swimming' ? 'https://cdn-icons-png.flaticon.com/512/3144/3144883.png' : (
-                                        $sport === 'Tennis' ? 'https://cdn-icons-png.flaticon.com/512/3132/3132644.png' : 'https://cdn-icons-png.flaticon.com/512/889/889505.png'))))
-                                    }}" alt="{{ $sport }} Icon" />
+                                    <svg class="sport-tab__glyph" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $glyph !!}</svg>
                                     {{ $sport }}
                                 </button>
                             @endforeach
@@ -982,280 +1127,596 @@
                     </div>
                 @endif
 
-                <!-- Court / Sub-Venue Selector Pills -->
                 <div class="mb-28">
                     <div class="crt-head">
                         <label class="sidebar-label">Choose a court</label>
                         <span id="crt-count" class="crt-head__count"></span>
                     </div>
-                    <div id="court-selector-container" class="court-selector-container">
-                        <!-- Dynamically populated in JavaScript -->
-                    </div>
+                    <div id="court-selector-container" class="court-selector-container"></div>
                 </div>
 
-                <!-- Dynamic Slots Grid Container -->
-                <div id="slots-grid-container">
-                    <!-- Morning, Afternoon, Evening slots rendered here -->
-                </div>
+                <div id="slots-grid-container"></div>
             </div>
 
-            <!-- Amenities Section -->
-            <div class="detail-card-panel">
-                <h3 class="detail-card-panel__title mb-20">Amenities Offered</h3>
-                @php
-                    $amenityIcons = [
-                        'Professional Floodlights' => 'https://cdn-icons-png.flaticon.com/512/14881/14881968.png',
-                        'Floodlights' => 'https://cdn-icons-png.flaticon.com/512/14881/14881968.png',
-                        'First Aid Kit' => 'https://cdn-icons-png.flaticon.com/512/12252/12252777.png',
-                        'First Aid' => 'https://cdn-icons-png.flaticon.com/512/12252/12252777.png',
-                        'Washrooms' => 'https://cdn-icons-png.flaticon.com/512/13132/13132308.png',
-                        'Changing Rooms' => 'https://cdn-icons-png.flaticon.com/512/13132/13132308.png',
-                        'Locker Rooms' => 'https://cdn-icons-png.flaticon.com/512/13132/13132308.png',
-                        'Shower Rooms' => 'https://cdn-icons-png.flaticon.com/512/13132/13132308.png',
-                        'Showers' => 'https://cdn-icons-png.flaticon.com/512/13132/13132308.png',
-                        'Separate Steam Rooms' => 'https://cdn-icons-png.flaticon.com/512/13132/13132308.png',
-                        'Drinking Water' => 'https://cdn-icons-png.flaticon.com/512/1078/1078844.png',
-                        'Drinking Water Station' => 'https://cdn-icons-png.flaticon.com/512/1078/1078844.png',
-                        'Free Parking' => 'https://cdn-icons-png.flaticon.com/512/8571/8571768.png',
-                        'Valet Parking' => 'https://cdn-icons-png.flaticon.com/512/8571/8571768.png',
-                        'Covered Batting Nets' => 'https://cdn-icons-png.flaticon.com/512/9957/9957884.png',
-                        'FIFA-Approved Turf' => 'https://cdn-icons-png.flaticon.com/512/33/33736.png',
-                        'Spectator Seating' => 'https://cdn-icons-png.flaticon.com/512/2822/2822557.png',
-                        'Refreshment Lounge' => 'https://cdn-icons-png.flaticon.com/512/2738/2738730.png',
-                        'Cafe' => 'https://cdn-icons-png.flaticon.com/512/2738/2738730.png',
-                        'Air Conditioning' => 'https://cdn-icons-png.flaticon.com/512/959/959740.png',
-                        'Yonex Synthetic Mats' => 'https://cdn-icons-png.flaticon.com/512/33/33736.png',
-                        'Racket Rental' => 'https://cdn-icons-png.flaticon.com/512/2906/2906803.png',
-                        'Shuttle Shop' => 'https://cdn-icons-png.flaticon.com/512/1162/1162456.png',
-                        'Temperature Controlled' => 'https://cdn-icons-png.flaticon.com/512/1684/1684375.png',
-                        'Olympic Lanes' => 'https://cdn-icons-png.flaticon.com/512/3144/3144860.png',
-                        'Qualified Lifeguards' => 'https://cdn-icons-png.flaticon.com/512/1012/1012399.png',
-                        'Towels Provided' => 'https://cdn-icons-png.flaticon.com/512/2913/2913508.png',
-                        'Imported Red Clay' => 'https://cdn-icons-png.flaticon.com/512/33/33736.png',
-                        'Ball Boy Service' => 'https://cdn-icons-png.flaticon.com/512/1012/1012399.png',
-                        'Tennis Coach Access' => 'https://cdn-icons-png.flaticon.com/512/1012/1012399.png',
-                        'Lounge' => 'https://cdn-icons-png.flaticon.com/512/2738/2738730.png',
-                        'Acrylic Court Finish' => 'https://cdn-icons-png.flaticon.com/512/33/33736.png',
-                        'Official Flex Rims' => 'https://cdn-icons-png.flaticon.com/512/33/33736.png',
-                        'Chain Nets' => 'https://cdn-icons-png.flaticon.com/512/33/33736.png',
-                        '24/7 Access' => 'https://cdn-icons-png.flaticon.com/512/3567/3567478.png',
-                        'Spectator Fence' => 'https://cdn-icons-png.flaticon.com/512/2822/2822557.png',
-                    ];
-                @endphp
-                <div class="amenities-grid">
-                    @foreach($venue->amenities as $amenity)
-                        @php
-                            $iconUrl = $amenityIcons[$amenity] ?? 'https://cdn-icons-png.flaticon.com/512/109/109602.png';
-                        @endphp
-                        <div class="amenity-item">
-                            <img src="{{ $iconUrl }}" alt="{{ $amenity }} icon">
-                            <strong>{{ $amenity }}</strong>
-                        </div>
-                    @endforeach
-                </div>
-            </div>
-
-            <!-- Rules & Policies Section -->
-            <div class="detail-card-panel">
-                <h3 class="detail-card-panel__title mb-20">Rules & Cancellation</h3>
-                
-                <div class="mb-20">
-                    <button onclick="toggleAccordion('rules-body', 'rules-chevron')" class="accordion-header">
-                        <h4 class="accordion-title">Venue Guidelines</h4>
-                        <span id="rules-chevron" class="accordion-chevron">▾</span>
-                    </button>
-                    <div id="rules-body" class="accordion-body">
-                        <ul>
-                            <li>Non-marking shoes are strictly mandatory for all indoor court facilities.</li>
-                            <li>Please report at least 10 minutes prior to the booked slot duration.</li>
-                            <li>No pets, glass containers, or alcoholic beverages allowed inside the playing area.</li>
-                            <li>Follow instructions from the ground staff for safety and court allocation.</li>
-                        </ul>
+            @if(count($venue->amenities))
+                <section class="vdk-sec">
+                    <div class="vdk-sec__head"><h2>Amenities</h2></div>
+                    <div class="vdk-amen">
+                        @foreach($venue->amenities as $amenity)
+                            <span class="vdk-amen__item">
+                                <span class="vdk-amen__ico">
+                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $mvAmenityIcon($amenity) !!}</svg>
+                                </span>
+                                {{ $amenity }}
+                            </span>
+                        @endforeach
                     </div>
+                </section>
+            @endif
+
+            @if($venue->description || !empty($venueSummary))
+                <section class="vdk-sec">
+                    <div class="vdk-sec__head"><h2>About venue</h2></div>
+                    @if($venue->description)<p class="vdk-body">{{ $venue->description }}</p>@endif
+                    @if(!empty($venueSummary))<p class="vdk-body">{{ $venueSummary }}</p>@endif
+                    @if($hostProfile ?? null)
+                        <a class="vdk-host" href="{{ route('site.host', ['slug' => $hostProfile->slug]) }}">
+                            Managed by <b>{{ $hostProfile->display_name }}</b>
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+                        </a>
+                    @endif
+                </section>
+            @endif
+
+            {{-- Only what the venue actually set — no stock rules filling the gap. --}}
+            @if(count($mvGoodToKnow))
+                <section class="vdk-sec">
+                    <div class="vdk-sec__head"><h2>Good to know</h2></div>
+                    <ul class="vdk-know">
+                        @foreach($mvGoodToKnow as $rule)
+                            <li>
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+                                {{ $rule }}
+                            </li>
+                        @endforeach
+                    </ul>
+                </section>
+            @endif
+
+            {{-- Reviews + RATE VENUE. The form is the one the phone sheet borrows. --}}
+            <section class="vdk-sec" id="vdk-reviews">
+                <div class="vdk-sec__head">
+                    <h2>Reviews</h2>
+                    <span id="reviews-count-badge" class="reviews-count-badge">{{ count($venue->reviews_list) }} Reviews</span>
                 </div>
-
-                <hr class="detail-divider">
-
-                <div class="mb-20">
-                    <button onclick="toggleAccordion('cancel-body', 'cancel-chevron')" class="accordion-header">
-                        <h4 class="accordion-title">Cancellation Policy</h4>
-                        <span id="cancel-chevron" class="accordion-chevron">▾</span>
-                    </button>
-                    <div id="cancel-body" class="accordion-body">
-                        <ul>
-                            @if (!empty($venue->cancellation))
-                                <li>{{ $venue->cancellation }}</li>
-                            @else
-                                <li>Free cancellation up to 6 hours before the booked slot time.</li>
-                                <li>50% refund for cancellations done between 6 hours and 2 hours of the slot.</li>
-                                <li>No refunds allowed for cancellations within 2 hours of the slot.</li>
-                            @endif
-                        </ul>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Reviews Section -->
-            <div class="detail-card-panel">
-                <div class="reviews-section-header">
-                    <h3>User Reviews</h3>
-                    <span id="reviews-count-badge" class="reviews-count-badge">
-                        {{ count($venue->reviews_list) }} Reviews
-                    </span>
-                </div>
-
-                <!-- Live reviews list -->
-                <div id="reviews-list-container">
-                    @foreach($venue->reviews_list as $review)
-                        <div class="review-card">
-                            <div class="review-card__header">
-                                <div class="review-user-info">
-                                    <div class="review-user-avatar">
-                                        {{ substr($review->user, 0, 1) }}
+                <div class="vdk-reviews">
+                    <div id="reviews-list-container" class="vdk-reviews__list">
+                        @forelse($venue->reviews_list as $review)
+                            <div class="review-card">
+                                <div class="review-card__header">
+                                    <div class="review-user-info">
+                                        <div class="review-user-avatar">{{ mb_strtoupper(mb_substr($review->user, 0, 1)) }}</div>
+                                        <div>
+                                            <strong class="review-user-name">{{ $review->user }}</strong>
+                                            <span class="review-date">{{ $review->date }}@if(!empty($review->played)) · Played here @endif</span>
+                                        </div>
                                     </div>
-                                    <div>
-                                        <strong class="review-user-name">{{ $review->user }}</strong>
-                                        <span class="review-date">{{ $review->date }}</span>
+                                    <div class="review-star-rating">
+                                        @for($i = 0; $i < 5; $i++)
+                                            <span class="review-star {{ $i < $review->rating ? 'is-active' : '' }}">★</span>
+                                        @endfor
                                     </div>
                                 </div>
-                                <div class="review-star-rating">
-                                    @for($i = 0; $i < 5; $i++)
-                                        <span class="review-star {{ $i < $review->rating ? 'is-active' : '' }}">★</span>
-                                    @endfor
-                                </div>
+                                @if($review->comment)<p class="review-comment">{{ $review->comment }}</p>@endif
                             </div>
-                            <p class="review-comment">{{ $review->comment }}</p>
-                        </div>
-                    @endforeach
-                </div>
+                        @empty
+                            {{-- Empty stands: nobody has rated it yet. --}}
+                            <div class="vdk-noreviews">
+                                <svg viewBox="0 0 200 110" aria-hidden="true">
+                                    <path d="M20 96h160" stroke="#CBD5E1" stroke-width="2" stroke-linecap="round"/>
+                                    <path d="M36 96V78h128v18M52 78V62h96v16M68 62V48h64v14" fill="#F1F5F9" stroke="#CBD5E1" stroke-width="2" stroke-linejoin="round"/>
+                                    <path d="M44 87h112M60 70h80M76 55h48" stroke="#E2E8F0" stroke-width="2" stroke-dasharray="6 5" stroke-linecap="round"/>
+                                    @foreach([58, 79, 100, 121, 142] as $i => $x)
+                                        <path transform="translate({{ $x - 9 }} {{ 14 + abs(2 - $i) * 4 }}) scale(.75)" d="m12 17.3 6.2 3.7-1.6-7 5.4-4.7-7.1-.6L12 2 9.1 8.7 2 9.3l5.4 4.7-1.6 7z"
+                                              fill="{{ $i === 0 ? '#F5A623' : 'none' }}" stroke="{{ $i === 0 ? '#F5A623' : '#CBD5E1' }}" stroke-width="2" stroke-linejoin="round"/>
+                                    @endforeach
+                                </svg>
+                                <strong>No reviews yet</strong>
+                                <span>Played here? Yours will be the first one players read.</span>
+                            </div>
+                        @endforelse
+                    </div>
 
-                {{-- RATE VENUE — saved for real (POST /gamehub/{id}/review → VenueReviewService,
-                     the same path as the app). Was a mock that drew a card and saved nothing.
-                     Name comes from the account; one review per person, re-rating edits it. --}}
-                <div class="review-form-card rvf" data-rvf>
-                    @if(!empty($venue->is_owner))
-                        <p class="rvf__note">This is your venue — players' ratings show here and in your partner app.</p>
-                    @else
-                        <h4 class="rvf__title">{{ !empty($venue->my_review) ? 'Your rating' : 'How was it here?' }}</h4>
-                        <p class="rvf__lede">{{ !empty($venue->my_review) ? 'Change it any time — your earlier rating is replaced.' : 'Your rating helps other players pick a court.' }}</p>
-                        <div class="rvf__stars" id="rating-selector" role="radiogroup" aria-label="Your rating">
-                            @foreach(['Poor', 'Okay', 'Good', 'Very good', 'Excellent'] as $i => $word)
-                                <button type="button" class="star-btn rvf__star" role="radio" aria-checked="false" aria-label="{{ $i + 1 }} star{{ $i ? 's' : '' }} — {{ $word }}" data-word="{{ $word }}" onclick="setFormRating({{ $i + 1 }})">
-                                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 17.3 6.2 3.7-1.6-7 5.4-4.7-7.1-.6L12 2 9.1 8.7 2 9.3l5.4 4.7-1.6 7z"/></svg>
+                    {{-- RATE VENUE — saved for real (POST /gamehub/{id}/review → VenueReviewService,
+                         the same path as the app). Name comes from the account; one review per
+                         person, re-rating edits it. --}}
+                    <div class="review-form-card rvf" data-rvf>
+                        @if(!empty($venue->is_owner))
+                            <p class="rvf__note">This is your venue — players' ratings show here and in your partner app.</p>
+                        @else
+                            <h4 class="rvf__title">{{ !empty($venue->my_review) ? 'Your rating' : 'How was it here?' }}</h4>
+                            <p class="rvf__lede">{{ !empty($venue->my_review) ? 'Change it any time — your earlier rating is replaced.' : 'Your rating helps other players pick a court.' }}</p>
+                            <div class="rvf__stars" id="rating-selector" role="radiogroup" aria-label="Your rating">
+                                @foreach(['Poor', 'Okay', 'Good', 'Very good', 'Excellent'] as $i => $word)
+                                    <button type="button" class="star-btn rvf__star" role="radio" aria-checked="false" aria-label="{{ $i + 1 }} star{{ $i ? 's' : '' }} — {{ $word }}" data-word="{{ $word }}" onclick="setFormRating({{ $i + 1 }})">
+                                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 17.3 6.2 3.7-1.6-7 5.4-4.7-7.1-.6L12 2 9.1 8.7 2 9.3l5.4 4.7-1.6 7z"/></svg>
+                                    </button>
+                                @endforeach
+                            </div>
+                            <span class="rvf__word" id="rvf-word">Tap a star</span>
+                            <textarea id="review-comment" rows="3" maxlength="1000" class="review-input-field review-comment-textarea rvf__text"
+                                      placeholder="What stood out — the surface, lights, staff? (optional)">{{ $venue->my_review['text'] ?? '' }}</textarea>
+                            <p class="rvf__err" id="rvf-err" hidden></p>
+                            @auth
+                                <button type="button" onclick="submitReview(this)" class="review-submit-btn rvf__go" id="rvf-go" disabled>
+                                    {{ !empty($venue->my_review) ? 'Update rating' : 'Post rating' }}
                                 </button>
+                                <p class="rvf__as">Posting as <b>{{ \Illuminate\Support\Str::of(auth()->user()->name)->explode(' ')->first() }}</b></p>
+                            @else
+                                <button type="button" class="review-submit-btn rvf__go" onclick="(window.openLoginModal ? window.openLoginModal() : (document.getElementById('loginBtn') || {click(){ location.href='/login'; }}).click())">
+                                    Sign in to rate
+                                </button>
+                            @endauth
+                        @endif
+                    </div>
+                </div>
+            </section>
+
+            @if(!empty($venueFaqs))
+                <section class="vdk-sec">
+                    <div class="vdk-sec__head"><h2>Questions about {{ $venue->title }}</h2></div>
+                    <div class="vdk-faq">
+                        @foreach($venueFaqs as $faq)
+                            <details @if($loop->first) open @endif>
+                                <summary>{{ $faq['question'] }}</summary>
+                                <p>{{ $faq['answer'] }}</p>
+                            </details>
+                        @endforeach
+                    </div>
+                </section>
+            @endif
+
+            @if(!empty($venueLinks['sports']) || !empty($venueLinks['nearby']))
+                <section class="vdk-sec vdk-sec--quiet">
+                    <div class="vdk-sec__head"><h2>Related to {{ $venue->title }}</h2></div>
+                    @if(!empty($venueLinks['nearby']))
+                        <div class="vdk-near">
+                            @foreach($venueLinks['nearby'] as $near)
+                                <a href="{{ $near['url'] }}"><b>{{ $near['name'] }}</b>@if($near['area'])<small>{{ $near['area'] }}</small>@endif</a>
                             @endforeach
                         </div>
-                        <span class="rvf__word" id="rvf-word">Tap a star</span>
-                        <textarea id="review-comment" rows="3" maxlength="1000" class="review-input-field review-comment-textarea rvf__text"
-                                  placeholder="What stood out — the surface, lights, staff? (optional)">{{ $venue->my_review['text'] ?? '' }}</textarea>
-                        <p class="rvf__err" id="rvf-err" hidden></p>
-                        @auth
-                            <button type="button" onclick="submitReview(this)" class="review-submit-btn rvf__go" id="rvf-go" disabled>
-                                {{ !empty($venue->my_review) ? 'Update rating' : 'Post rating' }}
-                            </button>
-                            <p class="rvf__as">Posting as <b>{{ \Illuminate\Support\Str::of(auth()->user()->name)->explode(' ')->first() }}</b></p>
-                        @else
-                            <button type="button" class="review-submit-btn rvf__go" onclick="(window.openLoginModal ? window.openLoginModal() : (document.getElementById('loginBtn') || {click(){ location.href='/login'; }}).click())">
-                                Sign in to rate
-                            </button>
-                        @endauth
                     @endif
-                </div>
-            </div>
+                    <div class="vdk-chips">
+                        @foreach($venueLinks['sports'] as $link)
+                            <a href="{{ $link['url'] }}">{{ $link['label'] }}</a>
+                        @endforeach
+                    </div>
+                </section>
+            @endif
         </div>
 
-        <!-- Right Column: Sticky Booking Card -->
-        <div class="sticky-sidebar-container">
-            <div class="sticky-booking-card">
-                <div class="price-row">
-                    <span class="price-row__label">Rate per hour</span>
-                    <div class="price-row__value">
-                        <strong id="rate-per-hour">₹{{ number_format($venue->price) }}</strong>
-                        <span>/ hr</span>
-                    </div>
+        {{-- ── Rail ─────────────────────────────────────────────────────── --}}
+        <aside class="vdk-rail">
+            <div class="vdk-card vdk-cta">
+                <div class="vdk-cta__price">
+                    {{-- The cheapest court across every sport, so it never disagrees with a tile. --}}
+                    @php $vdStarts = min(array_filter(array_map($vdFrom, $vdSports) ?: [(int) $venue->price]) ?: [0]); @endphp
+                    @if($vdStarts > 0)
+                        <span>Starts at</span>
+                        <b>₹{{ number_format($vdStarts) }}</b><i>/hr</i>
+                    @else
+                        <span>Prices by court and time</span>
+                    @endif
                 </div>
-
-                <hr class="detail-divider mb-20">
-
-                <div class="mb-16">
-                    <label class="sidebar-label">Date</label>
-                    <div id="selected-date-text" class="selected-date-preview">{{ $datePills[0]['display'] }}</div>
-                </div>
-
-                <div class="mb-24">
-                    <label class="sidebar-label">Selected Slots (<span id="slots-count">0</span>)</label>
-                    <div id="selected-slots-list" class="selected-slots-preview-list">
-                        <span class="no-slots-placeholder">No slots selected. Click slots on the calendar grid.</span>
-                    </div>
-                </div>
-
-                <!-- Price Calculator -->
-                <div id="price-calculator" class="price-calculator-panel">
-                    <div class="calc-row">
-                        <span>Subtotal (<span id="calc-hours">0</span> hr)</span>
-                        <span id="calc-subtotal">₹0</span>
-                    </div>
-                    <div class="calc-row" id="calc-fee-row" style="display:none">
-                        <span>{{ count($venue->fee_rules ?? []) > 1 ? 'Fees' : (($venue->fee_rules[0]['label'] ?? null) ?: 'Convenience fee') }}</span>
-                        <span id="calc-fee">₹0</span>
-                    </div>
-                    <div class="calc-row" id="calc-tax-row" style="display:none">
-                        <span id="calc-tax-label">{{ \App\Models\Venue::taxLabel() }}</span>
-                        <span id="calc-tax">₹0</span>
-                    </div>
-                    <hr class="dashed-divider">
-                    <div class="calc-row calc-row--bold">
-                        <span>Estimated Total</span>
-                        <span id="calc-total" class="total-green">₹0</span>
-                    </div>
-                </div>
-
-                <button id="book-now-button" disabled onclick="checkoutBooking()" class="book-now-button-widget">
-                    Select slots to book
+                <button type="button" class="vdk-btn" data-vdk-book @unless($venue->is_bookable) disabled @endunless>
+                    {{ $venue->is_bookable ? 'Book now' : 'Not taking bookings' }}
                 </button>
-
-                @guest
-                    <p class="booking-notice-text" style="color: #64748B;">
-                        🔒 Sign in required to complete reservation.
-                    </p>
-                @else
-                    <p class="booking-notice-text">Instant digital confirmation backed by Razorpay secure payment.</p>
-                @endguest
-
-                {{-- Phone sheet dock (shown only inside .mven__modal-foot): what you picked,
-                     drawn as a ticket stub, and the Checkout key. No money here — the bill
-                     with fees is the checkout page's job. Filled by renderDock(). --}}
-                <div id="co-dock" class="co-dock is-empty" aria-live="polite">
-                    <div class="co-stub">
-                        <div class="co-stub__date" aria-hidden="true">
-                            <span id="co-dow">—</span><b id="co-day">—</b><span id="co-mon"></span>
-                        </div>
-                        <div class="co-stub__body">
-                            <span id="co-what" class="co-stub__what">Your slot</span>
-                            <div id="co-times" class="co-stub__times"><span class="co-stub__hint">Tap an open time above</span></div>
-                            <span id="co-facts" class="co-stub__facts"></span>
-                        </div>
-                        <div id="co-court" class="co-stub__court" aria-hidden="true"></div>
-                        <button type="button" id="co-clear" class="co-stub__clear" aria-label="Clear picked slots" onclick="clearPicks()">
-                            <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-                        </button>
-                    </div>
-                    <button type="button" id="co-go" class="co-go" disabled onclick="goCheckout(this)">
-                        <span class="co-go__pass" aria-hidden="true">
-                            <svg viewBox="0 0 32 22" width="30" height="21"><path d="M3 2h26a1 1 0 0 1 1 1v4.5a3.5 3.5 0 0 0 0 7V19a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-4.5a3.5 3.5 0 0 0 0-7V3a1 1 0 0 1 1-1z" fill="#fff"/><path d="M21 3.5v15" stroke="#93B4F5" stroke-width="1.4" stroke-dasharray="1.6 1.8"/><path d="M7 8h9M7 11h6M7 14h8" stroke="#2563EB" stroke-width="1.6" stroke-linecap="round"/><circle cx="25.5" cy="11" r="2" fill="#2563EB"/></svg>
-                        </span>
-                        <span class="co-go__label" id="co-go-label">{{ auth()->check() ? 'Checkout' : 'Sign in to checkout' }}</span>
-                        <span class="co-go__arrow" aria-hidden="true">
-                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
-                        </span>
+                <div class="vdk-cta__row">
+                    <button type="button" class="vdk-ghost" onclick="shareVenue()">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7M16 6l-4-4-4 4M12 2v13"/></svg>
+                        Share
+                    </button>
+                    <button type="button" class="vdk-ghost action-round-btn" onclick="toggleFavorite(this)">
+                        <svg id="fav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                        Save
                     </button>
                 </div>
             </div>
-        </div>
 
+            {{-- Timing: the real week, a bar per day, a line where "now" is. --}}
+            @if($vdHasWeek || $venue->hours)
+                <div class="vdk-card">
+                    <div class="vdk-card__head">
+                        <h3>Timing</h3>
+                        @if($vdStatus)
+                            <span class="vdk-open is-{{ $vdStatus[0] }}"><i></i>{{ $vdStatus[1] }}@if($vdStatus[2])<small> · {{ $vdStatus[2] }}</small>@endif</span>
+                        @endif
+                    </div>
+                    @if($vdHasWeek)
+                        <div class="vdk-week" role="img" aria-label="Opening hours: {{ $venue->hours }}">
+                            @foreach($vdDayNames as $key => $name)
+                                @php $span = $vdSpan($vdWeek[$key] ?? null); $isToday = $key === $vdToday; @endphp
+                                <div class="vdk-week__row {{ $isToday ? 'is-today' : '' }}">
+                                    <span class="vdk-week__day">{{ $isToday ? 'Today' : $name }}</span>
+                                    <span class="vdk-week__track">
+                                        @if($span)
+                                            <span class="vdk-week__bar" style="left: {{ round($span[0] / 14.4, 2) }}%; width: {{ round(($span[1] - $span[0]) / 14.4, 2) }}%"></span>
+                                        @else
+                                            <span class="vdk-week__closed">Closed</span>
+                                        @endif
+                                        @if($isToday)<span class="vdk-week__now" style="left: {{ round($vdNowMin / 14.4, 2) }}%"></span>@endif
+                                    </span>
+                                </div>
+                            @endforeach
+                            <div class="vdk-week__axis" aria-hidden="true"><span></span><span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>12a</span></div>
+                        </div>
+                    @endif
+                    @if($venue->hours)<p class="vdk-card__note">{{ $venue->hours }}</p>@endif
+                </div>
+            @endif
+
+            {{-- Location: a live map when there's a pin, else a drawn one that says so. --}}
+            <div class="vdk-card">
+                <div class="vdk-card__head"><h3>Location</h3></div>
+                <p class="vdk-card__addr">{{ $mvAddress }}</p>
+                @if($mvEmbed)
+                    <iframe class="vdk-map" src="{{ $mvEmbed }}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" title="Map of {{ $venue->title }}"></iframe>
+                @else
+                    <a class="vdk-map vdk-map--art" href="{{ $mvMapUrl }}" target="_blank" rel="noopener" aria-label="Open {{ $venue->title }} in Google Maps">
+                        <svg viewBox="0 0 300 140" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                            <rect width="300" height="140" fill="#EEF2EA"/>
+                            <path d="M196 0h104v58c-30 6-60-4-104-20z" fill="#D7EBCF"/>
+                            <path d="M0 104c40-14 70 6 120-2s70-26 110-18 50 12 70 8" stroke="#BFDDF2" stroke-width="10" fill="none"/>
+                            <path d="M-10 70h320M112 -10v160M230 -10l-40 160" stroke="#fff" stroke-width="9"/>
+                            <path d="M-10 30h120M40 -10v160M170 70v80" stroke="#fff" stroke-width="5"/>
+                            <path d="M-10 70h320M112 -10v160" stroke="#F8E1A8" stroke-width="2" stroke-dasharray="8 6"/>
+                            <g transform="translate(150 70)">
+                                <ellipse cx="0" cy="2" rx="12" ry="4" fill="#0F172A" opacity=".15"/>
+                                <path d="M0 0c-9-12-15-18-15-26a15 15 0 0 1 30 0c0 8-6 14-15 26z" fill="#2563EB" stroke="#fff" stroke-width="2.5"/>
+                                <circle cx="0" cy="-26" r="5.5" fill="#fff"/>
+                            </g>
+                        </svg>
+                        <span class="vdk-map__cta">Open in Google Maps</span>
+                    </a>
+                @endif
+                <a class="vdk-ghost vdk-ghost--wide" href="{{ $mvMapUrl }}" target="_blank" rel="noopener">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 11 19-9-9 19-2-8z"/></svg>
+                    Get directions
+                </a>
+            </div>
+
+            {{-- Your booking: picked slots and the estimate. Sticks once you're picking. --}}
+            <div class="sticky-sidebar-container vdk-sticky">
+                <div class="sticky-booking-card">
+                    <div class="price-row">
+                        <span class="price-row__label">Your booking</span>
+                        <div class="price-row__value">
+                            <strong id="rate-per-hour">₹{{ number_format($venue->price) }}</strong>
+                            <span>/ hr</span>
+                        </div>
+                    </div>
+
+                    <hr class="detail-divider mb-20">
+
+                    <div class="mb-16">
+                        <label class="sidebar-label">Date</label>
+                        <div id="selected-date-text" class="selected-date-preview">{{ $datePills[0]['display'] }}</div>
+                    </div>
+
+                    <div class="mb-24">
+                        <label class="sidebar-label">Selected Slots (<span id="slots-count">0</span>)</label>
+                        <div id="selected-slots-list" class="selected-slots-preview-list">
+                            <span class="no-slots-placeholder">No slots picked yet — tap an open time on the board.</span>
+                        </div>
+                    </div>
+
+                    <div id="price-calculator" class="price-calculator-panel">
+                        <div class="calc-row">
+                            <span>Subtotal (<span id="calc-hours">0</span> hr)</span>
+                            <span id="calc-subtotal">₹0</span>
+                        </div>
+                        <div class="calc-row" id="calc-fee-row" style="display:none">
+                            <span>{{ count($venue->fee_rules ?? []) > 1 ? 'Fees' : (($venue->fee_rules[0]['label'] ?? null) ?: 'Convenience fee') }}</span>
+                            <span id="calc-fee">₹0</span>
+                        </div>
+                        <div class="calc-row" id="calc-tax-row" style="display:none">
+                            <span id="calc-tax-label">{{ \App\Models\Venue::taxLabel() }}</span>
+                            <span id="calc-tax">₹0</span>
+                        </div>
+                        <hr class="dashed-divider">
+                        <div class="calc-row calc-row--bold">
+                            <span>Estimated Total</span>
+                            <span id="calc-total" class="total-green">₹0</span>
+                        </div>
+                    </div>
+
+                    <button id="book-now-button" disabled onclick="checkoutBooking()" class="book-now-button-widget">
+                        Select slots to book
+                    </button>
+
+                    @guest
+                        <p class="booking-notice-text" style="color: #64748B;">Sign in to complete the booking.</p>
+                    @else
+                        <p class="booking-notice-text">Confirmed instantly · paid securely with Razorpay.</p>
+                    @endguest
+
+                    {{-- Phone sheet dock (shown only inside .mven__modal-foot): what you picked,
+                         drawn as a ticket stub, and the Checkout key. No money here — the bill
+                         with fees is the checkout page's job. Filled by renderDock(). --}}
+                    <div id="co-dock" class="co-dock is-empty" aria-live="polite">
+                        <div class="co-stub">
+                            <div class="co-stub__date" aria-hidden="true">
+                                <span id="co-dow">—</span><b id="co-day">—</b><span id="co-mon"></span>
+                            </div>
+                            <div class="co-stub__body">
+                                <span id="co-what" class="co-stub__what">Your slot</span>
+                                <div id="co-times" class="co-stub__times"><span class="co-stub__hint">Tap an open time above</span></div>
+                                <span id="co-facts" class="co-stub__facts"></span>
+                            </div>
+                            <div id="co-court" class="co-stub__court" aria-hidden="true"></div>
+                            <button type="button" id="co-clear" class="co-stub__clear" aria-label="Clear picked slots" onclick="clearPicks()">
+                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+                            </button>
+                        </div>
+                        <button type="button" id="co-go" class="co-go" disabled onclick="goCheckout(this)">
+                            <span class="co-go__pass" aria-hidden="true">
+                                <svg viewBox="0 0 32 22" width="30" height="21"><path d="M3 2h26a1 1 0 0 1 1 1v4.5a3.5 3.5 0 0 0 0 7V19a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1v-4.5a3.5 3.5 0 0 0 0-7V3a1 1 0 0 1 1-1z" fill="#fff"/><path d="M21 3.5v15" stroke="#93B4F5" stroke-width="1.4" stroke-dasharray="1.6 1.8"/><path d="M7 8h9M7 11h6M7 14h8" stroke="#2563EB" stroke-width="1.6" stroke-linecap="round"/><circle cx="25.5" cy="11" r="2" fill="#2563EB"/></svg>
+                            </span>
+                            <span class="co-go__label" id="co-go-label">{{ auth()->check() ? 'Checkout' : 'Sign in to checkout' }}</span>
+                            <span class="co-go__arrow" aria-hidden="true">
+                                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </aside>
     </div>
-
 </section>
+
+<style>
+@media (min-width: 721px) {
+    .page-shell.gamehub-detail-container.vdk {
+        display: block; max-width: 1200px; margin: 0 auto; padding: 18px 24px 64px;
+        font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif; color: #0F172A;
+    }
+    .vdk h2, .vdk h3 { margin: 0; letter-spacing: -.02em; color: #0F172A; }
+
+    /* Trail + head */
+    .vdk-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; color: #64748B; }
+    .vdk-crumbs a { color: #64748B; text-decoration: none; }
+    .vdk-crumbs a:hover { color: #2563EB; }
+    .vdk-crumbs [aria-current] { color: #0F172A; font-weight: 600; max-width: 32ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .vdk-crumbs svg { color: #CBD5E1; }
+    .vdk-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin: 14px 0 20px; }
+    .vdk-head__title { font-size: 30px; line-height: 1.15; font-weight: 800; letter-spacing: -.03em; }
+    .vdk-head__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-top: 8px; font-size: 14.5px; color: #475569; }
+    .vdk-head__score { display: inline-flex; align-items: center; gap: 4px; }
+    .vdk-head__score b { color: #0F172A; }
+    .vdk-head__score i { font-style: normal; color: #64748B; }
+    .vdk-head__badge { flex: none; padding: 5px 10px; border-radius: 999px; background: #EFF4FF; color: #1D4ED8; font-size: 12px; font-weight: 700; }
+    .vdk-link { padding: 0; border: 0; background: none; font: inherit; font-weight: 700; color: #2563EB; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+
+    .vdk-grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 28px; align-items: start; }
+    .vdk-main { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+    .vdk-rail { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+    /* Photos */
+    .vdk-photos__frame { position: relative; aspect-ratio: 16 / 9; border-radius: 18px; overflow: hidden; background: #E2E8F0; }
+    .vdk-photos__frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .35s ease; }
+    .vdk-photos__frame img.is-on { opacity: 1; }
+    .vdk-photos__nav {
+        position: absolute; top: 50%; translate: 0 -50%; width: 40px; height: 40px; border: 0; border-radius: 50%;
+        display: grid; place-items: center; background: rgba(255, 255, 255, .92); color: #0F172A; cursor: pointer;
+        box-shadow: 0 2px 10px rgba(15, 23, 42, .18); opacity: 0; transition: opacity .2s ease, transform .1s ease;
+    }
+    .vdk-photos__frame:hover .vdk-photos__nav, .vdk-photos__nav:focus-visible { opacity: 1; }
+    .vdk-photos__nav:active { transform: scale(.94); }
+    .vdk-photos__nav.is-prev { left: 14px; } .vdk-photos__nav.is-next { right: 14px; }
+    .vdk-photos__count { position: absolute; right: 14px; bottom: 14px; padding: 4px 10px; border-radius: 999px; background: rgba(15, 23, 42, .62); color: #fff; font-size: 12px; font-variant-numeric: tabular-nums; }
+    .vdk-photos__strip { display: flex; gap: 8px; margin-top: 10px; overflow-x: auto; scrollbar-width: none; }
+    .vdk-photos__strip button { flex: none; width: 92px; height: 60px; padding: 0; border: 2px solid transparent; border-radius: 10px; overflow: hidden; cursor: pointer; background: #E2E8F0; opacity: .7; transition: opacity .15s, border-color .15s; }
+    .vdk-photos__strip button.is-on { border-color: #2563EB; opacity: 1; }
+    .vdk-photos__strip img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .vdk-photos__frame--art { display: grid; place-items: center; background: #F1F5F9; }
+    .vdk-photos__frame--art svg { width: 62%; max-width: 460px; filter: drop-shadow(0 18px 24px rgba(15, 23, 42, .18)); transform: perspective(900px) rotateX(28deg); }
+    .vdk-photos__frame--art span { position: absolute; bottom: 16px; font-size: 13px; font-weight: 600; color: #64748B; }
+
+    /* Sections */
+    .vdk-sec { padding: 22px 24px; border: 1px solid #E8EDF4; border-radius: 18px; background: #fff; }
+    .vdk-sec__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+    .vdk-sec__head h2 { font-size: 19px; font-weight: 800; }
+    .vdk-sec__head > span { font-size: 13px; color: #64748B; }
+    .vdk-body { margin: 0 0 10px; font-size: 15px; line-height: 1.7; color: #334155; }
+    .vdk-host { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; font-size: 14px; color: #2563EB; text-decoration: none; }
+
+    /* Sports = courts */
+    .vdk-sports { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 12px; }
+    .vdk-sport {
+        display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 10px 12px; text-align: left;
+        border: 1.5px solid #E8EDF4; border-radius: 16px; background: #fff; cursor: pointer; font: inherit; color: #0F172A;
+        transition: border-color .15s, box-shadow .15s, transform .12s;
+    }
+    .vdk-sport:hover { border-color: #C7D4E6; transform: translateY(-2px); box-shadow: 0 10px 22px -16px rgba(15, 23, 42, .45); }
+    .vdk-sport.is-on { border-color: #2563EB; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
+    .vdk-sport__art { width: 100%; height: auto; margin-bottom: 8px; border-radius: 10px; }
+    .vdk-sport__name { font-size: 14.5px; font-weight: 800; }
+    .vdk-sport__sub { font-size: 12.5px; color: #64748B; font-variant-numeric: tabular-nums; }
+    .vdk-sport__sub b { color: #0F172A; }
+    .vdk-sport__sub i { font-style: normal; }
+
+    /* The slot board keeps its own styles; it just sits in a section now. */
+    #booking-widget.vdk-sec { margin: 0; box-shadow: none; scroll-margin-top: 84px; }
+    #booking-widget.vdk-sec:hover { transform: none; box-shadow: none; }
+    #booking-widget .detail-card-panel__title { font-size: 19px; font-weight: 800; letter-spacing: -.02em; }
+    .sport-tab__glyph { flex: none; }
+
+    /* Amenities */
+    .vdk-amen { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px 12px; }
+    .vdk-amen__item { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 600; color: #1E293B; }
+    .vdk-amen__ico { flex: none; width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: #F1F5FB; color: #2563EB; }
+
+    /* Good to know */
+    .vdk-know { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+    .vdk-know li { display: flex; gap: 10px; font-size: 14.5px; line-height: 1.55; color: #334155; }
+    .vdk-know svg { flex: none; margin-top: 3px; color: #16A34A; }
+
+    /* Reviews */
+    .vdk-reviews { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+    .vdk-reviews .review-form-card { margin: 0; }
+    .vdk-reviews__list .review-card:last-child { margin-bottom: 0; }
+    .vdk-noreviews { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 8px 18px; text-align: center; }
+    .vdk-noreviews svg { width: 200px; height: auto; margin-bottom: 8px; }
+    .vdk-noreviews strong { font-size: 15px; }
+    .vdk-noreviews span { font-size: 13.5px; color: #64748B; }
+
+    /* FAQ + related */
+    .vdk-faq details { border-bottom: 1px solid #EEF2F6; padding: 14px 0; }
+    .vdk-faq details:last-child { border-bottom: 0; }
+    .vdk-faq summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; gap: 12px; font-size: 15px; font-weight: 700; }
+    .vdk-faq summary::-webkit-details-marker { display: none; }
+    .vdk-faq summary::after { content: '+'; color: #2563EB; font-weight: 800; }
+    .vdk-faq details[open] summary::after { content: '–'; }
+    .vdk-faq p { margin: 8px 0 0; font-size: 14.5px; line-height: 1.6; color: #475569; }
+    .vdk-sec--quiet { padding-top: 6px; border: 0; background: transparent; }
+    .vdk-near { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .vdk-near a { display: flex; flex-direction: column; padding: 12px 14px; border: 1px solid #E8EDF4; border-radius: 12px; background: #fff; text-decoration: none; color: #0F172A; font-size: 14px; }
+    .vdk-near a:hover { border-color: #C7D4E6; }
+    .vdk-near small { color: #64748B; font-size: 12.5px; }
+    .vdk-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+    .vdk-chips a { padding: 7px 12px; border: 1px solid #E2E8F0; border-radius: 999px; font-size: 13px; font-weight: 600; color: #2563EB; text-decoration: none; background: #fff; }
+
+    /* Rail cards */
+    .vdk-card { padding: 18px; border: 1px solid #E8EDF4; border-radius: 18px; background: #fff; }
+    .vdk-card__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+    .vdk-card__head h3 { font-size: 16px; font-weight: 800; }
+    .vdk-card__note { margin: 12px 0 0; font-size: 13px; color: #64748B; line-height: 1.5; }
+    .vdk-card__addr { margin: 0 0 12px; font-size: 14px; line-height: 1.55; color: #334155; }
+    .vdk-cta__price { display: flex; align-items: baseline; gap: 4px; margin-bottom: 14px; }
+    .vdk-cta__price span { margin-right: 4px; font-size: 13px; color: #64748B; }
+    .vdk-cta__price b { font-size: 24px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+    .vdk-cta__price i { font-style: normal; color: #64748B; font-size: 14px; }
+    .vdk-btn {
+        width: 100%; height: 50px; border: 0; border-radius: 14px; background: #2563EB; color: #fff; font: inherit; font-size: 16px; font-weight: 800;
+        cursor: pointer; box-shadow: inset 0 -3px 0 rgba(15, 23, 42, .18); transition: background-color .15s, transform .1s;
+    }
+    .vdk-btn:hover { background: #1D4ED8; }
+    .vdk-btn:active { transform: translateY(1px); box-shadow: none; }
+    .vdk-btn:disabled { background: #CBD5E1; box-shadow: none; cursor: not-allowed; }
+    .vdk-cta__row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+    .vdk-ghost {
+        display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 42px; padding: 0 12px;
+        border: 1px solid #E2E8F0; border-radius: 12px; background: #fff; color: #0F172A; font: inherit; font-size: 14px; font-weight: 700;
+        text-decoration: none; cursor: pointer; transition: border-color .15s, background-color .15s;
+    }
+    .vdk-ghost:hover { border-color: #C7D4E6; background: #F8FAFC; }
+    .vdk .vdk-ghost.action-round-btn { width: auto; border-radius: 12px; }
+    .vdk-ghost--wide { width: 100%; margin-top: 12px; }
+
+    .vdk-open { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; }
+    .vdk-open i { width: 7px; height: 7px; border-radius: 50%; }
+    .vdk-open small { font-size: inherit; font-weight: 500; color: #64748B; }
+    .vdk-open.is-open { color: #15803D; } .vdk-open.is-open i { background: #16A34A; box-shadow: 0 0 0 3px rgba(22, 163, 74, .18); }
+    .vdk-open.is-shut { color: #64748B; } .vdk-open.is-shut i { background: #94A3B8; }
+
+    .vdk-week { display: grid; gap: 7px; }
+    .vdk-week__row { display: grid; grid-template-columns: 44px 1fr; align-items: center; gap: 8px; }
+    .vdk-week__day { font-size: 12.5px; font-weight: 600; color: #64748B; }
+    .vdk-week__track { position: relative; height: 12px; border-radius: 6px; background: #F1F5F9; }
+    .vdk-week__bar { position: absolute; top: 0; bottom: 0; border-radius: 6px; background: #BFD3FB; }
+    .vdk-week__closed { position: absolute; inset: 0; display: flex; align-items: center; padding-left: 8px; font-size: 10.5px; font-weight: 700; color: #94A3B8; letter-spacing: .02em; }
+    .vdk-week__row.is-today .vdk-week__day { color: #0F172A; font-weight: 800; }
+    .vdk-week__row.is-today .vdk-week__bar { background: #2563EB; }
+    .vdk-week__now { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; border-radius: 1px; background: #0F172A; }
+    .vdk-week__now::before { content: ''; position: absolute; top: -3px; left: -2px; width: 6px; height: 6px; border-radius: 50%; background: #0F172A; }
+    .vdk-week__axis { display: grid; grid-template-columns: 44px repeat(4, 1fr) 0; gap: 0 8px; font-size: 10.5px; color: #94A3B8; font-variant-numeric: tabular-nums; }
+    .vdk-week__axis span:nth-child(n+2) { margin-left: -8px; }
+    .vdk-week__axis span:last-child { justify-self: end; margin-left: 0; translate: -4px 0; }
+
+    .vdk-map { display: block; width: 100%; height: 170px; border: 0; border-radius: 14px; overflow: hidden; background: #EEF2EA; }
+    .vdk-map--art { position: relative; text-decoration: none; }
+    .vdk-map--art svg { width: 100%; height: 100%; display: block; }
+    .vdk-map__cta { position: absolute; left: 10px; bottom: 10px; padding: 6px 10px; border-radius: 999px; background: #fff; color: #0F172A; font-size: 12.5px; font-weight: 700; box-shadow: 0 2px 8px rgba(15, 23, 42, .14); }
+
+    .vdk-sticky { position: sticky; top: 84px; }
+    .vdk .sticky-booking-card { position: static; margin: 0; border: 1px solid #E8EDF4; border-radius: 18px; box-shadow: 0 16px 32px -24px rgba(15, 23, 42, .35); }
+    .vdk .sticky-sidebar-container { position: sticky; top: 84px; }
+
+    @media (max-width: 1080px) {
+        .vdk-grid { grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; }
+        .vdk-reviews { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 900px) {
+        .page-shell.gamehub-detail-container.vdk { padding: 14px 16px 48px; }
+        .vdk-grid { grid-template-columns: 1fr; }
+        .vdk-rail { display: grid; grid-template-columns: 1fr 1fr; }
+        .vdk-cta, .vdk-sticky { grid-column: 1 / -1; }
+        .vdk-sticky, .vdk .sticky-sidebar-container { position: static; }
+    }
+}
+@media (min-width: 721px) and (prefers-reduced-motion: reduce) {
+    .vdk-photos__frame img, .vdk-sport { transition: none; }
+}
+</style>
+
+<script>
+/* Desktop page: photo frame, sport tiles → slot board, Book / Rate jumps. */
+(() => {
+    const page = document.querySelector('.vdk');
+    if (!page) return;
+
+    const photos = page.querySelector('[data-vdk-photos]');
+    if (photos) {
+        const shots = [...photos.querySelectorAll('.vdk-photos__frame img')];
+        const thumbs = [...photos.querySelectorAll('[data-vdk-go]')];
+        const at = photos.querySelector('[data-vdk-at]');
+        let i = 0;
+        const show = (n) => {
+            i = (n + shots.length) % shots.length;
+            shots.forEach((s, k) => s.classList.toggle('is-on', k === i));
+            thumbs.forEach((t, k) => t.classList.toggle('is-on', k === i));
+            if (at) at.textContent = i + 1;
+            thumbs[i]?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+        };
+        photos.addEventListener('click', (e) => {
+            const step = e.target.closest('[data-vdk-step]');
+            if (step) return show(i + Number(step.dataset.vdkStep));
+            const go = e.target.closest('[data-vdk-go]');
+            if (go) show(Number(go.dataset.vdkGo));
+        });
+        photos.tabIndex = -1;
+        document.addEventListener('keydown', (e) => {
+            if (!photos.matches(':hover')) return;
+            if (e.key === 'ArrowLeft') show(i - 1);
+            if (e.key === 'ArrowRight') show(i + 1);
+        });
+    }
+
+    const board = document.getElementById('booking-widget');
+    const toBoard = () => board?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    const tiles = [...page.querySelectorAll('[data-vdk-sport]')];
+    const mark = (sport) => tiles.forEach((t) => t.classList.toggle('is-on', t.dataset.vdkSport === sport));
+    tiles.forEach((t) => t.addEventListener('click', () => {
+        const sport = t.dataset.vdkSport;
+        mark(sport);
+        if (typeof selectSport === 'function' && (venueCourts[sport] || []).length) selectSport(sport);
+        toBoard();
+    }));
+    // The board's own sport tabs keep the tiles in step.
+    document.addEventListener('click', (e) => {
+        const tab = e.target.closest('.vdk .sport-tab[id^="sport-tab-"]');
+        if (tab) mark(tab.id.slice('sport-tab-'.length));
+    });
+
+    page.querySelector('[data-vdk-book]')?.addEventListener('click', toBoard);
+    page.querySelector('[data-vdk-rate]')?.addEventListener('click', () => {
+        const form = page.querySelector('.review-form-card');
+        form?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        setTimeout(() => form?.querySelector('.rvf__star')?.focus({ preventScroll: true }), 450);
+    });
+})();
+</script>
 
 <style>
 /* ==========================================================================
@@ -2927,6 +3388,8 @@
         const dlist = document.getElementById('reviews-list-container');
         if (dlist) {
             dlist.querySelector('[data-mine]')?.remove();
+            // The empty-stands drawing goes once there's a review to show.
+            dlist.querySelector('.vdk-noreviews')?.remove();
             const card = document.createElement('div');
             card.className = 'review-card';
             card.dataset.mine = '1';
