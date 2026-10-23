@@ -50,6 +50,9 @@ final class PublicWebController extends Controller
      */
     private const GAMEHUB_SPORTS = ['All', 'Cricket', 'Football', 'Badminton', 'Basketball'];
 
+    /** Every sport ?sport= may name. The desktop chips show those that have venues. */
+    private const GAMEHUB_FILTER_SPORTS = ['Cricket', 'Football', 'Badminton', 'Basketball', 'Pickleball', 'Tennis', 'Volleyball', 'Swimming'];
+
     public function home(): View
     {
         $events = $this->eventFeed(6);
@@ -532,9 +535,11 @@ final class PublicWebController extends Controller
         // filtered set exactly as the app recomputes it, instead of a JS hide that
         // would leave the split stale.
         $selectedSport = $this->selectedSport();
+        // A venue counts for every sport it sells, not just its primary category.
         $filteredVenues = $selectedSport === 'All'
             ? $venues
-            : $venues->where('category', $selectedSport)->values();
+            : $venues->filter(fn ($v) => collect($v->sports ?: [$v->category])
+                ->contains(fn ($s) => strcasecmp((string) $s, $selectedSport) === 0))->values();
 
         // One catalogue, two presentations — no venue appears twice. Mirrors the app:
         // the reel is the top 5 by rating, "more" is strictly what the reel didn't show.
@@ -2293,7 +2298,8 @@ final class PublicWebController extends Controller
             return $path;
         }
 
-        return asset('storage/'.ltrim($path, '/'));
+        // The 1600px WebP copy when it exists; views add the other widths as a srcset.
+        return \App\Support\VenuePhoto::url($path) ?? asset('storage/'.ltrim($path, '/'));
     }
 
     /** Compact venue shape for the Pulse browse grid. */
@@ -2328,7 +2334,7 @@ final class PublicWebController extends Controller
      * Hours come from the venue's structured week (venue clock, IST), so the line
      * says exactly what the slot board will offer — no hours set means no line.
      *
-     * @return array{courts: int, from_price: int, open_state: ?string, open_now: bool}
+     * @return array{courts: int, from_price: int, open_state: ?string, open_now: bool, today_windows: list<array{int, int}>, now_minute: ?int}
      */
     private function venueCardFacts(Venue $v): array
     {
@@ -2338,9 +2344,12 @@ final class PublicWebController extends Controller
 
         $state = null;
         $openNow = false;
+        $windows = [];
+        $nowMinute = null;
         if (is_array($v->hours_json) && $v->hours_json !== []) {
             $now = \App\Support\BusinessClock::now();
-            $minute = (int) $now->format('G') * 60 + (int) $now->format('i');
+            $windows = $v->windowsForWeekday($now->format('D'));
+            $minute = $nowMinute = (int) $now->format('G') * 60 + (int) $now->format('i');
             $label = static fn (int $m): string => $m >= 1440 ? 'midnight' : date('g:i A', mktime(0, $m));
             $short = static fn (string $l): string => str_replace(':00 ', ' ', $l);
 
@@ -2358,7 +2367,11 @@ final class PublicWebController extends Controller
             $state ??= 'Closed now';
         }
 
-        return ['courts' => $courts->count(), 'from_price' => $from, 'open_state' => $state, 'open_now' => $openNow];
+        return [
+            'courts' => $courts->count(), 'from_price' => $from, 'open_state' => $state, 'open_now' => $openNow,
+            // Today's opening windows in venue-clock minutes, for the desktop card's hours strip.
+            'today_windows' => $windows, 'now_minute' => $nowMinute,
+        ];
     }
 
     /** Great-circle distance in km between two lat/lng points (haversine, Earth R = 6371 km). */
@@ -2577,7 +2590,7 @@ final class PublicWebController extends Controller
     {
         $sport = trim((string) request()->query('sport', ''));
 
-        foreach (self::GAMEHUB_SPORTS as $known) {
+        foreach (array_merge(self::GAMEHUB_SPORTS, self::GAMEHUB_FILTER_SPORTS) as $known) {
             if (strcasecmp($sport, $known) === 0) {
                 return $known;
             }

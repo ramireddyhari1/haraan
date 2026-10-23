@@ -248,33 +248,187 @@
             @keyframes mhub-sweep { 0% { transform: scale(.35); opacity: .55; } 80%, 100% { transform: scale(1); opacity: 0; } }
         }
     }
+</style>
 
-    /* Desktop finish: line icons on a tinted tile instead of clipart; quiet counts. */
-    .gamehub-page .sport-card__icon {
-        width: 56px; height: 56px; border-radius: 16px; color: #1E3A8A;
-        background: linear-gradient(180deg, #FFFFFF 0%, #EEF3FD 100%);
-        box-shadow: 0 0 0 1px #DCE6F8 inset, 0 1px 2px rgba(15, 23, 42, .06);
+{{-- Desktop / tablet Pulse (.dhub). Hidden on phones, where .mhub renders. --}}
+<style>
+    .dhub { --ink: #0F172A; --muted: #64748B; --faint: #94A3B8; --line: #E6EAF0; --blue: #2563EB; --cta: #1E3A8A; --cta-down: #172554; color: var(--ink); }
+    @media (max-width: 720px) { .dhub { display: none; } }
+
+    /* Head: words and facts, no banner. */
+    .dhub__head { padding: 10px 0 18px; }
+    .dhub__crumbs { display: flex; gap: 8px; font-size: 13px; color: var(--muted); }
+    .dhub__crumbs a { color: var(--muted); text-decoration: none; }
+    .dhub__crumbs a:hover { color: var(--ink); }
+    .dhub__crumbs span { color: #CBD5E1; }
+    .dhub__head h1 { margin: 10px 0 0; font-size: clamp(28px, 2.6vw, 38px); line-height: 1.12; font-weight: 800; letter-spacing: -.03em; color: var(--ink); text-wrap: balance; }
+    .dhub__facts { display: flex; flex-wrap: wrap; align-items: center; margin: 10px 0 0; font-size: 14.5px; color: var(--muted); }
+    .dhub__facts span + span::before { content: ""; display: inline-block; width: 3px; height: 3px; margin: 0 10px 3px; border-radius: 50%; background: #CBD5E1; }
+    .dhub__facts b { color: var(--ink); font-weight: 800; font-variant-numeric: tabular-nums; }
+    .dhub__facts .is-live { color: #15803D; font-weight: 700; }
+    .dhub__facts .is-live::after { content: ""; display: inline-block; width: 7px; height: 7px; margin-left: 7px; border-radius: 50%; background: #16A34A; box-shadow: 0 0 0 3px rgba(22, 163, 74, .18); vertical-align: 1px; }
+
+    /* Sport bar: sticks under the site topbar; a hairline appears once it's stuck. */
+    .dhub__bar {
+        position: sticky; top: var(--dhub-top, 78px); z-index: 20;
+        display: flex; align-items: center; gap: 16px;
+        margin: 0 -2px; padding: 12px 2px;
+        /* Solid white edge to edge: the shadow paints the gutters, clip-path keeps it
+           from bleeding above or below the bar. */
+        background: #fff; box-shadow: 0 0 0 100vmax #fff; clip-path: inset(0 -100vmax);
+        border-bottom: 1px solid var(--line);
     }
-    .gamehub-page .sport-card--football .sport-card__icon { width: 56px; height: 56px; }
-    .gamehub-page .sport-card__icon svg,
-    .gamehub-page .sport-card--football .sport-card__icon svg { width: 26px; height: 26px; }
-    /* Flex, not the icon/name/count grid: with no count line the name has to sit
-       on the icon's centre line, not at the top of an empty two-row grid. */
-    .gamehub-page .sport-card { display: flex; align-items: center; gap: 16px; transition: transform .12s, box-shadow .18s; }
-    .gamehub-page .sport-card small { margin-left: auto; color: #64748B; font-weight: 600; }
-    .gamehub-page .sport-card span:not(.sport-card__icon), .gamehub-page .sport-card small { align-self: center; }
-    .gamehub-page .sport-card:hover { transform: translateY(-1px); }
-    .gamehub-page .sport-card:active { transform: translateY(1px); }
-    .gamehub-page .gamehub-venue-card__category svg { color: #64748B; }
-    .gh-none { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-    .gh-none p { margin: 0; color: #475569; }
-    .gh-none p strong { color: #0F172A; }
-    .gh-none__cta {
-        flex: none; display: inline-flex; align-items: center; height: 42px; padding: 0 18px; border-radius: 12px;
-        background: #1E3A8A; color: #fff !important; font-weight: 700; text-decoration: none;
-        box-shadow: 0 1px 0 rgba(255, 255, 255, .18) inset, 0 2px 0 #172554;
+    .dhub__chips { display: flex; gap: 8px; min-width: 0; flex: 1; overflow-x: auto; scrollbar-width: none; }
+    .dhub__chips::-webkit-scrollbar { display: none; }
+    .dhub__chip {
+        flex: none; display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 15px;
+        border-radius: 999px; border: 1px solid var(--line); background: #fff;
+        font-size: 14px; font-weight: 700; color: #334155; text-decoration: none;
+        transition: border-color .15s, background .15s, color .15s;
     }
-    .gh-none__cta:active { transform: translateY(2px); box-shadow: none; }
+    .dhub__chip svg { color: var(--faint); }
+    .dhub__chip em { font-style: normal; font-size: 12px; font-weight: 700; color: var(--faint); font-variant-numeric: tabular-nums; }
+    .dhub__chip:hover { border-color: #C7D2E3; color: var(--ink); }
+    .dhub__chip.is-on { background: #EFF4FF; border-color: var(--blue); color: var(--cta); }
+    .dhub__chip.is-on svg, .dhub__chip.is-on em { color: var(--blue); }
+    .dhub__sort { flex: none; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+    .dhub__sort select {
+        height: 40px; padding: 0 34px 0 14px; border-radius: 12px; border: 1px solid var(--line);
+        font: inherit; font-size: 14px; font-weight: 700; color: var(--ink); cursor: pointer;
+        background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748B' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center;
+        appearance: none;
+    }
+    .dhub__sort select:focus-visible { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(37, 99, 235, .15); }
+
+    /* Body: grid + rail. */
+    .dhub__body { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 32px; align-items: start; padding: 24px 0 32px; }
+    .dhub__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 28px 22px; }
+
+    /* Venue card: clean photo, then facts in order of decision. */
+    .dvc { display: flex; flex-direction: column; min-width: 0; color: inherit; text-decoration: none; }
+    .dvc__img { position: relative; display: block; aspect-ratio: 4 / 3; border-radius: 16px; overflow: hidden; background: #EEF2F7; }
+    .dvc__img img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .5s cubic-bezier(.2, .7, .3, 1); }
+    .dvc:hover .dvc__img img { transform: scale(1.035); }
+    .dvc__img::after { content: ""; position: absolute; inset: 0; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .06); pointer-events: none; }
+    .dvc__rate {
+        position: absolute; top: 10px; right: 10px; display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 9px;
+        border-radius: 8px; background: rgba(255, 255, 255, .95); font-size: 12.5px; font-weight: 800; color: var(--ink);
+        box-shadow: 0 1px 3px rgba(15, 23, 42, .12);
+    }
+    .dvc__rate i { font-style: normal; color: #EAB308; }
+    .dvc__rate small { font-size: 11px; font-weight: 600; color: var(--muted); }
+    .dvc__body { display: flex; flex-direction: column; flex: 1; padding: 13px 2px 0; }
+    .dvc__title { font-size: 16.5px; font-weight: 800; letter-spacing: -.015em; line-height: 1.3; color: var(--ink); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .dvc:hover .dvc__title { color: var(--cta); }
+    .dvc__meta { display: flex; align-items: center; gap: 5px; margin-top: 5px; min-width: 0; font-size: 13px; color: var(--muted); }
+    .dvc__meta svg { flex: none; color: var(--faint); }
+    .dvc__meta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dvc__sports { margin-top: 3px; font-size: 13px; color: #475569; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dvc__sports i { font-style: normal; color: var(--faint); }
+
+    /* Today's hours on a 24h rail; the tick is the venue-clock now. */
+    .dvc__hours { display: flex; align-items: center; gap: 10px; margin-top: 11px; }
+    /* Notches at 6 AM, noon and 6 PM so the rail reads as a day. */
+    .dvc__rail {
+        position: relative; flex: 1; height: 6px; border-radius: 3px; background: #EEF1F5;
+    }
+    .dvc__rail::after {
+        content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+        background: linear-gradient(90deg, transparent calc(25% - .5px), #fff calc(25% - .5px), #fff calc(25% + .5px), transparent calc(25% + .5px),
+            transparent calc(50% - .5px), #fff calc(50% - .5px), #fff calc(50% + .5px), transparent calc(50% + .5px),
+            transparent calc(75% - .5px), #fff calc(75% - .5px), #fff calc(75% + .5px), transparent calc(75% + .5px));
+    }
+    .dvc__rail b { z-index: 1; }
+    .dvc__rail i { position: absolute; top: 0; bottom: 0; border-radius: 3px; background: #BFD3FB; }
+    .dvc__rail b { position: absolute; top: -4px; width: 2px; height: 14px; margin-left: -1px; border-radius: 1px; background: var(--ink); }
+    .dvc__hours em { flex: none; font-style: normal; font-size: 12px; font-weight: 700; color: var(--muted); }
+    .dvc__hours em.is-open { color: #15803D; }
+
+    .dvc__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: auto; padding-top: 14px; }
+    .dvc__price { display: inline-flex; align-items: baseline; gap: 3px; }
+    .dvc__price b { font-size: 18px; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+    .dvc__price small { font-size: 12px; color: var(--muted); }
+    .dvc__go {
+        display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 14px; border-radius: 11px;
+        background: var(--cta); color: #fff; font-size: 13.5px; font-weight: 800;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, .16) inset, 0 2px 0 var(--cta-down);
+        transition: background .15s, transform .1s, box-shadow .1s;
+    }
+    .dvc__go svg { transition: transform .2s; }
+    .dvc:hover .dvc__go { background: var(--cta-down); }
+    .dvc:hover .dvc__go svg { transform: translateX(2px); }
+    .dvc:active .dvc__go { transform: translateY(2px); box-shadow: none; }
+    .dvc:focus-visible { outline: none; }
+    .dvc:focus-visible .dvc__img { box-shadow: 0 0 0 3px #fff, 0 0 0 5px var(--blue); }
+
+    /* No venues. */
+    .dhub__none { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 48px 24px 56px; border: 1px dashed #D5DEEA; border-radius: 20px; background: #FBFCFE; }
+    .dhub__none strong { margin-top: 16px; font-size: 18px; font-weight: 800; letter-spacing: -.015em; }
+    .dhub__none p { margin: 6px 0 0; font-size: 14px; color: var(--muted); }
+    .dhub__none-links { display: flex; gap: 18px; margin-top: 16px; }
+    .dhub__none-links a { font-size: 14px; font-weight: 700; color: var(--blue); text-decoration: none; }
+    .dhub__none-links a:hover { text-decoration: underline; }
+
+    /* Rail. */
+    .dhub__rail { position: sticky; top: calc(var(--dhub-top, 78px) + 84px); display: flex; flex-direction: column; gap: 16px; }
+    .dab, .dtp { border: 1px solid var(--line); border-radius: 18px; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .04); }
+    .dab__head, .dtp__head { display: flex; align-items: center; gap: 9px; padding: 15px 16px 0; }
+    .dab__head img { width: 22px; height: 22px; object-fit: contain; }
+    .dab__head strong, .dtp__head strong { font-size: 15px; font-weight: 800; letter-spacing: -.01em; }
+    .dab__live { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 800; color: #DC2626; text-transform: uppercase; letter-spacing: .04em; }
+    .dab__live i { width: 7px; height: 7px; border-radius: 50%; background: #DC2626; animation: dab-pulse 1.6s ease-out infinite; }
+    @keyframes dab-pulse { 0% { box-shadow: 0 0 0 0 rgba(220, 38, 38, .45); } 100% { box-shadow: 0 0 0 7px rgba(220, 38, 38, 0); } }
+    @media (prefers-reduced-motion: reduce) { .dab__live i { animation: none; } }
+    .dab__list { display: flex; flex-direction: column; padding: 8px 8px 0; }
+    .dab__match { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: 12px; color: inherit; text-decoration: none; }
+    .dab__match + .dab__match { border-top: 1px solid #F1F4F8; border-radius: 0 0 12px 12px; }
+    .dab__match:hover { background: #F7F9FC; }
+    .dab__comp { font-size: 11.5px; font-weight: 700; color: var(--faint); text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dab__row { display: flex; align-items: center; gap: 9px; font-size: 14px; color: var(--muted); }
+    .dab__row.is-batting { color: var(--ink); font-weight: 700; }
+    .dab__logo { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 7px; background: #EEF2F7; font-size: 10px; font-weight: 800; color: #475569; overflow: hidden; }
+    .dab__logo img { width: 100%; height: 100%; object-fit: cover; }
+    .dab__name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dab__score { flex: none; font-weight: 800; font-variant-numeric: tabular-nums; color: inherit; }
+    .dab__score small { margin-left: 4px; font-size: 11.5px; font-weight: 600; color: var(--faint); }
+    .dab__empty { margin: 0; padding: 10px 16px 2px; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+    .dab__empty strong { display: block; margin-bottom: 2px; font-size: 14px; color: var(--ink); }
+    .dab__foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 14px 16px 16px; }
+    .dab__foot a { font-size: 13.5px; font-weight: 700; color: var(--blue); text-decoration: none; }
+    .dab__foot a:hover { text-decoration: underline; }
+    .dab__foot .dab__start {
+        display: inline-flex; align-items: center; height: 36px; padding: 0 14px; border-radius: 11px;
+        background: var(--cta); color: #fff; box-shadow: 0 1px 0 rgba(255, 255, 255, .16) inset, 0 2px 0 var(--cta-down);
+    }
+    .dab__foot .dab__start:hover { background: var(--cta-down); text-decoration: none; }
+    .dab__foot .dab__start:active { transform: translateY(2px); box-shadow: none; }
+
+    .dtp__head a { margin-left: auto; font-size: 13px; font-weight: 700; color: var(--blue); text-decoration: none; }
+    .dtp__head a:hover { text-decoration: underline; }
+    .dtp__row { display: flex; align-items: center; gap: 12px; margin: 8px 8px 8px; padding: 8px; border-radius: 12px; color: inherit; text-decoration: none; }
+    .dtp__row:hover { background: #F7F9FC; }
+    .dtp__avatar { position: relative; flex: none; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; background: #EFF4FF; color: var(--cta); font-weight: 800; font-size: 17px; }
+    .dtp__avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+    .dtp__avatar i { position: absolute; right: -3px; bottom: -3px; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: #EAB308; border: 2px solid #fff; font-style: normal; font-size: 10.5px; font-weight: 800; color: #fff; }
+    .dtp__id { display: flex; flex-direction: column; min-width: 0; }
+    .dtp__id b { font-size: 15px; font-weight: 800; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .dtp__id small { margin-top: 2px; font-size: 12.5px; color: var(--muted); }
+    .dtp__empty { margin: 0; padding: 8px 16px 16px; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+
+    .down { display: flex; flex-direction: column; gap: 4px; padding: 16px; border-radius: 18px; background: #F5F7FB; color: inherit; text-decoration: none; }
+    .down strong { font-size: 15px; font-weight: 800; letter-spacing: -.01em; }
+    .down span { font-size: 13.5px; line-height: 1.45; color: var(--muted); }
+    .down em { display: inline-flex; align-items: center; gap: 6px; margin-top: 8px; font-style: normal; font-size: 13.5px; font-weight: 700; color: var(--blue); }
+    .down:hover em svg { transform: translateX(2px); }
+    .down em svg { transition: transform .2s; }
+
+    /* Tablet: the rail drops under the grid as a row of panels. */
+    @media (max-width: 1100px) {
+        .dhub__bar { position: static; }
+        .dhub__body { grid-template-columns: minmax(0, 1fr); }
+        .dhub__rail { position: static; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); align-items: start; order: -1; }
+        .dhub__grid { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+    }
 </style>
 
 <div class="mhub">
@@ -411,7 +565,7 @@
                 @endphp
                 <a class="mhub__arena mhub__arena--v2" href="{{ \App\Support\SeoUrl::venue($venue) }}">
                     <span class="mhub__arena-img">
-                        <img src="{{ $venue->image }}" alt="{{ $venue->title }}" loading="lazy" decoding="async">
+                        <img src="{{ $venue->image }}"{!! \App\Support\VenuePhoto::imgAttrs($venue->image, '232px') !!} alt="{{ $venue->title }}" loading="lazy" decoding="async">
                         {{-- Today's hours from the venue's own week, on the venue clock. --}}
                         @if(!empty($venue->open_state))
                             <span class="mhub__arena-open {{ $venue->open_now ? 'is-open' : '' }}"><i></i>{{ $venue->open_state }}</span>
@@ -497,7 +651,7 @@
             @foreach($moreVenues as $venue)
                 <a class="mhub__vcard" href="{{ \App\Support\SeoUrl::venue($venue) }}">
                     <span class="mhub__vcard-img">
-                        <img src="{{ $venue->image }}" alt="{{ $venue->title }}" loading="lazy" decoding="async">
+                        <img src="{{ $venue->image }}"{!! \App\Support\VenuePhoto::imgAttrs($venue->image, '(min-width: 768px) 420px, 100vw') !!} alt="{{ $venue->title }}" loading="lazy" decoding="async">
                         <span class="mhub__vcard-scrim"></span>
                         <span class="mhub__arena-cat">{{ $venue->category }}</span>
                         @if($venue->tagline)<span class="mhub__vcard-tag">{{ $venue->tagline }}</span>@endif
@@ -528,306 +682,279 @@
     @endif
 </div>
 
-<section class="page-shell gamehub-page theme-gamehub">
-    <div class="gamehub-actions">
-        <a href="/gamehub/actionboard" class="gamehub-action-card active thanna-trigger">
-            <div class="action-card__icon-wrapper">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="action-card__svg">
-                    <path d="M21 7.5V16.5M21 7.5L12 3L3 7.5M21 7.5L12 12M3 7.5V16.5M3 7.5L12 12M12 12V21M12 21L21 16.5M12 21L3 16.5" />
-                    <polygon points="12 4.5 8 9.5 11.5 9.5 10.5 14.5 15.5 9.5 12 9.5 13 4.5" fill="currentColor" stroke="none" />
-                </svg>
-            </div>
-            <div class="action-card__content">
-                <span class="action-card__title">ActionBoard</span>
-                <span class="action-card__desc">Join active open sessions</span>
-            </div>
-            @if(count($liveMatches))
-                <span class="action-card__badge">{{ count($liveMatches) }} live</span>
-            @endif
-        </a>
-        <a href="#featured-venues" class="gamehub-action-card">
-            <div class="action-card__icon-wrapper">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="action-card__svg">
-                    <line x1="5" y1="18" x2="5" y2="7" />
-                    <line x1="9" y1="18" x2="9" y2="7" />
-                    <line x1="13" y1="18" x2="13" y2="7" />
-                    <line x1="4" y1="7" x2="14" y2="7" />
-                    <path d="M19.5 3.5l1 1-11.5 11.5-2.5-2.5 13-10z" />
-                    <path d="M6.5 13.5l-3 3c-.7.7-.7 1.8 0 2.5s1.8.7 2.5 0l3-3" />
-                    <circle cx="19" cy="18" r="3" />
-                    <path d="M17 17a3 3 0 0 1 4 2" />
-                </svg>
-            </div>
-            <div class="action-card__content">
-                <span class="action-card__title">Reserve Turf</span>
-                <span class="action-card__desc">Book secure hourly slots</span>
-            </div>
-        </a>
-        <a href="#all-sports" class="gamehub-action-card">
-            <div class="action-card__icon-wrapper">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="action-card__svg">
-                    <ellipse cx="12" cy="10" rx="9" ry="5.5" />
-                    <ellipse cx="12" cy="10" rx="6.2" ry="3.8" />
-                    <line x1="12" y1="8" x2="12" y2="12" />
-                    <circle cx="12" cy="10" r="1.2" />
-                    <path d="M3 10v6c0 3 4 5.5 9 5.5s9-2.5 9-5.5v-6" />
-                    <line x1="7.5" y1="14.2" x2="7.5" y2="19.5" />
-                    <line x1="12" y1="15.5" x2="12" y2="21.5" />
-                    <line x1="16.5" y1="14.2" x2="16.5" y2="19.5" />
-                </svg>
-            </div>
-            <div class="action-card__content">
-                <span class="action-card__title">Explore Arenas</span>
-                <span class="action-card__desc">Find premier sports grounds</span>
-            </div>
-        </a>
-    </div>
+{{-- ================================================================= --}}
+{{-- DESKTOP / TABLET PULSE (>720px)                                     --}}
+{{--                                                                    --}}
+{{-- One catalogue page, Playo-shaped: a plain head that states real     --}}
+{{-- facts, a sticky sport bar, the venue grid, and a sticky rail that   --}}
+{{-- carries the live side of Pulse (ActionBoard, top player). Every     --}}
+{{-- number on it is read from the venues or matches below — no counts   --}}
+{{-- for sports with no venues, no hero art, no invented claims.         --}}
+{{-- ================================================================= --}}
+@php
+    // Chips: every sport some venue here sells (a venue counts for each of its
+    // sports), plus whatever is selected so the bar never loses the active chip.
+    $dSportCounts = collect($venues ?? [])
+        ->flatMap(fn ($v) => collect($v->sports ?: [$v->category])->filter()->unique())
+        ->countBy()
+        ->sortDesc();
+    if ($selectedSport !== 'All' && !$dSportCounts->has($selectedSport)) {
+        $dSportCounts->put($selectedSport, 0);
+    }
+    $dTotalAll = collect($venues ?? [])->count();
 
-    {{-- Live now: real in-progress matches (mobile only; mirrors the app ActionboardLiveStrip) --}}
-    @if(!empty($liveMatches) && count($liveMatches))
-    <section class="gh-live" aria-label="Live matches">
-        <div class="gh-live__head">
-            <span class="gh-live__title"><span class="gh-live__dot"></span>Live now</span>
-            <a href="/gamehub/actionboard" class="gh-live__all">See all</a>
-        </div>
-        <div class="gh-live__scroll">
-            @foreach($liveMatches as $lm)
-                <a class="gh-live__card" href="/gamehub/actionboard/match/{{ $lm['id'] }}">
-                    <div class="gh-live__cardhead">
-                        <span class="gh-live__comp">{{ $lm['competition'] ?: 'Live match' }}</span>
-                        <span class="gh-live__badge">LIVE</span>
-                    </div>
-                    @foreach([$lm['home'], $lm['away']] as $team)
-                        @php $glIcon = hrn_team_icon($team['logo'] ?? '', $team['emblem'] ?? ''); @endphp
-                        <div class="gh-live__team {{ $team['batting'] ? 'is-batting' : '' }}">
-                            <span class="gh-live__logo {{ $glIcon !== '' ? 'has-img' : '' }}">@if($glIcon !== '')<img src="{{ $glIcon }}" alt="{{ $team['abbr'] }}" loading="lazy">@else{{ \Illuminate\Support\Str::of($team['abbr'])->substr(0, 2)->upper() }}@endif</span>
-                            <span class="gh-live__abbr">{{ $team['abbr'] }}</span>
-                            <span class="gh-live__name">{{ $team['name'] }}</span>
-                            <span class="gh-live__score">{{ $team['score'] }}</span>
-                            @if($team['overs'])<span class="gh-live__ov">({{ $team['overs'] }})</span>@endif
-                        </div>
-                    @endforeach
+    $dFrom = $hubAll->pluck('from_price')->filter(fn ($p) => $p > 0)->min();
+    $dHasDistance = $hubAll->contains(fn ($v) => !empty($v->distance_km));
+    $dWhere = $selectedCity ?: null;
+    $dSportWord = $selectedSport === 'All' ? null : strtolower($selectedSport);
+
+    // Minutes → "6 AM" for the hours strip's tooltip.
+    $dClock = static fn (int $m): string => $m >= 1440 ? 'midnight' : str_replace(':00 ', ' ', date('g:i A', mktime(0, $m)));
+@endphp
+
+<section class="dhub" aria-label="Pulse venues">
+    <header class="dhub__head">
+        <nav class="dhub__crumbs" aria-label="Breadcrumb"><a href="/">Haraan</a><span aria-hidden="true">/</span>Pulse</nav>
+        <h1>
+            {{ $dSportWord ? ucfirst($dSportWord) . ' venues' : 'Turfs & courts' }}
+            {{ $dWhere ? 'in ' . $dWhere : 'near you' }}
+        </h1>
+        @if($hubTotal)
+            <p class="dhub__facts">
+                <span>{{ $hubTotal }} {{ \Illuminate\Support\Str::plural('venue', $hubTotal) }}</span>
+                @if($hubHasHours)
+                    <span class="{{ $hubOpenNow ? 'is-live' : '' }}">{{ ucfirst($hubNowLine) }}</span>
+                @endif
+                @if($dFrom)
+                    <span>From <b>₹{{ number_format($dFrom) }}</b>/hr</span>
+                @endif
+            </p>
+        @endif
+    </header>
+
+    {{-- Sport bar: ?sport= links (the split and the live board are recomputed
+         server-side, same as the phone chips), plus a client-side sort. --}}
+    <div class="dhub__bar">
+        <nav class="dhub__chips" aria-label="Filter by sport">
+            <a class="dhub__chip {{ $selectedSport === 'All' ? 'is-on' : '' }}" href="/gamehub">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $hubIcons['all'] !!}</svg>
+                All<em>{{ $dTotalAll }}</em>
+            </a>
+            @foreach($dSportCounts as $sport => $count)
+                <a class="dhub__chip {{ strcasecmp($sport, $selectedSport) === 0 ? 'is-on' : '' }}" href="/gamehub?sport={{ urlencode($sport) }}">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $hubIcons[$hubGlyphKey((string) $sport)] !!}</svg>
+                    {{ $sport }}@if($count > 0)<em>{{ $count }}</em>@endif
                 </a>
             @endforeach
-        </div>
-    </section>
-    @endif
-
-    <section class="gamehub-hero">
-        <div class="gamehub-hero__copy">
-            <h1>Turfs &amp; courts in {{ $selectedCity ?? 'India' }}</h1>
-            <p>Book cricket turfs, box cricket, football and badminton courts by the hour.</p>
-
-            <div class="search-strip search-strip--gamehub">
-                <label class="search-field">
-                    <span>⌕</span>
-                    <input type="text" id="venueSearchInput" value="" placeholder="Search by name or sport...">
-                </label>
-                <button class="filter-button filter-button--dropdown" type="button" id="venueClearFilter">All Sports</button>
-            </div>
-        </div>
-
-        <div class="gamehub-hero__art">
-            {{-- WebP at 1280px (~95 KB); the 2.2 MB PNG drew half-loaded for seconds. --}}
-            <img src="{{ asset('images/gamehub-hero.webp') }}" alt="Pulse artwork" width="1280" height="543" fetchpriority="high" decoding="async">
-        </div>
-    </section>
-
-    <section class="events-section" id="all-sports">
-        <div class="section-shell__header">
-            <div>
-                <p class="eyebrow eyebrow--soft">Sports</p>
-                <h2>Pick a sport</h2>
-            </div>
-        </div>
-
-        @php
-            $sportTiles = [
-                ['name' => 'Cricket', 'icon' => 'https://cdn-icons-png.flaticon.com/512/5140/5140374.png', 'class' => ''],
-                ['name' => 'Football', 'icon' => 'https://cdn-icons-png.flaticon.com/512/7711/7711842.png', 'class' => 'sport-card--football'],
-                ['name' => 'Badminton', 'icon' => 'https://cdn-icons-png.flaticon.com/512/10904/10904303.png', 'class' => ''],
-                ['name' => 'Swimming', 'icon' => 'https://cdn-icons-png.flaticon.com/512/8317/8317259.png', 'class' => ''],
-                ['name' => 'Tennis', 'icon' => 'https://cdn-icons-png.flaticon.com/512/8927/8927653.png', 'class' => ''],
-                ['name' => 'Basketball', 'icon' => 'https://cdn-icons-png.flaticon.com/512/9128/9128501.png', 'class' => ''],
-            ];
-        @endphp
-        <div class="sport-grid">
-            @foreach($sportTiles as $tile)
-                @php $count = (int) (($sportCounts ?? collect())[$tile['name']] ?? 0); @endphp
-                <button class="sport-card {{ $tile['class'] }}" type="button" data-sport="{{ $tile['name'] }}">
-                    <span class="sport-card__icon" aria-hidden="true">
-                        @if(strtolower($tile['name']) === 'swimming')
-                            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18c1.5 1 3 1 4.5 0s3-1 4.5 0 3 1 4.5 0 3-1 4.5 0"/><path d="M2 14c1.5 1 3 1 4.5 0s3-1 4.5 0 3 1 4.5 0 3-1 4.5 0"/><circle cx="16" cy="6" r="2"/><path d="m6 12 4-5 3 2 3-1"/></svg>
-                        @else
-                            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">{!! $hubIcons[$hubGlyphKey($tile['name'])] !!}</svg>
-                        @endif
-                    </span>
-                    <span>{{ $tile['name'] }}</span>
-                    {{-- A count is shown only when there is something to count. --}}
-                    @if($count > 0)<small>{{ $count }} {{ $count === 1 ? 'venue' : 'venues' }}</small>@endif
-                </button>
-            @endforeach
-        </div>
-    </section>
-
-    <section class="events-section" id="featured-venues">
-        <div class="section-shell__header">
-            <div>
-                <p class="eyebrow eyebrow--soft">Venues</p>
-                <h2>Book a ground by the hour</h2>
-            </div>
-            <a href="#all-venues" class="text-link">View all</a>
-        </div>
-
-        @if(isset($venues) && count($venues))
-            @php
-                $sportIcons = [
-                    'Cricket' => 'https://cdn-icons-png.flaticon.com/512/5140/5140374.png',
-                    'Football' => 'https://cdn-icons-png.flaticon.com/512/7711/7711842.png',
-                    'Badminton' => 'https://cdn-icons-png.flaticon.com/512/10904/10904303.png',
-                    'Swimming' => 'https://cdn-icons-png.flaticon.com/512/8317/8317259.png',
-                    'Tennis' => 'https://cdn-icons-png.flaticon.com/512/8927/8927653.png',
-                    'Basketball' => 'https://cdn-icons-png.flaticon.com/512/9128/9128501.png',
-                ];
-            @endphp
-            <div class="events-grid gamehub-venues-grid">
-                @foreach($venues as $venue)
-                    <a class="event-card gamehub-venue-card" href="{{ \App\Support\SeoUrl::venue($venue) }}" data-venue-name="{{ \Illuminate\Support\Str::lower($venue->title) }}" data-venue-category="{{ \Illuminate\Support\Str::lower($venue->category) }}">
-                        <div class="event-card__thumb">
-                            <img src="{{ $venue->image }}" alt="{{ $venue->title }}" />
-                            <div class="event-card__thumb-overlay">
-                                <div class="event-card__thumb-text">
-                                    <div class="event-card__thumb-venue">{{ $venue->location }}@if(!empty($venue->distance)) • {{ $venue->distance }}@endif</div>
-                                    <h3 class="event-card__thumb-title">{{ $venue->title }}</h3>
-                                </div>
-                            </div>
-                            @if(isset($venue->badge))
-                                <span class="venue-badge">{{ $venue->badge }}</span>
-                            @endif
-                        </div>
-                        <div class="event-card__body gamehub-venue-card__body">
-                            <!-- Category & Rating Row -->
-                            <div class="event-card__meta gamehub-venue-card__meta">
-                                <span class="event-card__category gamehub-venue-card__category" style="display: flex; align-items: center; gap: 6px;">
-                                    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $hubIcons[$hubGlyphKey((string) $venue->category)] !!}</svg>
-                                    {{ $venue->category }}
-                                </span>
-                                @if($venue->reviews > 0)
-                                    <span class="event-card__rating gamehub-venue-card__rating">
-                                        <span class="gamehub-venue-card__star">★</span>
-                                        <span class="gamehub-venue-card__rating-value">{{ $venue->rating }}</span>
-                                        <span class="gamehub-venue-card__reviews-count">({{ $venue->reviews }})</span>
-                                    </span>
-                                @else
-                                    <span class="event-card__rating gamehub-venue-card__rating gamehub-venue-card__rating--new">New</span>
-                                @endif
-                            </div>
-                            
-                            <!-- Price & Action Button Row -->
-                            <div class="event-card__actions gamehub-venue-card__actions">
-                                <span class="event-card__price gamehub-venue-card__price">
-                                    ₹{{ number_format($venue->price) }}/hr
-                                </span>
-                                <span class="btn btn--solid event-card__btn gamehub-venue-card__btn">
-                                    Book Slot
-                                </span>
-                            </div>
-                        </div>
-                    </a>
-                @endforeach
-            </div>
-        @else
-            <div class="empty-state gh-none">
-                <p><strong>No grounds listed here yet.</strong> New grounds show up here as owners list them.</p>
-                <a class="gh-none__cta" href="/partner/login">List your ground</a>
-            </div>
+        </nav>
+        @if($hubTotal > 1)
+            <label class="dhub__sort">
+                <span>Sort</span>
+                <select id="dhubSort">
+                    <option value="order">Recommended</option>
+                    @if($hubAll->contains(fn ($v) => $v->reviews > 0))<option value="rating">Top rated</option>@endif
+                    <option value="price">Price: low to high</option>
+                    @if($dHasDistance)<option value="dist">Nearest</option>@endif
+                    @if($hubHasHours)<option value="open">Open now first</option>@endif
+                </select>
+            </label>
         @endif
-    </section>
+    </div>
 
-    <a class="promo-banner" href="/partner/login">
-        <img src="{{ asset('images/gamehub-hero.webp') }}" alt="Promo banner" width="1280" height="543" loading="lazy" decoding="async">
-        <div class="promo-banner__content">
-            <span class="eyebrow eyebrow--soft">For ground owners</span>
-            <h2>Run a turf or court? List it on Haraan.</h2>
-            <p>Take bookings online and keep walk-ins and online slots in one calendar.</p>
-            <span class="btn btn--solid">List your ground</span>
+    <div class="dhub__body">
+        <div class="dhub__main">
+            @if($hubTotal)
+                <div class="dhub__grid" id="dhubGrid">
+                    @foreach($hubAll as $i => $venue)
+                        @php
+                            $dSports = collect($venue->sports ?: [$venue->category])->filter()->values();
+                            $dMeta = collect([
+                                $venue->location ?: $venue->city,
+                                ($venue->courts ?? 0) > 1 ? $venue->courts . ' courts' : null,
+                                $venue->distance ?: null,
+                            ])->filter()->implode(' · ');
+                            $dPrice = $venue->from_price ?: $venue->price;
+                            $dWindows = collect($venue->today_windows ?? [])
+                                ->map(fn ($w) => [max(0, (int) $w[0]), min(1440, (int) $w[1])])
+                                ->filter(fn ($w) => $w[1] > $w[0]);
+                        @endphp
+                        <a class="dvc" href="{{ \App\Support\SeoUrl::venue($venue) }}"
+                           data-order="{{ $i }}" data-rating="{{ $venue->reviews > 0 ? (float) $venue->rating : 0 }}"
+                           data-price="{{ $dPrice ?: 999999 }}" data-open="{{ $venue->open_now ? 1 : 0 }}"
+                           data-dist="{{ $venue->distance_km ?? 99999 }}">
+                            <span class="dvc__img">
+                                <img src="{{ $venue->image }}"{!! \App\Support\VenuePhoto::imgAttrs($venue->image, '(min-width: 1280px) 300px, (min-width: 1025px) 28vw, 45vw') !!} alt="{{ $venue->title }}" loading="{{ $i < 6 ? 'eager' : 'lazy' }}" decoding="async">
+                                @if($venue->reviews > 0)
+                                    <span class="dvc__rate"><i aria-hidden="true">★</i>{{ $venue->rating }}<small>({{ $venue->reviews }})</small></span>
+                                @endif
+                            </span>
+                            <span class="dvc__body">
+                                <strong class="dvc__title">{{ $venue->title }}</strong>
+                                @if($dMeta)
+                                    <span class="dvc__meta">
+                                        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"></path><circle cx="12" cy="9.5" r="2.5"></circle></svg>
+                                        <span>{{ $dMeta }}</span>
+                                    </span>
+                                @endif
+                                @if($dSports->count())
+                                    <span class="dvc__sports">{{ $dSports->take(3)->implode(' · ') }}@if($dSports->count() > 3) <i>+{{ $dSports->count() - 3 }}</i>@endif</span>
+                                @endif
+
+                                {{-- Today's hours drawn on a 24-hour rail, with a tick at the
+                                     venue-clock now. Only for venues that set their hours. --}}
+                                @if(!empty($venue->open_state))
+                                    <span class="dvc__hours">
+                                        <span class="dvc__rail" role="img" aria-label="Today: {{ $dWindows->map(fn ($w) => $dClock($w[0]) . ' to ' . $dClock($w[1]))->implode(', ') ?: 'closed' }}">
+                                            @foreach($dWindows as $w)
+                                                <i style="left: {{ round($w[0] / 14.4, 2) }}%; width: {{ round(($w[1] - $w[0]) / 14.4, 2) }}%"></i>
+                                            @endforeach
+                                            @if($venue->now_minute !== null)
+                                                <b style="left: {{ round($venue->now_minute / 14.4, 2) }}%"></b>
+                                            @endif
+                                        </span>
+                                        <em class="{{ $venue->open_now ? 'is-open' : '' }}">{{ $venue->open_state }}</em>
+                                    </span>
+                                @endif
+
+                                <span class="dvc__foot">
+                                    <span class="dvc__price">
+                                        @if($dPrice)
+                                            @if(($venue->courts ?? 0) > 1)<small>from</small>@endif
+                                            <b>₹{{ number_format($dPrice) }}</b><small>/hr</small>
+                                        @else
+                                            <small>See prices</small>
+                                        @endif
+                                    </span>
+                                    <span class="dvc__go">Book<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"></path></svg></span>
+                                </span>
+                            </span>
+                        </a>
+                    @endforeach
+                </div>
+            @else
+                <div class="dhub__none">
+                    {{-- An unclaimed plot: a court outline drawn in dashes, waiting for a ground. --}}
+                    <svg viewBox="0 0 220 120" width="220" height="120" aria-hidden="true">
+                        <rect x="20" y="16" width="180" height="88" rx="8" fill="#F5F8FD" stroke="#94A3B8" stroke-width="1.6" stroke-dasharray="6 5"/>
+                        <line x1="110" y1="22" x2="110" y2="98" stroke="#CBD5E1" stroke-width="1.4" stroke-dasharray="4 4"/>
+                        <circle cx="110" cy="60" r="16" fill="none" stroke="#CBD5E1" stroke-width="1.4" stroke-dasharray="4 4"/>
+                        <rect x="20" y="40" width="22" height="40" fill="none" stroke="#CBD5E1" stroke-width="1.4" stroke-dasharray="4 4"/>
+                        <rect x="178" y="40" width="22" height="40" fill="none" stroke="#CBD5E1" stroke-width="1.4" stroke-dasharray="4 4"/>
+                        <path d="M150 30v-22" stroke="#1E3A8A" stroke-width="2" stroke-linecap="round"/>
+                        <path d="M150 8h22l-6 6 6 6h-22z" fill="#2563EB"/>
+                    </svg>
+                    <strong>{{ $dSportWord ? 'No ' . $dSportWord . ' venues' : 'No venues' }} {{ $dWhere ? 'in ' . $dWhere : 'near you' }} yet</strong>
+                    <p>Grounds show up here as soon as an owner lists one.</p>
+                    <div class="dhub__none-links">
+                        @if($selectedSport !== 'All')<a href="/gamehub">See every sport</a>@endif
+                        <a href="/become-a-partner">List your ground</a>
+                    </div>
+                </div>
+            @endif
         </div>
-    </a>
+
+        <aside class="dhub__rail">
+            {{-- ActionBoard: the live side of Pulse. Real matches only. --}}
+            <section class="dab" aria-label="ActionBoard">
+                <header class="dab__head">
+                    <img src="{{ asset('images/haraan-mark.png') }}" alt="" aria-hidden="true" width="22" height="22">
+                    <strong>ActionBoard</strong>
+                    @if(count($hubLive))<span class="dab__live"><i></i>{{ count($hubLive) }} live</span>@endif
+                </header>
+                @if(count($hubLive))
+                    <div class="dab__list">
+                        @foreach(array_slice($hubLive, 0, 3) as $lm)
+                            @php
+                                $dRows = collect([$lm['home'], $lm['away']])->sortByDesc(fn ($t) => (bool) $t['batting'])->values();
+                            @endphp
+                            <a class="dab__match" href="/gamehub/actionboard/match/{{ $lm['id'] }}">
+                                @if($lm['competition'])<span class="dab__comp">{{ $lm['competition'] }}</span>@endif
+                                @foreach($dRows as $team)
+                                    @php $dIcon = hrn_team_icon($team['logo'] ?? '', $team['emblem'] ?? ''); @endphp
+                                    <span class="dab__row {{ $team['batting'] ? 'is-batting' : '' }}">
+                                        <span class="dab__logo {{ $dIcon !== '' ? 'has-img' : '' }}">@if($dIcon !== '')<img src="{{ $dIcon }}" alt="" loading="lazy">@else{{ \Illuminate\Support\Str::of($team['abbr'])->substr(0, 2)->upper() }}@endif</span>
+                                        <span class="dab__name">{{ $team['name'] }}</span>
+                                        <span class="dab__score">{{ $team['score'] }}@if($team['overs'])<small>({{ $team['overs'] }})</small>@endif</span>
+                                    </span>
+                                @endforeach
+                            </a>
+                        @endforeach
+                    </div>
+                @else
+                    <p class="dab__empty">
+                        <strong>{{ $selectedSport === 'All' || $selectedSport === 'Cricket' ? 'No live matches right now' : 'No live ' . strtolower($selectedSport) . ' matches right now' }}</strong>
+                        {{ $selectedSport === 'All' || $selectedSport === 'Cricket' ? 'Scores land here ball by ball' : 'Scores land here' }} as soon as someone starts scoring.
+                    </p>
+                @endif
+                <footer class="dab__foot">
+                    <a href="/gamehub/actionboard">Open the board</a>
+                    <a class="dab__start" href="/gamehub/actionboard/create">Start a match</a>
+                </footer>
+            </section>
+
+            {{-- Top player: this month's #1 on the ranked board for the chosen city. --}}
+            @if($dWhere)
+                <section class="dtp" aria-label="Top player">
+                    <header class="dtp__head">
+                        <strong>Top player in {{ $dWhere }}</strong>
+                        <a href="/gamehub/leaderboard">Leaderboard</a>
+                    </header>
+                    @if($topPlayer)
+                        <a class="dtp__row" href="/player/{{ $topPlayer['player_id'] }}">
+                            <span class="dtp__avatar">
+                                @if(!empty($topPlayer['avatar']))<img src="{{ $topPlayer['avatar'] }}" alt="" loading="lazy">@else{{ \Illuminate\Support\Str::of($topPlayer['name'])->substr(0, 1)->upper() }}@endif
+                                <i aria-hidden="true">1</i>
+                            </span>
+                            <span class="dtp__id">
+                                <b>{{ $topPlayer['name'] }}</b>
+                                <small>{{ number_format($topPlayer['xp']) }} XP this month @if($topPlayer['matches'])· {{ $topPlayer['matches'] }} {{ \Illuminate\Support\Str::plural('match', $topPlayer['matches']) }}@endif</small>
+                            </span>
+                        </a>
+                    @else
+                        <p class="dtp__empty">Nobody in {{ $dWhere }} has played a ranked match this month. The first one takes the spot.</p>
+                    @endif
+                </section>
+            @endif
+
+            <a class="down" href="/become-a-partner">
+                <strong>Run a turf or court?</strong>
+                <span>Take bookings online and keep walk-ins in the same calendar.</span>
+                <em>List your ground<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"></path></svg></em>
+            </a>
+        </aside>
+    </div>
 </section>
 
 <script>
+/* Desktop sort: reorders the cards already on the page; filters stay server-side. */
 document.addEventListener('DOMContentLoaded', () => {
-    const cards = document.querySelectorAll('.gamehub-action-card');
-    cards.forEach(card => {
-        card.addEventListener('click', (e) => {
-            cards.forEach(c => c.classList.remove('active'));
-            card.classList.add('active');
-        });
-    });
+    // The sport bar and rail stick under the site topbar, whose height changes with
+    // the viewport (it wraps on narrower screens), so read it rather than guess.
+    const dhub = document.querySelector('.dhub');
+    const topbar = document.querySelector('.topbar');
+    const setTop = () => {
+        const cs = topbar && getComputedStyle(topbar);
+        const stuck = cs && cs.display !== 'none' && (cs.position === 'sticky' || cs.position === 'fixed');
+        dhub?.style.setProperty('--dhub-top', (stuck ? topbar.offsetHeight : 0) + 'px');
+    };
+    setTop();
+    addEventListener('resize', setTop, { passive: true });
 
-    /* ---- Venue filtering: search box + sport tiles ---- */
-    const searchInput = document.getElementById('venueSearchInput');
-    const clearBtn    = document.getElementById('venueClearFilter');
-    const sportTiles  = document.querySelectorAll('.sport-card[data-sport]');
-    const venueCards  = Array.from(document.querySelectorAll('.gamehub-venue-card'));
-    const venuesGrid  = document.querySelector('.gamehub-venues-grid');
-
-    let activeSport = null;
-
-    // Empty-message element shown when nothing matches.
-    let emptyMsg = null;
-    if (venuesGrid) {
-        emptyMsg = document.createElement('div');
-        emptyMsg.className = 'empty-state';
-        emptyMsg.style.display = 'none';
-        emptyMsg.innerHTML = '<p>No venues match your filters</p>';
-        venuesGrid.parentNode.insertBefore(emptyMsg, venuesGrid.nextSibling);
-    }
-
-    function applyFilters() {
-        const q = (searchInput?.value || '').trim().toLowerCase();
-        let visible = 0;
-
-        venueCards.forEach(card => {
-            const name = card.getAttribute('data-venue-name') || '';
-            const cat  = card.getAttribute('data-venue-category') || '';
-            const matchesText  = !q || name.includes(q) || cat.includes(q);
-            const matchesSport = !activeSport || cat === activeSport.toLowerCase();
-            const show = matchesText && matchesSport;
-            card.style.display = show ? '' : 'none';
-            if (show) visible++;
-        });
-
-        if (emptyMsg) emptyMsg.style.display = visible === 0 ? 'block' : 'none';
-        if (venuesGrid) venuesGrid.style.display = visible === 0 ? 'none' : '';
-    }
-
-    searchInput?.addEventListener('input', applyFilters);
-
-    sportTiles.forEach(tile => {
-        tile.addEventListener('click', () => {
-            const sport = tile.getAttribute('data-sport');
-            if (activeSport === sport) {
-                activeSport = null;
-                tile.classList.remove('is-active');
-            } else {
-                activeSport = sport;
-                sportTiles.forEach(t => t.classList.remove('is-active'));
-                tile.classList.add('is-active');
-            }
-            applyFilters();
-            document.getElementById('featured-venues')?.scrollIntoView({ behavior: 'smooth' });
-        });
-    });
-
-    clearBtn?.addEventListener('click', () => {
-        activeSport = null;
-        if (searchInput) searchInput.value = '';
-        sportTiles.forEach(t => t.classList.remove('is-active'));
-        applyFilters();
+    const sort = document.getElementById('dhubSort');
+    const grid = document.getElementById('dhubGrid');
+    if (!sort || !grid) return;
+    const cards = Array.from(grid.children);
+    const num = (el, k) => parseFloat(el.dataset[k]) || 0;
+    const by = {
+        order:  (a, b) => num(a, 'order') - num(b, 'order'),
+        rating: (a, b) => num(b, 'rating') - num(a, 'rating') || num(a, 'order') - num(b, 'order'),
+        price:  (a, b) => num(a, 'price') - num(b, 'price') || num(a, 'order') - num(b, 'order'),
+        dist:   (a, b) => num(a, 'dist') - num(b, 'dist'),
+        open:   (a, b) => num(b, 'open') - num(a, 'open') || num(a, 'order') - num(b, 'order'),
+    };
+    sort.addEventListener('change', () => {
+        cards.sort(by[sort.value] || by.order).forEach(c => grid.appendChild(c));
     });
 });
 </script>
 @endsection
-
-@include('site.partials.thanna-actionboard')
