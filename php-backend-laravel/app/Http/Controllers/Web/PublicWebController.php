@@ -2489,7 +2489,8 @@ final class PublicWebController extends Controller
             'convenience_fee_value' => (float) ($v->convenience_fee_value ?? 0),
             // Every fee (convenience + the admin's named ones), for the same estimate.
             'fee_rules' => $v->feeRules(),
-            'hours' => $v->displayHours() ?: '',
+            // Falls back to the slot times when the weekly hours aren't set.
+            'hours' => $v->publicHours(),
             'cancellation' => $v->cancellationText(),
             // The app's VenueDetailScreen reads these (address line, "Show in Map"/
             // "Get directions", the "Good to know" checklist, the rating summary);

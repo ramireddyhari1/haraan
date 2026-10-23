@@ -237,23 +237,97 @@ final class Venue extends Model
     }
 
     /**
-     * schema.org `OpeningHoursSpecification` rows from the weekly hours, one per run of
+     * Open/close minutes per weekday for the public site: the weekly hours when set,
+     * else the span of that weekday's slots (first start → last start + one slot).
+     * Null = closed / no slots that day. Display only — booking stays on hours_json.
+     *
+     * @return array<string, array{0: int, 1: int}|null> keyed Mon…Sun
+     */
+    private function publicWeek(): array
+    {
+        $hasHours = is_array($this->hours_json) && $this->hours_json !== [];
+        $monday = Carbon::now()->startOfWeek(Carbon::MONDAY);
+        $week = [];
+
+        foreach (array_keys(self::WEEKDAYS) as $i => $key) {
+            if ($hasHours) {
+                $day = $this->hoursForWeekday($key);
+                $open = $day ? self::toMinutes($day['open']) : null;
+                $close = $day ? self::toMinutes($day['close']) : null;
+                $week[$key] = ($open !== null && $close !== null) ? [$open, $close] : null;
+
+                continue;
+            }
+
+            $starts = $this->slotsOn($monday->copy()->addDays($i))
+                ->map(fn (VenueSlot $s) => self::toMinutes($s->time))
+                ->filter(fn (?int $m) => $m !== null);
+            $week[$key] = $starts->isEmpty()
+                ? null
+                : [$starts->min(), min(24 * 60, $starts->max() + $this->slotLength())];
+        }
+
+        return $week;
+    }
+
+    /**
+     * The week's hours as the website shows them: {@see displayHours()} when the weekly
+     * hours are set (or typed as text), else read off the slots. /control keeps using
+     * displayHours(), where "not configured" is the true answer.
+     */
+    public function publicHours(): string
+    {
+        $set = $this->displayHours();
+        if ($set !== '') {
+            return $set;
+        }
+
+        $week = $this->publicWeek();
+        if (array_filter($week) === []) {
+            return '';
+        }
+
+        $segments = [];
+        $run = [];
+        $runSig = null;
+        $flush = function () use (&$segments, &$run, &$runSig): void {
+            if ($run !== []) {
+                $days = count($run) === 1 ? $run[0] : $run[0].'–'.end($run);
+                $segments[] = $runSig === 'closed' ? "$days Closed" : "$days $runSig";
+                $run = [];
+            }
+        };
+        foreach ($week as $key => $span) {
+            $sig = $span === null ? 'closed' : self::toLabel($span[0]).'–'.self::toLabel($span[1]);
+            if ($sig !== $runSig) {
+                $flush();
+                $runSig = $sig;
+            }
+            $run[] = $key;
+        }
+        $flush();
+
+        return implode(' · ', $segments);
+    }
+
+    /**
+     * schema.org `OpeningHoursSpecification` rows from {@see publicWeek()}, one per run of
      * days sharing the same times. Closed days are left out (schema reads absence as
-     * closed); open == close is "24 hours" → 00:00–23:59. Empty when hours aren't set.
+     * closed); open == close is "24 hours" → 00:00–23:59. Empty when neither hours nor
+     * slots are set.
      *
      * @return list<array<string, mixed>>
      */
     public function openingHoursSchema(): array
     {
         $byTimes = [];
-        foreach (self::WEEKDAYS as $key => $dayName) {
-            $day = $this->hoursForWeekday($key);
-            $open = $day ? self::toMinutes($day['open']) : null;
-            $close = $day ? self::toMinutes($day['close']) : null;
-            if ($open === null || $close === null) {
+        foreach ($this->publicWeek() as $key => $span) {
+            if ($span === null) {
                 continue;
             }
-            $hm = static fn (int $m): string => sprintf('%02d:%02d', intdiv($m, 60) % 24, $m % 60);
+            $dayName = self::WEEKDAYS[$key];
+            [$open, $close] = $span;
+            $hm = static fn (int $m): string => $m >= 24 * 60 ? '23:59' : sprintf('%02d:%02d', intdiv($m, 60), $m % 60);
             [$opens, $closes] = $open === $close ? ['00:00', '23:59'] : [$hm($open), $hm($close)];
             $byTimes[$opens.'-'.$closes]['days'][] = $dayName;
             $byTimes[$opens.'-'.$closes]['times'] = [$opens, $closes];
