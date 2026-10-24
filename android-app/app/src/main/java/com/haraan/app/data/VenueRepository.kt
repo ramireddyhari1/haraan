@@ -219,7 +219,7 @@ class VenueRepository {
                 sports = o.optJSONArray("sports").toStringList().ifEmpty { listOfNotNull(category.takeIf { it.isNotBlank() }) },
                 price = o.optInt("price", 0),
                 image = o.optString("image").takeIf { it.isNotBlank() && it != "null" },
-                images = o.optJSONArray("images").toStringList()
+                images = o.sizedImages()
                     .filter { it.isNotBlank() && it != "null" }.distinct(),
                 tagline = o.optString("tagline"),
                 distance = o.optString("distance"),
@@ -314,7 +314,7 @@ class VenueRepository {
     }
 
     private fun parseDetail(d: JSONObject): VenueDetailData {
-        val images = d.optJSONArray("images").toStringList()
+        val images = d.sizedImages()
         // org.json's optString returns the literal "null" for a JSON null value, which then
         // renders as "null" in the UI. Read display strings through this instead.
         fun s(key: String): String = if (d.isNull(key)) "" else d.optString(key).let { if (it == "null") "" else it }
@@ -434,6 +434,31 @@ class VenueRepository {
                 ReviewResult.Error(e.message ?: "Failed to connect. Please check your network.")
             }
         }
+}
+
+/**
+ * Each venue photo at the width that suits this phone.
+ *
+ * The server sends `images` (1600px WebP copies, or the original when a photo has
+ * none) and, index-aligned, `image_sets`: every width it cut, smallest first. Venue
+ * photos are always drawn about screen-wide and cropped to fill a frame taller than
+ * 16:9, so ask for the screen width plus headroom for the crop: a 1080px phone gets
+ * the 1600 copy, a 1440px one the 2400, a 720px one the 960. A photo with no set (a
+ * pasted link, an older server) keeps its plain URL.
+ */
+private fun JSONObject.sizedImages(): List<String> {
+    val plain = optJSONArray("images") ?: return emptyList()
+    val sets = optJSONArray("image_sets")
+    val want = (android.content.res.Resources.getSystem().displayMetrics.widthPixels * 1.3f).toInt()
+    return (0 until plain.length()).mapNotNull { i ->
+        val url = plain.optString(i).takeIf { it.isNotBlank() } ?: return@mapNotNull null
+        val set = sets?.optJSONArray(i)?.let { arr ->
+            (0 until arr.length()).mapNotNull { j ->
+                arr.optJSONObject(j)?.let { it.optInt("w") to it.optString("url") }
+            }.filter { it.first > 0 && it.second.isNotBlank() }.sortedBy { it.first }
+        }.orEmpty()
+        set.firstOrNull { it.first >= want }?.second ?: set.lastOrNull()?.second ?: url
+    }
 }
 
 private fun JSONArray?.toStringList(): List<String> =
