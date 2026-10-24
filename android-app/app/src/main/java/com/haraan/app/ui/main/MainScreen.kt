@@ -4599,6 +4599,7 @@ private fun CrexMatchesScreen(
               showAll = !isBoard,
             )
           }
+          }
         }
 
       LazyColumn(
@@ -4624,7 +4625,6 @@ private fun CrexMatchesScreen(
           // matches too (Finished and Scheduled have their own tabs), and showing them here
           // put "won by 3 wickets" results under a LIVE heading.
           val sportFeed = liveFeed?.let { rows ->
-          }
             rows
               .filter { it.isInPlay }
               .filter { selectedSport == "All" || it.sport.equals(selectedSport, ignoreCase = true) }
@@ -6665,6 +6665,10 @@ private fun CrexTabsSection(
     // stays on whichever tab the reader was on.
     TabItem("Plans", Icons.Outlined.WorkspacePremium, badge = "Go Pro")
   )
+  val plansIndex = tabs.lastIndex
+  val ink = Color(0xFF1E293B)
+  val accent = Color(0xFF2563EB)
+  val edge = Color(0xFFC7D7F0)
 
   Box(
     modifier = Modifier
@@ -6750,24 +6754,7 @@ private fun CrexTabsSection(
               if (tab.title == "Live") {
                 LivePulseDot(Modifier.offset(x = 3.dp, y = (-2).dp))
               }
-  val plansIndex = tabs.lastIndex
-  val ink = Color(0xFF1E293B)
-  val accent = Color(0xFF2563EB)
-  val edge = Color(0xFFC7D7F0)
             }
-          }
-        }
-      }
-    }
-  }
-}
-
-
-// Softly pulsing red dot — signals live activity on the Live tab.
-@Composable
-private fun LivePulseDot(modifier: Modifier = Modifier) {
-  val t = rememberInfiniteTransition(label = "livePulse")
-  val a by t.animateFloat(
             Spacer(modifier = Modifier.height(5.dp))
             Text(
               text = tab.title,
@@ -6794,6 +6781,19 @@ private fun LivePulseDot(modifier: Modifier = Modifier) {
                 .background(Color(0xFF0F172A))
                 .padding(horizontal = 5.dp, vertical = 2.dp),
             )
+          }
+        }
+      }
+    }
+  }
+}
+
+
+// Softly pulsing red dot — signals live activity on the Live tab.
+@Composable
+private fun LivePulseDot(modifier: Modifier = Modifier) {
+  val t = rememberInfiniteTransition(label = "livePulse")
+  val a by t.animateFloat(
     initialValue = 1f, targetValue = 0.25f,
     animationSpec = infiniteRepeatable(tween(750), RepeatMode.Reverse),
     label = "livePulseAlpha",
