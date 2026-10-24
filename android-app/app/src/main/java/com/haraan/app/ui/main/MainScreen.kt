@@ -123,6 +123,11 @@ import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.WorkspacePremium
 import androidx.compose.material.icons.filled.Apps
+import androidx.compose.material.icons.outlined.PlayCircle
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.Event
+import androidx.compose.material.icons.outlined.Apartment
+import androidx.compose.material.icons.outlined.AccountBalance
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Scoreboard
@@ -4548,19 +4553,36 @@ private fun CrexMatchesScreen(
             .zIndex(1f)
             .shadow(topElev)
             .background(currentBg)
-            .padding(horizontal = 16.dp)
-            .padding(top = 12.dp, bottom = 2.dp)
         ) {
-          CrexHeaderSection(
-            onCreateMatch = { requireRankedAccess { showCreateWizard = true } },
-            onJoinByCode = { showJoinDialog = true },
-            onSearch = { showPlayerSearch = true },
-          )
-          // Live/Finished/District/State board strip — back up top, directly under the header.
-          CrexTabsSection(
-            selectedTab = selectedTab,
-            onTabSelected = { selectedTab = it }
-          )
+          // Header + board strip sit on a soft blue wash; the selected tab is a card of the
+          // page colour that rises out of it, so the tab and the feed below read as one sheet.
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .background(Brush.verticalGradient(listOf(Color(0xFFD9E8FF), Color(0xFFEDF4FF))))
+              .padding(horizontal = 12.dp)
+              .padding(top = 12.dp)
+          ) {
+            Box(Modifier.padding(horizontal = 4.dp)) {
+              CrexHeaderSection(
+                onCreateMatch = { requireRankedAccess { showCreateWizard = true } },
+                onJoinByCode = { showJoinDialog = true },
+                onSearch = { showPlayerSearch = true },
+              )
+            }
+            // Live/Finished/District/State board strip — back up top, directly under the header.
+            CrexTabsSection(
+              selectedTab = selectedTab,
+              onTabSelected = { selectedTab = it },
+              sheetColor = currentBg,
+            )
+          }
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(horizontal = 16.dp)
+              .padding(bottom = 2.dp)
+          ) {
           // Sport is a FILTER over the list, not a destination — it used to occupy
           // three primary nav slots. Shown only on Live/Finished: District and State
           // are leaderboards that do not filter by sport, and a chip row that did
@@ -4602,6 +4624,7 @@ private fun CrexMatchesScreen(
           // matches too (Finished and Scheduled have their own tabs), and showing them here
           // put "won by 3 wickets" results under a LIVE heading.
           val sportFeed = liveFeed?.let { rows ->
+          }
             rows
               .filter { it.isInPlay }
               .filter { selectedSport == "All" || it.sport.equals(selectedSport, ignoreCase = true) }
@@ -6625,121 +6648,117 @@ private fun CrexHeaderSection(
 @Composable
 private fun CrexTabsSection(
   selectedTab: Int,
-  onTabSelected: (Int) -> Unit
+  onTabSelected: (Int) -> Unit,
+  // Colour of the feed under the strip — the selected tab is cut from the same sheet.
+  sheetColor: Color,
 ) {
-  data class TabItem(val title: String, val icon: ImageVector)
+  data class TabItem(val title: String, val icon: ImageVector, val badge: String? = null)
 
   val tabs = listOf(
-    TabItem("Live", Icons.Default.PlayArrow),
-    TabItem("Finished", Icons.Default.CheckCircle),
-    TabItem("Scheduled", Icons.Default.Event),
-    TabItem("District", Icons.Default.Apartment),
-    TabItem("State", Icons.Default.AccountBalance),
+    TabItem("Live", Icons.Outlined.PlayCircle),
+    TabItem("Finished", Icons.Outlined.CheckCircle),
+    TabItem("Scheduled", Icons.Outlined.Event),
+    TabItem("District", Icons.Outlined.Apartment),
+    TabItem("State", Icons.Outlined.AccountBalance),
     // Pro / Hero, for everyone — free and brand-new players included. It is a door, not a
     // page: the plans screen owns sign-in and checkout, so this tab opens it and the board
     // stays on whichever tab the reader was on.
-    TabItem("Plans", Icons.Default.WorkspacePremium)
+    TabItem("Plans", Icons.Outlined.WorkspacePremium, badge = "Go Pro")
   )
 
-  Column(
+  Box(
     modifier = Modifier
       .fillMaxWidth()
-      .padding(top = 4.dp)
+      .padding(top = 14.dp)
+      .height(64.dp)
   ) {
-    Row(
-      modifier = Modifier.fillMaxWidth(),
-      horizontalArrangement = Arrangement.SpaceEvenly,
-    ) {
-      tabs.forEachIndexed { index, tab ->
-        val isSelected = selectedTab == index
-        // Smooth color crossfade between active/inactive (vs. an instant cut).
-        val tabColor by androidx.compose.animation.animateColorAsState(
-          targetValue = if (isSelected) Color(0xFF2563EB) else Color(0xFF94A3B8),
-          animationSpec = tween(200),
-          label = "tabColor"
-        )
-        Column(
-          modifier = Modifier
-            .weight(1f)
-            .clickable {
-              if (index == plansIndex) com.haraan.app.data.membership.MembershipNav.open()
-              else onTabSelected(index)
-            }
-            .padding(top = 8.dp),
-          horizontalAlignment = Alignment.CenterHorizontally,
-          verticalArrangement = Arrangement.Center
-        ) {
-  val plansIndex = tabs.lastIndex
-          // The active tab's icon sits in a soft blue chip — a physical highlight that lifts
-          // the current tab out of the flat row.
-          val chipBg by androidx.compose.animation.animateColorAsState(
-            targetValue = if (isSelected) Color(0xFFE8F0FE) else Color.Transparent,
-            animationSpec = tween(200),
-            label = "tabChip",
-          )
-          Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier
-              .size(width = 40.dp, height = 28.dp)
-              .clip(RoundedCornerShape(9.dp))
-              .background(chipBg),
-          ) {
-            Box(contentAlignment = Alignment.TopEnd) {
-              Icon(
-                imageVector = tab.icon,
-                contentDescription = null,
-                tint = tabColor,
-                modifier = Modifier.size(17.dp)
-              )
-              if (tab.title == "Live") {
-                LivePulseDot(Modifier.offset(x = 5.dp, y = (-3).dp))
-              }
-            }
-          }
-
-          Spacer(modifier = Modifier.height(4.dp))
-
-          Text(
-            text = tab.title,
-            // Six tabs share a 360dp phone — "Scheduled" only fits its slot at 11sp.
-            fontSize = 11.sp,
-            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-            color = tabColor,
-            maxLines = 1,
-            softWrap = false,
-          )
-
-        }
-      }
-    }
-
-    // Single sliding indicator that animates between tabs (vs. the old per-tab block
-    // that just blinked on) — the motion is what reads "expensive".
-    Spacer(Modifier.height(8.dp))
-    BoxWithConstraints(Modifier.fillMaxWidth().height(2.5.dp)) {
+    // One raised card that slides between tabs (rather than six that blink on and off) —
+    // filled with the feed colour so its open bottom flows straight into the list.
+    BoxWithConstraints(Modifier.matchParentSize()) {
       val slot = maxWidth / tabs.size
-      val indW = slot * 0.5f
       val pos by animateDpAsState(
-        targetValue = slot * selectedTab + (slot - indW) / 2f,
-        // Emphasized easing — the "expensive" travel curve (fast out, gentle settle).
+        targetValue = slot * selectedTab,
+        // Emphasized easing — fast out, gentle settle.
         animationSpec = tween(300, easing = androidx.compose.animation.core.CubicBezierEasing(0.2f, 0f, 0f, 1f)),
         label = "tabSlide",
       )
       Box(
         Modifier
           .offset(x = pos)
-          .width(indW)
-          .height(2.5.dp)
-          .clip(RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp))
-          .background(Color(0xFF2563EB))
+          .width(slot)
+          .fillMaxHeight()
+          .drawBehind {
+            val r = 14.dp.toPx()
+            val w = size.width
+            val h = size.height
+            val sheet = androidx.compose.ui.graphics.Path().apply {
+              moveTo(0f, h)
+              lineTo(0f, r)
+              quadraticBezierTo(0f, 0f, r, 0f)
+              lineTo(w - r, 0f)
+              quadraticBezierTo(w, 0f, w, r)
+              lineTo(w, h)
+              close()
+            }
+            drawPath(sheet, sheetColor)
+            // Hairline on the sides and top only — the bottom stays open into the feed.
+            val rim = androidx.compose.ui.graphics.Path().apply {
+              moveTo(0f, h)
+              lineTo(0f, r)
+              quadraticBezierTo(0f, 0f, r, 0f)
+              lineTo(w - r, 0f)
+              quadraticBezierTo(w, 0f, w, r)
+              lineTo(w, h)
+            }
+            drawPath(rim, edge, style = Stroke(width = 1.dp.toPx()))
+          }
       )
     }
-    Box(
-      modifier = Modifier
-        .fillMaxWidth()
-        .height(1.dp)
-        .background(Color(0xFFE2E8F0))
-    )
+
+    Row(Modifier.fillMaxSize()) {
+      tabs.forEachIndexed { index, tab ->
+        val isSelected = selectedTab == index
+        val tabColor by androidx.compose.animation.animateColorAsState(
+          targetValue = if (isSelected) accent else ink,
+          animationSpec = tween(200),
+          label = "tabColor"
+        )
+        Box(
+          modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .clickable(
+              interactionSource = remember { MutableInteractionSource() },
+              indication = null,
+            ) {
+              if (index == plansIndex) com.haraan.app.data.membership.MembershipNav.open()
+              else onTabSelected(index)
+            },
+          contentAlignment = Alignment.TopCenter,
+        ) {
+          Column(
+            modifier = Modifier.padding(top = 10.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+          ) {
+            Box(contentAlignment = Alignment.TopEnd) {
+              Icon(
+                imageVector = tab.icon,
+                contentDescription = null,
+                tint = tabColor,
+                modifier = Modifier.size(22.dp)
+              )
+              if (tab.title == "Live") {
+                LivePulseDot(Modifier.offset(x = 3.dp, y = (-2).dp))
+              }
+  val plansIndex = tabs.lastIndex
+  val ink = Color(0xFF1E293B)
+  val accent = Color(0xFF2563EB)
+  val edge = Color(0xFFC7D7F0)
+            }
+          }
+        }
+      }
+    }
   }
 }
 
@@ -6749,6 +6768,32 @@ private fun CrexTabsSection(
 private fun LivePulseDot(modifier: Modifier = Modifier) {
   val t = rememberInfiniteTransition(label = "livePulse")
   val a by t.animateFloat(
+            Spacer(modifier = Modifier.height(5.dp))
+            Text(
+              text = tab.title,
+              // Six tabs share a 360dp phone — "Scheduled" only fits its slot at 11sp.
+              fontSize = 11.sp,
+              fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+              color = tabColor,
+              maxLines = 1,
+              softWrap = false,
+            )
+          }
+          // Dark pill riding the top edge of the tab, like a shelf tag.
+          if (tab.badge != null) {
+            Text(
+              text = tab.badge,
+              fontSize = 8.sp,
+              fontWeight = FontWeight.Bold,
+              color = Color.White,
+              maxLines = 1,
+              softWrap = false,
+              modifier = Modifier
+                .offset(y = (-17).dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color(0xFF0F172A))
+                .padding(horizontal = 5.dp, vertical = 2.dp),
+            )
     initialValue = 1f, targetValue = 0.25f,
     animationSpec = infiniteRepeatable(tween(750), RepeatMode.Reverse),
     label = "livePulseAlpha",
