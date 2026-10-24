@@ -224,9 +224,9 @@ private fun BattingScore(
         Row(verticalAlignment = Alignment.CenterVertically) {
             HeroCrest(code, Modifier.size(26.dp), iconRef = logo)
             Spacer(Modifier.width(8.dp))
-            Text(code, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.4.sp)
+            Text(code, color = HeroInk, fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.4.sp)
             // Once the match is over nobody is batting — the line just names the side.
-            if (batting) Text("  ·  batting", color = Color.White.copy(alpha = 0.6f), fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+            if (batting) Text("  ·  batting", color = HeroInk.copy(alpha = 0.6f), fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
         }
         Spacer(Modifier.height(4.dp))
         val slash = score.indexOf('/')
@@ -244,20 +244,20 @@ private fun BattingScore(
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 if (runsInt != null) animatedRuns.toString() else runs,
-                color = Color.White, fontSize = 46.sp,
+                color = HeroInk, fontSize = 46.sp,
                 fontFamily = com.haraan.app.theme.ArchivoDisplay,
                 letterSpacing = (-1.5).sp, style = tnum,
             )
             if (wkts.isNotEmpty()) {
                 Text(
-                    wkts, color = Color.White.copy(alpha = 0.55f), fontSize = 24.sp,
+                    wkts, color = HeroInk.copy(alpha = 0.55f), fontSize = 24.sp,
                     fontFamily = com.haraan.app.theme.ArchivoDisplay,
                     modifier = Modifier.padding(bottom = 6.dp), style = tnum,
                 )
             }
             if (overs.isNotBlank()) {
                 Text(
-                    "  ($overs)", color = Color.White.copy(alpha = 0.75f), fontSize = 15.sp,
+                    "  ($overs)", color = HeroInk.copy(alpha = 0.75f), fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(bottom = 9.dp), style = tnum,
                 )
@@ -279,11 +279,11 @@ private fun FieldingLine(name: String, logo: String, score: String) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         HeroCrest(code, Modifier.size(20.dp), iconRef = logo)
         Spacer(Modifier.width(8.dp))
-        Text(code, color = Color.White.copy(alpha = 0.82f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp)
+        Text(code, color = HeroInk.copy(alpha = 0.82f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp)
         Spacer(Modifier.weight(1f))
         Text(
             score.ifBlank { "Yet to bat" },
-            color = Color.White.copy(alpha = if (score.isBlank()) 0.6f else 0.85f),
+            color = HeroInk.copy(alpha = if (score.isBlank()) 0.6f else 0.85f),
             fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
             style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
         )
@@ -307,13 +307,13 @@ private fun ThisOverStrip(balls: List<String>) {
     val shown = balls.takeLast(7)
     val slots = maxOf(6, shown.size)
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Text("THIS OVER", color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+        Text("THIS OVER", color = HeroInk.copy(alpha = 0.6f), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
         Spacer(Modifier.width(10.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             for (i in 0 until slots) {
                 val b = shown.getOrNull(i)
                 if (b == null) {
-                    Box(Modifier.size(22.dp).border(1.dp, Color.White.copy(alpha = 0.28f), CircleShape))
+                    Box(Modifier.size(22.dp).border(1.dp, HeroInk.copy(alpha = 0.28f), CircleShape))
                 } else {
                     val ink = overBallInk(b)
                     val boundary = b == "4" || b == "6" || b.startsWith("W")
@@ -323,7 +323,7 @@ private fun ThisOverStrip(balls: List<String>) {
                             .size(22.dp)
                             .clip(CircleShape)
                             .background(Color.White)
-                            .then(if (boundary) Modifier.border(1.5.dp, ink, CircleShape) else Modifier),
+                            .border(if (boundary) 1.5.dp else 1.dp, if (boundary) ink else HeroHairline, CircleShape),
                     ) {
                         Text(b, color = ink, fontSize = if (b.length > 2) 7.5.sp else 9.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     }
@@ -342,7 +342,7 @@ private fun HeroLastBall(state: MatchUiState) {
         val inPlay = state.ballInPlay && state.isLive
         if (inPlay) {
             Text(
-                "BOWLING", color = Color.White,
+                "BOWLING", color = HeroInk,
                 fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp
             )
             Spacer(Modifier.height(8.dp))
@@ -374,6 +374,7 @@ private fun HeroLastBall(state: MatchUiState) {
                     UmpireSignal(
                         ball = lastBall,
                         ballKey = ballKey,
+                        holdMs = HeroFlashMs,
                         modifier = Modifier.size(width = 100.dp, height = 118.dp),
                     )
                     val call = UmpireCall.of(lastBall)
@@ -385,8 +386,8 @@ private fun HeroLastBall(state: MatchUiState) {
                         else -> "$lastBall RUNS"
                     }
                     Text(
-                        caption, color = Color.White,
-                        fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp,
+                        caption, color = HeroInk,
+                        fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.6.sp, maxLines = 1,
                     )
                 }
             }
@@ -419,8 +420,8 @@ private fun DeliveryInPlay(modifier: Modifier = Modifier) {
         label = "t"
     )
     val pitch = Color(0xFFC8A96B)
-    val crease = Color.White.copy(alpha = 0.85f)
-    val stump = Color.White
+    val crease = HeroInk.copy(alpha = 0.55f)
+    val stump = HeroInk.copy(alpha = 0.8f)
     val ballRed = Color(0xFFC62828)
 
     Canvas(modifier = modifier) {
@@ -497,12 +498,18 @@ private fun DeliveryInPlay(modifier: Modifier = Modifier) {
 private fun HeroStat(label: String, value: String) {
     Text(
         buildAnnotatedString {
-            withStyle(SpanStyle(color = Color.White.copy(alpha = 0.62f), fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)) { append("$label  ") }
-            withStyle(SpanStyle(color = Color.White, fontWeight = FontWeight.Bold)) { append(value) }
+            withStyle(SpanStyle(color = HeroInk.copy(alpha = 0.62f), fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)) { append("$label  ") }
+            withStyle(SpanStyle(color = HeroInk, fontWeight = FontWeight.Bold)) { append(value) }
         },
         fontSize = 10.5.sp
     )
 }
+
+/** Ink on the hero's pale blue wash — a deep navy so it stays in the blue family. */
+private val HeroInk = Color(0xFF0F2A5C)
+private val HeroHairline = Color(0xFFCFDDF6)
+/** How long the card flashes on a 4, 6 or wicket before the umpire gives the signal. */
+private const val HeroFlashMs = 1000L
 
 // ─────────────────────────────────────────────
 //  1. LIVE SCORE CARD
@@ -524,19 +531,25 @@ fun LiveScoreCard(state: MatchUiState, modifier: Modifier = Modifier) {
     var firstBall by remember { mutableStateOf(true) }
     LaunchedEffect(state.thisOver) {
         if (firstBall) { firstBall = false; return@LaunchedEffect }
-        val flash = when (state.thisOver.lastOrNull()) {
-            "4", "6" -> CrexColors.AccentGreen
-            "W" -> CrexColors.WicketBall
+        val flash = when (UmpireCall.of(state.thisOver.lastOrNull().orEmpty())) {
+            UmpireCall.FOUR -> CrexColors.FourBall
+            UmpireCall.SIX -> Color(0xFF15803D)
+            UmpireCall.OUT -> CrexColors.WicketBall
             else -> null
         }
         if (flash != null) {
+            // One second of flash — two quick blinks, then a fade — and only then does the
+            // umpire come up with the signal (he waits out [HeroFlashMs]).
             pulseColor = flash
-            pulse.snapTo(1f)
-            pulse.animateTo(0f, tween(900, easing = FastOutSlowInEasing))
+            pulse.snapTo(0f)
+            pulse.animateTo(1f, tween(80))
+            pulse.animateTo(0.3f, tween(170))
+            pulse.animateTo(1f, tween(100))
+            pulse.animateTo(0f, tween(HeroFlashMs.toInt() - 350, easing = FastOutSlowInEasing))
         }
     }
     // 1f pulse → ~4% larger, settling back — a subtle heartbeat, not a bounce.
-    val popScale = 1f + pulse.value * 0.04f
+    val popScale = 1f + pulse.value * 0.02f
 
     Column(
         modifier = modifier
@@ -562,45 +575,18 @@ fun LiveScoreCard(state: MatchUiState, modifier: Modifier = Modifier) {
                 .graphicsLayer { scaleX = popScale; scaleY = popScale }
                 .clip(RoundedCornerShape(RibbonCardRadius - band))
                 .background(
-                    // Haraan blue as a pane of glass: lit a touch brighter at the top-left,
-                    // settling into the brand blue and a shade deeper at the foot.
+                    // Brand blue thinned with white: a soft wash that still reads as Haraan,
+                    // not a solid slab of colour.
                     Brush.linearGradient(
-                        0f to Color(0xFF4A86F7),
-                        0.45f to Color(0xFF2563EB),
-                        1f to Color(0xFF1E50D6),
+                        0f to Color(0xFFF3F7FF),
+                        1f to Color(0xFFE2ECFE),
                     )
                 )
                 .drawWithContent {
-                    val w = size.width
-                    val h = size.height
-                    // The reflection: one broad, soft curve of light over the upper half, the
-                    // way a window catches the sky. Behind the content, so text stays crisp.
-                    drawOval(
-                        brush = Brush.verticalGradient(
-                            0f to Color.White.copy(alpha = 0.20f),
-                            1f to Color.White.copy(alpha = 0f),
-                            startY = -h * 0.55f, endY = h * 0.42f,
-                        ),
-                        topLeft = Offset(-w * 0.25f, -h * 0.55f),
-                        size = Size(w * 1.5f, h),
-                    )
-                    // A cool sheen off the right edge, so the pane has depth, not just tint.
-                    drawRect(
-                        Brush.radialGradient(
-                            listOf(Color(0xFF93C5FD).copy(alpha = 0.22f), Color.Transparent),
-                            center = Offset(w * 1.02f, h * 0.95f),
-                            radius = w * 0.6f,
-                        )
-                    )
                     drawContent()
-                    if (pulse.value > 0f) drawRect(pulseColor.copy(alpha = pulse.value * 0.28f))
+                    if (pulse.value > 0f) drawRect(pulseColor.copy(alpha = pulse.value * 0.42f))
                 }
-                // The glass edge: a bright rim at the top that fades out down the sides.
-                .border(
-                    1.dp,
-                    Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.55f), Color.White.copy(alpha = 0.06f))),
-                    RoundedCornerShape(RibbonCardRadius - band),
-                )
+                .border(1.dp, HeroHairline, RoundedCornerShape(RibbonCardRadius - band))
                 .padding(horizontal = 18.dp, vertical = 14.dp)
         ) {
                 // Innings replayed from the ball log are the truth for who is in and what the
@@ -632,13 +618,13 @@ fun LiveScoreCard(state: MatchUiState, modifier: Modifier = Modifier) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         state.competition.ifBlank { if (state.isLive) "Live" else state.status.ifBlank { "Match" } }.uppercase(),
-                        color = Color.White.copy(alpha = 0.72f), fontSize = 9.5.sp,
+                        color = HeroInk.copy(alpha = 0.72f), fontSize = 9.5.sp,
                         fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, maxLines = 1,
                         modifier = Modifier.weight(1f),
                     )
                     if (state.toss.isNotBlank()) {
                         Text(
-                            "Toss: " + state.toss, color = Color.White.copy(alpha = 0.72f),
+                            "Toss: " + state.toss, color = HeroInk.copy(alpha = 0.72f),
                             fontSize = 10.5.sp, fontWeight = FontWeight.Medium,
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
@@ -668,7 +654,7 @@ fun LiveScoreCard(state: MatchUiState, modifier: Modifier = Modifier) {
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
-                Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.16f)))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(HeroInk.copy(alpha = 0.16f)))
                 Spacer(modifier = Modifier.height(10.dp))
 
                 FieldingLine(

@@ -14,6 +14,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -97,8 +99,11 @@ private val BrandBlue = Color(0xFF2563EB)
  * back up and gives the signal — a FOUR waved across the waist, a SIX with both arms up,
  * OUT with the finger. Between balls he breathes, so the slot never reads as a sticker.
  */
+/** The calls the hero card flashes for — the umpire waits for those. */
+private val HeldCalls = setOf(UmpireCall.FOUR, UmpireCall.SIX, UmpireCall.OUT)
+
 @Composable
-fun UmpireSignal(ball: String, ballKey: String, modifier: Modifier = Modifier) {
+fun UmpireSignal(ball: String, ballKey: String, modifier: Modifier = Modifier, holdMs: Long = 0L) {
     val call = UmpireCall.of(ball)
     val target = poseFor(call)
     // The real three-piece brand H, stitched on the chest.
@@ -111,6 +116,8 @@ fun UmpireSignal(ball: String, ballKey: String, modifier: Modifier = Modifier) {
     val finger = remember { Animatable(0f) }
     // 1 = fully below the floor line, 0 = standing on it.
     val rise = remember { Animatable(1f) }
+    // The ball already on screen when the board opens plays at once; only a fresh one waits.
+    var opened by remember { mutableStateOf(false) }
 
     LaunchedEffect(ballKey) {
         // Already up from the last ball: sink out of sight first, so each delivery gets its
@@ -118,6 +125,9 @@ fun UmpireSignal(ball: String, ballKey: String, modifier: Modifier = Modifier) {
         if (rise.value < 0.99f) rise.animateTo(1f, tween(200, easing = FastOutSlowInEasing))
         finger.snapTo(0f)
         lu.snapTo(Rest.lUpper); lf.snapTo(Rest.lFore); ru.snapTo(Rest.rUpper); rf.snapTo(Rest.rFore)
+        // A 4, 6 or wicket: the card flashes first, and he stays down until it has.
+        if (opened && call in HeldCalls && holdMs > 0) delay(holdMs)
+        opened = true
         rise.animateTo(0f, spring(dampingRatio = 0.62f, stiffness = 240f))
         delay(60)
         val arm = spring<Float>(dampingRatio = 0.62f, stiffness = Spring.StiffnessMediumLow)
@@ -176,7 +186,7 @@ fun UmpireSignal(ball: String, ballKey: String, modifier: Modifier = Modifier) {
             blendMode = BlendMode.DstIn,
         )
         drawLine(
-            Color.White.copy(alpha = 0.28f),
+            Color(0xFF0F2A5C).copy(alpha = 0.14f),
             Offset(size.width * 0.08f, floorY), Offset(size.width * 0.92f, floorY),
             strokeWidth = 1f * density,
         )
