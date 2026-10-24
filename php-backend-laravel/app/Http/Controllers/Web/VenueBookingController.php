@@ -355,7 +355,7 @@ final class VenueBookingController extends Controller
         $feeShares = self::split($fee, $rates);
         $discountShares = self::split($discount, $rates);
         $taxShares = self::split($tax, $rates);
-        $commissionPercent = PlatformRules::float('fees.venue_commission_percent');
+        $commissionPercent = $venue->commissionPercent();
 
         /** @var Collection<int, Booking> $bookings */
         $bookings = collect();

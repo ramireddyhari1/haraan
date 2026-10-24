@@ -1497,11 +1497,11 @@ final class BookingService
                 $applied['coupon']->recordUse();
             }
 
-            // Pulse commission (/control → Platform rules → Fees): Haraan's share of an ONLINE
+            // Pulse commission (the venue's own rate in /control, else Platform rules → Fees): Haraan's share of an ONLINE
             // booking, on the slot value after discount, deducted from the venue's payout. Never
             // charged on a desk walk-in — that money never passed through the platform.
             $commission = $meta['channel'] === 'online'
-                ? round(max(0.0, $subtotal - $discount) * PlatformRules::float('fees.venue_commission_percent') / 100, 2)
+                ? round(max(0.0, $subtotal - $discount) * $venue->commissionPercent() / 100, 2)
                 : 0.0;
 
             return Booking::query()->create([

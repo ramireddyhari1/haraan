@@ -450,7 +450,7 @@
             }).join('') + '<div class="ha-pad6"></div></section>';
     }
 
-    function detailsCard(d, published) {
+    function detailsCard(d, published, commission) {
         var html = '<section class="ha-vcard"><div class="ha-row ha-vhead"><b class="ha-grow">Venue details</b>';
         if (d) {
             html += d.rating && d.reviews_count > 0
@@ -474,15 +474,11 @@
         if (imgs.length) html += '<b class="ha-vsec">Photos · ' + imgs.length + '</b><div class="ha-vphotos">' + imgs.map(function (src) { return '<img src="' + esc(src) + '" alt="" loading="lazy">'; }).join('') + '</div>';
         if ((d.amenities || []).length) html += '<b class="ha-vsec">Amenities</b><div class="ha-chips">' + d.amenities.map(function (a) { return '<span>' + esc(a) + '</span>'; }).join('') + '</div>';
         if ((d.rules || []).length) html += '<b class="ha-vsec">House rules</b><ul class="ha-rules">' + d.rules.map(function (r) { return '<li>' + esc(r) + '</li>'; }).join('') + '</ul>';
-        var fees = (d.fees || []).map(function (f) {
-            var val = Number(f.value) || 0;
-            if (val <= 0) return null;
-            return cap(f.label || 'Fee') + ' ' + (f.type === 'percent' ? inr(val) + '%' : rupees(val));
-        }).filter(Boolean);
-        if (d.cancellation || fees.length) {
+        // Haraan's fees on the player's bill aren't the partner's to see; their commission is.
+        if (d.cancellation || commission) {
             html += '<b class="ha-vsec">Policy &amp; charges</b><div class="ha-keylines">'
                 + (d.cancellation ? '<p><small>Cancellation</small>' + esc(d.cancellation) + '</p>' : '')
-                + (fees.length ? '<p><small>Players also pay</small>' + esc(fees.join(' · ')) + '</p>' : '') + '</div>';
+                + (commission ? '<p><small>Haraan commission</small>' + esc(commission + ' · set by Haraan') + '</p>' : '') + '</div>';
         }
         if (d.about && String(d.about).trim()) {
             var long = String(d.about).split('\n').length > 4 || d.about.length > 220;
@@ -610,7 +606,7 @@
         var out = managerCard(venuesState.manager);
         if (!rooms.length) out += noVenue();
         rooms.forEach(function (room) {
-            out += venueHero(room) + attentionCard(room) + detailsCard(room.details, room.details != null) + courtsCard(room) + manageCard(room);
+            out += venueHero(room) + attentionCard(room) + detailsCard(room.details, room.details != null, room.v.commission_label) + courtsCard(room) + manageCard(room);
         });
         if (rooms.length) out += anotherVenue();
         host.innerHTML = '<div class="ha-tab ha-venues">' + out + '</div>';
