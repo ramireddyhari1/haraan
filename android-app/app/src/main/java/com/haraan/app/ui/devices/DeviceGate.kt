@@ -37,7 +37,10 @@ fun DeviceGate(
     onTokenReplaced: () -> Unit,
     content: @Composable () -> Unit,
 ) {
-    if (!TokenStore.isSignedIn(token)) {
+    // A sign-in from inside the shell (the ActionBoard's ranked gate) saves a token without
+    // replacing [token], so it asks for a re-check here instead.
+    val recheck by DeviceGateSignal.ticks.collectAsState()
+    if (!TokenStore.isSignedIn(token) && recheck == 0) {
         content()
         return
     }
@@ -47,7 +50,7 @@ fun DeviceGate(
     val event by vm.events.collectAsState()
     var showPlans by remember { mutableStateOf(false) }
 
-    LaunchedEffect(token) { vm.enter() }
+    LaunchedEffect(token, recheck) { vm.enter() }
 
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
@@ -86,6 +89,16 @@ fun DeviceGate(
         onUpgrade = { showPlans = true },
         onClose = null,
     )
+}
+
+/** Asks [DeviceGate] to check this phone again now, e.g. after a 403 device_limit_reached. */
+object DeviceGateSignal {
+    private val _ticks = kotlinx.coroutines.flow.MutableStateFlow(0)
+    val ticks: kotlinx.coroutines.flow.StateFlow<Int> = _ticks
+
+    fun recheck() {
+        _ticks.value += 1
+    }
 }
 
 /** Account → Signed-in devices. */

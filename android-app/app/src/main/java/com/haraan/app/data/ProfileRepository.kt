@@ -305,6 +305,12 @@ sealed class ProfileStatus {
   /** No real session (signed out, or browsing as a guest) — needs login first. */
   object NeedsLogin : ProfileStatus()
 
+  /**
+   * Signed in, but this phone is past the plan's device limit (403 device_limit_reached).
+   * The fix is the device chooser, not another login — a login here just loops.
+   */
+  object DeviceHeld : ProfileStatus()
+
   /** We could not find out. Show [message]; change nothing. */
   data class Unavailable(val message: String) : ProfileStatus()
 }
@@ -614,7 +620,8 @@ class ProfileRepository(
       if (fetchMe(token!!).profileComplete) ProfileStatus.Complete else ProfileStatus.Incomplete
     } catch (e: ProfileHttpException) {
       // The session is gone (or was never real) → send them to login, not setup.
-      if (e.code == 401 || e.code == 403) ProfileStatus.NeedsLogin
+      if (e.code == 403 && e.message == "device_limit_reached") ProfileStatus.DeviceHeld
+      else if (e.code == 401 || e.code == 403) ProfileStatus.NeedsLogin
       else ProfileStatus.Unavailable(e.message ?: "Couldn't check your player profile.")
     } catch (_: Exception) {
       ProfileStatus.Unavailable("Couldn't reach Haraan. Check your connection and try again.")

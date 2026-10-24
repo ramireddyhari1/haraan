@@ -4484,6 +4484,8 @@ private fun CrexMatchesScreen(
           is com.haraan.app.data.ProfileStatus.Complete -> { profileReady = true; action() }
           is com.haraan.app.data.ProfileStatus.Incomplete -> { pendingRankedAction = action; gateStep = 2 }
           is com.haraan.app.data.ProfileStatus.NeedsLogin -> { pendingRankedAction = action; gateStep = 1 }
+          // Past the device limit: the device chooser takes over; logging in again would loop.
+          is com.haraan.app.data.ProfileStatus.DeviceHeld -> com.haraan.app.ui.devices.DeviceGateSignal.recheck()
           // Couldn't check — say so and leave them where they are. Never assume
           // "no profile" from a network failure.
           is com.haraan.app.data.ProfileStatus.Unavailable ->
@@ -5693,6 +5695,13 @@ private fun CrexMatchesScreen(
               }
               is com.haraan.app.data.ProfileStatus.Incomplete -> gateStep = 2
               is com.haraan.app.data.ProfileStatus.NeedsLogin -> gateStep = 1
+              // Signed in fine, but this phone is past the plan's device limit. Close the
+              // login and let the device chooser take over — showing login again looped.
+              is com.haraan.app.data.ProfileStatus.DeviceHeld -> {
+                gateStep = 0
+                pendingRankedAction = null
+                com.haraan.app.ui.devices.DeviceGateSignal.recheck()
+              }
               is com.haraan.app.data.ProfileStatus.Unavailable -> {
                 gateStep = 0
                 pendingRankedAction = null
