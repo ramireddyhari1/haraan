@@ -60,7 +60,11 @@ class LiveMatchController extends Controller
 
         $matches = $near->sort($matches)->take(40);
 
-        $data = $matches->map(function (LiveMatch $m) use ($viewer, $near): array {
+        // Who on each card the viewer knows — friends by follow, and the real accounts the
+        // app intersects with the viewer's own contacts on the device. Empty for guests.
+        $people = (new \App\Services\FriendsPlaying())->forFeed($viewer, $matches);
+
+        $data = $matches->map(function (LiveMatch $m) use ($viewer, $near, $people): array {
             // Which side is batting (latest over's tag)? Drives score/overs attribution and
             // lets the app put the batting side on top of the card.
             $overSummary = is_array($m->over_summary) ? $m->over_summary : [];
@@ -148,6 +152,11 @@ class LiveMatchController extends Controller
                 // fix (every match created before 2026-07-21). The app shows the
                 // chip only when this is present — never a guessed distance.
                 'distanceKm'  => $this->roundKm($near->distanceKm($m)),
+                // Friends playing in this match (up to 3, plus the full count), and every
+                // linked account in its squads for the app's on-device contacts match.
+                'friends'      => $people[(string) $m->id]['friends'] ?? [],
+                'friendsCount' => $people[(string) $m->id]['friendsCount'] ?? 0,
+                'playerIds'    => $people[(string) $m->id]['playerIds'] ?? [],
             ];
         })->all();
 

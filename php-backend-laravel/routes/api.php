@@ -328,6 +328,11 @@ Route::middleware('auth.jwt')->prefix('players')->group(function (): void {
     // silently loses: Laravel matches the first route, so this controller never ran.
     Route::get('/find', [PlayersController::class, 'search']);
     Route::get('/username-available', [PlayersController::class, 'usernameAvailable']);
+    // Which of my (hashed) contacts play on Haraan — for "your contacts are playing" on
+    // ActionBoard cards. Tight limit: it answers "is this number on Haraan", so it must not
+    // become a way to sweep the phone-number space.
+    Route::post('/contacts/match', [\App\Http\Controllers\Api\ContactsController::class, 'match'])
+        ->middleware('throttle:10,60');
 
     // Photo posts (profile grid). Literal '/posts' registered here, before the catch-all
     // {player}/* routes below, so it is never read as a {player} segment.
