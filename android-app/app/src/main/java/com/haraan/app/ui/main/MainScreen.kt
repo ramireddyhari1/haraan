@@ -4362,6 +4362,28 @@ private fun CrexMatchesScreen(
     }
   }
   LaunchedEffect(Unit) { loadLiveFeed() }
+
+  // Contacts on Haraan: last answer from disk at once, a fresh match at most daily. The
+  // prompt shows only to signed-in players who haven't answered it either way.
+  var contactsAsk by remember {
+    mutableStateOf(
+      com.haraan.app.data.TokenStore.getSignedInToken(context) != null &&
+        !com.haraan.app.data.ContactFriends.hasPermission(context) &&
+        !com.haraan.app.data.ContactFriends.isDismissed(context)
+    )
+  }
+  val contactsPermission = rememberLauncherForActivityResult(
+    androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+  ) { granted ->
+    contactsAsk = false
+    if (granted) scope.launch {
+      com.haraan.app.data.ContactFriends.syncIfDue(context, com.haraan.app.data.TokenStore.getSignedInToken(context), force = true)
+    } else com.haraan.app.data.ContactFriends.dismiss(context)
+  }
+  LaunchedEffect(Unit) {
+    com.haraan.app.data.ContactFriends.load(context)
+    com.haraan.app.data.ContactFriends.syncIfDue(context, com.haraan.app.data.TokenStore.getSignedInToken(context))
+  }
   // Keep the live feed ticking without a manual pull: refresh on tab re-focus / app
   // foreground and every 20s while visible; paused entirely in the background.
   AutoRefresh(intervalMs = 20_000L) { loadLiveFeed() }
@@ -4618,6 +4640,12 @@ private fun CrexMatchesScreen(
       ) {
         if (selectedTab == 0) {
           // ── LIVE: in-progress matches first, then what's coming up ──
+          if (contactsAsk) item {
+            ContactsOptInCard(
+              onAllow = { contactsPermission.launch(android.Manifest.permission.READ_CONTACTS) },
+              onDismiss = { contactsAsk = false; com.haraan.app.data.ContactFriends.dismiss(context) },
+            )
+          }
           //
           // Sport is a FILTER over the one ranked feed, not a switch. This used to be
           // `when (selectedSport) { "Cricket" -> feed; else -> empty }`, which was only
@@ -9570,6 +9598,8 @@ private fun LiveFeedGroup(
 ) {
   // Each match in its own floating card with space between them — the old single grouped
   // surface with inset hairlines read as one crammed, "mixed" block (flagged by the user).
+  // Contacts the viewer opted to match, by player id → the name saved in their phone book.
+  val contactNames by com.haraan.app.data.ContactFriends.names.collectAsState()
   Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
     rows.forEach { m ->
       // Put the batting side on top (first-innings team leads the card). The top row is
@@ -9578,7 +9608,11 @@ private fun LiveFeedGroup(
       // Compact codes (KP, PP) instead of long stored names, matching the hero card.
       val code1 = com.haraan.app.ui.matches.teamShortCode(m.team1)
       val code2 = com.haraan.app.ui.matches.teamShortCode(m.team2)
+      val people = remember(m.friends, m.friendsCount, m.playerIds, contactNames) {
+        peoplePlaying(m, contactNames)
+      }
       MatchGroup {
+      if (people != null) FriendsPlayingStrip(people)
       MatchLiveContent(
         modifier = Modifier.fillMaxWidth(),
         onClick = { onMatchClick(m.id) },
@@ -9610,6 +9644,150 @@ private fun LiveFeedGroup(
       }
     }
   }
+}
+
+/** Who on a card the viewer knows: the faces shown, the line under them, and how many in all. */
+private data class PeoplePlaying(
+  val faces: List<Pair<String, String?>>,   // display name → photo url
+  val line: String,
+)
+
+/**
+ * Merges the server's friends (by follow) with the viewer's own contacts (matched on the
+ * device). A person in both reads by the name the viewer SAVED for them — that is what they
+ * call them. Null when nobody on the card is known, so the strip takes no space at all.
+ */
+private fun peoplePlaying(
+  m: com.haraan.app.data.LiveMatchRow,
+  contactNames: Map<String, String>,
+): PeoplePlaying? {
+  val names = LinkedHashMap<String, Pair<String, String?>>()
+  val avatarById = m.friends.associate { it.playerId to it.avatar }
+  // Contacts first: a name from your own phone book is the most recognisable one.
+  m.playerIds.forEach { pid -> contactNames[pid]?.let { names[pid] = it to avatarById[pid] } }
+  m.friends.forEach { f -> names.putIfAbsent(f.playerId, f.name to f.avatar) }
+  if (names.isEmpty()) return null
+
+  // Friends past the three the server named still count toward "+N".
+  val extraFriends = (m.friendsCount - m.friends.size).coerceAtLeast(0)
+  val total = names.size + extraFriends
+  // First names keep the line to one row: "Ravi and Kiran", not two full names.
+  val first = names.values.map { it.first.trim().substringBefore(' ') }
+  val verb = when {
+    !m.isLive && m.hasFinished -> "played"
+    total == 1 -> "is playing"
+    else -> "are playing"
+  }
+  val line = when {
+    total == 1 -> "${first[0]} $verb"
+    total == 2 && first.size >= 2 -> "${first[0]} and ${first[1]} $verb"
+    total == 2 -> "${first[0]} and 1 friend $verb"
+    first.size >= 2 -> "${first[0]}, ${first[1]} +${total - 2} $verb"
+    else -> "${first[0]} +${total - 1} $verb"
+  }
+  return PeoplePlaying(names.values.take(3).toList(), line)
+}
+
+/**
+ * The line across the top of an ActionBoard card when someone the viewer knows is in it:
+ * up to three overlapping faces and "Ravi and Kiran are playing". Kept quiet — a hairline
+ * under it, no fill — so the score below stays the loudest thing on the card.
+ */
+@Composable
+private fun FriendsPlayingStrip(p: PeoplePlaying) {
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 8.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Box(Modifier.width((20 + 14 * (p.faces.size - 1)).dp).height(22.dp)) {
+      p.faces.forEachIndexed { i, (name, photo) ->
+        Box(
+          modifier = Modifier
+            .offset(x = (14 * i).dp)
+            .size(22.dp)
+            .clip(CircleShape)
+            .background(Color.White)
+            .padding(1.5.dp)
+            .clip(CircleShape)
+            .background(Color(0xFFE8F0FE)),
+          contentAlignment = Alignment.Center,
+        ) {
+          Text(
+            name.trim().take(1).uppercase(),
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color(0xFF2563EB),
+          )
+          if (!photo.isNullOrBlank()) {
+            AsyncImage(
+              model = photo,
+              contentDescription = null,
+              contentScale = ContentScale.Crop,
+              modifier = Modifier.fillMaxSize().clip(CircleShape),
+            )
+          }
+        }
+      }
+    }
+    Spacer(Modifier.width(8.dp))
+    Text(
+      p.line,
+      fontSize = 12.5.sp,
+      fontWeight = FontWeight.SemiBold,
+      color = Color(0xFF1E293B),
+      maxLines = 1,
+      overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+    )
+  }
+  Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp).height(1.dp).background(Color(0xFFEEF1F5)))
+}
+
+/**
+ * The one-time ask for contacts, said plainly before Android's own dialog: what it is for,
+ * and what does NOT happen to the phone book. Not now is remembered; it never nags.
+ */
+@Composable
+private fun ContactsOptInCard(onAllow: () -> Unit, onDismiss: () -> Unit) {
+  MatchGroup {
+    Column(Modifier.padding(16.dp)) {
+      Text(
+        "See when your contacts are playing",
+        fontSize = 15.sp,
+        fontWeight = FontWeight.Bold,
+        color = Color(0xFF0F172A),
+      )
+      Spacer(Modifier.height(4.dp))
+      Text(
+        "Match cards will name the people you know. Numbers are scrambled on your phone " +
+          "before they are checked, and your contact list is never stored by Haraan.",
+        fontSize = 12.5.sp,
+        lineHeight = 17.sp,
+        color = Color(0xFF64748B),
+      )
+      Spacer(Modifier.height(12.dp))
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Button(
+          onClick = onAllow,
+          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+          shape = RoundedCornerShape(10.dp),
+          contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+          Text("Allow contacts", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.width(14.dp))
+        Text(
+          "Not now",
+          fontSize = 13.sp,
+          fontWeight = FontWeight.SemiBold,
+          color = Color(0xFF2563EB),
+          modifier = Modifier.clickable(onClick = onDismiss).padding(6.dp),
+        )
+      }
+    }
+  }
+  Spacer(Modifier.height(12.dp))
 }
 
 // One floating card surface for a single match (or, in other callers, a small group).

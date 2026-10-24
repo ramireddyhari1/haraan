@@ -8,6 +8,9 @@
          prompt - but WITHOUT it declared, Vibrator.vibrate() is a silent no-op, so the
          burst plays its animation and the phone stays perfectly still. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Opt-in: "your contacts are playing" on ActionBoard cards. Numbers are hashed on the
+         device and only matched, never stored (see data/ContactFriends.kt). -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
     <!-- Only for a phone paired INTO a match as a camera. Requested at that moment,
          never on launch: the scoring app itself has no use for a camera. -->
     <uses-permission android:name="android.permission.CAMERA" />

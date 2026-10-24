@@ -110,6 +110,20 @@ data class LiveMatchRow(
    * an unmeasurable distance is never estimated.
    */
   val distanceKm: Double? = null,
+  /** People the viewer follows (or who follow them) in this match's squads — up to 3. */
+  val friends: List<FriendPlaying> = emptyList(),
+  /** All of them, so the card can say "+2" past the names it shows. */
+  val friendsCount: Int = 0,
+  /** Every linked account in the squads — intersected on-device with [ContactFriends]. */
+  val playerIds: List<String> = emptyList(),
+)
+
+/** A friend in a feed match. [relation] is mutual | following | follows_you. */
+data class FriendPlaying(
+  val playerId: String,
+  val name: String,
+  val avatar: String?,
+  val relation: String,
 )
 
 /**
@@ -627,6 +641,22 @@ class MatchRepository(
           // optDouble yields NaN when absent — map that back to a real null so the
           // card can tell "no fix" apart from "zero km away".
           distanceKm = o.optDouble("distanceKm", Double.NaN).takeUnless { it.isNaN() },
+          friends = o.optJSONArray("friends")?.let { fa ->
+            (0 until fa.length()).mapNotNull { j ->
+              val f = fa.optJSONObject(j) ?: return@mapNotNull null
+              val pid = f.optString("playerId")
+              if (pid.isBlank()) null else FriendPlaying(
+                playerId = pid,
+                name = f.optString("name").ifBlank { "Player" },
+                avatar = f.optString("avatar").takeIf { it.isNotBlank() && it != "null" },
+                relation = f.optString("relation"),
+              )
+            }
+          }.orEmpty(),
+          friendsCount = o.optInt("friendsCount", 0),
+          playerIds = o.optJSONArray("playerIds")?.let { pa ->
+            (0 until pa.length()).map { pa.optString(it) }.filter { it.isNotBlank() }
+          }.orEmpty(),
         )
       }
     } catch (_: Exception) {
