@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!--
+    Haraan cricket illustration system — Umpire, both arms raised.
+    Flat vector, faceless, transparent background. Palette:
+      navy #102C4E · white #FFFFFF · light grey #E8EDF2 · skin #F79565
+    Shading tones are the palette's own colours deepened a step (skin #E8804F,
+    grey #D5DEE8), never new hues. Drawn on a 420-wide grid and scaled to the canvas.
+  -->
+  <defs>
+    <!-- One hand, wrist at the origin, fingers pointing up; thumb toward +x (the midline). -->
+    <g id="hand">
+      <!-- Fingers close together, pinky (−x) shortest, middle longest. -->
+      <rect x="-21" y="-62" width="10.8" height="36" rx="5.4" fill="#F79565"/>
+      <rect x="-10.6" y="-71" width="10.8" height="45" rx="5.4" fill="#F79565"/>
+      <rect x="-0.2" y="-74" width="10.8" height="48" rx="5.4" fill="#F79565"/>
+      <rect x="10.2" y="-69" width="10.8" height="43" rx="5.4" fill="#F79565"/>
+      <rect x="-21" y="-42" width="42" height="44" rx="13" fill="#F79565"/>
+      <!-- Thumb, angled out from the lower palm toward the head. -->
+      <rect x="-6.5" y="-28" width="13" height="28" rx="6.5" fill="#F79565" transform="translate(17 -8) rotate(34)"/>
+      <!-- Where the fingers part: soft creases, not outlines. -->
+      <path d="M-10.4 -56 V-38 M0 -62 V-38 M10.4 -58 V-38" stroke="#E8804F" stroke-width="1.4" stroke-linecap="round" opacity="0.6"/>
+    </g>
+  </defs>
+
+  <g transform="translate(512 96) scale(2.55) translate(-210 -25)">
+
+    <!-- ── Arms: straight up and a little out, the inner edge in shade ── -->
+    <g id="arm-left">
+      <path d="M128 266 L80 98" stroke="#F79565" stroke-width="36" stroke-linecap="round"/>
+      <path d="M141 262 L93 95" stroke="#E8804F" stroke-width="7" stroke-linecap="round" opacity="0.55"/>
+    </g>
+    <g id="arm-right">
+      <path d="M292 266 L340 98" stroke="#F79565" stroke-width="36" stroke-linecap="round"/>
+      <path d="M279 262 L327 95" stroke="#E8804F" stroke-width="7" stroke-linecap="round" opacity="0.55"/>
+    </g>
+
+    <!-- ── Hands: open palms facing out, as the signal is given ── -->
+    <use href="#hand" transform="translate(80 100) rotate(-16)"/>
+    <use href="#hand" transform="translate(340 100) rotate(16) scale(-1 1)"/>
+
+    <!-- ── Neck ── -->
+    <rect id="neck" x="191" y="218" width="38" height="44" rx="6" fill="#E8804F"/>
+
+    <!-- ── Shirt: a white polo, sleeves lifted with the arms ── -->
+    <g id="shirt">
+      <path d="M100 360 L94 292 L86 236 L146 214 L190 246 L230 246 L274 214 L334 236 L326 292 L320 360 Z" fill="#FFFFFF"/>
+      <!-- Side folds down the body. -->
+      <path d="M94 292 L86 236 L104 230 L116 300 L112 360 L100 360 Z" fill="#E8EDF2"/>
+      <path d="M326 292 L334 236 L316 230 L304 300 L308 360 L320 360 Z" fill="#E8EDF2"/>
+      <!-- Sleeve hems: the inside of each sleeve showing as a grey band. -->
+      <path d="M86 236 L146 214 L148 222 L89 244 Z" fill="#D5DEE8"/>
+      <path d="M334 236 L274 214 L272 222 L331 244 Z" fill="#D5DEE8"/>
+      <!-- Soft fold where each sleeve meets the body. -->
+      <path d="M120 250 Q132 276 128 304" stroke="#E8EDF2" stroke-width="5" fill="none" stroke-linecap="round"/>
+      <path d="M300 250 Q288 276 292 304" stroke="#E8EDF2" stroke-width="5" fill="none" stroke-linecap="round"/>
+    </g>
+
+    <!-- ── Collar: neck V, placket with two buttons, folded points ── -->
+    <g id="collar">
+      <path d="M193 246 L210 280 L227 246 Z" fill="#E8804F"/>
+      <rect x="203" y="272" width="14" height="60" rx="2" fill="#E8EDF2"/>
+      <rect x="205" y="272" width="10" height="58" rx="1.5" fill="#FFFFFF"/>
+      <circle cx="210" cy="292" r="2.6" fill="#D5DEE8"/>
+      <circle cx="210" cy="314" r="2.6" fill="#D5DEE8"/>
+      <!-- Each collar point casts a soft grey fold onto the shirt below it. -->
+      <path d="M189 246 L173 266 L204 287 L210 277 Z" fill="#D5DEE8"/>
+      <path d="M188 240 L172 258 L202 278 L209 270 Z" fill="#FFFFFF"/>
+      <path d="M231 246 L247 266 L216 287 L210 277 Z" fill="#D5DEE8"/>
+      <path d="M232 240 L248 258 L218 278 L211 270 Z" fill="#F4F6F9"/>
+    </g>
+
+    <!-- ── Head: hair behind, ears, a plain face ── -->
+    <g id="head">
+      <rect x="157" y="138" width="106" height="58" rx="20" fill="#102C4E"/>
+      <ellipse cx="166" cy="194" rx="9" ry="13" fill="#F79565"/>
+      <ellipse cx="254" cy="194" rx="9" ry="13" fill="#F79565"/>
+      <ellipse cx="167" cy="195" rx="4" ry="6.5" fill="#E8804F"/>
+      <ellipse cx="253" cy="195" rx="4" ry="6.5" fill="#E8804F"/>
+      <path d="M173 150 H247 Q250 150 250 160 V196 Q250 236 210 238 Q170 236 170 196 V160 Q170 150 173 150 Z" fill="#F79565"/>
+      <!-- Shadow the brim throws across the forehead. -->
+      <path d="M170 152 H250 V166 Q210 172 170 166 Z" fill="#E8804F" opacity="0.45"/>
+    </g>
+
+    <!-- ── Hat: wide brim, crown with a navy band, right side in shade ── -->
+    <g id="hat">
+      <!-- Crown first, so the brim sits over its base. -->
+      <path d="M162 150 L168 106 Q170 94 184 94 H236 Q250 94 252 106 L258 150 Z" fill="#FFFFFF"/>
+      <path d="M232 94 H236 Q250 94 252 106 L258 150 H238 Z" fill="#E8EDF2"/>
+      <path d="M163.5 140 L165.6 122 H254.4 L256.5 140 Z" fill="#102C4E"/>
+      <ellipse cx="210" cy="156" rx="96" ry="15" fill="#D5DEE8"/>
+      <ellipse cx="210" cy="151" rx="96" ry="14" fill="#FFFFFF"/>
+    </g>
+  </g>
+</svg>
