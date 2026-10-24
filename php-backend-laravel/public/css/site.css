@@ -71,16 +71,13 @@ a {
 	}
 }
 
-/* Pulse runs on the same Haraan blue as Events — the second glow is a deeper
-   indigo-blue rather than the old emerald, so the lane reads as one brand.
-   Inherits the fixed position + breathing animation from body::before above. */
-@media (min-width: 1200px) {
-	body.aurora-hub::before {
-		background-image:
-			radial-gradient(1200px 640px at 28% -40%, rgba(37, 99, 235, 0.20), transparent 68%),
-			radial-gradient(1000px 560px at 102% -30%, rgba(30, 58, 138, 0.16), transparent 66%),
-			linear-gradient(180deg, #e8eefb 0%, rgba(232, 238, 251, 0) 100%);
-	}
+/* Pulse is one plain white surface, header included (Playo-style). The
+   off-white frosted bar over a blue aurora read as two colours meeting at the
+   header edge — here header and page are the same #fff, split by a hairline. */
+@media (min-width: 721px) {
+	body.aurora-hub { background: #fff !important; }
+	body.aurora-hub::before { display: none; }
+	body.aurora-hub .topbar { background: #fff; backdrop-filter: none; border-bottom: 1px solid #EEF1F5; }
 }
 
 /* Event detail is a pristine-white minimal page, so its gutters read faint —
