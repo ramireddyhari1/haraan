@@ -77,6 +77,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.filled.Bookmark
@@ -122,12 +123,12 @@ import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.WorkspacePremium
-import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.outlined.PlayCircle
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.Event
 import androidx.compose.material.icons.outlined.Apartment
 import androidx.compose.material.icons.outlined.AccountBalance
+import androidx.compose.material.icons.filled.Apps
 import androidx.compose.material.icons.outlined.Apps
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Scoreboard
@@ -221,6 +222,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
@@ -4664,7 +4667,22 @@ private fun CrexMatchesScreen(
           // costing a heading.
           when {
             sportFeed == null -> item { GameHubFeedSkeleton() }
-            sportFeed.isEmpty() -> item { CrexTabEmpty(emptyLiveLabel(selectedSport)) }
+            sportFeed.isEmpty() -> item {
+              // The feed also carries not-yet-started matches: the first one is the
+              // honest "what's next", and Scheduled is where it lives.
+              val sportRows = liveFeed.orEmpty().filter { selectedSport == "All" || it.sport.equals(selectedSport, ignoreCase = true) }
+              val next = sportRows.firstOrNull { !it.isInPlay && !it.hasFinished }
+              val anyResults = sportRows.any { it.hasFinished }
+              BoardEmpty(
+                title = emptyLiveLabel(selectedSport),
+                finished = false,
+                nextLabel = next?.let { "${it.team1.ifBlank { "Team A" }} vs ${it.team2.ifBlank { "Team B" }}" },
+                onNext = { selectedTab = 2 },
+                onCreate = { requireRankedAccess { showCreateWizard = true } },
+                altLabel = if (anyResults) "Recent results" else null,
+                onAlt = { selectedTab = 1 },
+              )
+            }
             else -> {
               item { CrexLeagueTitle("Matches near you") }
               item { LiveFeedGroup(rows = sportFeed, onMatchClick = onMatchClick) }
@@ -4686,7 +4704,15 @@ private fun CrexMatchesScreen(
           }
           when {
             finishedFeed == null -> item { GameHubFeedSkeleton() }
-            finishedFeed.isEmpty() -> item { CrexTabEmpty(emptyFinishedLabel(selectedSport)) }
+            finishedFeed.isEmpty() -> item {
+              BoardEmpty(
+                title = emptyFinishedLabel(selectedSport),
+                finished = true,
+                onCreate = { requireRankedAccess { showCreateWizard = true } },
+                altLabel = "Scheduled",
+                onAlt = { selectedTab = 2 },
+              )
+            }
             else -> {
               item { CrexLeagueTitle("Recent results") }
               item { LiveFeedGroup(rows = finishedFeed, onMatchClick = onMatchClick) }
@@ -9078,6 +9104,213 @@ private fun OpenMatchCard(
           Icon(Icons.Filled.PersonAddAlt1, null, tint = Color.White, modifier = Modifier.size(15.dp))
           Spacer(Modifier.width(5.dp))
           Text("Request to join", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        }
+      }
+    }
+  }
+}
+
+/**
+ * The Live / Finished tabs with nothing on them, drawn — same piece as the website's
+ * `site/partials/actionboard-empty.blade.php`. A grey sentence on a blank page read as a
+ * broken screen. Every line here is a fact or a door: the next real fixture (opens
+ * Scheduled), where results are, how to start a match. Nothing invented to fill space.
+ */
+@Composable
+private fun BoardEmpty(
+  title: String,
+  finished: Boolean,
+  nextLabel: String? = null,
+  onNext: (() -> Unit)? = null,
+  onCreate: () -> Unit,
+  altLabel: String? = null,
+  onAlt: (() -> Unit)? = null,
+) {
+  val blue = HaraanColors.EventsBlue
+  Column(
+    Modifier
+      .fillMaxWidth()
+      .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 8.dp)
+      .shadow(10.dp, RoundedCornerShape(22.dp), ambientColor = Color(0x220F172A), spotColor = Color(0x330F172A))
+      .clip(RoundedCornerShape(22.dp))
+      .background(Color.White)
+      .border(1.dp, Color(0xFFE6ECF4), RoundedCornerShape(22.dp))
+      .padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 18.dp),
+    horizontalAlignment = Alignment.CenterHorizontally,
+  ) {
+    BoardEmptyArt(finished = finished)
+    Spacer(Modifier.height(14.dp))
+    Text(
+      title, color = HaraanColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold,
+      letterSpacing = (-0.2).sp, textAlign = TextAlign.Center,
+    )
+    if (nextLabel != null && onNext != null) {
+      Spacer(Modifier.height(12.dp))
+      Row(
+        Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(14.dp))
+          .background(Color(0xFFF5F8FF))
+          .border(1.dp, Color(0xFFDCE6F8), RoundedCornerShape(14.dp))
+          .pressable(onClick = onNext)
+          .padding(start = 12.dp, end = 10.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text("NEXT UP", color = blue, fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.sp)
+        Spacer(Modifier.width(8.dp))
+        Text(
+          nextLabel, color = HaraanColors.TextPrimary, fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold,
+          maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+        )
+        Icon(Icons.Default.ChevronRight, null, tint = Color(0xFF94A3B8), modifier = Modifier.size(18.dp))
+      }
+    } else {
+      Spacer(Modifier.height(4.dp))
+      Text(
+        if (finished) "Scorecards land here the moment a match near you ends."
+        else "When a match near you starts, its score lands here ball by ball.",
+        color = HaraanColors.TextMuted, fontSize = 13.sp, lineHeight = 18.sp, textAlign = TextAlign.Center,
+        modifier = Modifier.padding(horizontal = 12.dp),
+      )
+    }
+    Spacer(Modifier.height(16.dp))
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+      // The one action: blue, a white "+" seated in it; a press sinks it 2px and the
+      // shadow under it closes.
+      val press = remember { MutableInteractionSource() }
+      val down by press.collectIsPressedAsState()
+      val sink by animateDpAsState(if (down) 2.dp else 0.dp, tween(80), label = "createSink")
+      Row(
+        Modifier
+          .offset(y = sink)
+          .shadow(if (down) 1.dp else 6.dp, RoundedCornerShape(50), spotColor = blue)
+          .clip(RoundedCornerShape(50))
+          .background(blue)
+          .clickable(interactionSource = press, indication = null, onClick = onCreate)
+          .height(42.dp)
+          .padding(start = 6.dp, end = 18.dp),
+        verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Box(Modifier.size(30.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
+          Icon(Icons.Default.Add, null, tint = blue, modifier = Modifier.size(16.dp))
+        }
+        Spacer(Modifier.width(8.dp))
+        Text("Create a match", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.ExtraBold)
+      }
+      if (altLabel != null && onAlt != null) {
+        Text(
+          altLabel, color = Color(0xFF1E40AF), fontSize = 13.5.sp, fontWeight = FontWeight.Bold,
+          modifier = Modifier.clip(RoundedCornerShape(8.dp)).pressable(onClick = onAlt).padding(horizontal = 4.dp, vertical = 8.dp),
+        )
+      }
+    }
+  }
+}
+
+/**
+ * The drawing, in a 280×150 design space scaled to the card. Live: a ground waiting —
+ * scoreboard on dashes, floodlights off, stumps up, the ball settling by the crease.
+ * Finished: the scorebook open on a blank page, pencil down. Quiet motion only (the
+ * dashes wait, the ball rocks); the system's animator scale switches it off.
+ */
+@Composable
+private fun BoardEmptyArt(finished: Boolean) {
+  val t = rememberInfiniteTransition(label = "boardEmpty")
+  val wait by t.animateFloat(1f, 0.35f, infiniteRepeatable(tween(1200, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "wait")
+  val rock by t.animateFloat(-5f, 12f, infiniteRepeatable(tween(1600, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "rock")
+  val bob by t.animateFloat(0f, -2f, infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "bob")
+
+  Canvas(
+    Modifier
+      .fillMaxWidth()
+      .widthIn(max = 360.dp)
+      .aspectRatio(280f / 150f)
+      .clip(RoundedCornerShape(16.dp)),
+  ) {
+    val s = size.width / 280f
+    fun o(x: Float, y: Float) = Offset(x * s, y * s)
+    fun sz(w: Float, h: Float) = Size(w * s, h * s)
+    fun line(c: Color, x1: Float, y1: Float, x2: Float, y2: Float, w: Float, a: Float = 1f) =
+      drawLine(c, o(x1, y1), o(x2, y2), w * s, StrokeCap.Round, alpha = a)
+    fun path(vararg pts: Float) = androidx.compose.ui.graphics.Path().apply {
+      moveTo(pts[0] * s, pts[1] * s)
+      var i = 2
+      while (i < pts.size) { lineTo(pts[i] * s, pts[i + 1] * s); i += 2 }
+      close()
+    }
+
+    drawRect(Color(0xFFEEF3FA))
+
+    if (!finished) {
+      // Floodlight masts, lamps off.
+      val mast = Color(0xFFC5D0DF)
+      line(mast, 30f, 104f, 30f, 30f, 3f); line(mast, 250f, 104f, 250f, 30f, 3f)
+      for (x in listOf(18f, 238f)) {
+        drawRoundRect(Color(0xFFDCE4EF), o(x, 18f), sz(24f, 15f), CornerRadius(3 * s))
+        drawRoundRect(mast, o(x, 18f), sz(24f, 15f), CornerRadius(3 * s), style = Stroke(1.5f * s))
+        line(mast, x + 6, 22.5f, x + 18, 22.5f, 1.5f); line(mast, x + 6, 28.5f, x + 18, 28.5f, 1.5f)
+      }
+      // Outfield.
+      drawOval(Color(0xFFDDEBDF), o(8f, 84f), sz(264f, 68f))
+      // Scoreboard.
+      line(Color(0xFF94A3B8), 110f, 72f, 110f, 92f, 3f); line(Color(0xFF94A3B8), 170f, 72f, 170f, 92f, 3f)
+      drawRoundRect(Color(0xFF0F172A), o(92f, 26f), sz(96f, 48f), CornerRadius(7 * s))
+      drawRoundRect(Color(0xFF1E293B), o(98f, 32f), sz(34f, 9f), CornerRadius(4.5f * s))
+      drawCircle(Color(0xFF475569), 2.4f * s, o(105f, 36.5f))
+      drawRoundRect(Color(0xFF334155), o(111f, 34.5f), sz(16f, 4f), CornerRadius(2 * s))
+      drawRoundRect(Color(0xFF334155), o(160f, 34.5f), sz(20f, 4f), CornerRadius(2 * s))
+      val amber = Color(0xFFFBBF24)
+      line(amber, 124f, 58f, 132f, 58f, 3.2f, wait); line(amber, 136f, 63f, 144f, 51f, 2.6f, wait); line(amber, 148f, 58f, 156f, 58f, 3.2f, wait)
+      // Pitch, creases, stumps.
+      drawPath(path(118f, 96f, 162f, 96f, 171f, 130f, 109f, 130f), Color(0xFFE9DCC0))
+      line(Color.White, 115f, 102f, 165f, 102f, 1.6f, 0.9f); line(Color.White, 108f, 124f, 172f, 124f, 1.6f, 0.9f)
+      val wood = Color(0xFF8B6B3E)
+      for (x in listOf(136f, 140f, 144f)) line(wood, x, 92f, x, 100f, 1.8f)
+      line(wood, 135f, 92f, 145f, 92f, 1.4f)
+      for (x in listOf(134.5f, 140f, 145.5f)) line(wood, x, 117f, x, 127f, 2.2f)
+      line(wood, 133.5f, 117f, 146.5f, 117f, 1.6f)
+      // The ball, settling.
+      drawOval(Color(0xFF0F172A), o(159f, 129.9f), sz(12f, 3.2f), alpha = 0.14f)
+      rotate(rock, pivot = o(165f, 131f)) {
+        drawCircle(Color(0xFFDC2626), 5.2f * s, o(165f, 126f))
+        line(Color(0xFFFCA5A5), 162f, 122.8f, 163.8f, 129f, 0.9f)
+        line(Color(0xFFFCA5A5), 165f, 121.3f, 166.8f, 127.6f, 0.9f)
+      }
+    } else {
+      // The scorebook, open on a blank page.
+      drawOval(Color(0xFF0F172A), o(48f, 125f), sz(184f, 14f), alpha = 0.08f)
+      val left = androidx.compose.ui.graphics.Path().apply {
+        moveTo(52 * s, 34 * s); cubicTo(82 * s, 28 * s, 112 * s, 30 * s, 140 * s, 42 * s)
+        lineTo(140 * s, 130 * s); cubicTo(112 * s, 118 * s, 82 * s, 116 * s, 52 * s, 122 * s); close()
+      }
+      val right = androidx.compose.ui.graphics.Path().apply {
+        moveTo(228 * s, 34 * s); cubicTo(198 * s, 28 * s, 168 * s, 30 * s, 140 * s, 42 * s)
+        lineTo(140 * s, 130 * s); cubicTo(168 * s, 118 * s, 198 * s, 116 * s, 228 * s, 122 * s); close()
+      }
+      for (p in listOf(left, right)) {
+        drawPath(p, Color.White)
+        drawPath(p, Color(0xFFD5DEEC), style = Stroke(1.5f * s))
+      }
+      line(Color(0xFFC5D0DF), 140f, 42f, 140f, 130f, 1.5f)
+      val rule = Color(0xFFE2E8F0)
+      for (i in 0 until 5) {
+        val d = i * 14f
+        line(rule, 62f, 52f + d, 128f, 57f + d, 1.2f)
+        line(rule, 152f, 57f + d, 218f, 52f + d, 1.2f)
+      }
+      drawRoundRect(Color(0xFFCBD5E1), o(80f, 44f), sz(30f, 4f), CornerRadius(2 * s))
+      val ink = Color(0xFFCBD5E1)
+      line(ink, 170f, 80f, 178f, 79f, 3f, wait); line(ink, 182f, 85f, 189f, 73f, 2.4f, wait); line(ink, 193f, 78f, 201f, 77f, 3f, wait)
+      // Bookmark ribbon.
+      drawPath(path(152f, 36f, 159f, 36f, 159f, 58f, 155.5f, 55f, 152f, 58f), Color(0xFF2563EB))
+      // Pencil, resting.
+      translate(top = bob * s) {
+        rotate(-32f, pivot = o(200f, 112f)) {
+          drawRoundRect(Color(0xFFFBBF24), o(166f, 108f), sz(54f, 8f), CornerRadius(1.5f * s))
+          drawRoundRect(Color(0xFFF9A8D4), o(216f, 108f), sz(8f, 8f), CornerRadius(1.5f * s))
+          drawRect(Color(0xFF94A3B8), o(212f, 108f), sz(4f, 8f))
+          drawPath(path(166f, 108f, 157f, 112f, 166f, 116f), Color(0xFFF5D7A1))
+          drawPath(path(159.5f, 110.9f, 157f, 112f, 159.5f, 113.1f), Color(0xFF334155))
         }
       }
     }
