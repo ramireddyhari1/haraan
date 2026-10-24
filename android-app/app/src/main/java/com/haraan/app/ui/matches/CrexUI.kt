@@ -210,54 +210,126 @@ fun HeroCrest(monogram: String, modifier: Modifier = Modifier, iconRef: String =
 }
 
 @Composable
-private fun HeroTeamColumn(
+private fun BattingScore(
     modifier: Modifier,
-    monogram: String,
+    name: String,
+    logo: String,
     score: String,
     overs: String,
-    runsColor: Color,
-    wktColor: Color,
-    alignEnd: Boolean,
-    iconRef: String = ""
+    stats: List<Pair<String, String>>,
+    batting: Boolean = true,
 ) {
-    val align = if (alignEnd) Alignment.End else Alignment.Start
-    // Always render a compact code in the hero — never the long raw team name.
-    val code = teamShortCode(monogram)
-    Column(modifier = modifier, horizontalAlignment = align) {
-        HeroCrest(code, Modifier.size(42.dp), iconRef = iconRef)
-        Spacer(Modifier.height(8.dp))
-        Text(code, color = Color(0xFF1E293B), fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.height(2.dp))
+    val code = teamShortCode(name)
+    Column(modifier = modifier) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            HeroCrest(code, Modifier.size(26.dp), iconRef = logo)
+            Spacer(Modifier.width(8.dp))
+            Text(code, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.4.sp)
+            // Once the match is over nobody is batting — the line just names the side.
+            if (batting) Text("  ·  batting", color = Color.White.copy(alpha = 0.6f), fontSize = 11.5.sp, fontWeight = FontWeight.Medium)
+        }
+        Spacer(Modifier.height(4.dp))
         val slash = score.indexOf('/')
         val runs = if (slash >= 0) score.substring(0, slash) else score
         val wkts = if (slash >= 0) score.substring(slash) else ""
         // Roll the runs up to the new total instead of hard-swapping, so a boundary reads
-        // as the number *climbing*. Non-numeric scores ("Yet to bat") fall through as-is.
+        // as the number *climbing*. Non-numeric scores fall through as-is.
         val runsInt = runs.toIntOrNull()
         val animatedRuns by androidx.compose.animation.core.animateIntAsState(
             targetValue = runsInt ?: 0,
             animationSpec = androidx.compose.animation.core.tween(550, easing = androidx.compose.animation.core.FastOutSlowInEasing),
             label = "runsRoll"
         )
-        val runsText = if (runsInt != null) animatedRuns.toString() else runs
+        val tnum = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
-                runsText, color = runsColor, fontSize = 34.sp,
+                if (runsInt != null) animatedRuns.toString() else runs,
+                color = Color.White, fontSize = 46.sp,
                 fontFamily = com.haraan.app.theme.ArchivoDisplay,
-                letterSpacing = (-1).sp,
-                style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
+                letterSpacing = (-1.5).sp, style = tnum,
             )
             if (wkts.isNotEmpty()) {
                 Text(
-                    wkts, color = wktColor, fontSize = 18.sp,
+                    wkts, color = Color.White.copy(alpha = 0.55f), fontSize = 24.sp,
                     fontFamily = com.haraan.app.theme.ArchivoDisplay,
-                    modifier = Modifier.padding(bottom = 3.dp),
-                    style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum")
+                    modifier = Modifier.padding(bottom = 6.dp), style = tnum,
+                )
+            }
+            if (overs.isNotBlank()) {
+                Text(
+                    "  ($overs)", color = Color.White.copy(alpha = 0.75f), fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(bottom = 9.dp), style = tnum,
                 )
             }
         }
-        Spacer(Modifier.height(2.dp))
-        Text(overs, color = Color(0xFF64748B), fontSize = 11.sp)
+        if (stats.isNotEmpty()) {
+            Spacer(Modifier.height(2.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                stats.forEach { (label, value) -> HeroStat(label, value) }
+            }
+        }
+    }
+}
+
+/** The fielding side on one quiet line: crest, code, and its score or "Yet to bat". */
+@Composable
+private fun FieldingLine(name: String, logo: String, score: String) {
+    val code = teamShortCode(name)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        HeroCrest(code, Modifier.size(20.dp), iconRef = logo)
+        Spacer(Modifier.width(8.dp))
+        Text(code, color = Color.White.copy(alpha = 0.82f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.4.sp)
+        Spacer(Modifier.weight(1f))
+        Text(
+            score.ifBlank { "Yet to bat" },
+            color = Color.White.copy(alpha = if (score.isBlank()) 0.6f else 0.85f),
+            fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+            style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
+        )
+    }
+}
+
+private fun overBallInk(b: String): Color = when {
+    b == "4" -> CrexColors.AccentBlue
+    b == "6" -> Color(0xFF15803D)
+    b.startsWith("W") -> CrexColors.WicketBall
+    b == "•" || b == "0" -> Color(0xFF94A3B8)
+    else -> Color(0xFF0F172A)
+}
+
+/**
+ * The over so far, one disc per delivery and an empty ring for each ball still to come —
+ * the same strip a scorer keeps in the book, so a viewer can read the over at a glance.
+ */
+@Composable
+private fun ThisOverStrip(balls: List<String>) {
+    val shown = balls.takeLast(7)
+    val slots = maxOf(6, shown.size)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("THIS OVER", color = Color.White.copy(alpha = 0.6f), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+        Spacer(Modifier.width(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+            for (i in 0 until slots) {
+                val b = shown.getOrNull(i)
+                if (b == null) {
+                    Box(Modifier.size(22.dp).border(1.dp, Color.White.copy(alpha = 0.28f), CircleShape))
+                } else {
+                    val ink = overBallInk(b)
+                    val boundary = b == "4" || b == "6" || b.startsWith("W")
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(Color.White)
+                            .then(if (boundary) Modifier.border(1.5.dp, ink, CircleShape) else Modifier),
+                    ) {
+                        Text(b, color = ink, fontSize = if (b.length > 2) 7.5.sp else 9.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -270,16 +342,16 @@ private fun HeroLastBall(state: MatchUiState) {
         val inPlay = state.ballInPlay && state.isLive
         Text(
             if (inPlay) "BOWLING" else "LAST BALL",
-            color = if (inPlay) Color(0xFF2563EB) else Color(0xFF334155).copy(alpha = 0.5f),
+            color = Color.White.copy(alpha = if (inPlay) 1f else 0.62f),
             fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(8.dp))
         val lastBall = state.thisOver.lastOrNull() ?: "•"
         val c = when (lastBall) {
-            "6" -> CrexColors.SixBall
-            "4" -> CrexColors.AccentGreen
+            "6" -> Color(0xFF15803D)
+            "4" -> CrexColors.AccentBlue
             "W" -> CrexColors.WicketBall
-            "•", "0" -> Color(0xFF0F172A).copy(alpha = 0.25f)
+            "•", "0" -> Color(0xFF94A3B8)
             else -> Color(0xFF0F172A)
         }
         // Identity of the delivery, not its value: the screen refetches on a poll and on
@@ -302,8 +374,24 @@ private fun HeroLastBall(state: MatchUiState) {
                 // lands, then the slot hands back to the last-ball glyph and its burst.
                 DeliveryInPlay(Modifier.size(width = 84.dp, height = 66.dp))
             } else {
-                Text(lastBall, color = c.copy(alpha = 0.12f), fontSize = 56.sp, fontWeight = FontWeight.Black)
-                Text(lastBall, color = c, fontSize = 38.sp, fontWeight = FontWeight.Black)
+                // The ball as the over strip draws it — a white disc with the result in it —
+                // only larger. A boundary or wicket gets a ring in its own colour.
+                val ringed = lastBall == "4" || lastBall == "6" || lastBall == "W"
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(58.dp)
+                        .shadow(6.dp, CircleShape, ambientColor = Color(0xFF0B2A78), spotColor = Color(0xFF0B2A78))
+                        .clip(CircleShape)
+                        .background(Color.White)
+                        .then(if (ringed) Modifier.border(3.dp, c.copy(alpha = 0.9f), CircleShape) else Modifier),
+                ) {
+                    Text(
+                        lastBall, color = c, fontSize = 28.sp,
+                        fontFamily = com.haraan.app.theme.ArchivoDisplay,
+                        style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
+                    )
+                }
             }
             // Overlaid, so the burst can spill past the centre column without moving any
             // of the hero's layout — a score that shifted sideways on every six would be
@@ -313,13 +401,6 @@ private fun HeroLastBall(state: MatchUiState) {
                 modifier = Modifier.size(190.dp),
                 onFinished = { burst = null },
             )
-        }
-        Spacer(Modifier.height(6.dp))
-        Box(
-            modifier = Modifier.size(30.dp).clip(CircleShape).background(Color(0xFF1E293B)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text("VS", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -342,7 +423,7 @@ private fun DeliveryInPlay(modifier: Modifier = Modifier) {
     )
     val pitch = Color(0xFFC8A96B)
     val crease = Color.White.copy(alpha = 0.85f)
-    val stump = Color(0xFF0F172A)
+    val stump = Color.White
     val ballRed = Color(0xFFC62828)
 
     Canvas(modifier = modifier) {
@@ -419,10 +500,10 @@ private fun DeliveryInPlay(modifier: Modifier = Modifier) {
 private fun HeroStat(label: String, value: String) {
     Text(
         buildAnnotatedString {
-            withStyle(SpanStyle(color = Color(0xFF64748B), fontWeight = FontWeight.Medium)) { append("$label ") }
-            withStyle(SpanStyle(color = Color(0xFF0F172A), fontWeight = FontWeight.Bold)) { append(value) }
+            withStyle(SpanStyle(color = Color.White.copy(alpha = 0.62f), fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)) { append("$label  ") }
+            withStyle(SpanStyle(color = Color.White, fontWeight = FontWeight.Bold)) { append(value) }
         },
-        fontSize = 10.sp
+        fontSize = 10.5.sp
     )
 }
 
@@ -484,78 +565,124 @@ fun LiveScoreCard(state: MatchUiState, modifier: Modifier = Modifier) {
                 .graphicsLayer { scaleX = popScale; scaleY = popScale }
                 .clip(RoundedCornerShape(RibbonCardRadius - band))
                 .background(
-                    Brush.verticalGradient(
-                        listOf(Color(0xFFD3EAF8), Color(0xFFAFD2EC))
+                    // Haraan blue as a pane of glass: lit a touch brighter at the top-left,
+                    // settling into the brand blue and a shade deeper at the foot.
+                    Brush.linearGradient(
+                        0f to Color(0xFF4A86F7),
+                        0.45f to Color(0xFF2563EB),
+                        1f to Color(0xFF1E50D6),
                     )
                 )
                 .drawWithContent {
+                    val w = size.width
+                    val h = size.height
+                    // The reflection: one broad, soft curve of light over the upper half, the
+                    // way a window catches the sky. Behind the content, so text stays crisp.
+                    drawOval(
+                        brush = Brush.verticalGradient(
+                            0f to Color.White.copy(alpha = 0.20f),
+                            1f to Color.White.copy(alpha = 0f),
+                            startY = -h * 0.55f, endY = h * 0.42f,
+                        ),
+                        topLeft = Offset(-w * 0.25f, -h * 0.55f),
+                        size = Size(w * 1.5f, h),
+                    )
+                    // A cool sheen off the right edge, so the pane has depth, not just tint.
+                    drawRect(
+                        Brush.radialGradient(
+                            listOf(Color(0xFF93C5FD).copy(alpha = 0.22f), Color.Transparent),
+                            center = Offset(w * 1.02f, h * 0.95f),
+                            radius = w * 0.6f,
+                        )
+                    )
                     drawContent()
                     if (pulse.value > 0f) drawRect(pulseColor.copy(alpha = pulse.value * 0.28f))
                 }
+                // The glass edge: a bright rim at the top that fades out down the sides.
+                .border(
+                    1.dp,
+                    Brush.verticalGradient(listOf(Color.White.copy(alpha = 0.55f), Color.White.copy(alpha = 0.06f))),
+                    RoundedCornerShape(RibbonCardRadius - band),
+                )
                 .padding(horizontal = 18.dp, vertical = 14.dp)
         ) {
-                // Meta line — real format/status, no placeholders.
-                Text(
-                    text = state.competition.ifBlank { if (state.isLive) "Live" else state.status.ifBlank { "Match" } },
-                    color = Color(0xFF334155).copy(alpha = 0.78f),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                // Innings replayed from the ball log are the truth for who is in and what the
+                // first side made; the flat score fields only guess the batting side from the
+                // last over's tag, which in a chase can leave the first total on the wrong row.
+                val cards = state.inningsCards
+                val current = cards.lastOrNull()
+                val battingIsTeam2 = (current?.battingTeam ?: state.battingTeam) == 2
+                val firstInnings = if (current != null) cards.firstOrNull { it !== current && it.battingTeam != current.battingTeam } else null
+                val battingScore = current?.let { "${it.runs}/${it.wickets}" } ?: sanitizeScore(state.score)
+                val battingOvers = current?.overs?.ifBlank { null } ?: state.overs
+                val fieldingScore = when {
+                    firstInnings != null -> "${firstInnings.runs}/${firstInnings.wickets} (${firstInnings.overs})"
+                    // Only one innings so far: the other side hasn't batted, whatever "0"
+                    // the flat field carries.
+                    current != null || state.innings <= 1 -> sanitizeScore(state.opponentScore).let {
+                        if (it.trim() in setOf("", "0", "0/0")) "" else it
+                    }
+                    else -> sanitizeScore(state.opponentScore)
+                }
+                // The chase, worked from the same two innings the Live tab's chase card uses.
+                val chase = if (firstInnings != null && current != null && state.isLive) {
+                    val maxOvers = Regex("(\\d+)").find(state.competition)?.value?.toIntOrNull()?.takeIf { it > 0 } ?: 20
+                    val bowled = current.overs.split(".").let { (it.getOrNull(0)?.toIntOrNull() ?: 0) * 6 + (it.getOrNull(1)?.toIntOrNull() ?: 0) }
+                    val need = (firstInnings.runs + 1 - current.runs).coerceAtLeast(0)
+                    (need to (maxOvers * 6 - bowled).coerceAtLeast(0)).takeIf { it.first > 0 }
+                } else null
+                // Format on the left, toss on the right — the small print above a TV score.
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        state.competition.ifBlank { if (state.isLive) "Live" else state.status.ifBlank { "Match" } }.uppercase(),
+                        color = Color.White.copy(alpha = 0.72f), fontSize = 9.5.sp,
+                        fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp, maxLines = 1,
+                        modifier = Modifier.weight(1f),
+                    )
+                    if (state.toss.isNotBlank()) {
+                        Text(
+                            "Toss: " + state.toss, color = Color.White.copy(alpha = 0.72f),
+                            fontSize = 10.5.sp, fontWeight = FontWeight.Medium,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Teams and Scores row — each side shows its own real score. `score` is the
-                // batting side; `opponentScore` is the other. Overs only show for the side
-                // that's actually batting.
-                val battingIsTeam2 = state.battingTeam == 2
-                val team1Score = sanitizeScore(if (battingIsTeam2) state.opponentScore else state.score)
-                val team2Score = sanitizeScore(if (battingIsTeam2) state.score else state.opponentScore)
-                val oversLabel = if (state.overs.isNotBlank()) "${state.overs} ov" else ""
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Top
-                ) {
-                    HeroTeamColumn(
+                // The batting side owns the card; the last ball sits beside its score.
+                val stats = buildList {
+                    if (state.crr.isNotBlank()) add("CRR" to state.crr)
+                    if (state.rrr.isNotEmpty()) add("RRR" to state.rrr)
+                    if (chase != null) add("NEED" to "${chase.first} off ${chase.second}")
+                    else if (state.runsNeeded != null && state.ballsLeft != null) add("NEED" to "${state.runsNeeded} off ${state.ballsLeft}")
+                }
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    BattingScore(
                         modifier = Modifier.weight(1f),
-                        monogram = state.team1,
-                        score = team1Score,
-                        overs = if (battingIsTeam2) "" else oversLabel,
-                        runsColor = Color(0xFF0D47A1),
-                        wktColor = Color(0xFF0D47A1).copy(alpha = 0.42f),
-                        alignEnd = false,
-                        iconRef = state.team1Logo
+                        name = if (battingIsTeam2) state.team2 else state.team1,
+                        logo = if (battingIsTeam2) state.team2Logo else state.team1Logo,
+                        score = battingScore,
+                        overs = battingOvers,
+                        stats = stats,
+                        batting = state.isLive,
                     )
-
                     HeroLastBall(state = state)
-
-                    HeroTeamColumn(
-                        modifier = Modifier.weight(1f),
-                        monogram = state.team2,
-                        score = team2Score,
-                        overs = if (battingIsTeam2) oversLabel else "",
-                        runsColor = Color(0xFF475569),
-                        wktColor = Color(0xFF94A3B8),
-                        alignEnd = true,
-                        iconRef = state.team2Logo
-                    )
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.16f)))
+                Spacer(modifier = Modifier.height(10.dp))
 
-                // CRR, RRR, Toss info row — only render stats we actually have.
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                        if (state.crr.isNotBlank()) HeroStat("CRR", state.crr)
-                        if (state.rrr.isNotEmpty()) HeroStat("RRR", state.rrr)
-                    }
-                    if (state.toss.isNotBlank()) HeroStat("TOSS", state.toss)
+                FieldingLine(
+                    name = if (battingIsTeam2) state.team1 else state.team2,
+                    logo = if (battingIsTeam2) state.team1Logo else state.team2Logo,
+                    score = fieldingScore,
+                )
+
+                if (state.isLive) {
+                    Spacer(modifier = Modifier.height(10.dp))
+                    ThisOverStrip(state.thisOver)
                 }
 
         }
