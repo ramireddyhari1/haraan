@@ -340,20 +340,14 @@ private fun HeroLastBall(state: MatchUiState) {
         modifier = Modifier.padding(horizontal = 6.dp)
     ) {
         val inPlay = state.ballInPlay && state.isLive
-        Text(
-            if (inPlay) "BOWLING" else "LAST BALL",
-            color = Color.White.copy(alpha = if (inPlay) 1f else 0.62f),
-            fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp
-        )
-        Spacer(Modifier.height(8.dp))
-        val lastBall = state.thisOver.lastOrNull() ?: "•"
-        val c = when (lastBall) {
-            "6" -> Color(0xFF15803D)
-            "4" -> CrexColors.AccentBlue
-            "W" -> CrexColors.WicketBall
-            "•", "0" -> Color(0xFF94A3B8)
-            else -> Color(0xFF0F172A)
+        if (inPlay) {
+            Text(
+                "BOWLING", color = Color.White,
+                fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp
+            )
+            Spacer(Modifier.height(8.dp))
         }
+        val lastBall = state.thisOver.lastOrNull() ?: "•"
         // Identity of the delivery, not its value: the screen refetches on a poll and on
         // every realtime nudge, and keyed on "6" a six would replay its burst every few
         // seconds. Overs advance per legal ball and the over's ball list grows per
@@ -374,22 +368,25 @@ private fun HeroLastBall(state: MatchUiState) {
                 // lands, then the slot hands back to the last-ball glyph and its burst.
                 DeliveryInPlay(Modifier.size(width = 84.dp, height = 66.dp))
             } else {
-                // The ball as the over strip draws it — a white disc with the result in it —
-                // only larger. A boundary or wicket gets a ring in its own colour.
-                val ringed = lastBall == "4" || lastBall == "6" || lastBall == "W"
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .size(58.dp)
-                        .shadow(6.dp, CircleShape, ambientColor = Color(0xFF0B2A78), spotColor = Color(0xFF0B2A78))
-                        .clip(CircleShape)
-                        .background(Color.White)
-                        .then(if (ringed) Modifier.border(3.dp, c.copy(alpha = 0.9f), CircleShape) else Modifier),
-                ) {
+                // The umpire gives the signal for the last ball; the caption under him
+                // names it, or reads the runs when there is no signal to give.
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    UmpireSignal(
+                        ball = lastBall,
+                        ballKey = ballKey,
+                        modifier = Modifier.size(width = 100.dp, height = 118.dp),
+                    )
+                    val call = UmpireCall.of(lastBall)
+                    val caption = when {
+                        state.thisOver.isEmpty() -> "LAST BALL"
+                        call != UmpireCall.STAND -> call.caption
+                        lastBall == "•" || lastBall == "0" -> "DOT BALL"
+                        lastBall == "1" -> "1 RUN"
+                        else -> "$lastBall RUNS"
+                    }
                     Text(
-                        lastBall, color = c, fontSize = 28.sp,
-                        fontFamily = com.haraan.app.theme.ArchivoDisplay,
-                        style = androidx.compose.ui.text.TextStyle(fontFeatureSettings = "tnum"),
+                        caption, color = Color.White,
+                        fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp,
                     )
                 }
             }
