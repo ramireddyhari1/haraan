@@ -267,7 +267,7 @@
             <div class="kv-grounds">
                 @foreach($venues as $v)
                     <a class="kv-ground" href="{{ \App\Support\SeoUrl::venue($v) }}">
-                        <img class="kv-ground__img" src="{{ $v->image ?: asset('images/haraan-social-card.png') }}" alt="{{ $v->title }}, {{ $cityName }}" loading="{{ $loop->index < 3 ? 'eager' : 'lazy' }}">
+                        <img class="kv-ground__img" src="{{ $v->image ?: asset('images/haraan-social-card.png') }}"{!! \App\Support\VenuePhoto::imgAttrs($v->image, '(min-width: 768px) 340px, 100vw') !!} alt="{{ $v->title }}, {{ $cityName }}" loading="{{ $loop->index < 3 ? 'eager' : 'lazy' }}">
                         <span class="kv-ground__body">
                             <h3 class="kv-ground__name">{{ $v->title }}</h3>
                             <span class="kv-ground__where">{{ $v->location ?: $cityName }}</span>
@@ -306,7 +306,7 @@
                     <div class="kv-grounds">
                         @foreach($featuredVenues as $v)
                             <a class="kv-ground" href="{{ \App\Support\SeoUrl::venue($v) }}">
-                                <img class="kv-ground__img" src="{{ $v->image ?: asset('images/haraan-social-card.png') }}" alt="{{ $v->title }}" loading="lazy">
+                                <img class="kv-ground__img" src="{{ $v->image ?: asset('images/haraan-social-card.png') }}"{!! \App\Support\VenuePhoto::imgAttrs($v->image, '(min-width: 768px) 340px, 100vw') !!} alt="{{ $v->title }}" loading="lazy">
                                 <span class="kv-ground__body">
                                     <h3 class="kv-ground__name">{{ $v->title }}</h3>
                                     <span class="kv-ground__where">{{ trim(($v->location ? $v->location.', ' : '').($v->city ?? ''), ', ') }}</span>

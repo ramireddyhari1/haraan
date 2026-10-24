@@ -45,6 +45,12 @@ class PartnerApplicationController extends Controller
             'amenities' => array_keys(VenueForm::AMENITIES),
             'rulePresets' => VenueForm::RULE_PRESETS,
             'maxPhotos' => self::MAX_PHOTOS,
+            // Same bar /control holds venue photos to; here it only warns (see venue_photos.partner_warning).
+            'photoCheck' => PlatformRules::bool('venue_photos.partner_warning') ? [
+                'w' => PlatformRules::int('venue_photos.min_width'),
+                'h' => PlatformRules::int('venue_photos.min_height'),
+                'landscape' => PlatformRules::bool('venue_photos.require_landscape'),
+            ] : null,
             'askPayouts' => PlatformRules::bool('partner_onboarding.ask_payouts'),
             'banks' => self::banks(),
             // Only promise a WhatsApp confirmation when one can actually be sent.

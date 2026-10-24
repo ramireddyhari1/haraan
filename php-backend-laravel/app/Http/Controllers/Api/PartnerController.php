@@ -3624,12 +3624,16 @@ class PartnerController extends Controller
             'location' => $v->location ?? null,
             // Same resolver the public venue list uses, so the partner sees the
             // exact photo customers see rather than a second source of truth.
-            'image'    => \App\Support\MediaUrl::resolve(
+            'image'    => \App\Support\VenuePhoto::url(
                 is_array($v->images) ? ($v->images[0] ?? null) : null,
+                960,
             ),
             'sports'   => is_array($v->sports) ? array_values(array_filter($v->sports)) : [],
             'bookings' => (clone $paid)->count(),
             'revenue'  => round((float) (clone $paid)->sum('total_amount'), 2),
+            // Haraan's cut, set in /control — the partner reads it, never sets it.
+            'commission_percent' => $v->commissionPercent(),
+            'commission_label'   => $v->commissionLabel(),
         ];
     }
 

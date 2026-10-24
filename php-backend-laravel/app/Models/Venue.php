@@ -21,7 +21,7 @@ final class Venue extends Model
     use AuditsAdminChanges;
 
     /** Only changes to these fields are audit-logged (see AuditsAdminChanges). */
-    protected array $auditedAttributes = ['status', 'published_at', 'price', 'convenience_fee_type', 'convenience_fee_value', 'fees', 'is_bookable', 'is_active', 'booking_window_days', 'partner_id', 'cancel_free_hours', 'cancel_refund_percent'];
+    protected array $auditedAttributes = ['status', 'published_at', 'price', 'convenience_fee_type', 'convenience_fee_value', 'fees', 'commission_percent', 'is_bookable', 'is_active', 'booking_window_days', 'partner_id', 'cancel_free_hours', 'cancel_refund_percent'];
 
     use BroadcastsContentChanges;
 
@@ -31,7 +31,7 @@ final class Venue extends Model
     protected $fillable = [
         'name', 'category', 'kind', 'branch_label', 'branch_code', 'capabilities',
         'sports', 'location', 'city', 'address', 'distance', 'latitude', 'longitude', 'map_link', 'place_id',
-        'price', 'convenience_fee_type', 'convenience_fee_value', 'fees',
+        'price', 'convenience_fee_type', 'convenience_fee_value', 'fees', 'commission_percent',
         'price_chart', 'price_note', 'rating', 'ratings_count', 'reviews_count', 'tagline', 'hours',
         'about', 'rules', 'images', 'amenities', 'status', 'published_at', 'is_bookable', 'booking_window_days', 'is_active', 'is_featured',
         'sort_order', 'partner_id', 'organization_id',
@@ -45,6 +45,7 @@ final class Venue extends Model
         'sports' => 'array',
         'rules' => 'array',
         'fees' => 'array',
+        'commission_percent' => 'float',
         'price_chart' => 'array',
         'hours_json' => 'array',
         'slot_minutes' => 'integer',
@@ -557,6 +558,37 @@ final class Venue extends Model
                 throw new \DomainException("Venue #{$venue->id} has bookings and cannot be deleted. Deactivate it instead.");
             }
         });
+
+        // Sized WebP copies of every uploaded photo, made after the response so a save
+        // with five 12 MP shots doesn't keep the admin waiting. Until they exist every
+        // page falls back to the original, so there's no window where a photo is missing.
+        static::saved(function (Venue $venue): void {
+            // Originals aren't synced until after `saved`, so an empty set means this save
+            // was the insert. (wasRecentlyCreated stays true for the instance's whole life.)
+            $inserted = $venue->getOriginal() === [];
+            if (! $inserted && ! $venue->wasChanged('images')) {
+                return;
+            }
+
+            $list = static fn ($v): array => array_values(array_filter(
+                is_array($v) ? $v : (array) json_decode((string) $v, true),
+                static fn ($i): bool => is_string($i) && trim($i) !== '',
+            ));
+            $now = $list($venue->images);
+            $removed = array_diff($list($venue->getOriginal('images')), $now);
+
+            $sync = static function () use ($now, $removed): void {
+                foreach ($removed as $path) {
+                    \App\Support\VenuePhoto::forget($path);
+                }
+                foreach ($now as $path) {
+                    \App\Support\VenuePhoto::generate($path);
+                }
+            };
+
+            // There's no response to wait for on the console (artisan, seeders, tests).
+            app()->runningInConsole() ? $sync() : dispatch($sync)->afterResponse();
+        });
     }
 
     /** Human summary of the week's hours, e.g. "Mon–Fri 6:00 AM–11:00 PM · Sat–Sun 7:00 AM–10:00 PM". */
@@ -643,6 +675,27 @@ final class Venue extends Model
     public function convenienceFeeFor(float $subtotal): float
     {
         return round(array_sum(array_column($this->feeLinesFor($subtotal), 'amount')), 2);
+    }
+
+    /**
+     * Haraan's commission on this venue's online bookings, in percent: the venue's own rate
+     * when /control set one, else the platform default (Platform rules → Fees). 0 = free.
+     */
+    public function commissionPercent(): float
+    {
+        return $this->commission_percent !== null
+            ? (float) $this->commission_percent
+            : \App\Support\PlatformRules::float('fees.venue_commission_percent');
+    }
+
+    /** "Free", or "12.5% of each online booking" — how the partner reads their rate. */
+    public function commissionLabel(): string
+    {
+        $pct = $this->commissionPercent();
+
+        return $pct > 0
+            ? rtrim(rtrim(number_format($pct, 2), '0'), '.') . '% of each online booking'
+            : 'Free — no commission';
     }
 
     /**

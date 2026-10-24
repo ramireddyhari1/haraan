@@ -8,6 +8,7 @@ use App\Models\PartnerPayoutAccount;
 use App\Models\PartnerSubscription;
 use App\Models\Venue;
 use App\Models\VenueCourt;
+use Filament\Facades\Filament;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
@@ -32,6 +33,12 @@ class VenueInfolist
 {
     /** Booking statuses that represent money actually taken. Status casing is mixed in prod. */
     private const PAID = ['confirmed', 'paid', 'completed', 'checked_in'];
+
+    /** The partner console shows this same page; a few money lines are Haraan's alone. */
+    private static function isPartnerPanel(): bool
+    {
+        return Filament::getCurrentPanel()?->getId() === 'partner';
+    }
 
     public static function configure(Schema $schema): Schema
     {
@@ -343,7 +350,9 @@ class VenueInfolist
                     ->color(fn (Venue $record): string => in_array($record->convenience_fee_type, ['flat', 'percent'], true) ? 'info' : 'gray')
                     ->columnSpan(['default' => 1, 'md' => 2]),
 
+                // Haraan's own fees are never shown to the partner, nor the example that adds them.
                 TextEntry::make('other_fees')
+                    ->visible(fn (): bool => ! self::isPartnerPanel())
                     ->label('Other fees charged to the customer')
                     ->state(fn (Venue $record): array => collect($record->fees ?? [])
                         ->filter(fn ($f): bool => trim((string) ($f['label'] ?? '')) !== '' && (float) ($f['value'] ?? 0) > 0)
@@ -357,6 +366,7 @@ class VenueInfolist
                     ->columnSpan(['default' => 1, 'md' => 2]),
 
                 TextEntry::make('fee_example')
+                    ->visible(fn (): bool => ! self::isPartnerPanel())
                     ->label('Worked example on one default-rate hour')
                     ->state(function (Venue $record): string {
                         $base = (float) $record->price;
@@ -369,6 +379,14 @@ class VenueInfolist
                             ? $inr($base) . ' + ' . $inr($fee) . ' fee = ' . $inr($base + $fee) . ' collected'
                             : $inr($base) . ' collected — no booking fee on top';
                     })
+                    ->columnSpan(['default' => 1, 'md' => 2]),
+
+                TextEntry::make('commission')
+                    ->label('Haraan commission')
+                    ->state(fn (Venue $record): string => $record->commissionLabel()
+                        . ($record->commission_percent === null && ! self::isPartnerPanel() ? ' (platform default)' : ''))
+                    ->badge()
+                    ->color(fn (Venue $record): string => $record->commissionPercent() > 0 ? 'warning' : 'success')
                     ->columnSpan(['default' => 1, 'md' => 2]),
 
                 TextEntry::make('price_note')

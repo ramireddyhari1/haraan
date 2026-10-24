@@ -26,6 +26,7 @@
         'amenities' => $amenities,
         'rules' => $rulePresets,
         'maxPhotos' => $maxPhotos,
+        'photoCheck' => $photoCheck ?? null,
         'askPayouts' => $askPayouts,
         'banks' => $banks,
         'ifscBanks' => PA::IFSC_BANKS,
@@ -382,6 +383,9 @@
         .bp-photo__cover { position: absolute; left: 6px; bottom: 6px; font-size: 9.5px; font-weight: 800; letter-spacing: .12em; background: var(--blue); color: #fff; border-radius: 6px; padding: 3px 6px; }
         .bp-photo__make { position: absolute; left: 6px; bottom: 6px; font-size: 10.5px; font-weight: 700; background: rgba(15,23,42,.66); color: #fff; border: 0; border-radius: 6px; padding: 3px 6px; cursor: pointer; }
         .bp-photo__x { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; border-radius: 50%; border: 0; background: rgba(15,23,42,.66); color: #fff; cursor: pointer; display: grid; place-items: center; }
+        .bp-photo__flag { position: absolute; left: 6px; top: 6px; font-size: 9.5px; font-weight: 800; letter-spacing: .08em; background: #F59E0B; color: #fff; border-radius: 6px; padding: 3px 6px; }
+        .bp-photo.is-weak img { outline: 2px solid #F59E0B; outline-offset: -2px; }
+        .bp-photo-warn { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: #FFFBEB; border: 1px solid #FDE68A; color: #92400E; font-size: 13px; line-height: 1.45; }
         .bp-photo__x svg { width: 12px; height: 12px; stroke: #fff; stroke-width: 2.6; fill: none; stroke-linecap: round; }
 
         .bp-slip__thumbs { display: flex; gap: 5px; margin-top: 6px; }
@@ -766,6 +770,7 @@
                                 <input type="file" id="bpPhotoIn" accept="image/jpeg,image/png,image/webp" multiple>
                             </label>
                             <div class="bp-photos" id="bpPhotos"></div>
+                            <div class="bp-photo-warn" id="bpPhotoWarn" hidden></div>
                             <div class="bp-hint" id="bpPhotoHint">Photos stay on this page only until you send — if you reload, add them again.</div>
                             <div class="bp-err"></div>
                         </div>
@@ -1229,14 +1234,23 @@
 
     // ── Photos ───────────────────────────────────────────────────────────────────
     // Shrunk on the phone before upload: a 12 MP shot becomes a ~300 KB JPEG.
+    // The size check reads the photo as picked, before shrinking.
+    const photoIssue = (w, h) => {
+        const ck = CFG.photoCheck;
+        if (!ck) return null;
+        if (ck.landscape && w <= h) return 'tall';
+        if (w < ck.w || h < ck.h) return 'small';
+        return null;
+    };
     const shrink = (file) => new Promise((resolve) => {
         const img = new Image(); const url = URL.createObjectURL(file);
         img.onload = () => {
+            const issue = photoIssue(img.naturalWidth, img.naturalHeight);
             const max = 1600; const k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
             const c = document.createElement('canvas'); c.width = Math.round(img.naturalWidth * k); c.height = Math.round(img.naturalHeight * k);
             c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
             URL.revokeObjectURL(url);
-            c.toBlob((b) => resolve(b || file), 'image/jpeg', 0.84);
+            c.toBlob((b) => resolve({ blob: b || file, issue }), 'image/jpeg', 0.84);
         };
         img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
         img.src = url;
@@ -1248,19 +1262,27 @@
         if (list.length < files.length) setErr('photos', 'Only JPG, PNG or WebP photos.');
         if (list.length > room) setErr('photos', `Up to ${CFG.maxPhotos} photos — the first ${room || 'ones'} were kept.`);
         for (const f of list.slice(0, Math.max(0, room))) {
-            const blob = await shrink(f);
-            if (!blob) continue;
-            photos.push({ blob, url: URL.createObjectURL(blob) });
+            const shot = await shrink(f);
+            if (!shot) continue;
+            photos.push({ blob: shot.blob, issue: shot.issue, url: URL.createObjectURL(shot.blob) });
             buzz(6); paintPhotos(); paintScene();
         }
     };
     const paintPhotos = () => {
         $('#bpPhotos').innerHTML = photos.map((p, i) => `
-            <div class="bp-photo" data-i="${i}"><img src="${p.url}" alt="">
+            <div class="bp-photo${p.issue ? ' is-weak' : ''}" data-i="${i}"><img src="${p.url}" alt="">
+                ${p.issue ? `<span class="bp-photo__flag">${p.issue === 'tall' ? 'TALL' : 'SMALL'}</span>` : ''}
                 ${i === 0 ? '<span class="bp-photo__cover">COVER</span>' : '<button type="button" class="bp-photo__make" data-cover>Make cover</button>'}
                 <button type="button" class="bp-photo__x" data-x aria-label="Remove photo"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
             </div>`).join('');
         $('#bpDrop').hidden = photos.length >= CFG.maxPhotos;
+        const tall = photos.some((p) => p.issue === 'tall'), small = photos.some((p) => p.issue === 'small');
+        const warn = $('#bpPhotoWarn');
+        warn.hidden = !(tall || small);
+        warn.textContent = [
+            tall ? 'Photos marked TALL are portrait. Customers see venue photos wide, so these get cropped to a thin strip. Turn the phone sideways and take them again.' : '',
+            small ? `Photos marked SMALL are under ${CFG.photoCheck.w}×${CFG.photoCheck.h} px and will look blurry. Photos forwarded on WhatsApp get shrunk, so use the originals from your camera.` : '',
+        ].filter(Boolean).join(' ') + ' You can still send them, and we can sort photos out on the call.';
     };
     $('#bpPhotoIn').addEventListener('change', (e) => { addPhotos(e.target.files); e.target.value = ''; });
     const drop = $('#bpDrop');

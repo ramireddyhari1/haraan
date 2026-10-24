@@ -443,7 +443,7 @@
     <div class="mven__hero">
         <div class="mven__shots" @if(count($mvImages) > 1) data-mven-shots @endif>
             @foreach($mvImages as $shot)
-                <img class="mven__shot" src="{{ $shot }}" alt="{{ $venue->title }}"
+                <img class="mven__shot" src="{{ $shot }}"{!! \App\Support\VenuePhoto::imgAttrs($shot, '140vw') !!} alt="{{ $venue->title }}"
                      @if($loop->first) fetchpriority="high" @else loading="lazy" @endif decoding="async">
             @endforeach
         </div>
@@ -1008,7 +1008,7 @@
                 @if(count($mvImages))
                     <div class="vdk-photos__frame">
                         @foreach($mvImages as $shot)
-                            <img src="{{ $shot }}" alt="{{ $venue->title }} photo {{ $loop->iteration }}" class="{{ $loop->first ? 'is-on' : '' }}"
+                            <img src="{{ $shot }}"{!! \App\Support\VenuePhoto::imgAttrs($shot, '(min-width: 1260px) 784px, 62vw') !!} alt="{{ $venue->title }} photo {{ $loop->iteration }}" class="{{ $loop->first ? 'is-on' : '' }}"
                                  @if($loop->first) fetchpriority="high" @else loading="lazy" @endif decoding="async">
                         @endforeach
                         @if(count($mvImages) > 1)
@@ -1025,7 +1025,7 @@
                         <div class="vdk-photos__strip">
                             @foreach($mvImages as $shot)
                                 <button type="button" class="{{ $loop->first ? 'is-on' : '' }}" data-vdk-go="{{ $loop->index }}" aria-label="Photo {{ $loop->iteration }}">
-                                    <img src="{{ $shot }}" alt="" loading="lazy" decoding="async">
+                                    <img src="{{ $shot }}"{!! \App\Support\VenuePhoto::imgAttrs($shot, '92px') !!} alt="" loading="lazy" decoding="async">
                                 </button>
                             @endforeach
                         </div>

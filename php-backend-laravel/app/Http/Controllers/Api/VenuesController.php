@@ -9,8 +9,8 @@ use App\Models\User;
 use App\Models\Venue;
 use App\Services\VenueBookingWindow;
 use App\Services\VenueSlotAvailability;
-use App\Support\MediaUrl;
 use App\Support\PlatformRules;
+use App\Support\VenuePhoto;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use App\Support\BusinessClock;
@@ -86,7 +86,10 @@ final class VenuesController extends Controller
                 'peak_start' => $c->peak_start,
                 'peak_end' => $c->peak_end,
             ])->values(),
-            'images' => MediaUrl::resolveMany($venue->images),
+            // Sized WebP copies (VenuePhoto): `images` is the 1600px one, which older builds
+            // load as-is; `image_sets` lists every width so newer builds pick by screen.
+            'images' => VenuePhoto::urls($venue->images),
+            'image_sets' => VenuePhoto::setsMany($venue->images),
             'latitude' => $venue->latitude,
             'longitude' => $venue->longitude,
             'map_link' => $venue->map_link,
@@ -236,10 +239,11 @@ final class VenuesController extends Controller
             'ratings_count' => $v->ratings_count,
             'reviews_count' => $v->reviews_count,
             'tagline' => $v->tagline,
-            'image' => MediaUrl::resolve(is_array($v->images) ? ($v->images[0] ?? null) : null),
+            'image' => VenuePhoto::url(is_array($v->images) ? ($v->images[0] ?? null) : null),
             // Every photo, so list cards can swipe through the gallery without opening the
             // venue. Additive: `image` above stays for older app builds.
-            'images' => MediaUrl::resolveMany(is_array($v->images) ? $v->images : null),
+            'images' => VenuePhoto::urls(is_array($v->images) ? $v->images : null),
+            'image_sets' => VenuePhoto::setsMany(is_array($v->images) ? $v->images : null),
             'is_bookable' => $v->is_bookable,
             'is_featured' => $v->is_featured,
             // The owner's public page, when they have a live one (host-profile twin).

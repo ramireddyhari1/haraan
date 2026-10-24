@@ -329,19 +329,26 @@ class VenueForm
                             ->visible(fn ($get): bool => ! self::isPartnerPanel()
                                 && in_array($get('convenience_fee_type'), ['flat', 'percent'], true)),
 
+                        // Haraan's cut of each online booking (Venue::commissionPercent()). Admin sets
+                        // it; the partner reads it. Blank falls back to the platform default.
+                        Placeholder::make('commission_readonly')
+                            ->label('Haraan commission')
+                            ->visible(fn (): bool => self::isPartnerPanel())
+                            ->content(fn (?Venue $record): string => ($record?->commissionLabel() ?? 'Free — no commission') . ' — set by Haraan'),
+                        TextInput::make('commission_percent')
+                            ->label('Haraan commission (%)')
+                            ->visible(fn (): bool => ! self::isPartnerPanel())
+                            ->numeric()
+                            ->minValue(0)
+                            ->maxValue(50)
+                            ->suffix('%')
+                            ->placeholder(fn (): string => 'Platform default — ' . rtrim(rtrim(number_format(\App\Support\PlatformRules::float('fees.venue_commission_percent'), 2), '0'), '.') . '%')
+                            ->helperText('Haraan’s share of each online booking at this venue, taken from the payout. 0 = free. Blank = the platform default (Platform rules → Fees). Walk-ins are never charged. The partner sees this rate, read-only.'),
+
                         // Any other fee, named by Haraan ("Floodlight charge", "Maintenance fee"),
                         // each its own line on the customer's bill. Venue::feeRules() adds these
                         // after the convenience fee, so every checkout (app, website, WhatsApp)
-                        // charges them. Admin-only, like the fee above.
-                        Placeholder::make('fees_readonly')
-                            ->label('Other fees')
-                            ->visible(fn (?Venue $record): bool => self::isPartnerPanel() && ! empty($record?->fees))
-                            ->content(fn (?Venue $record): string => collect($record?->fees ?? [])
-                                ->filter(fn ($f): bool => ! empty($f['label']) && (float) ($f['value'] ?? 0) > 0)
-                                ->map(fn ($f): string => $f['label'] . ': ' . (($f['type'] ?? '') === 'percent'
-                                    ? rtrim(rtrim(number_format((float) $f['value'], 2), '0'), '.') . '% of the slot price'
-                                    : '₹' . number_format((float) $f['value'], 2) . ' per booking'))
-                                ->implode(' · ') . ' — set by Haraan'),
+                        // charges them. Admin-only, and never shown to the partner — not even read-only.
                         Repeater::make('fees')
                             ->label('Other fees')
                             ->visible(fn (): bool => ! self::isPartnerPanel())
@@ -411,11 +418,21 @@ class VenueForm
                             ->reorderable()
                             ->acceptedFileTypes(['image/jpeg', 'image/png', 'image/webp'])
                             ->maxSize(15360)
+                            // Runs on new uploads only; photos already on the venue are never re-checked.
+                            ->rule(static fn (): \Closure => static function (string $attribute, mixed $value, \Closure $fail): void {
+                                if ($value instanceof \Illuminate\Http\UploadedFile
+                                    && ($problem = \App\Support\VenuePhoto::uploadProblem((string) $value->getRealPath())) !== null) {
+                                    $fail($problem);
+                                }
+                            })
                             ->imageEditor()
                             ->disk('public')
                             ->directory('venues')
                             ->visibility('public')
-                            ->helperText('Drag to reorder. JPG, PNG or WebP, up to 15 MB each. Or paste links below.')
+                            ->helperText(fn (): string => 'Drag to reorder. JPG, PNG or WebP, up to 15 MB each. Or paste links below.'
+                                .(\App\Support\PlatformRules::bool('venue_photos.check_uploads')
+                                    ? (\App\Support\PlatformRules::bool('venue_photos.require_landscape') ? ' Landscape, at' : ' At').' least '.\App\Support\PlatformRules::int('venue_photos.min_width').'×'.\App\Support\PlatformRules::int('venue_photos.min_height').' px.'
+                                    : ''))
                             ->columnSpanFull(),
                         TagsInput::make('image_urls')
                             ->label('…or paste image URLs')
@@ -592,7 +609,8 @@ class VenueForm
     private static function previewFeeRules($get, ?Venue $record): array
     {
         if (self::isPartnerPanel()) {
-            return $record?->feeRules() ?? [];
+            // The named fees are Haraan's business, not the partner's: only the convenience fee.
+            return array_slice(array_filter($record?->feeRules() ?? [], fn (array $r): bool => $r['label'] === 'Convenience fee'), 0, 1);
         }
         $rules = [];
         // Forms without the convenience-fee inputs still charge the saved fee at checkout.
