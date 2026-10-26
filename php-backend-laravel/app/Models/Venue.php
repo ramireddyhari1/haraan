@@ -423,6 +423,42 @@ final class Venue extends Model
     }
 
     /**
+     * The cheapest hourly rate a player can actually be charged — what every "from ₹X/hr"
+     * shows. Same base rule as {@see VenueCourt::rateFor()}: a slot's own price (per court,
+     * else all courts) beats the court rate, which beats the venue's own price. Before, the
+     * list, city page and venue page each read a different one of those three, so one venue
+     * showed ₹781 in one place and ₹800 in another while checkout charged the slot's ₹800.
+     * Time-bound extras (peak, pricing rules) are left to the slot board.
+     */
+    public function fromPrice(): int
+    {
+        $courts = $this->courts->where('is_active', true);
+        $rates = $courts->isEmpty()
+            ? [$this->fromPriceFor(null)]
+            : $courts->map(fn (VenueCourt $c) => $this->fromPriceFor($c))->all();
+        $rates = array_filter($rates, static fn (int $r) => $r > 0);
+
+        return $rates !== [] ? min($rates) : 0;
+    }
+
+    /** {@see fromPrice()} for one court (null = a venue that sells no courts). */
+    public function fromPriceFor(?VenueCourt $court): int
+    {
+        $fallback = (float) ($court !== null ? ($court->price ?? $this->price ?? 0) : ($this->price ?? 0));
+        $slots = ($this->relationLoaded('slots') ? $this->slots : $this->slots()->get())
+            ->filter(fn (VenueSlot $s) => (bool) $s->is_available && ($court === null || $s->allowsCourt($court)));
+
+        $rates = $slots->isEmpty()
+            ? [$fallback]
+            : $slots->map(fn (VenueSlot $s) => (float) (($court !== null
+                ? $s->priceForCourt($court)
+                : ((float) $s->price > 0 ? (float) $s->price : null)) ?? $fallback))->all();
+        $rates = array_filter($rates, static fn (float $r) => $r > 0);
+
+        return $rates !== [] ? (int) min($rates) : 0;
+    }
+
+    /**
      * Regenerate this venue's bookable slots from its structured hours: one start-time per
      * open weekday from open→close, stepped by slot_minutes. Replaces existing slots, so hours
      * become the single source of truth. No-op when hours aren't set (keeps any manual slots).

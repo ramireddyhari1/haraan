@@ -463,7 +463,7 @@ final class PublicWebController extends Controller
         [$userLat, $userLng] = $this->viewerLatLng();
 
         $allVenues = Venue::published()
-            ->with('courts')
+            ->with(['courts', 'slots'])
             ->orderByDesc('is_featured')
             ->orderBy('sort_order')
             ->get();
@@ -732,12 +732,10 @@ final class PublicWebController extends Controller
         return mb_strtolower($area) === $area ? mb_convert_case($area, MB_CASE_TITLE) : $area;
     }
 
-    /** Lowest hourly rate across courts, else the venue price; 0 when unpriced. */
+    /** The cheapest rate checkout charges ({@see Venue::fromPrice()}); 0 when unpriced. */
     private static function venueFromPrice(object $d): int
     {
-        $prices = array_filter(array_map('intval', array_values((array) $d->court_prices)), static fn (int $p) => $p > 0);
-
-        return $prices !== [] ? min($prices) : (int) $d->price;
+        return (int) $d->from_price;
     }
 
     /**
@@ -843,7 +841,8 @@ final class PublicWebController extends Controller
             });
         }
 
-        $venues = $venuesQuery->orderByDesc('is_featured')
+        $venues = $venuesQuery->with(['courts', 'slots'])
+            ->orderByDesc('is_featured')
             ->orderBy('sort_order')
             ->get()
             ->map(fn (Venue $v) => $this->decorateVenueCard($v));
@@ -852,6 +851,7 @@ final class PublicWebController extends Controller
         $featuredVenues = collect();
         if ($venues->count() < 3) {
             $featuredVenues = Venue::published()
+                ->with(['courts', 'slots'])
                 ->orderByDesc('is_featured')
                 ->limit(6)
                 ->get()
@@ -2317,7 +2317,9 @@ final class PublicWebController extends Controller
             'category' => $v->category,
             'rating' => ($v->ratings_count > 0 && $v->rating) ? $v->rating : null,
             'reviews' => (int) ($v->reviews_count ?? 0),
-            'price' => (int) ($v->price ?? 0),
+            // What checkout really charges at its cheapest — never the bare venue price,
+            // which a slot or court price overrides ({@see Venue::fromPrice()}).
+            'price' => $v->fromPrice(),
             'badge' => $v->is_featured ? 'Featured' : null,
             // The app's cards carry these two (VenueItem.tagline / .sports); the web card
             // shape predates them. Additive — the desktop markup ignores both.
@@ -2339,8 +2341,7 @@ final class PublicWebController extends Controller
     private function venueCardFacts(Venue $v): array
     {
         $courts = $v->courts->where('is_active', true);
-        $rates = $courts->pluck('price')->map(fn ($p) => (int) $p)->filter(fn (int $p) => $p > 0);
-        $from = $rates->isNotEmpty() ? (int) $rates->min() : (int) ($v->price ?? 0);
+        $from = $v->fromPrice();
 
         $state = null;
         $openNow = false;
@@ -2420,13 +2421,13 @@ final class PublicWebController extends Controller
             }
         }
 
-        // Per-court hourly rate keyed by court name (null → venue price). The scheduler prices
-        // each slot by the selected court so a premium pitch costs more than a practice court.
-        $basePrice = (int) ($v->price ?? 0);
+        // Per-court "from" rate keyed by court name — the cheapest that court really sells at,
+        // slot prices included ({@see Venue::fromPriceFor()}). It was the bare court/venue
+        // price, so a court card said ₹781 while every slot on it charged ₹800.
         $courtPrices = [];
         $courtPeak = [];
         foreach ($v->courts as $c) {
-            $courtPrices[$c->name] = $c->price ?? $basePrice;
+            $courtPrices[$c->name] = $v->fromPriceFor($c);
             // Peak pricing for the scheduler: applied by time window (evenings cost more). The
             // backend stays authoritative on weekday precision when a booking is actually made.
             if ($c->peak_price !== null && (int) $c->peak_price > 0 && $c->peak_start !== null && $c->peak_end !== null) {
@@ -2444,15 +2445,30 @@ final class PublicWebController extends Controller
         // grid with a random 30% marked "Reserved", whatever the venue had set up.
         $step = max(30, (int) ($v->slot_minutes ?: 60));
         $label = static fn (int $m): string => Carbon::today()->addMinutes($m)->format('h:i A');
+        $venuePrice = (int) ($v->price ?? 0);
         $slotsByDate = [];
         for ($i = 0; $i < 7; $i++) {
             $date = BusinessClock::todayDate()->addDays($i);
-            $slotsByDate[$date->toDateString()] = $v->slotsOn($date)->map(function ($s) use ($step, $label) {
+            $slotsByDate[$date->toDateString()] = $v->slotsOn($date)->map(function ($s) use ($step, $label, $v, $date, $venuePrice) {
                 $start = BookingService::timeToMinutes($s->time);
                 if ($start === null) {
                     return null;
                 }
                 $end = min(24 * 60, $start + $step);
+
+                // Each court's rate for this slot on this date, by the same rateFor() the
+                // review page and checkout charge (slot price, per-court price, peak days,
+                // pricing rules). The board used to re-derive it in JS from the court rate
+                // and peak window alone, and showed a different price than it charged.
+                $rates = [];
+                foreach ($v->courts as $c) {
+                    if ($s->allowsCourt($c)) {
+                        $rates[$c->name] = $c->rateFor($date->copy(), $s->time, $venuePrice, $s->priceForCourt($c));
+                    }
+                }
+                if ($v->courts->isEmpty()) {
+                    $rates[''] = max(0, (int) ((float) $s->price > 0 ? $s->price : $venuePrice));
+                }
 
                 return [
                     'id' => (int) $s->id,
@@ -2460,6 +2476,7 @@ final class PublicWebController extends Controller
                     'time' => $label($start).' - '.$label($end),
                     'sports' => $s->sportsList(),
                     'open' => (bool) $s->is_available,
+                    'rates' => (object) $rates,
                 ];
             })->filter()->values()->all();
         }
@@ -2490,6 +2507,9 @@ final class PublicWebController extends Controller
             'my_review' => $mine ? ['rating' => (int) $mine->rating, 'text' => (string) $mine->text] : null,
             'is_owner' => auth()->check() && (int) $v->partner_id === (int) auth()->id(),
             'price' => (int) ($v->price ?? 0),
+            // The "from ₹X/hr" everywhere on the page (bar, sidebar, About) — what checkout
+            // really charges at its cheapest, not the bare venue price.
+            'from_price' => $v->fromPrice(),
             // The booking sheet estimates the total from these; the server recomputes it.
             'convenience_fee_type' => (string) ($v->convenience_fee_type ?? 'none'),
             'convenience_fee_value' => (float) ($v->convenience_fee_value ?? 0),

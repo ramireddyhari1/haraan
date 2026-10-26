@@ -688,8 +688,8 @@
     {{-- ── 10. Sticky book bar ───────────────────────────────────────────── --}}
     <div class="mven__bar">
         <span class="mven__bar-price">
-            @if($venue->price > 0)
-                <b>₹{{ number_format($venue->price) }}</b><i>/hr</i>
+            @if($venue->from_price > 0)
+                <b>₹{{ number_format($venue->from_price) }}</b><i>/hr</i>
             @else
                 {{-- The app guards this so the bar never shows a bare "₹0 /hr". --}}
                 <span class="mven__bar-noprice">Tap to see slots</span>
@@ -869,9 +869,9 @@
 
     // "from ₹X/hr" per sport: the cheapest court that sport is sold on.
     $vdFrom = function (string $sport) use ($vdCourts, $vdCourtPrices, $venue): int {
-        $prices = array_map(fn ($c) => (int) ($vdCourtPrices[$c] ?? $venue->price), (array) ($vdCourts[$sport] ?? []));
+        $prices = array_map(fn ($c) => (int) ($vdCourtPrices[$c] ?? $venue->from_price), (array) ($vdCourts[$sport] ?? []));
         $prices = array_filter($prices, fn ($p) => $p > 0);
-        return $prices ? min($prices) : (int) $venue->price;
+        return $prices ? min($prices) : (int) $venue->from_price;
     };
 
     // A top-down drawing of the sport's own playing surface, landscape, 160×100.
@@ -1300,7 +1300,7 @@
             <div class="vdk-card vdk-cta">
                 <div class="vdk-cta__price">
                     {{-- The cheapest court across every sport, so it never disagrees with a tile. --}}
-                    @php $vdStarts = min(array_filter(array_map($vdFrom, $vdSports) ?: [(int) $venue->price]) ?: [0]); @endphp
+                    @php $vdStarts = min(array_filter(array_map($vdFrom, $vdSports) ?: [(int) $venue->from_price]) ?: [0]); @endphp
                     @if($vdStarts > 0)
                         <span>Starts at</span>
                         <b>₹{{ number_format($vdStarts) }}</b><i>/hr</i>
@@ -1391,7 +1391,7 @@
                     <div class="price-row">
                         <span class="price-row__label">Your booking</span>
                         <div class="price-row__value">
-                            <strong id="rate-per-hour">₹{{ number_format($venue->price) }}</strong>
+                            <strong id="rate-per-hour">₹{{ number_format($venue->from_price) }}</strong>
                             <span>/ hr</span>
                         </div>
                     </div>
@@ -2461,7 +2461,7 @@
     const venueSports = @json($venue->sports);
     const courtPrices = @json($venue->court_prices ?? new \stdClass);
     const courtPeak = @json($venue->court_peak ?? new \stdClass);
-    const venueBasePrice = {{ (int) $venue->price }};
+    const venueBasePrice = {{ (int) $venue->from_price }};
     // Mirrors Venue::convenienceFeeFor() — the server recomputes it; this is only the estimate.
     // Mirrors Venue::feeLinesFor(): the convenience fee + the admin's named fees, each
     // rounded to paise. Only an estimate for the sheet; the review page asks the server.
@@ -2484,9 +2484,16 @@
         return 0;
     }
 
-    // Base hourly rate for the currently-selected court (falls back to the venue base price).
+    // The day's usual hourly rate on the selected court: the most common rate among the
+    // picked day's slots (the server's own figures), else the court's "from" rate.
     function currentRate() {
-        return courtPrices[selectedCourt] ?? venueBasePrice;
+        const counts = {};
+        daySlots(selectedDate).forEach(s => {
+            const r = s.rates ? s.rates[selectedCourt ?? ''] : undefined;
+            if (r > 0) counts[r] = (counts[r] || 0) + 1;
+        });
+        const common = Object.keys(counts).sort((a, b) => counts[b] - counts[a] || a - b)[0];
+        return common != null ? Number(common) : (courtPrices[selectedCourt] ?? venueBasePrice);
     }
 
     // "06:00 AM" / "18:00" → minutes-from-midnight, or null.
@@ -2501,13 +2508,16 @@
         return h * 60 + parseInt(m[2], 10);
     }
 
-    // Rate for a specific slot on the selected court: peak when the slot's start time falls in
-    // the court's peak window, else the base rate.
-    function slotRate(slotStr) {
-        const base = currentRate();
+    // Rate for a specific slot on the selected court, as the server prices it for that date
+    // (slot price, per-court price, peak days, pricing rules — what checkout charges). The
+    // peak-window guess below is only for a page rendered without those rates.
+    function slotRate(slot) {
+        const own = slot.rates ? slot.rates[selectedCourt ?? ''] : undefined;
+        if (own > 0) return own;
+        const base = courtPrices[selectedCourt] ?? venueBasePrice;
         const p = courtPeak[selectedCourt];
         if (!p) return base;
-        const t = timeMin(String(slotStr).split(' - ')[0]);
+        const t = timeMin(String(slot.time).split(' - ')[0]);
         const s = timeMin(p.start), e = timeMin(p.end);
         if (t != null && s != null && e != null && t >= s && t < e) return p.price;
         return base;
@@ -2705,6 +2715,7 @@
         const dtEl = document.getElementById('selected-date-text');
         if (dtEl) dtEl.innerText = selectedDateDisplay;
         renderDateStrip();
+        renderCourtSelector(); // a court's peak is the picked day's
 
         // A new day is a new set of slots and bookings.
         selectedSlots = [];
@@ -2766,7 +2777,11 @@
         container.innerHTML = courts.map(court => {
             const isActive = court === selectedCourt;
             const rate = courtPrices[court] ?? venueBasePrice;
-            const peak = courtPeak[court] && courtPeak[court].price > rate ? courtPeak[court].price : 0;
+            // Peak = the dearest slot this court really sells on the picked day. A slot's own
+            // price beats the court's peak rate, so courtPeak alone can name a price nobody pays.
+            const dayTop = Math.max(0, ...daySlots(selectedDate).map(s => (s.rates && s.rates[court]) || 0));
+            const peak = dayTop > rate ? dayTop
+                : (!daySlots(selectedDate).some(s => s.rates) && courtPeak[court] && courtPeak[court].price > rate ? courtPeak[court].price : 0);
             return `
                 <button type="button" onclick="selectCourt('${court}')" class="court-pill crt ${isActive ? 'is-active' : ''}" aria-pressed="${isActive}">
                     <span class="crt__art">${art}</span>
@@ -3012,7 +3027,7 @@
                 const isTaken = state !== 'open';
                 const slotKey = `${selectedDate}_${selectedSport}_${selectedCourt}_${slot.id}`;
                 const isSelected = selectedSlots.some(s => s.key === slotKey);
-                const r = slotRate(slot.time);
+                const r = slotRate(slot);
                 const isPeak = r > rate;
                 const flip = slotFlips[slot.id];
 
@@ -3024,10 +3039,10 @@
                 ].filter(Boolean).join(' ');
                 const onclickAttr = isTaken ? '' : `onclick="toggleSlot(this, ${slot.id}, ${r})"`;
                 // The price is said once, in the line above. A key only carries one when
-                // it differs (peak), or the word for why it can't be taken.
+                // it differs (peak, or a cheaper slot), or the word for why it can't be taken.
                 const sub = state === 'booked' ? 'Booked'
                     : state === 'closed' ? 'Closed'
-                    : isPeak ? '₹' + r.toLocaleString() : '';
+                    : r !== rate ? '₹' + r.toLocaleString() : '';
                 const tag = nextUp && nextUp.id === slot.id && slot.start - nowMin <= 240
                     ? `<span class="sb-key__soon">${startsIn(slot.start - nowMin)}</span>` : '';
                 const style = animate ? ` style="--i:${idx++}"` : '';
@@ -3051,7 +3066,7 @@
         };
 
         // The price once, and the peak rate only where this court has one.
-        const peakRates = slots.map(s => slotRate(s.time)).filter(v => v > rate);
+        const peakRates = slots.map(s => slotRate(s)).filter(v => v > rate);
 
         // Parts of the day, each a jump to its group with its real open count.
         const parts = [
@@ -3060,6 +3075,7 @@
             ['Evening', slots.filter(s => s.start >= 17 * 60)],
         ];
         const peakWin = courtPeak[selectedCourt] && courtPeak[selectedCourt].start && courtPeak[selectedCourt].end
+            && peakRates.length && Math.max(...peakRates) === courtPeak[selectedCourt].price
             ? ' · ' + spoken(courtPeak[selectedCourt].start).replace(/ (AM|PM)$/, (m, ap) => spoken(courtPeak[selectedCourt].end).endsWith(ap) ? '' : m) + '–' + spoken(courtPeak[selectedCourt].end)
             : '';
         // One part of the day on screen at a time. Keep the player's choice while it still
