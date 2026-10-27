@@ -117,6 +117,11 @@ class PitchGround private constructor(
      * height); false when it is the [DEFAULT_CAMERA_HEIGHT_M] assumption.
      */
     val heightMeasured: Boolean = false,
+    /**
+     * True when the tilt and roll came from the phone's gravity sensor ([fromWicketAndTilt]),
+     * not from the look of the stumps. Swing needs it: see [QuadSpeed]'s bend test.
+     */
+    val upFromGravity: Boolean = false,
 ) {
     /** How high the lens is above the ground, metres — measured or assumed, see [heightMeasured]. */
     val heightM: Double get() = cameraHeightM
@@ -179,7 +184,7 @@ class PitchGround private constructor(
             camX * towardX + camY * towardY,
             cameraHeightM,
         )
-        return PitchCamera.of(fPx / heightPx, rows, centre, widthPx.toDouble() / heightPx, heightMeasured)
+        return PitchCamera.of(fPx / heightPx, rows, centre, widthPx.toDouble() / heightPx, heightMeasured, upKnown = upFromGravity)
     }
 
     /**
@@ -202,7 +207,7 @@ class PitchGround private constructor(
     private fun copyMeasured() = PitchGround(
         fPx = fPx, cx = cx, cy = cy, cameraHeightM = cameraHeightM, pitchRad = pitchRad, rollRad = rollRad,
         stumpsX = stumpsX, stumpsY = stumpsY, towardX = towardX, towardY = towardY,
-        stumpsDistanceM = stumpsDistanceM, heightMeasured = true,
+        stumpsDistanceM = stumpsDistanceM, heightMeasured = true, upFromGravity = upFromGravity,
     )
 
     /** [aimedAt] without the plausibility limits, with the two sets' distance apart. */
@@ -227,7 +232,7 @@ class PitchGround private constructor(
         return PitchGround(
             fPx = fPx, cx = cx, cy = cy, cameraHeightM = cameraHeightM, pitchRad = pitchRad, rollRad = rollRad,
             stumpsX = stumpsX, stumpsY = stumpsY, towardX = dx / length, towardY = dy / length,
-            stumpsDistanceM = stumpsDistanceM, heightMeasured = heightMeasured,
+            stumpsDistanceM = stumpsDistanceM, heightMeasured = heightMeasured, upFromGravity = upFromGravity,
         ) to length
     }
 
@@ -360,7 +365,7 @@ class PitchGround private constructor(
             return PitchGround(
                 fPx = f, cx = cx, cy = cy, cameraHeightM = h, pitchRad = tilt.pitchRad, rollRad = tilt.rollRad,
                 stumpsX = sX, stumpsY = sY, towardX = -sX / dist, towardY = -sY / dist,
-                stumpsDistanceM = dist, heightMeasured = true,
+                stumpsDistanceM = dist, heightMeasured = true, upFromGravity = true,
             )
         }
 

@@ -1,6 +1,7 @@
 package com.haraan.app.vision
 
 import kotlin.math.abs
+import kotlin.math.atan2
 import kotlin.math.hypot
 import kotlin.math.sqrt
 
@@ -36,6 +37,13 @@ class PitchCamera private constructor(
      * camera solved from pitch corners always measured it.
      */
     val heightMeasured: Boolean = true,
+    /**
+     * Whether "up" is known independently of the ball: from the ground plane of four pitch
+     * corners, or from the phone's gravity sensor. False for a camera whose roll was read
+     * off the stumps alone — a few degrees out there, and a ball's drop leaks sideways into
+     * a swing that never happened (both 4K bench clips, 2026-10-27).
+     */
+    val upKnown: Boolean = true,
 ) {
     /** How high the lens is above the pitch, in metres. */
     val heightM: Double get() = up * centre[2]
@@ -81,7 +89,8 @@ class PitchCamera private constructor(
             centre: DoubleArray,
             aspect: Double,
             heightMeasured: Boolean = false,
-        ): PitchCamera = PitchCamera(focalHeights, rows, centre, 1.0, aspect, heightMeasured)
+            upKnown: Boolean = false,
+        ): PitchCamera = PitchCamera(focalHeights, rows, centre, 1.0, aspect, heightMeasured, upKnown)
 
         fun from(quad: PitchQuad, frameAspect: Float): PitchCamera? {
             val aspect = if (frameAspect > 0f) frameAspect.toDouble() else return null
@@ -291,10 +300,10 @@ object QuadSpeed {
             var tb = a
             while (tb <= b) {
                 val near = run.filter { abs(it.timestampMs - tb) <= MAX_LOOKBACK_MS }
-                val fit = fitFlight(near, camera, tb, reachedStumpsMs)?.takeIf { physical(it.first) }
-                if (fit != null && fit.second < bestError) {
-                    bestError = fit.second
-                    best = fit.first
+                val fit = fitFlight(near, camera, tb, reachedStumpsMs, Bends.NONE)?.takeIf { physical(it.v) }
+                if (fit != null && fit.error < bestError) {
+                    bestError = fit.error
+                    best = fit.v
                     bestTb = tb
                 }
                 tb += by
@@ -306,8 +315,11 @@ object QuadSpeed {
             val coarse = bestTb
             scan(coarse - TB_SCAN_STEP_MS, coarse + TB_SCAN_STEP_MS, TB_STEP_MS)
         }
-        val v = best ?: return FitResult.Refused("the sightings around the bounce are too few or too close together to fit")
+        val straight = best ?: return FitResult.Refused("the sightings around the bounce are too few or too close together to fit")
         val near = run.filter { abs(it.timestampMs - bestTb) <= MAX_LOOKBACK_MS }
+        val bent = bend(near, camera, bestTb, reachedStumpsMs, straight)
+        val v = bent.v
+        val swingAccel = bent.swingAccel
 
         // Towards the striker is down the pitch's y.
         if (v[3] >= 0) {
@@ -345,9 +357,124 @@ object QuadSpeed {
                 firstSeenMs = near.first().timestampMs.toDouble(),
                 lastSeenMs = near.last().timestampMs.toDouble(),
                 cameraHeightM = camera.heightM,
+                inAx = swingAccel,
+                turnFitted = hasAfter && bent.turned,
             ),
         )
     }
+
+    /*
+     * SWING AND TURN, ONLY WHEN THE SIGHTINGS DEMAND THEM.
+     *
+     * The straight fit draws every delivery as a pace bowler's: a straight line over the
+     * ground into the bounce, and the same line out of it. A leg-break that turned 5° was
+     * drawn going on with the arm, and an outswinger as the straight line nearest its curve,
+     * pitched in the wrong place. Across the pitch is the axis a camera behind the bowler
+     * sees BEST, so two more unknowns are affordable there — a steady sideways pull before
+     * the bounce (swing) and the ball's own sideways speed after it (turn) — where freeing
+     * the along-the-pitch speed after the bounce was not (see [fitFlight]).
+     *
+     * Each is a nested model, so an F-test on the extra unknown says whether the sightings
+     * really bend or noise was fitted: kept only when the miss drops by [F_MIN] times what
+     * one more free number buys on noise alone, the bend is big enough to see
+     * ([MIN_SWING_M], [MIN_TURN_DEG]) and small enough to be cricket ([MAX_SWING_ACCEL],
+     * [MAX_TURN_DEG]).
+     */
+    private class Bent(val v: DoubleArray, val swingAccel: Double, val turned: Boolean)
+
+    private fun bend(points: List<BallSighting>, camera: PitchCamera, tb: Double, reachedStumpsMs: Double?, straight: DoubleArray): Bent {
+        val base = fitFlight(points, camera, tb, reachedStumpsMs, Bends.NONE) ?: return Bent(straight, 0.0, false)
+        val beforeSeen = points.filter { it.timestampMs <= tb }
+        val afterSeen = points.filter { it.timestampMs > tb }
+        val canTurn = afterSeen.size >= TURN_MIN_AFTER &&
+            afterSeen.last().timestampMs - afterSeen.first().timestampMs >= MIN_TURN_SPAN_MS
+        val canSwing = camera.upKnown && beforeSeen.size >= SWING_MIN_BEFORE &&
+            beforeSeen.last().timestampMs - beforeSeen.first().timestampMs >= MIN_SWING_SPAN_MS
+
+        /*
+         * Each bend on its own against the straight fit, then both together against the
+         * better single. A swinging ball's misfit leaks into a "turn" when turn is tried
+         * alone, and freeing swing beside it then shrinks that turn to nothing — so the pair
+         * is judged as a pair, and a single is kept only if it still holds up on its own.
+         */
+        fun candidate(bends: Bends, over: Solved): Solved? {
+            val fit = fitFlight(points, camera, tb, reachedStumpsMs, bends) ?: return null
+            if (!physical(fit.v) || fit.v[3] >= 0) return null
+            if (!significant(over, fit, points.size)) return null
+            if (bends.turn && !turnWorthKeeping(fit.v, afterSeen, tb)) return null
+            if (bends.swing && !swingWorthKeeping(fit.swingAccel, beforeSeen, tb)) return null
+            return fit
+        }
+        val turned = if (canTurn) candidate(Bends(swing = false, turn = true), base) else null
+        val swung = if (canSwing) candidate(Bends(swing = true, turn = false), base) else null
+        val single = listOfNotNull(turned, swung).minByOrNull { it.rss }
+        val both = if (canTurn && canSwing) candidate(Bends(swing = true, turn = true), single ?: base) else null
+        return when {
+            both != null -> Bent(both.v, both.swingAccel, true)
+            single != null -> Bent(single.v, single.swingAccel, single === turned)
+            else -> Bent(straight, 0.0, false)
+        }
+    }
+
+    /** One more free number earns its place: (drop in the miss) / (miss per spare equation) > [F_MIN]. */
+    private fun significant(simpler: Solved, richer: Solved, sightings: Int): Boolean {
+        // Each sighting is three cross-product rows but only two independent equations.
+        val spare = (2 * sightings + richer.extraRows - richer.unknowns).coerceAtLeast(1)
+        if (richer.rss <= 0.0) return richer.rss < simpler.rss
+        val f = (simpler.rss - richer.rss) / (richer.rss / spare)
+        return f > F_MIN
+    }
+
+    private fun turnWorthKeeping(v: DoubleArray, after: List<BallSighting>, tb: Double): Boolean {
+        val deg = turnDegrees(v[2], v[3], v[5], v[6])
+        if (abs(deg) < MIN_TURN_DEG || abs(deg) > MAX_TURN_DEG) return false
+        // ...and moves the ball off its straight line by more than a ball's width where seen.
+        val seenS = (after.last().timestampMs - tb) / 1000.0
+        return abs(v[5] - PACE_KEPT_OFF_PITCH * v[2]) * seenS >= MIN_TURN_SHIFT_M
+    }
+
+    private fun swingWorthKeeping(ax: Double, before: List<BallSighting>, tb: Double): Boolean {
+        if (abs(ax) > MAX_SWING_ACCEL) return false
+        val seenS = (tb - before.first().timestampMs) / 1000.0
+        return abs(ax) * seenS * seenS / 2.0 >= MIN_SWING_M
+    }
+
+    /** Signed degrees from the line into the bounce to the line out of it; positive = towards +x. */
+    internal fun turnDegrees(inVx: Double, inVy: Double, outVx: Double, outVy: Double): Double {
+        val into = atan2(inVx, -inVy)
+        val out = atan2(outVx, -outVy)
+        return Math.toDegrees(out - into)
+    }
+
+    /** Swing and turn are each tried only past these many sightings on their side. */
+    private const val SWING_MIN_BEFORE = 6
+    private const val MIN_SWING_SPAN_MS = 120.0
+    private const val MIN_TURN_SPAN_MS = 50.0
+
+    /*
+     * F > 10 on one extra number is far past the 1% point for any sample this size (~7): a
+     * straight ball with a pixel of noise practically never gets a bend. Tuned on the
+     * simulated noise in QuadSpeedTest; the real clips on the scoreboard must stay straight.
+     */
+    private const val F_MIN = 10.0
+
+    /** Under this a "bend" is not worth drawing; over the max it is not a cricket ball. */
+    internal const val MIN_SWING_M = 0.05
+    /*
+     * 1.5°, not 1: a pace ball in the 120 fps net session (net03) read -1.2° — seam movement
+     * or noise, either way not the turn a spinner means (3-10°).
+     */
+    internal const val MIN_TURN_DEG = 1.5
+    private const val MIN_TURN_SHIFT_M = 0.03
+
+    /*
+     * Big swing is ~0.8 m over the flight at 130 km/h (0.5 s): 2·0.8/0.5² ≈ 6.4 m/s².
+     * A slower ball swinging as much needs less. 12 leaves room and refuses junk.
+     */
+    internal const val MAX_SWING_ACCEL = 12.0
+
+    /** The biggest leg-break turns ~12-15°; past this the "after" sightings are a bat or pad. */
+    internal const val MAX_TURN_DEG = 20.0
 
     fun estimate(
         run: List<BallSighting>,
@@ -417,27 +544,55 @@ object QuadSpeed {
     /** How far past the last sighting the bounce may be extrapolated. */
     private const val EXTRAPOLATE_BOUNCE_MS = 600.0
 
+    /** Which sideways bends a fit is allowed. See [bend]. */
+    private data class Bends(val swing: Boolean, val turn: Boolean) {
+        companion object {
+            val NONE = Bends(swing = false, turn = false)
+        }
+    }
+
+    /**
+     * A solved flight: [v] is bx, by, vx, vy, vz and — with a leg after the bounce — vx', vy',
+     * vz'. [swingAccel] is the sideways pull before the bounce (0 when not fitted). [rss] is the
+     * summed squared miss over [rows] rows, [unknowns] of them free, [extraRows] not sightings.
+     */
+    private class Solved(
+        val v: DoubleArray,
+        val swingAccel: Double,
+        val rss: Double,
+        val rows: Int,
+        val unknowns: Int,
+        val extraRows: Int,
+    ) {
+        val error: Double get() = rss / rows
+    }
+
     /**
      * One flight through the rays, for a given bounce moment [tb]. Unknowns, all linear:
      * bounce place (bx, by); before it vx, vy and vz (vz positive = coming down); after it
-     * vx', vy', vz' (vz' positive = going up). Returns the unknowns and the mean squared
-     * miss, or null when the before or after side is too thin to fit.
+     * the climb vz' (vz' positive = going up) — and, as [bends] allows, a sideways pull before
+     * the bounce (swing) and the ball's own sideways speed after it (turn). Null when the
+     * before or after side is too thin to fit.
      */
-    private fun fitFlight(points: List<BallSighting>, camera: PitchCamera, tb: Double, reachedStumpsMs: Double? = null): Pair<DoubleArray, Double>? {
+    private fun fitFlight(points: List<BallSighting>, camera: PitchCamera, tb: Double, reachedStumpsMs: Double?, bends: Bends): Solved? {
         val before = points.count { it.timestampMs <= tb }
         val after = points.size - before
         if (before < MIN_PRE_BOUNCE) return null
         /*
-         * AFTER THE BOUNCE THE BALL KEEPS ITS LINE. Its own across-and-along speed after
-         * the bounce used to be three more unknowns, and seen from behind the bowler — where
-         * along-the-pitch is depth, the axis one camera sees worst — it came out pointing
-         * back at the bowler on a 4K net clip with twenty clean sightings after the bounce,
-         * so the leg was thrown away and the path was projected into the stumps. Off the
-         * pitch a ball keeps its line and loses some pace, so that motion is the incoming
-         * one scaled by [PACE_KEPT_OFF_PITCH], and only the climb off the pitch is solved.
-         * The answer is still eight numbers, as before.
+         * AFTER THE BOUNCE THE BALL KEEPS ITS PACE DOWN THE PITCH. Its own across-and-along
+         * speed after the bounce used to be three more unknowns, and seen from behind the
+         * bowler — where along-the-pitch is depth, the axis one camera sees worst — it came
+         * out pointing back at the bowler on a 4K net clip with twenty clean sightings after
+         * the bounce, so the leg was thrown away and the path was projected into the stumps.
+         * Off the pitch a ball loses some pace, so its speed down the pitch is the incoming
+         * one scaled by [PACE_KEPT_OFF_PITCH], and the climb off the pitch is solved. Across
+         * the pitch it keeps its line too, unless [bends] lets turn be solved (see [bend]).
          */
-        val n = if (after >= 2) 6 else 5
+        val hasAfter = after >= 2
+        if (bends.turn && !hasAfter) return null
+        var n = if (hasAfter) 6 else 5
+        val swingCol = if (bends.swing) n++ else -1
+        val turnCol = if (bends.turn) n++ else -1
         val c = camera.centre
         val up = camera.up
         val ata = Array(n) { DoubleArray(n) }
@@ -445,7 +600,7 @@ object QuadSpeed {
         val rows = ArrayList<Pair<DoubleArray, Double>>()
         for (sighting in points) {
             val s = (sighting.timestampMs - tb) / 1000.0
-            if (s > 0 && n == 5) continue
+            if (s > 0 && !hasAfter) continue
             val d = camera.ray(sighting.x.toDouble(), sighting.y.toDouble())
             // P - C = a + J u, J is 3 x n.
             val a = doubleArrayOf(-c[0], -c[1], up * (-G * s * s / 2.0) - c[2])
@@ -454,8 +609,10 @@ object QuadSpeed {
             j[1][1] = 1.0
             if (s <= 0) {
                 j[0][2] = s; j[1][3] = s; j[2][4] = -up * s
+                if (swingCol >= 0) j[0][swingCol] = s * s / 2.0
             } else {
-                j[0][2] = PACE_KEPT_OFF_PITCH * s; j[1][3] = PACE_KEPT_OFF_PITCH * s; j[2][5] = up * s
+                if (turnCol >= 0) j[0][turnCol] = s else j[0][2] = PACE_KEPT_OFF_PITCH * s
+                j[1][3] = PACE_KEPT_OFF_PITCH * s; j[2][5] = up * s
             }
             // cross(a + J u, d) = 0  →  ([d]x J) u = cross(a, d)
             val rhs = PitchCamera.cross(a, d)
@@ -482,6 +639,7 @@ object QuadSpeed {
          * ball was on their line (0 m) at that moment — one strong equation that pins the
          * distance against the time, and with it both the speed and where it pitched.
          */
+        var extraRows = 0
         if (reachedStumpsMs != null) {
             val s = (reachedStumpsMs - tb) / 1000.0
             val coeff = DoubleArray(n)
@@ -489,24 +647,26 @@ object QuadSpeed {
             coeff[3] = STUMPS_WEIGHT * (if (s <= 0) s else PACE_KEPT_OFF_PITCH * s)
             val rhs = 0.0
             rows.add(coeff to rhs)
+            extraRows++
             for (p in 0 until n) {
                 atb[p] += coeff[p] * rhs
                 for (q in 0 until n) ata[p][q] += coeff[p] * coeff[q]
             }
         }
         val u = solve(ata, atb) ?: return null
-        var error = 0.0
+        var rss = 0.0
         for ((coeff, rhs) in rows) {
             var r = -rhs
             for (k in 0 until n) r += coeff[k] * u[k]
-            error += r * r
+            rss += r * r
         }
-        val full = if (n == 6) {
-            doubleArrayOf(u[0], u[1], u[2], u[3], u[4], PACE_KEPT_OFF_PITCH * u[2], PACE_KEPT_OFF_PITCH * u[3], u[5])
+        val full = if (hasAfter) {
+            val outVx = if (turnCol >= 0) u[turnCol] else PACE_KEPT_OFF_PITCH * u[2]
+            doubleArrayOf(u[0], u[1], u[2], u[3], u[4], outVx, PACE_KEPT_OFF_PITCH * u[3], u[5])
         } else {
-            u
+            u.copyOf(5)
         }
-        return full to error / rows.size
+        return Solved(full, if (swingCol >= 0) u[swingCol] else 0.0, rss, rows.size, n, extraRows)
     }
 
     /** Gaussian elimination with partial pivoting; null when singular. */
@@ -555,6 +715,14 @@ data class Flight3d(
     val cameraHeightM: Double,
     /** The ball, for how fast it slows in the air. See [BallDrag]. */
     val ball: BallDrag = BallDrag.LEATHER,
+    /**
+     * Sideways pull before the bounce, m/s² (+ = towards +x): swing or drift. 0 when the
+     * sightings did not show one — see [QuadSpeed]'s bend test. [inVx] is the sideways speed
+     * AT the bounce, so the path into it is a parabola over the ground ending on that line.
+     */
+    val inAx: Double = 0.0,
+    /** Whether [outVx] was solved on its own (the ball turned) rather than kept on the line in. */
+    val turnFitted: Boolean = false,
 ) {
     /** The fitted steady speed over the ground before the bounce: the average, not the release. */
     val groundKmh: Double get() = hypot(inVx, inVy) * 3.6
@@ -580,7 +748,7 @@ data class Flight3d(
     fun at(ms: Double): Point3 {
         val s = (ms - bounceMs) / 1000.0
         return if (s <= 0) {
-            Point3(bounceX + inVx * s, bounceY + inVy * s, (-inVzDown * s - G * s * s / 2).coerceAtLeast(0.0))
+            Point3(bounceX + inVx * s + inAx * s * s / 2, bounceY + inVy * s, (-inVzDown * s - G * s * s / 2).coerceAtLeast(0.0))
         } else {
             Point3(bounceX + legVx * s, bounceY + legVy * s, (legVzUp * s - G * s * s / 2).coerceAtLeast(0.0))
         }
@@ -605,6 +773,19 @@ data class Flight3d(
             if (vy >= 0) return null
             return bounceMs + (0.0 - bounceY) / vy * 1000.0
         }
+
+    /**
+     * How far swing moved it sideways by the bounce, against the straight line it was
+     * released on, in metres (+ = towards +x). 0 when no swing was fitted.
+     */
+    val swingM: Double
+        get() {
+            val s = (bounceMs - releaseMs) / 1000.0
+            return inAx * s * s / 2
+        }
+
+    /** Degrees it changed direction at the bounce (+ = towards +x); 0 when it kept its line. */
+    val turnDeg: Double get() = if (turnFitted) QuadSpeed.turnDegrees(inVx, inVy, legVx, legVy) else 0.0
 
     /** Where it would have crossed the striker's stump line, in 3D. */
     val atStumps: Point3? get() = stumpsMs?.let(::at)

@@ -64,6 +64,8 @@ class TrackingScoreboardTest {
         val hitting: Boolean?,
         val falseCalls: Int,
         val falseShown: Int,
+        /** Swing / turn the 3D fit kept ("–" = drawn straight). Every bench clip is pace: expect "–". */
+        val bend: String = "–",
     ) {
         val speedErrPct: Double? get() = if (truthKmh != null && groundKmh != null) (groundKmh - truthKmh) / truthKmh * 100 else null
     }
@@ -314,6 +316,7 @@ class TrackingScoreboardTest {
                 hitting = match?.path?.hitting,
                 falseCalls = 0,
                 falseShown = 0,
+                bend = flight?.let { bendOf(it) } ?: "–",
             )
         }
         // Everything called that matched no delivery is a false call; only shown ones reach a player.
@@ -323,10 +326,18 @@ class TrackingScoreboardTest {
             rows += Row(
                 last.clip, last.rate, last.found, last.shown, last.points, last.recall, last.medianPx, last.truthKmh,
                 last.truthTolPct, last.groundKmh, last.bounceErrFrames, last.hitting,
-                falseCalls = extra.size, falseShown = extra.count { it.path != null },
+                falseCalls = extra.size, falseShown = extra.count { it.path != null }, bend = last.bend,
             )
         }
         return rows
+    }
+
+    private fun bendOf(f: Flight3d): String {
+        val parts = listOfNotNull(
+            f.inAx.takeIf { it != 0.0 }?.let { "swing %+.2f m".format(f.swingM) },
+            f.turnDeg.takeIf { f.turnFitted }?.let { "turn %+.1f°".format(it) },
+        )
+        return if (parts.isEmpty()) "–" else parts.joinToString(", ")
     }
 
     private fun report(rows: List<Row>, cold: List<ColdRow> = emptyList(), hidden: List<HiddenRow> = emptyList()) {
@@ -335,8 +346,8 @@ class TrackingScoreboardTest {
         sb.appendLine()
         sb.appendLine("Truth: `src/test/resources/vision-bench/truth.txt`, checked by eye. Speed truth is the average release-to-stumps speed (18.5 m), compared with the fit's average (`groundKmh`).")
         sb.appendLine()
-        sb.appendLine("| clip | rate | found | shown | pts | ball recall | median err px | truth km/h | fit km/h | err % | bounce err fr | hitting | false calls (shown) |")
-        sb.appendLine("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        sb.appendLine("| clip | rate | found | shown | pts | ball recall | median err px | truth km/h | fit km/h | err % | bounce err fr | hitting | false calls (shown) | bend |")
+        sb.appendLine("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         fun d(v: Double?, p: Int = 1) = v?.let { "%.${p}f".format(it) } ?: "–"
         for (r in rows) {
             val truth = r.truthKmh?.let { "%.1f ±%.0f%%".format(it, r.truthTolPct) } ?: "–"
@@ -344,7 +355,7 @@ class TrackingScoreboardTest {
             sb.appendLine(
                 "| ${r.clip} | ${r.rate} | ${if (r.found) "yes" else "**no**"} | ${if (r.shown) "yes" else "**no**"} | ${r.points} | " +
                     "${r.recall?.let { "%.0f%%".format(it * 100) } ?: "–"} | ${d(r.medianPx)} | $truth | ${d(r.groundKmh)} | $err | " +
-                    "${r.bounceErrFrames?.let { "%+d".format(it) } ?: "–"} | ${r.hitting ?: "–"} | ${r.falseCalls} (${r.falseShown}) |",
+                    "${r.bounceErrFrames?.let { "%+d".format(it) } ?: "–"} | ${r.hitting ?: "–"} | ${r.falseCalls} (${r.falseShown}) | ${r.bend} |",
             )
         }
         sb.appendLine()

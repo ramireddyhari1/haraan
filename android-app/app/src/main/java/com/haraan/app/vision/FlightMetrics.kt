@@ -284,6 +284,12 @@ data class FlightMetrics(
                 },
                 curve = deviation(run, aspect, "whole flight", scale),
                 swing = when {
+                    // The 3D fit found a sideways pull and it passed the bend test: metres on the ground.
+                    flight3d != null && flight3d.inAx != 0.0 -> MetricValue.Estimated(
+                        flight3d.swingM,
+                        "m",
+                        "sideways by the bounce, from the 3D flight (+ = picture-right from the bowler's end)",
+                    )
                     bounceAt == null -> MetricValue.Unavailable(
                         "needs a bounce in the track to separate it from movement off the pitch",
                     )
@@ -295,7 +301,9 @@ data class FlightMetrics(
                     )
                     else -> deviation(after, aspect, "after the bounce", scale)
                 },
-                turn = turn(before, after, frameAspect),
+                turn = flight3d?.takeIf { it.turnFitted }?.let {
+                    MetricValue.Estimated(it.turnDeg, "°", "on the ground, from the 3D flight either side of the bounce")
+                } ?: turn(before, after, frameAspect),
                 spin = MetricValue.Unavailable(
                     // Worth stating rather than omitting: it is the metric people most
                     // expect, and [turn] beside it is the thing they usually mean. A
