@@ -49,7 +49,7 @@ final class BookingsController extends Controller
             $query->where('status', (string) $request->query('status'));
         }
 
-        $limit = (int) $request->query('limit', '20');
+        $limit = min(100, max(1, (int) $request->query('limit', '20')));
 
         return BookingResource::collection($query->paginate($limit))
             ->response();

@@ -8,6 +8,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
+import kotlin.random.Random
 
 /**
  * Keeps a screen's data fresh without the user pulling to refresh, switching tabs,
@@ -64,7 +65,10 @@ fun AutoRefresh(
             }
             if (intervalMs > 0L) {
                 while (true) {
-                    delay(intervalMs)
+                    // ±10% jitter: phones that opened the app together (a push, a match
+                    // start) would otherwise poll the server in lockstep forever.
+                    val spread = intervalMs / 10
+                    delay(intervalMs + if (spread > 0) Random.nextLong(-spread, spread + 1) else 0L)
                     runCatching { currentOnRefresh() }
                 }
             }

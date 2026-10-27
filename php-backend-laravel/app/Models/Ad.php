@@ -39,6 +39,15 @@ final class Ad extends Model
         'clicks_count' => 'integer',
     ];
 
+    /** The public /api/login-posters list, cached because every login screen polls it. */
+    public const LOGIN_POSTERS_CACHE_KEY = 'api.login_posters';
+
+    protected static function booted(): void
+    {
+        static::saved(fn () => \Illuminate\Support\Facades\Cache::forget(self::LOGIN_POSTERS_CACHE_KEY));
+        static::deleted(fn () => \Illuminate\Support\Facades\Cache::forget(self::LOGIN_POSTERS_CACHE_KEY));
+    }
+
     public function events(): HasMany
     {
         return $this->hasMany(AdEvent::class);

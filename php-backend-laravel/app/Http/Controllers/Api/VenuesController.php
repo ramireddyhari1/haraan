@@ -13,6 +13,7 @@ use App\Support\PlatformRules;
 use App\Support\VenuePhoto;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use App\Support\BusinessClock;
 use Illuminate\Support\Carbon;
 
@@ -21,12 +22,15 @@ final class VenuesController extends Controller
     /** GET /api/venues — list active venues for the GameHub browse screen. */
     public function index(): JsonResponse
     {
-        $venues = Venue::published()
+        // Every viewer gets the same list and the app polls it every 20s, so it is built
+        // once per 30s instead of per request. A venue save clears it (Venue::booted).
+        $venues = Cache::remember(Venue::LIST_CACHE_KEY, 30, fn () => Venue::published()
             ->with('partner.hostProfile')
             ->orderByDesc('is_featured')
             ->orderBy('sort_order')
             ->get()
-            ->map(fn (Venue $v) => $this->card($v));
+            ->map(fn (Venue $v) => $this->card($v))
+            ->all());
 
         return response()->json(['data' => $venues]);
     }

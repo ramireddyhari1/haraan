@@ -64,7 +64,13 @@ class LiveMatchController extends Controller
         // app intersects with the viewer's own contacts on the device. Empty for guests.
         $people = (new \App\Services\FriendsPlaying())->forFeed($viewer, $matches);
 
-        $data = $matches->map(function (LiveMatch $m) use ($viewer, $near, $people): array {
+        // Venue badges for the whole page in one query, not a booking + venue lookup per card.
+        $bookingIds = $matches->pluck('venue_booking_id')->filter()->unique()->values();
+        $bookings = $bookingIds->isEmpty()
+            ? collect()
+            : \App\Models\Booking::query()->with('venue')->whereIn('id', $bookingIds)->get()->keyBy('id');
+
+        $data = $matches->map(function (LiveMatch $m) use ($viewer, $near, $people, $bookings): array {
             // Which side is batting (latest over's tag)? Drives score/overs attribution and
             // lets the app put the batting side on top of the card.
             $overSummary = is_array($m->over_summary) ? $m->over_summary : [];
@@ -126,7 +132,7 @@ class LiveMatchController extends Controller
                 'venue'       => (string) ($m->venue ?? ''),
                 // Set only when this match sits on a confirmed Haraan booking — the card
                 // shows the venue's real name in place of the typed one when it is.
-                'venueBadge'  => $this->venueBadge($m),
+                'venueBadge'  => $this->venueBadge($m, $bookings),
                 'competition' => (string) ($m->competition ?? ''),
                 'isLive'      => strtolower((string) $m->status) === 'live',
                 // Ended = completed_at is stamped. Cricket writes its result into status
@@ -450,9 +456,18 @@ class LiveMatchController extends Controller
      * There is no negative counterpart. A match on a maidan is not "unverified" — it is the
      * normal case, and marking it would be an insult dressed up as a feature.
      */
-    private function venueBadge(LiveMatch $match): ?array
+    /** @param \Illuminate\Support\Collection<int, \App\Models\Booking>|null $preloaded bookings keyed by id */
+    private function venueBadge(LiveMatch $match, ?\Illuminate\Support\Collection $preloaded = null): ?array
     {
-        $booking = \App\Services\VenueVerificationService::findValidBooking($match->venue_booking_id);
+        if ($preloaded !== null) {
+            // Same rule as VenueVerificationService::findValidBooking (confirmed, any owner).
+            $booking = $match->venue_booking_id ? $preloaded->get($match->venue_booking_id) : null;
+            if ($booking !== null && strtoupper((string) $booking->status) !== 'CONFIRMED') {
+                $booking = null;
+            }
+        } else {
+            $booking = \App\Services\VenueVerificationService::findValidBooking($match->venue_booking_id);
+        }
         if ($booking === null) {
             return null;
         }

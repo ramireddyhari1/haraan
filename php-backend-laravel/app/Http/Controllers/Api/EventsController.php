@@ -67,7 +67,8 @@ final class EventsController extends Controller
         }
         $query->orderByDesc('created_at');
 
-        $limit = (int) $request->query('limit', '20');
+        // Clamped: an unbounded ?limit= let one request pull every event with its tiers.
+        $limit = min(50, max(1, (int) $request->query('limit', '20')));
 
         return EventResource::collection($query->paginate($limit))
             ->response();

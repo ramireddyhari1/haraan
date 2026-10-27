@@ -198,19 +198,24 @@ Route::get('/section-themes', [SectionThemeController::class, 'index']);
 
 // Login screen posters — public, no auth needed, used by the Android app on launch.
 Route::get('/login-posters', static function () {
-    $posters = Ad::where('placement', 'login_poster')
-        ->where('is_active', true)
-        ->orderBy('sort_order')
-        ->orderBy('id')
-        ->get(['id', 'title', 'subtitle', 'image', 'cta_url', 'sort_order']);
+    // Every login screen polls this; a poster save clears the cache (Ad::booted).
+    $posters = \Illuminate\Support\Facades\Cache::remember(Ad::LOGIN_POSTERS_CACHE_KEY, 60, static function (): array {
+        $posters = Ad::where('placement', 'login_poster')
+            ->where('is_active', true)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->get(['id', 'title', 'subtitle', 'image', 'cta_url', 'sort_order']);
 
-    // The app loads `image` straight into Coil as a URL. Filament's FileUpload stores a
-    // *relative* path on the public disk (e.g. "login-posters/x.jpg"), while the older Blade
-    // admin stored an absolute URL — resolve either to an absolute URL so both render.
-    $posters->each(function (Ad $poster): void {
-        if ($poster->image && ! str_starts_with($poster->image, 'http')) {
-            $poster->image = Storage::disk('public')->url($poster->image);
-        }
+        // The app loads `image` straight into Coil as a URL. Filament's FileUpload stores a
+        // *relative* path on the public disk (e.g. "login-posters/x.jpg"), while the older Blade
+        // admin stored an absolute URL — resolve either to an absolute URL so both render.
+        $posters->each(function (Ad $poster): void {
+            if ($poster->image && ! str_starts_with($poster->image, 'http')) {
+                $poster->image = Storage::disk('public')->url($poster->image);
+            }
+        });
+
+        return $posters->toArray();
     });
 
     return response()->json($posters);

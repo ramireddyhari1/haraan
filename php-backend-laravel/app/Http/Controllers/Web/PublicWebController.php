@@ -1283,7 +1283,14 @@ final class PublicWebController extends Controller
 
     public function actionBoard(): View
     {
-        $matches = LiveMatch::orderBy('created_at', 'desc')->get()->toArray();
+        // Bounded: this used to load every match ever played (JSON squads and all) on
+        // each page view. Private matches never surface in a public list.
+        $matches = LiveMatch::query()
+            ->where('is_private', false)
+            ->orderByDesc('created_at')
+            ->limit(60)
+            ->get()
+            ->toArray();
 
         // ── Mobile app-parity feed (mirrors Api\LiveMatchController::index) ──
         // Same visibility rules as the app: signed-in users get their district's
@@ -1827,7 +1834,14 @@ final class PublicWebController extends Controller
         $player = User::where('player_id', $player_id)->firstOrFail();
 
         // Find recent matches where this player is in the squad
-        $allMatches = LiveMatch::orderBy('created_at', 'desc')->get();
+        // LIKE on the squad JSON narrows the scan in SQL (a superset: the exact id check
+        // below still decides); without it every match ever was loaded per profile view.
+        $needle = '%'.$player_id.'%';
+        $allMatches = LiveMatch::query()
+            ->where(fn ($q) => $q->where('home_squad', 'like', $needle)->orWhere('away_squad', 'like', $needle))
+            ->orderByDesc('created_at')
+            ->limit(100)
+            ->get();
         $recentMatches = [];
 
         foreach ($allMatches as $match) {

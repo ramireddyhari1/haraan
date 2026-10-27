@@ -276,12 +276,14 @@ fun LoginScreen(
     )
 
     // Poster images — fetched from the admin API; falls back to local drawables if offline.
-    // AUTO-REFRESH: fetch on resume + re-poll every 6s while the login screen is visible, so
+    // AUTO-REFRESH: fetch on resume + re-poll every 15s while the login screen is visible, so
     // an admin change in /control appears here within seconds — no need to background/reopen.
+    // (Was 6s; the server clears its poster cache on every save, so 15s loses no freshness
+    // that matters and cuts this screen's load on the server by more than half.)
     // AutoRefresh binds to RESUMED, so it pauses in the background and costs nothing off-screen.
     val localPosters = listOf(R.drawable.poster1, R.drawable.poster2, R.drawable.poster3)
     var remotePosters by remember { mutableStateOf<List<String>>(emptyList()) }
-    com.haraan.app.ui.components.AutoRefresh(intervalMs = 6_000L) {
+    com.haraan.app.ui.components.AutoRefresh(intervalMs = 15_000L) {
         withContext(Dispatchers.IO) {
             runCatching {
                 // Cache-bust so no proxy/HTTP cache can serve a stale list — freshness is the

@@ -30,6 +30,12 @@ trait BroadcastsContentChanges
     /** Fire the signal, never letting a broadcasting failure propagate to the write. */
     protected function broadcastContentChange(): void
     {
+        // Clear any cached public list BEFORE telling clients to refetch, or the refetch
+        // the broadcast triggers would be served the stale copy.
+        if (method_exists($this, 'forgetContentCache')) {
+            $this->forgetContentCache();
+        }
+
         try {
             ContentUpdated::dispatch($this->contentDomain());
         } catch (Throwable $e) {

@@ -28,6 +28,15 @@ final class Venue extends Model
     /** Clients refetch venue lists when a venue changes. */
     protected string $contentDomain = 'venues';
 
+    /** The public /api/venues list, cached briefly because every app polls it. */
+    public const LIST_CACHE_KEY = 'api.venues.list';
+
+    /** Called by BroadcastsContentChanges before the refetch broadcast goes out. */
+    protected function forgetContentCache(): void
+    {
+        \Illuminate\Support\Facades\Cache::forget(self::LIST_CACHE_KEY);
+    }
+
     protected $fillable = [
         'name', 'category', 'kind', 'branch_label', 'branch_code', 'capabilities',
         'sports', 'location', 'city', 'address', 'distance', 'latitude', 'longitude', 'map_link', 'place_id',
