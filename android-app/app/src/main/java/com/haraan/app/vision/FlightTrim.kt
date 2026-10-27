@@ -38,6 +38,17 @@ object FlightTrim {
             val dt = (q.timestampMs - p.timestampMs).coerceAtLeast(1L).toDouble()
             val step = hypot((q.x - p.x).toDouble(), (q.y - p.y) / a)
             val speed = step / dt
+            /*
+             * A BALL LOST FOR LONG IS NOT THE NEXT THING SEEN. On a 120 fps net clip (net01) the
+             * ball came down the picture for 450 ms, was lost for 125 ms well wide of the
+             * stumps, and the track carried on with something sliding sideways at one height —
+             * a batter or the net — and the fit read the whole thing as a ball travelling away
+             * from the batter, so the delivery was never shown. The gap rule at the stumps
+             * below never applied: the ball never got near them. Lost for [MAX_GAP_SPACINGS]
+             * of the track's own spacings and at least [MIN_LONG_GAP_MS], the flight ends.
+             */
+            val lost = q.timestampMs - p.timestampMs
+            if (i >= MIN_KEPT && lost > maxOf(usualGap * MAX_GAP_SPACINGS, MIN_LONG_GAP_MS)) return run.subList(0, i)
             if (i >= MIN_KEPT && speeds.size >= RECENT) {
                 val recent = speeds.takeLast(RECENT).sorted()[RECENT / 2]
                 val tooFast = speed > recent * MAX_SPEEDUP + SPEED_SLACK_PER_MS
@@ -92,6 +103,10 @@ object FlightTrim {
     /** After arriving, this far off to a side, or this far up the picture, is not the ball. */
     private const val AWAY_FROM_STUMPS_ACROSS = 0.09
     private const val AWAY_FROM_STUMPS_UP = 0.08
+
+    /** Anywhere in the flight, a gap this many times the track's usual spacing (and at least this long) ends it. */
+    private const val MAX_GAP_SPACINGS = 12L
+    private const val MIN_LONG_GAP_MS = 100L
 
     /** After arriving, a gap this many times the track's usual spacing (and at least this long) ends it. */
     private const val MAX_GAP_AT_STUMPS = 4L

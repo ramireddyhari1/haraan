@@ -29,6 +29,25 @@ class FlightTrimTest {
     }
 
     @Test
+    fun cutsAfterALongLossWellWideOfTheStumps() {
+        // net01: lost for 125 ms (15 frames at 120 fps), then something sliding sideways at one height.
+        val run = receding(30)
+        val last = run.last()
+        val slide = (0 until 12).map { i ->
+            BallSighting(last.timestampMs + 125 + i * 8L, last.x + 0.03f + i * 0.004f, last.y - 0.07f, 0.5f, 5)
+        }
+        assertEquals(run, FlightTrim.receding(run + slide, aspect, stumps = Point2(last.x + 0.11, last.y + 0.01)))
+    }
+
+    @Test
+    fun keepsAShortLossInTheAir() {
+        // A few frames missed mid-flight is still the same ball.
+        val run = receding(40)
+        val gappy = run.filterIndexed { i, _ -> i !in 18..23 }
+        assertEquals(gappy, FlightTrim.receding(gappy, aspect))
+    }
+
+    @Test
     fun cutsAtAJumpBackUpThePicture() {
         val run = receding(30)
         val last = run.last()

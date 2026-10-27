@@ -7,7 +7,8 @@ and scores it against hand-checked truth in `app/src/test/resources/vision-bench
    `python to_bench_raw.py IMG_6056.MOV <bench>/img6056.raw`
 2. Run (Gradle caches results, so `--rerun`):
    `VISION_BENCH_DIR=<bench> ./gradlew :app:testDebugUnitTest --tests "*TrackingScoreboardTest" --rerun`
-   Optional: `BENCH_ONLY=img6056,net02` and `BENCH_LOG=1` (the chain's reasoning per call).
+   Optional: `BENCH_ONLY=img6056,net02` and `BENCH_LOG=1` (the chain's reasoning per call,
+   including why a fit was refused); add `BENCH_TRACK=1` for every sighting of each call.
 3. Read `app/build/reports/vision-bench/scoreboard.md`.
 
 Adding truth for a new clip:

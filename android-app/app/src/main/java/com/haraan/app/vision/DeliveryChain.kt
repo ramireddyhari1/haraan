@@ -176,12 +176,25 @@ class DeliveryChain(
         log(
             "called ${track.size} pts ${track.first().timestampMs}..${track.last().timestampMs}ms y ${"%.3f".format(track.first().y)}..${"%.3f".format(track.maxOf { it.y })} " +
                 "lock=${"%.3f,%.3f".format(lock.anchor.base.x, lock.anchor.base.y)} near=${bowlersEnd?.base} " +
-                "fit=${f?.let { "bounce %.2f out=${it.hasOutLeg} hits=${it.hitsStumps} ground %.1f".format(it.bounceY, it.groundKmh) }} " +
+                "fit=${f?.let { "bounce %.2f out=${it.hasOutLeg} hits=${it.hitsStumps} ground %.1f".format(it.bounceY, it.groundKmh) }
+                    ?: refusal(track, lock, ground)} " +
+                "trimmed=${FlightTrim.receding(TrailGeometry.runs(track).lastOrNull().orEmpty(), aspect, lock.anchor.base).size} " +
                 "atStumps=${FlightMetrics.reachedStumps(FlightTrim.receding(track, aspect, lock.anchor.base), lock, aspect)} span=${"%.4f".format(lock.anchor.span(aspect))} measurable=${lock.isMeasurable} " +
-                "tail=" + track.takeLast(8).joinToString(";") { "%d,%.3f,%.3f".format(it.timestampMs, it.x, it.y) },
+                // BENCH_TRACK (scoreboard only) prints every sighting, not just the last eight.
+                "tail=" + (if (System.getenv("BENCH_TRACK") != null) track else track.takeLast(8)).joinToString(";") { "%d,%.3f,%.3f".format(it.timestampMs, it.x, it.y) },
         )
         val path = if (f != null && ground != null) ArPath.fromFlight(f, ground)?.takeIf { !it.isEmpty } else null
         return CalledDelivery(calledMs, track, lock, f, path)
+    }
+
+    /** Why the 3D fit refused [track], as [FlightMetrics.of] would run it — for the log only. */
+    private fun refusal(track: List<BallSighting>, lock: WicketLock, ground: PitchCamera?): String {
+        ground ?: return "no ground"
+        val run = FlightTrim.receding(TrailGeometry.runs(track).lastOrNull().orEmpty(), aspect, lock.anchor.base)
+        return when (val r = QuadSpeed.fit(run, ground, null, aspect, FlightMetrics.reachedStumps(run, lock, aspect))) {
+            is QuadSpeed.FitResult.Refused -> r.reason
+            is QuadSpeed.FitResult.Ok -> "fitted alone but not through FlightMetrics"
+        }
     }
 
     /**
