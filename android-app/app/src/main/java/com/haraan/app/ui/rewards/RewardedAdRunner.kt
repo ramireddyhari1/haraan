@@ -5,12 +5,9 @@ import com.google.android.gms.ads.AdError
 import com.google.android.gms.ads.AdRequest
 import com.google.android.gms.ads.FullScreenContentCallback
 import com.google.android.gms.ads.LoadAdError
-import com.google.android.gms.ads.MobileAds
 import com.google.android.gms.ads.rewarded.RewardedAd
 import com.google.android.gms.ads.rewarded.RewardedAdLoadCallback
 import com.google.android.gms.ads.rewarded.ServerSideVerificationOptions
-import com.google.android.ump.ConsentRequestParameters
-import com.google.android.ump.UserMessagingPlatform
 import com.haraan.app.data.rewards.AdSession
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -23,7 +20,7 @@ import kotlin.coroutines.resume
  * callback unlocks anything. This class just shows the ad and says how it went, so the screen
  * knows whether to start asking the server.
  *
- * The SDK is initialised here, on the first tap — never at app start, and never at all for a
+ * The SDK is initialised (GoogleAds) on the first tap — never at app start, and never at all for a
  * member whose plan has no ads (the server never offers them a video).
  */
 object RewardedAdRunner {
@@ -40,11 +37,8 @@ object RewardedAdRunner {
         data class Failed(val message: String) : Outcome
     }
 
-    @Volatile private var initialised = false
-
     suspend fun play(activity: Activity, session: AdSession): Outcome {
-        if (!consent(activity)) return Outcome.NoConsent
-        initialise(activity)
+        if (!com.haraan.app.ui.ads.GoogleAds.ready(activity)) return Outcome.NoConsent
 
         val ad = load(activity, session.adUnitId) ?: return Outcome.Failed("No video is available right now. Try again later.")
         ad.setServerSideVerificationOptions(
@@ -66,34 +60,6 @@ object RewardedAdRunner {
                 }
             }
             ad.show(activity) { earned = true }
-        }
-    }
-
-    /** Google UMP consent. Ads are requested only when the player can be asked or already agreed. */
-    private suspend fun consent(activity: Activity): Boolean {
-        val info = UserMessagingPlatform.getConsentInformation(activity)
-        suspendCancellableCoroutine { cont ->
-            info.requestConsentInfoUpdate(
-                activity,
-                ConsentRequestParameters.Builder().build(),
-                {
-                    UserMessagingPlatform.loadAndShowConsentFormIfRequired(activity) {
-                        if (cont.isActive) cont.resume(Unit)
-                    }
-                },
-                { if (cont.isActive) cont.resume(Unit) },
-            )
-        }
-        return info.canRequestAds()
-    }
-
-    private suspend fun initialise(activity: Activity) {
-        if (initialised) return
-        suspendCancellableCoroutine { cont ->
-            MobileAds.initialize(activity.applicationContext) {
-                initialised = true
-                if (cont.isActive) cont.resume(Unit)
-            }
         }
     }
 

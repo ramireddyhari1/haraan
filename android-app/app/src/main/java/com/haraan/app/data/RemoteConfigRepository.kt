@@ -29,11 +29,24 @@ data class RealtimeConfig(
     val channel: String = "content",
 )
 
+/**
+ * Google AdMob spots in the ActionBoard, from /control → Marketing → Ad networks. A null spot
+ * stays empty: switched off, no unit set, or the member's plan has no ads.
+ */
+data class NetworkAdsConfig(
+    /** Native ad between matches in the ActionBoard lists, one after every [feedEvery] matches. */
+    val feedUnitId: String? = null,
+    val feedEvery: Int = 5,
+    /** Banner on the match screen, where the match sponsor goes. */
+    val matchUnitId: String? = null,
+)
+
 /** Resolved remote config: feature flags + theme + realtime endpoint. */
 data class RemoteConfig(
     val features: Map<String, Boolean> = emptyMap(),
     val theme: AppTheme = AppTheme(),
     val realtime: RealtimeConfig = RealtimeConfig(),
+    val ads: NetworkAdsConfig = NetworkAdsConfig(),
 )
 
 /**
@@ -71,6 +84,11 @@ class RemoteConfigRepository(private val baseUrl: String = ApiConfig.BASE_URL) {
             val rt = root.optJSONObject("realtime") ?: JSONObject()
             fun rtStr(k: String) = rt.optString(k).takeIf { it.isNotBlank() && it != "null" }
 
+            val ads = root.optJSONObject("ads")
+            val adsFeed = ads?.optJSONObject("feed")
+            val adsMatch = ads?.optJSONObject("match")
+            fun unit(o: JSONObject?) = o?.optString("unit_id")?.takeIf { it.startsWith("ca-app-pub-") }
+
             RemoteConfig(
                 features = features,
                 theme = AppTheme(
@@ -88,6 +106,11 @@ class RemoteConfigRepository(private val baseUrl: String = ApiConfig.BASE_URL) {
                     port = rt.optInt("port", 443),
                     scheme = rt.optString("scheme", "https"),
                     channel = rt.optString("channel", "content"),
+                ),
+                ads = NetworkAdsConfig(
+                    feedUnitId = unit(adsFeed),
+                    feedEvery = (adsFeed?.optInt("every", 5) ?: 5).coerceAtLeast(2),
+                    matchUnitId = unit(adsMatch),
                 ),
             )
         } catch (_: Exception) {

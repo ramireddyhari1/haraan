@@ -52,10 +52,10 @@ fun LiveTab(state: MatchUiState, modifier: Modifier = Modifier, ads: List<AdItem
             item { WinChanceCard(state, pct) }
         }
 
-        // Sponsored ad bar — admin-controlled (placement "match_live"). Scrolls in below
-        // the live content so it never covers the score; hidden entirely when there's none.
-        ads.firstOrNull()?.let { ad ->
-            item { MatchAdBar(ad) }
+        // Sponsor spot — the "match_live" sponsor, else the AdMob banner (both set in /control).
+        // Scrolls in below the live content so it never covers the score; nothing when neither.
+        if (com.haraan.app.ui.ads.matchSponsorSpotHasAd(ads.firstOrNull())) {
+            item { com.haraan.app.ui.ads.MatchSponsorSpot(ads.firstOrNull()) }
         }
     }
 }

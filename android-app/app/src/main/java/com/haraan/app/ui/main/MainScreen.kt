@@ -4366,6 +4366,16 @@ private fun CrexMatchesScreen(
   }
   LaunchedEffect(Unit) { loadLiveFeed() }
 
+  // Ads between matches: Haraan sponsors booked into `actionboard_feed` first, else the AdMob
+  // unit from /control → Marketing → Ad networks. Empty for a member whose plan has no ads.
+  var feedHouseAds by remember { mutableStateOf<List<com.haraan.app.data.AdItem>>(emptyList()) }
+  LaunchedEffect(Unit) {
+    feedHouseAds = runCatching {
+      com.haraan.app.data.ContentRepository().getAds("actionboard_feed", com.haraan.app.data.TokenStore.getToken(context))
+    }.getOrDefault(emptyList())
+  }
+  com.haraan.app.ui.ads.ActionBoardAdsLifecycle()
+
   // Contacts on Haraan: last answer from disk at once, a fresh match at most daily. The
   // prompt shows only to signed-in players who haven't answered it either way.
   var contactsAsk by remember {
@@ -4685,7 +4695,7 @@ private fun CrexMatchesScreen(
             }
             else -> {
               item { CrexLeagueTitle("Matches near you") }
-              item { LiveFeedGroup(rows = sportFeed, onMatchClick = onMatchClick) }
+              feedWithAds(sportFeed, feedHouseAds, "live") { rows -> LiveFeedGroup(rows = rows, onMatchClick = onMatchClick) }
               item { Spacer(modifier = Modifier.height(8.dp)) }
             }
           }
@@ -4715,7 +4725,7 @@ private fun CrexMatchesScreen(
             }
             else -> {
               item { CrexLeagueTitle("Recent results") }
-              item { LiveFeedGroup(rows = finishedFeed, onMatchClick = onMatchClick) }
+              feedWithAds(finishedFeed, feedHouseAds, "finished") { rows -> LiveFeedGroup(rows = rows, onMatchClick = onMatchClick) }
               item { Spacer(modifier = Modifier.height(8.dp)) }
             }
           }
@@ -4796,6 +4806,15 @@ private fun CrexMatchesScreen(
                     },
                   )
                   Spacer(modifier = Modifier.height(10.dp))
+                  val openIndex = open.indexOf(m)
+                  val every = com.haraan.app.ui.ads.actionBoardFeedEvery()
+                  if ((openIndex + 1) % every == 0 && com.haraan.app.ui.ads.actionBoardFeedHasAd(feedHouseAds)) {
+                    com.haraan.app.ui.ads.ActionBoardFeedAd(
+                      position = openIndex / every,
+                      houseAds = feedHouseAds,
+                      modifier = Modifier.padding(bottom = 10.dp),
+                    )
+                  }
                 }
               }
             }
@@ -9824,6 +9843,37 @@ private fun matchFormatLabel(competition: String, sport: String): String {
 
 // Renders a list of real live-feed rows as one grouped surface. Shared by the
 // "Live in your district" and "Featured matches" sections so both look identical.
+/**
+ * A match list with an ad after every N matches (N from /control → Marketing → Ad networks).
+ * The rows are cut into blocks of N, each its own lazy item, with the ad between blocks — so a
+ * list shorter than N shows no ad, and a list with no ad to show stays one block as before.
+ */
+private fun androidx.compose.foundation.lazy.LazyListScope.feedWithAds(
+  rows: List<com.haraan.app.data.LiveMatchRow>,
+  houseAds: List<com.haraan.app.data.AdItem>,
+  keyPrefix: String,
+  group: @Composable (List<com.haraan.app.data.LiveMatchRow>) -> Unit,
+) {
+  if (!com.haraan.app.ui.ads.actionBoardFeedHasAd(houseAds)) {
+    item { group(rows) }
+    return
+  }
+  val blocks = rows.chunked(com.haraan.app.ui.ads.actionBoardFeedEvery())
+  blocks.forEachIndexed { i, block ->
+    item(key = "$keyPrefix-block-$i") { group(block) }
+    if (block.size == com.haraan.app.ui.ads.actionBoardFeedEvery()) {
+      item(key = "$keyPrefix-ad-$i") {
+        com.haraan.app.ui.ads.ActionBoardFeedAd(
+          position = i,
+          houseAds = houseAds,
+          modifier = Modifier.padding(top = 10.dp),
+        )
+      }
+      if (i < blocks.lastIndex) item(key = "$keyPrefix-gap-$i") { Spacer(Modifier.height(10.dp)) }
+    }
+  }
+}
+
 @Composable
 private fun LiveFeedGroup(
   rows: List<com.haraan.app.data.LiveMatchRow>,

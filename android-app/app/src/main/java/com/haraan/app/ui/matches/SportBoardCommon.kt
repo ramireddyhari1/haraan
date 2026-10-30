@@ -223,11 +223,13 @@ fun BoardLineups(state: MatchUiState) {
 @Composable
 fun BoardMatchInfo(state: MatchUiState) {
     // The live-board sponsor, when there is one, closes the summary on every board sport.
-    LocalMatchAds.current.ads.firstOrNull()?.let { ad ->
-        Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-            MatchAdBar(ad)
-            Spacer(Modifier.height(20.dp))
-        }
+    // Without one, the AdMob banner from /control → Marketing → Ad networks takes the spot.
+    val sponsor = LocalMatchAds.current.ads.firstOrNull()
+    if (com.haraan.app.ui.ads.matchSponsorSpotHasAd(sponsor)) {
+        com.haraan.app.ui.ads.MatchSponsorSpot(
+            sponsor,
+            modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 4.dp, bottom = 20.dp),
+        )
     }
     val rows = buildList {
         // A booked Haraan court gets its own row above the rest, because it is the one line

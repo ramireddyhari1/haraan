@@ -780,8 +780,8 @@ private fun SummaryTab(state: MatchUiState, football: FootballState, onOpenStats
                 InfoRow("Status", if (state.isLive) "In play" else state.status.ifBlank { "Full time" })
             }
         }
-        matchAd?.let { ad ->
-            item { MatchAdBar(ad) }
+        if (com.haraan.app.ui.ads.matchSponsorSpotHasAd(matchAd)) {
+            item { com.haraan.app.ui.ads.MatchSponsorSpot(matchAd) }
         }
     }
 }
