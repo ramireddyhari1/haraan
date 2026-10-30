@@ -762,6 +762,8 @@ private fun CameraMode(
      */
     val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
     val vision = remember { OpenCvBallTracker().also { it.setDetail(BALL_DETAIL) } }
+    // The ball step the clip screen and the scoreboard run too; see BallStep.
+    val ballStep = remember { com.haraan.app.vision.BallStep(vision, keepLooking = true) }
 
     /*
      * HOW HOT THE PHONE IS.
@@ -1207,7 +1209,6 @@ private fun CameraMode(
          */
         var lumaScratch: ByteArray? = null
         var lumaFrame = 0
-        var lastCorridorMs = 0L
         /** The U (blue-difference) plane, for the colour pass. Same one-buffer rule. */
         var chromaScratch: ByteArray? = null
 
@@ -1460,40 +1461,20 @@ private fun CameraMode(
                                 focus = wicketTracker.focus(),
                                 allowSearch = wicketLock == null || idleAnalysisFrame % 16 == 0,
                             )
-                            val nearNow = bowlersEndOf(sightings, cameraIntrinsics)
-                            nearNow?.let { bowlersEndBase = bowlersEndFilter.add(it) ?: bowlersEndBase }
-                            wicketLock = wicketTracker.onFrame(
-                                battersEndWithPredicted(
-                                    farWicketSearch, sightings, wicketLock, bowlersEndBase ?: nearNow, cameraIntrinsics,
-                                    bytes, image.width, image.height, plane.rowStride, image.imageInfo.rotationDegrees, uprightAspect,
-                                ),
+                            val step = com.haraan.app.vision.WicketStep.feed(
+                                sightings, cameraIntrinsics, bowlersEndBase, bowlersEndFilter, farWicketSearch, wicketTracker, steadyWicket,
+                                bytes, image.width, image.height, plane.rowStride, image.imageInfo.rotationDegrees,
                                 cameraMove, uprightAspect, frameMs,
                             )
-                            steadyWicket.add(wicketLock, frameMs, nearNow)
+                            wicketLock = step.lock
+                            bowlersEndBase = step.bowlersEnd
                             steadyDrawLock = steadyWicket.value()
                         }
                         // From behind the bowler, look only along the delivery's corridor and
-                        // expect the ball to head for the batter's stumps. See setCorridor.
-                        if (frameMs - lastCorridorMs >= CORRIDOR_REFRESH_MS) {
-                            lastCorridorMs = frameMs
-                            // From the steadied stumps: they outlive the live lock the bowler's
-                            // run-up knocks out at the moment of release. See SteadyWicket.
-                            val steady = steadyWicket.value()
-                            val c = deliveryCorridor(steady ?: wicketLock, cameraIntrinsics, uprightWidthPx, uprightAspect)
-                            // A lock flickering for a moment keeps the corridor it had: dropping
-                            // it would restart the tracker, perhaps mid-delivery. Only no lock at
-                            // all goes back to the whole frame.
-                            if (c == null) {
-                                if (wicketLock == null && steady == null) {
-                                    vision.setCorridor(null, null, null, null, null)
-                                    corridorRef.set(null)
-                                }
-                            } else {
-                                vision.setCorridor(c[0], c[1], c[2], c[3], com.haraan.app.vision.Point2(c[4].toDouble(), c[5].toDouble()))
-                                corridorRef.set(c)
-                            }
-                        }
-                        val sighting = vision.onFrame(
+                        // expect the ball to head for the batter's stumps. See BallStep.
+                        ballStep.refreshCorridor(steadyWicket.value(), wicketLock, cameraIntrinsics, uprightWidthPx, uprightAspect, frameMs)
+                        corridorRef.set(ballStep.corridor)
+                        val step = ballStep.frame(
                             luma = bytes,
                             width = image.width,
                             height = image.height,
@@ -1503,7 +1484,10 @@ private fun CameraMode(
                             // viewer's, a quarter turn apart on every portrait phone.
                             rotationDegrees = image.imageInfo.rotationDegrees,
                             timestampMs = frameMs,
+                            lock = wicketLock,
+                            aspect = uprightAspect,
                         )
+                        val sighting = step.sighting
                         if (sighting != null) {
                             trackedPoints = vision.track().size
                             latestBall = sighting
@@ -1522,40 +1506,16 @@ private fun CameraMode(
                             }
                             trackQuality = vision.quality()
                         }
-                        // Asked on every frame, sighting or not: going quiet IS the signal. A flight
-                        // a newer track replaced before it went quiet counts as finished now.
-                        val replaced = vision.takeFinished()?.takeIf { fin ->
-                            com.haraan.app.vision.FlightEnd.check(
-                                fin, fin.last().timestampMs + com.haraan.app.vision.FlightEnd.QUIET_MS, uprightAspect, wicketLock,
-                            ) != null
-                        }
-                        val flight = replaced ?: vision.track()
-                        val ended = replaced != null || com.haraan.app.vision.FlightEnd.check(flight, frameMs, uprightAspect, wicketLock) != null
-                        // Done, but never came towards the stumps: a person, not a ball. Let go
+                        // Done, but never came at the stumps: a person, not a ball. Let go
                         // before it is drawn as a delivery, and keep watching.
-                        // A called ball keeps its trail; a stray afterwards just cannot replace it.
-                        val lockNow = wicketLock
-                        val towards = !ended || lockNow == null ||
-                            com.haraan.app.vision.FlightEnd.travelsToward(flight, lockNow, uprightAspect)
-                        if (!towards) {
-                            if (calledFlight == null) {
-                                vision.reset()
-                                ballTrail = emptyList()
-                                latestBall = null
-                                trackedPoints = 0
-                            }
-                        } else if (ended) {
-                            val called = calledFlight
-                            if (called == null) {
-                                calledFlight = flight
-                            } else if (
-                                flight.isNotEmpty() && called.isNotEmpty() &&
-                                flight.first().timestampMs > called.last().timestampMs &&
-                                flight.size >= maxOf(called.size, SUPERSEDE_MIN_POINTS)
-                            ) {
-                                calledFlight = flight
-                            }
-                            calledFlight?.let { ballTrail = it.takeLast(CAMERA_TRAIL_POINTS) }
+                        if (step.strayDropped) {
+                            ballTrail = emptyList()
+                            latestBall = null
+                            trackedPoints = 0
+                        }
+                        step.called?.let { flight ->
+                            calledFlight = flight
+                            ballTrail = flight.takeLast(CAMERA_TRAIL_POINTS)
                         }
                     } else {
                         // Pitch detector is throttled to once every 4 frames so the Hough
@@ -1637,18 +1597,13 @@ private fun CameraMode(
                                     allowSearch = allowSearch,
                                 )
                                 if (sightings.isNotEmpty()) lastSightingMs = frameClockMs
-                                val nearNow = bowlersEndOf(sightings, cameraIntrinsics)
-                                nearNow?.let { bowlersEndBase = bowlersEndFilter.add(it) ?: bowlersEndBase }
-                                wicketLock = wicketTracker.onFrame(
-                                    sightings = battersEndWithPredicted(
-                                        farWicketSearch, sightings, held, bowlersEndBase ?: nearNow, cameraIntrinsics,
-                                        bytes, image.width, image.height, plane.rowStride, image.imageInfo.rotationDegrees, uprightAspect,
-                                    ),
-                                    motion = cameraMove,
-                                    frameAspect = uprightAspect,
-                                    timestampMs = frameClockMs,
+                                val step = com.haraan.app.vision.WicketStep.feed(
+                                    sightings, cameraIntrinsics, bowlersEndBase, bowlersEndFilter, farWicketSearch, wicketTracker, steadyWicket,
+                                    bytes, image.width, image.height, plane.rowStride, image.imageInfo.rotationDegrees,
+                                    cameraMove, uprightAspect, frameClockMs,
                                 )
-                                steadyWicket.add(wicketLock, frameClockMs, nearNow)
+                                wicketLock = step.lock
+                                bowlersEndBase = step.bowlersEnd
                                 steadyDrawLock = steadyWicket.value()
                             }
                             val now = System.currentTimeMillis()
@@ -2999,7 +2954,7 @@ private fun CameraMode(
                 if (calibrated != null) {
                     val trial = com.haraan.app.vision.FlightMetrics.of(flight, uprightAspect, calibrated, wicketLock)
                     if (trial.flight3d == null) {
-                        vision.reset()
+                        ballStep.reset()
                         ballTrail = emptyList()
                         latestBall = null
                         trackedPoints = 0
@@ -3064,7 +3019,7 @@ private fun CameraMode(
             discardClip = false
             uploadError = null
             // A fresh delivery: the previous track must not bleed into this one.
-            vision.reset()
+            ballStep.reset()
             trackedPoints = 0
             ballTrail = emptyList()
             latestBall = null

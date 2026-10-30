@@ -1,7 +1,5 @@
 package com.haraan.app.vision
 
-import com.haraan.app.camera.battersEndOnly
-import com.haraan.app.camera.bowlersEndOf
 import com.haraan.app.camera.deliveryCorridor
 
 /**
@@ -25,6 +23,8 @@ class CalledDelivery(
  *
  * [ClipDeliveryAnalyzer] feeds it decoded frames on a phone; the tracking scoreboard feeds it
  * the same frames from raw streams on a desk. One chain, so a score is a score of what ships.
+ * The stumps and ball steps themselves are [WicketStep] and [BallStep], which the live camera
+ * screen runs too.
  *
  * Frames are the camera's analysis frame: sideways 1280x720 luma and a 640x360 Cb plane.
  */
@@ -44,15 +44,14 @@ class DeliveryChain(
     private val stumps = ColourStumpDetector()
     private val wickets = WicketTracker()
     private val ball = OpenCvBallTracker().also { it.setDetail(ballDetail) }
+    private val ballStep = BallStep(ball, keepLooking = !resetAfterCall)
     private val camera = CameraIntrinsics(ASSUMED_FOCAL_FW, "assumed")
     private val still = FrameMotion(0f, 0f, 1f, 0f, 30, 32)
     private val nearEnd = BowlersEndFilter()
     private val steadyLock = SteadyWicket()
     private val farSearch = FarWicketSearch(ASSUMED_FOCAL_FW)
     private var lock: WicketLock? = null
-    private var corridor: FloatArray? = null
     private var lastStumpsMs = Long.MIN_VALUE / 2
-    private var lastCorridorMs = Long.MIN_VALUE / 2
     private var stumpsChecks = 0
 
     /** The bowler's stumps' feet, once seen. */
@@ -78,7 +77,7 @@ class DeliveryChain(
      * The ball tracker started afresh — what the live screen does each time a ball is armed,
      * for the bench's live-screen comparison. The stumps and the corridor are kept.
      */
-    fun rearm() = ball.reset()
+    fun rearm() = ballStep.reset()
 
     /** Bench hook: the ball tracker's per-frame candidates and tracks ([OpenCvBallTracker.debug]). */
     internal var ballDebug: ((String) -> Unit)?
@@ -99,40 +98,14 @@ class DeliveryChain(
             lastStumpsMs = ts
             feedStumps(y, u, ts)
         }
-        // Re-derived until there is one, then once a second; built on the steadied stumps,
-        // which outlive the live lock the run-up knocks out.
-        if (corridor == null || ts - lastCorridorMs >= 1_000L) {
-            lastCorridorMs = ts
-            val steady = steadyLock.value()
-            val c = deliveryCorridor(steady ?: lock, camera, ClipFrames.UPRIGHT_W, aspect)
-            if (c != null) {
-                corridor = c
-                ball.setCorridor(c[0], c[1], c[2], c[3], Point2(c[4].toDouble(), c[5].toDouble()))
-            } else if (lock == null && steady == null) {
-                corridor = null
-                ball.setCorridor(null, null, null, null, null)
-            }
-        }
+        ballStep.refreshCorridor(steadyLock.value(), lock, camera, ClipFrames.UPRIGHT_W, aspect, ts)
         val t0 = System.nanoTime()
-        ball.onFrame(y, ClipFrames.SENSOR_W, ClipFrames.SENSOR_H, ClipFrames.SENSOR_W, 90, ts)
+        val l = lock
+        val step = ballStep.frame(y, ClipFrames.SENSOR_W, ClipFrames.SENSOR_H, ClipFrames.SENSOR_W, 90, ts, l, aspect)
         ballNs += System.nanoTime() - t0
-        val l = lock ?: return emptyList()
-        // A flight a newer track replaced before it went quiet is finished now.
-        val replaced = ball.takeFinished()?.takeIf { fin ->
-            FlightEnd.check(fin, fin.last().timestampMs + FlightEnd.QUIET_MS, aspect, l) != null
-        }
-        val track = replaced ?: ball.track()
-        if (replaced == null && FlightEnd.check(track, ts, aspect, l) == null) return emptyList()
-        // Done, but never came at the stumps: someone walking about, not a delivery.
-        if (!FlightEnd.travelsToward(track, l, aspect)) {
-            if (replaced == null) ball.reset()
-            return emptyList()
-        }
+        val track = step.called ?: return emptyList()
         // Measured from the steadied stumps, not this frame's: see [SteadyWicket].
-        val called = call(track, (steadyLock.value() ?: l).withFarSpan(), ts)
-        // A fresh start for the next ball, as an Auto segment does.
-        if (replaced == null && resetAfterCall) ball.reset()
-        return listOfNotNull(called)
+        return listOfNotNull(call(track, (steadyLock.value() ?: l!!).withFarSpan(), ts))
     }
 
     /** A flight still in the air when the clip ends, called as it stands. */
@@ -148,7 +121,7 @@ class DeliveryChain(
 
     /** This frame's stumps lock and the corridor the ball is searched in, for the scoreboard. */
     val currentLock: WicketLock? get() = lock
-    val currentCorridor: FloatArray? get() = corridor
+    val currentCorridor: FloatArray? get() = ballStep.corridor
 
     /** The ball tracker's current track, for the scoreboard. */
     fun ballTrack(): List<BallSighting> = ball.track()
@@ -166,20 +139,13 @@ class DeliveryChain(
             focus = wickets.focus(),
             allowSearch = searchAllowed(lock, bowlersEnd != null, stumpsChecks),
         )
-        val nearNow = bowlersEndOf(seen, camera)
-        nearNow?.let { bowlersEnd = nearEnd.add(it) ?: bowlersEnd }
-        /*
-         * NOTHING CONFIRMED, BUT THE BOWLER'S STUMPS ARE IN VIEW: look where they say the
-         * batter's must be. See [FarWicketSearch.offer]; [predictFar] off is for the bench.
-         */
-        val far = battersEndOnly(seen, camera, bowlersEnd).let { found ->
-            if (!predictFar) found else farSearch.offer(
-                found, lock, bowlersEnd ?: nearNow,
-                y, ClipFrames.SENSOR_W, ClipFrames.SENSOR_H, ClipFrames.SENSOR_W, 90, aspect,
-            ) { s, near -> battersEndOnly(s, camera, near) }
-        }
-        lock = wickets.onFrame(far, still, aspect, ts)
-        steadyLock.add(lock, ts, nearNow)
+        val step = WicketStep.feed(
+            seen, camera, bowlersEnd, nearEnd, farSearch, wickets, steadyLock,
+            y, ClipFrames.SENSOR_W, ClipFrames.SENSOR_H, ClipFrames.SENSOR_W, 90,
+            still, aspect, ts, predictFar,
+        )
+        lock = step.lock
+        bowlersEnd = step.bowlersEnd
         steadyLock.value()?.takeIf { it.isMeasurable }?.let { l ->
             farStumpsAt = doubleArrayOf(l.anchor.base.x, l.anchor.base.y, l.anchor.span(aspect).toDouble())
         }
