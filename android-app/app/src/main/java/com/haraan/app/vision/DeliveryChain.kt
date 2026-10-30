@@ -34,12 +34,16 @@ class DeliveryChain(
     private val log: (String) -> Unit = {},
     /** Look for the batter's stumps where the bowler's say ([FarWicketSearch]). Off only to compare on the bench. */
     private val predictFar: Boolean = true,
+    /** The ball tracker's analysis detail ([OpenCvBallTracker.setDetail]); the live screen asks 1.5. */
+    ballDetail: Double = 1.0,
+    /** A fresh ball tracker after each call, as the clip screen does; the live screen keeps looking. */
+    private val resetAfterCall: Boolean = true,
 ) {
     val aspect = ClipFrames.UPRIGHT_W.toFloat() / ClipFrames.UPRIGHT_H
 
     private val stumps = ColourStumpDetector()
     private val wickets = WicketTracker()
-    private val ball = OpenCvBallTracker()
+    private val ball = OpenCvBallTracker().also { it.setDetail(ballDetail) }
     private val camera = CameraIntrinsics(ASSUMED_FOCAL_FW, "assumed")
     private val still = FrameMotion(0f, 0f, 1f, 0f, 30, 32)
     private val nearEnd = BowlersEndFilter()
@@ -69,6 +73,17 @@ class DeliveryChain(
     /** The stumps deliveries are measured from: the steadied lock, else this frame's. */
     val measuringLock: WicketLock? get() = steadyLock.value() ?: lock
     val stumpsFound: Boolean get() = steadyLock.value() != null
+
+    /**
+     * The ball tracker started afresh — what the live screen does each time a ball is armed,
+     * for the bench's live-screen comparison. The stumps and the corridor are kept.
+     */
+    fun rearm() = ball.reset()
+
+    /** Bench hook: the ball tracker's per-frame candidates and tracks ([OpenCvBallTracker.debug]). */
+    internal var ballDebug: ((String) -> Unit)?
+        get() = ball.debug
+        set(value) { ball.debug = value }
 
     /** A warm-up frame: the stumps alone, every one, before the ball is looked for. */
     fun warm(y: ByteArray, u: ByteArray, ts: Long) = feedStumps(y, u, ts)
@@ -111,7 +126,7 @@ class DeliveryChain(
         // Measured from the steadied stumps, not this frame's: see [SteadyWicket].
         val called = call(track, (steadyLock.value() ?: l).withFarSpan(), ts)
         // A fresh start for the next ball, as an Auto segment does.
-        if (replaced == null) ball.reset()
+        if (replaced == null && resetAfterCall) ball.reset()
         return listOfNotNull(called)
     }
 

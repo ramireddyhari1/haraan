@@ -248,6 +248,40 @@ class WicketTrackerTest {
         assertEquals(WicketTrackState.CONFIRMED, settled!!.state)
     }
 
+    /**
+     * Setup's Done with the stumps in the box: the batter then stands in front of them for
+     * twenty seconds — taking guard, a chat with the umpire — and the lock is still there, in
+     * the same place and at the same size. Unpinned, the same lock is gone after the coast.
+     */
+    @Test
+    fun `a lock pinned at setup is held while the batter hides the stumps`() {
+        val pinned = WicketTracker()
+        pinned.feed(stumps(x = 0.52f, span = 0.06f), frames = WicketTracker.CONFIRM_FRAMES)
+        val before = pinned.lock()!!.anchor
+        assertTrue(pinned.pinCurrent())
+        assertEquals(WicketLockSource.MANUAL, pinned.lock()!!.source)
+
+        val loose = WicketTracker()
+        loose.feed(stumps(x = 0.52f, span = 0.06f), frames = WicketTracker.CONFIRM_FRAMES)
+
+        var held: WicketLock? = null
+        var lost: WicketLock? = null
+        for (t in 100L..20_000L step 33L) {
+            held = pinned.onFrame(null, steady(), aspect, t)
+            lost = loose.onFrame(null, steady(), aspect, t)
+        }
+        assertNull("an unpinned detected lock lets go after the coast", lost)
+        assertNotNull("the pinned lock is still held", held)
+        assertEquals(WicketTrackState.CONFIRMED, held!!.state)
+        assertEquals(before.base.x, held.anchor.base.x, 1e-9)
+        assertEquals(before.span(aspect), held.anchor.span(aspect), 1e-6f)
+    }
+
+    @Test
+    fun `nothing held means nothing to pin`() {
+        assertFalse(WicketTracker().pinCurrent())
+    }
+
     @Test
     fun `memory is carried on camera motion and refuses a wicket of a different size`() {
         val nudge = FrameMotion(0.05f, 0f, 1f, 0f, inliers = 30, total = 32)

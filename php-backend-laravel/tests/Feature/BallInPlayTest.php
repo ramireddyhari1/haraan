@@ -123,6 +123,9 @@ final class BallInPlayTest extends TestCase
         self::assertSame('1080p60', $quality(), '60 fps by default');
         \App\Support\PlatformRules::save(['creation.camera_video_quality' => '720p60']);
         self::assertSame('720p60', $quality());
+        // "Highest this phone can film": each phone works out its own best rate and size.
+        \App\Support\PlatformRules::save(['creation.camera_video_quality' => 'highest']);
+        self::assertSame('highest', $quality());
     }
 
     public function test_a_paired_camera_is_cued_per_ball_and_told_about_dead_balls(): void

@@ -106,7 +106,8 @@ internal class ReplayFrameRing {
         const val WIDTH = 360
         const val HEIGHT = 640
         const val QUALITY = 78
-        const val KEEP_MS = 4_000.0
+        // The ball is read for 2 s before its replay is built: the flight must still be here then.
+        const val KEEP_MS = 6_000.0
         const val MAX_PENDING = 4
 
         /** The replay opens this long before the ball was first seen... */

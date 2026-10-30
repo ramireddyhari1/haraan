@@ -308,4 +308,94 @@ class PitchGroundTest {
             }
         }
     }
+
+    // ---- both sets AND gravity: the feet alone, no widths ----------------------------
+
+    /** A net from just behind the bowler's stumps: far set 22.5 m off, near set 2.4 m. */
+    private fun twoWicketScene(camH: Double, roll: Double = 0.0, tiltErr: Double = 0.0): TwoWickets {
+        val farX = 0.9
+        val farY = 22.5
+        val ux = -0.035
+        val uy = -kotlin.math.sqrt(1 - ux * ux)
+        val nearX = farX + ux * PitchGeometry.STUMPS_TO_STUMPS_M
+        val nearY = farY + uy * PitchGeometry.STUMPS_TO_STUMPS_M
+        val pitch = kotlin.math.atan(camH / farY) + 0.04
+        val (cam, lock, _) = scene(farX, farY, camH, pitch, roll)
+        val nearPx = cam.project(nearX, nearY)
+        val (gx, gy, gz) = gravity(pitch + tiltErr, roll)
+        return TwoWickets(cam, lock, BowlersEnd(Point2(nearPx.first / w, nearPx.second / h), 0.0), DeviceTilt.reading(gx, gy, gz)!!, farX, farY, ux, uy)
+    }
+
+    private class TwoWickets(
+        val cam: Cam, val lock: WicketLock, val near: BowlersEnd, val tilt: DeviceTilt.Reading,
+        val farX: Double, val farY: Double, val ux: Double, val uy: Double,
+    )
+
+    @Test
+    fun `with both sets and gravity every metre lands right`() {
+        for ((camH, roll) in listOf(0.5 to 0.0, 0.9 to Math.toRadians(2.0), 1.6 to Math.toRadians(-1.5))) {
+            val s = twoWicketScene(camH, roll)
+            val g = PitchGround.fromTwoWicketsAndTilt(s.lock, CameraIntrinsics(focalFw, "test"), w, h, s.near, s.tilt)
+            assertNotNull("height $camH", g)
+            assertEquals("height", camH, g!!.heightM, 0.02)
+            assertTrue(g.heightMeasured && g.upFromGravity)
+            for (along in listOf(0.0, 3.0, 6.0, 9.0, 14.0)) for (across in listOf(-1.32, 0.0, 1.32)) {
+                // Across is perpendicular to the pitch line (ux, uy), picture-right.
+                val truth = s.cam.project(s.farX + s.ux * along - s.uy * across, s.farY + s.uy * along + s.ux * across)
+                val got = g.project(along, across)!!
+                assertTrue("h $camH along $along across $across: got $got truth $truth", PitchGround.near(got, truth, 1.5))
+            }
+        }
+    }
+
+    /**
+     * The point of it: a pixel of jitter on the far set's feet — what the detector does frame
+     * to frame at 22 m — must barely move the bands. The width-based solve swings them.
+     */
+    @Test
+    fun `a pixel of jitter on the far stumps barely moves the bands`() {
+        val s = twoWicketScene(1.3)
+        val lens = CameraIntrinsics(focalFw, "test")
+        fun bandY(lock: WicketLock, useTilt: Boolean): Pair<Double, Double>? {
+            val g = if (useTilt) PitchGround.fromTwoWicketsAndTilt(lock, lens, w, h, s.near, s.tilt)
+            else PitchGround.fromTwoWickets(lock, lens, w, h, s.near)
+            return g?.project(6.0, 0.0)
+        }
+        // A solve that gives up on a jittered frame is the worst swing of all: the guide vanishes.
+        fun swing(a: Pair<Double, Double>?, b: Pair<Double, Double>?) =
+            if (a == null || b == null) Double.MAX_VALUE else hypot(a.first - b.first, a.second - b.second)
+        fun jittered(dl: Double, dr: Double, dy: Double = 0.0): WicketLock {
+            val a = s.lock.anchor
+            // Each foot moved by a pixel: the span changes by up to two, the feet's line by one.
+            return s.lock.copy(anchor = WicketAnchor(Point2(a.baseLeft.x + dl / w, a.baseLeft.y + dy / h), Point2(a.baseRight.x + dr / w, a.baseRight.y + dy / h)))
+        }
+        val cases = listOf(Triple(-1.0, 1.0, 0.0), Triple(1.0, -1.0, 0.0), Triple(1.0, 1.0, 0.0), Triple(0.0, 0.0, 1.0), Triple(0.0, 0.0, -1.0))
+        val oldSwing = cases.maxOf { (l, r, y) -> swing(bandY(jittered(l, r, y), false), bandY(s.lock, false)) }
+        val newSwing = cases.maxOf { (l, r, y) -> swing(bandY(jittered(l, r, y), true), bandY(s.lock, true)) }
+        println("good-length mark moves: width-based ${if (oldSwing == Double.MAX_VALUE) "gave up" else "%.1f px".format(oldSwing)}, gravity %.1f px".format(newSwing))
+        assertTrue("gravity solve moved $newSwing px", newSwing < 2.0)
+        assertTrue("it must be steadier than the width solve ($oldSwing px)", newSwing < oldSwing / 3)
+    }
+
+    @Test
+    fun `half a degree of tilt error keeps the bands within a few pixels`() {
+        for (err in listOf(-0.5, 0.5)) {
+            val s = twoWicketScene(1.2, tiltErr = Math.toRadians(err))
+            val g = PitchGround.fromTwoWicketsAndTilt(s.lock, CameraIntrinsics(focalFw, "test"), w, h, s.near, s.tilt)!!
+            for (along in listOf(3.0, 6.0, 9.0)) {
+                val truth = s.cam.project(s.farX + s.ux * along, s.farY + s.uy * along)
+                val got = g.project(along, 0.0)!!
+                println("tilt err $err° along $along: off %.1f px".format(hypot(got.first - truth.first, got.second - truth.second)))
+                assertTrue("err $err along $along: got $got truth $truth", PitchGround.near(got, truth, 6.0))
+            }
+        }
+    }
+
+    @Test
+    fun `a lens that cannot draw the far set its measured width is refused`() {
+        val s = twoWicketScene(1.2)
+        assertNull(PitchGround.fromTwoWicketsAndTilt(s.lock, CameraIntrinsics(focalFw * 0.5, "wrong"), w, h, s.near, s.tilt))
+        // best() still finds a ground, from the two sets' sizes or the width solve.
+        assertNotNull(PitchGround.best(s.lock, CameraIntrinsics(focalFw, "test"), w, h, s.tilt, s.near))
+    }
 }

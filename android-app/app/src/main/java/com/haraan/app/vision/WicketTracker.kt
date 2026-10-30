@@ -1180,6 +1180,35 @@ class WicketTracker {
         note = "hand-placed"
     }
 
+    /**
+     * SET UP ONCE, THEN HELD — Setup's Done, when the detector already sees the stumps in the box.
+     *
+     * Setup used to keep such a lock as the detector's, and a detected lock lets go after
+     * [MAX_COAST_MS] unseen: the batter taking guard in front of the stumps for a few seconds
+     * dropped it, the screen went back to "Detecting stumps…" and the next ball had nothing to
+     * be measured against — the best setups failed first. Pinned, it is held exactly as a
+     * hand-placed lock is (carried on camera motion, nudged when the stumps show again, never
+     * dropped for being hidden), at the detector's own reading: stump centres already, so not
+     * through [lockManually]'s edge-to-centre step. Returns false when nothing is held.
+     */
+    @Synchronized
+    fun pinCurrent(): Boolean {
+        anchor ?: return false
+        if (source == WicketLockSource.MANUAL) return true
+        source = WicketLockSource.MANUAL
+        state = WicketTrackState.CONFIRMED
+        if (firstReadyMs == null) firstReadyMs = lastFrameMs
+        streak = CONFIRM_FRAMES
+        coastFrames = 0
+        ageFrames = 0
+        heldFrames = maxOf(heldFrames, 1)
+        blindFrames = 0
+        hypotheses.clear()
+        memory = null
+        note = "set up: held where the detector saw it"
+        return true
+    }
+
     /** Give the wicket back to the detector. */
     @Synchronized
     fun clearManualLock() {

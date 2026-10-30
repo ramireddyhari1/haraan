@@ -84,27 +84,57 @@ class TrackingScoreboardTest {
             if (only != null && clip.id !in only) continue
             val frames = indexOf(File(dir, clip.raw + ".idx"), clip)
             val nativeFps = 1000.0 / ((frames.last().second - frames.first().second) / (frames.size - 1).coerceAtLeast(1))
-            for (rate in listOf(120, 60, 30)) {
+            // BENCH_RATES=30 (comma list) to run only some rates; BENCH_NOLIVE to skip the live section.
+            val rates = System.getenv("BENCH_RATES")?.split(',')?.map { it.trim().toInt() } ?: listOf(120, 60, 30)
+            for (rate in rates) {
                 val step = maxOf(1, (nativeFps / rate).roundToInt())
                 if (rate != 120 && step == 1) continue
                 rows += run(File(dir, clip.raw), clip, frames, step, "${(nativeFps / step).roundToInt()} fps")
             }
         }
-        val cold = ArrayList<ColdRow>()
+        /*
+         * THE LIVE SCREEN, AS IT RUNS. Same clips at thirty a second, but the way the camera
+         * screen does it: stumps only until the ball is armed (the scorer's BALL), the ball
+         * tracker started cold at that moment, finer detail, and no fresh tracker after a call.
+         * Against the 30 fps rows above, that is the gap between live and replay.
+         */
+        val live = ArrayList<Row>()
         for (clip in clips) {
             if (only != null && clip.id !in only) continue
+            if (clip.deliveries.none { it.releaseFrame != null }) continue
+            val frames = indexOf(File(dir, clip.raw + ".idx"), clip)
+            val nativeFps = 1000.0 / ((frames.last().second - frames.first().second) / (frames.size - 1).coerceAtLeast(1))
+            val step = maxOf(1, (nativeFps / 30).roundToInt())
+            for (mode in if (System.getenv("BENCH_NOLIVE") != null) emptyList() else LIVE_MODES) {
+                live += run(File(dir, clip.raw), clip, frames, step, "${(nativeFps / step).roundToInt()} fps ${mode.label}", mode)
+            }
+        }
+        val cold = ArrayList<ColdRow>()
+        // A quick look at some rates (BENCH_RATES) skips the slow cold-start and batter sections.
+        val quick = System.getenv("BENCH_RATES") != null
+        for (clip in clips) {
+            if (quick || (only != null && clip.id !in only)) continue
             val frames = indexOf(File(dir, clip.raw + ".idx"), clip)
             cold += ColdRow(clip.id, coldStart(File(dir, clip.raw), frames, predictFar = false), coldStart(File(dir, clip.raw), frames, predictFar = true))
         }
         val hidden = ArrayList<HiddenRow>()
         for (clip in clips) {
             if (only != null && clip.id !in only) continue
-            if (clip.deliveries.none { it.releaseFrame != null } || clip.quiet == null) continue
+            if (quick || clip.deliveries.none { it.releaseFrame != null } || clip.quiet == null) continue
             val frames = indexOf(File(dir, clip.raw + ".idx"), clip)
             for (seconds in listOf(0, 8, 15, 30)) hidden += batterInFront(File(dir, clip.raw), clip, frames, seconds)
         }
-        report(rows, cold, hidden)
+        report(rows + live, cold, hidden)
     }
+
+    /** How the live screen arms and runs the ball tracker; see the live section in [scoreboard]. */
+    private class LiveMode(
+        val label: String,
+        /** The ball armed this long before release (the scorer's BALL). */
+        val armLeadMs: Long,
+        val detail: Double,
+        val resetAfterCall: Boolean,
+    )
 
     private class HiddenRow(val clip: String, val seconds: Int, val stateAfter: String, val steadyKept: Boolean, val shown: Boolean, val kmh: Double?)
 
@@ -221,14 +251,25 @@ class TrackingScoreboardTest {
     }
 
     /** One clip through the chain, every [step]-th frame, scored against its truth. */
-    private fun run(raw: File, clip: Clip, frames: List<Frame>, step: Int, rate: String): List<Row> {
+    private fun run(raw: File, clip: Clip, frames: List<Frame>, step: Int, rate: String, live: LiveMode? = null): List<Row> {
         val sw = ClipFrames.SENSOR_W
         val sh = ClipFrames.SENSOR_H
         val y = ByteArray(sw * sh)
         val u = ByteArray(sw / 2 * (sh / 2))
         val frameBytes = (y.size + u.size).toLong()
         val f = RandomAccessFile(raw, "r")
-        val chain = DeliveryChain(log = if (System.getenv("BENCH_LOG") != null) { line -> println("[${clip.id} $rate] $line") } else { _ -> })
+        val chain = DeliveryChain(
+            log = if (System.getenv("BENCH_LOG") != null) { line -> println("[${clip.id} $rate] $line") } else { _ -> },
+            ballDetail = live?.detail ?: 1.0,
+            resetAfterCall = live?.resetAfterCall ?: true,
+        )
+        // BENCH_DEBUG: every candidate and track the ball tracker holds, frame by frame.
+        if (System.getenv("BENCH_DEBUG") != null) chain.ballDebug = { line -> println("[${clip.id} $rate] ball $line") }
+        // Live: the ball is armed this long before the first release; before it, stumps only.
+        val armMs = live?.let { mode ->
+            clip.deliveries.firstNotNullOfOrNull { it.releaseFrame }?.let { r -> frames.first { it.first == r }.second - mode.armLeadMs }
+        }
+        var armed = armMs == null
         fun read(at: Int) {
             f.seek(at * frameBytes)
             f.readFully(y)
@@ -246,8 +287,21 @@ class TrackingScoreboardTest {
             }
             for (k in frames.indices step step) {
                 read(frames[k].line)
+                if (!armed) {
+                    if (frames[k].second < armMs!!) {
+                        chain.warm(y, u, frames[k].second.toLong())
+                        continue
+                    }
+                    chain.rearm()
+                    armed = true
+                }
                 analysed += frames[k].first
-                called += chain.frame(y, u, frames[k].second.toLong())
+                // Without a reset the flight held is called again every frame: keep one per flight.
+                for (d in chain.frame(y, u, frames[k].second.toLong())) {
+                    val start = d.track.first().timestampMs
+                    val same = called.indexOfFirst { it.track.first().timestampMs == start }
+                    if (same < 0) called += d else if (d.track.size >= called[same].track.size) called[same] = d
+                }
                 if (System.getenv("BENCH_FRAMES") != null) {
                     val l = chain.currentLock
                     val c = chain.currentCorridor
@@ -363,7 +417,7 @@ class TrackingScoreboardTest {
         sb.appendLine()
         sb.appendLine("| rate | deliveries shown | ball recall (mean) | median err px | median abs speed err % | false calls shown |")
         sb.appendLine("|---|---|---|---|---|---|")
-        for ((rate, rs) in rows.groupBy { it.rate.split(' ').first().toInt().let { f -> if (f > 90) "120" else if (f > 45) "60" else "30" } }) {
+        for ((rate, rs) in rows.groupBy { r -> if ("live" in r.rate) "30 live" else r.rate.split(' ').first().toInt().let { f -> if (f > 90) "120" else if (f > 45) "60" else "30" } }) {
             val recalls = rs.mapNotNull { it.recall }
             val px = rs.mapNotNull { it.medianPx }.sorted()
             val speed = rs.mapNotNull { it.speedErrPct?.let(::abs) }.sorted()
@@ -461,6 +515,12 @@ class TrackingScoreboardTest {
     }
 
     private companion object {
+        val LIVE_MODES = listOf(
+            LiveMode("live: armed 2 s before", 2_000, 1.5, false),
+            LiveMode("live: armed 0.5 s before", 500, 1.5, false),
+            LiveMode("live: armed 2 s, detail 1", 2_000, 1.0, false),
+            LiveMode("live: armed 2 s, reset after call", 2_000, 1.5, true),
+        )
         const val WARM_UP_MAX_FRAMES = 150
         /** Release to the batter's stumps: the pitch less the bowler's stride past the crease. */
         const val RELEASE_TO_STUMPS_M = 18.5

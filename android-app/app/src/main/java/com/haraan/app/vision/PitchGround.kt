@@ -203,6 +203,14 @@ class PitchGround private constructor(
         return g
     }
 
+    /**
+     * How far down this ground's pitch a point in the picture lies — the bowler's stumps'
+     * base, say — in metres, or null when it is not on the ground in front of the camera.
+     * Equal to 20.12 when the ground was solved from both sets; whatever this ground makes of
+     * it otherwise.
+     */
+    fun lengthTo(px: Pair<Double, Double>): Double? = aimedRaw(px)?.second
+
     /** This ground with its height marked as measured (by the pitch's length). */
     private fun copyMeasured() = PitchGround(
         fPx = fPx, cx = cx, cy = cy, cameraHeightM = cameraHeightM, pitchRad = pitchRad, rollRad = rollRad,
@@ -443,6 +451,80 @@ class PitchGround private constructor(
         private const val MIN_SOLVED_HEIGHT_M = 0.15
         private const val MAX_SOLVED_HEIGHT_M = 4.0
 
+        /**
+         * BOTH SETS OF STUMPS AND GRAVITY: THE FEET ALONE, NO WIDTHS.
+         *
+         * [fromTwoWickets] gets the camera's downward tilt from how wide the far set looks —
+         * two to four pixels at 20 m, so a pixel of detector jitter swung the tilt, and every
+         * band on the ground swam with it. With the phone's attitude read from gravity the
+         * tilt is known to a fraction of a degree, so only the two FEET are needed: each one's
+         * ray is dropped onto a ground one metre below the lens, and since everything scales
+         * with the height, the height is the Laws' 20.12 m over how far apart they land. The
+         * feet are hundreds of pixels apart, so a pixel of jitter is a fraction of a percent.
+         *
+         * The far set's width is still used, but only as a check on the lens: a camera that
+         * puts it more than [LENS_CHECK_TOLERANCE] off what it measures is the wrong lens (a
+         * cropped or re-encoded clip), and the caller falls back to the width-based solve,
+         * which can recover the lens from the two sets' sizes.
+         */
+        fun fromTwoWicketsAndTilt(
+            lock: WicketLock,
+            camera: CameraIntrinsics,
+            widthPx: Int,
+            heightPx: Int,
+            bowlersEnd: BowlersEnd,
+            tilt: DeviceTilt.Reading,
+        ): PitchGround? {
+            if (lock.kind != WicketKind.STUMPS || widthPx <= 0 || heightPx <= 0) return null
+            val f = camera.focalFw * widthPx
+            val cx = widthPx / 2.0
+            val cy = heightPx / 2.0
+            val cr = cos(-tilt.rollRad)
+            val sr = sin(-tilt.rollRad)
+            val cp = cos(tilt.pitchRad)
+            val sp = sin(tilt.pitchRad)
+            /** A pixel, roll taken out, dropped onto the ground 1 m below the lens. */
+            fun ground(p: Point2): DoubleArray? {
+                val x = p.x * widthPx - cx
+                val y = p.y * heightPx - cy
+                val xN = (x * cr - y * sr) / f
+                val yN = (x * sr + y * cr) / f
+                val dz = -(yN * cp + sp)
+                if (dz >= -1e-6) return null
+                val t = 1.0 / -dz
+                return doubleArrayOf(t * xN, t * (cp - yN * sp))
+            }
+            val far = ground(lock.anchor.base) ?: return null
+            val near = ground(bowlersEnd.base) ?: return null
+            val apart = hypot(near[0] - far[0], near[1] - far[1])
+            if (apart < 1e-6) return null
+            val h = PitchGeometry.STUMPS_TO_STUMPS_M / apart
+            if (h < MIN_MEASURED_HEIGHT_M || h > MAX_MEASURED_HEIGHT_M) return null
+            val sX = h * far[0]
+            val sY = h * far[1]
+            val dist = hypot(sX, sY)
+            if (dist < 0.3) return null
+            val g = PitchGround(
+                fPx = f, cx = cx, cy = cy, cameraHeightM = h, pitchRad = tilt.pitchRad, rollRad = tilt.rollRad,
+                stumpsX = sX, stumpsY = sY,
+                towardX = (near[0] - far[0]) / apart, towardY = (near[1] - far[1]) / apart,
+                stumpsDistanceM = dist, heightMeasured = true, upFromGravity = true,
+            )
+            // The lens check: the far set, projected through this camera, against what it measures.
+            val half = PitchGeometry.STUMP_CENTRES_SPAN_M / 2.0
+            val a = g.project(0.0, -half) ?: return null
+            val b = g.project(0.0, half) ?: return null
+            val drawnPx = hypot(b.first - a.first, b.second - a.second)
+            val l = lock.anchor.baseLeft
+            val r = lock.anchor.baseRight
+            val seenPx = hypot((r.x - l.x) * widthPx, (r.y - l.y) * heightPx)
+            if (seenPx <= 0.0 || abs(drawnPx / seenPx - 1.0) > LENS_CHECK_TOLERANCE) return null
+            return g
+        }
+
+        /** How far the far set's drawn width may be from its measured width before the lens is doubted. */
+        private const val LENS_CHECK_TOLERANCE = 0.4
+
         /*
          * The answer changes only when the stumps or the phone do, and it is asked for on every
          * drawn frame by the guide, by the stumps drawn at both ends, by the corridor and by the
@@ -452,9 +534,14 @@ class PitchGround private constructor(
          */
         private data class BestKey(val parts: List<Long>)
 
-        private val bestCache = Any()
-        private var bestKey: BestKey? = null
-        private var bestValue: PitchGround? = null
+        /*
+         * A few answers, not one: the guide (drawn from the steadied stumps), the corridor and
+         * the 3D fit ask with different locks, and a single slot thrashed between them.
+         */
+        private val bestCache = object : LinkedHashMap<BestKey, PitchGround?>(8, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<BestKey, PitchGround?>?) = size > BEST_CACHE_SIZE
+        }
+        private const val BEST_CACHE_SIZE = 4
 
         private fun keyOf(
             lock: WicketLock,
@@ -483,17 +570,15 @@ class PitchGround private constructor(
             camera: CameraIntrinsics,
             widthPx: Int,
             heightPx: Int,
-            tilt: DeviceTilt.Reading? = DeviceTilt.steady(),
+            // Held through a moment's shake: see DeviceTilt.held.
+            tilt: DeviceTilt.Reading? = DeviceTilt.held(),
             /** The bowler's-end stumps, when they are in view. */
             bowlersEnd: BowlersEnd? = null,
         ): PitchGround? {
             val key = keyOf(lock, camera, widthPx, heightPx, tilt, bowlersEnd)
-            synchronized(bestCache) { if (key == bestKey) return bestValue }
+            synchronized(bestCache) { if (bestCache.containsKey(key)) return bestCache[key] }
             val value = solveBest(lock, camera, widthPx, heightPx, tilt, bowlersEnd)
-            synchronized(bestCache) {
-                bestKey = key
-                bestValue = value
-            }
+            synchronized(bestCache) { bestCache[key] = value }
             return value
         }
 
@@ -505,6 +590,10 @@ class PitchGround private constructor(
             tilt: DeviceTilt.Reading?,
             bowlersEnd: BowlersEnd?,
         ): PitchGround? {
+            // The pitch's own length with gravity's tilt beats everything: no width in it at all.
+            if (bowlersEnd != null && tilt != null) {
+                fromTwoWicketsAndTilt(lock, camera, widthPx, heightPx, bowlersEnd, tilt)?.let { return it }
+            }
             // The pitch's own length beats both gravity and a guess, when it can be seen.
             bowlersEnd?.let { fromTwoWickets(lock, camera, widthPx, heightPx, it) }?.let { return it }
             val g = tilt?.let { fromWicketAndTilt(lock, camera, widthPx, heightPx, it) }

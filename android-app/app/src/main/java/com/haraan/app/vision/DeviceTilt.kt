@@ -56,13 +56,39 @@ object DeviceTilt {
     }
 
     /** Forget everything — the screen closed, the next reading starts fresh. */
-    fun clear() = synchronized(lock) { samples = 0; wobble = Double.MAX_VALUE }
+    fun clear() = synchronized(lock) { samples = 0; wobble = Double.MAX_VALUE; lastSteady = null }
 
     /** The attitude, or null unless the phone has been still and upright long enough to trust. */
     fun steady(nowMs: Long = System.currentTimeMillis()): Reading? = synchronized(lock) {
         if (samples < MIN_SAMPLES || nowMs - lastMs > STALE_MS || wobble > MAX_WOBBLE) return null
-        reading(sx, sy, sz)
+        reading(sx, sy, sz)?.also {
+            lastSteady = it
+            lastSteadyMs = nowMs
+        }
     }
+
+    /**
+     * THE LAST STEADY ATTITUDE, HELD THROUGH A MOMENT'S SHAKE.
+     *
+     * [steady] goes null the instant the wobble crosses its limit — a tap on the screen, a
+     * gust on the stand — and the ground then fell back from gravity to the assumed camera
+     * height and back again, so every band on the pitch jumped a metre and returned. The last
+     * steady reading is kept for [HOLD_MS] while the phone still points within [HOLD_DEG] of
+     * where it did; a phone that has really been turned is let go at once.
+     */
+    fun held(nowMs: Long = System.currentTimeMillis()): Reading? {
+        steady(nowMs)?.let { return it }
+        return synchronized(lock) {
+            val h = lastSteady ?: return@synchronized null
+            if (nowMs - lastSteadyMs > HOLD_MS || samples == 0 || nowMs - lastMs > STALE_MS) return@synchronized null
+            val now = reading(sx, sy, sz) ?: return@synchronized null
+            val off = Math.toDegrees(maxOf(abs(now.pitchRad - h.pitchRad), abs(now.rollRad - h.rollRad)))
+            if (off > HOLD_DEG) null else h
+        }
+    }
+
+    private var lastSteady: Reading? = null
+    private var lastSteadyMs = 0L
 
     /** The attitude a gravity vector means, or null when the phone is not near upright. */
     fun reading(gx: Double, gy: Double, gz: Double): Reading? {
@@ -80,4 +106,6 @@ object DeviceTilt {
     private const val MAX_WOBBLE = 0.06
     private const val MIN_SAMPLES = 15
     private const val STALE_MS = 1_500L
+    private const val HOLD_MS = 8_000L
+    private const val HOLD_DEG = 1.5
 }

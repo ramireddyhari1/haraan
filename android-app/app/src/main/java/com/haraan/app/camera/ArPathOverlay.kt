@@ -367,7 +367,7 @@ internal fun LivePathOverlay(
         launch {
             when (path.hitting) {
                 true -> cricketThud(context, Thud.WICKET)
-                false -> cricketThud(context, Thud.TICK)
+                false -> cricketThud(context, Thud.MISS)
                 null -> Unit
             }
         }

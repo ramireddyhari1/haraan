@@ -22,6 +22,8 @@ object FlightTrim {
         val half = run.subList(0, run.size / 2)
         val across = half.last().x - half.first().x
         val speeds = ArrayList<Double>()
+        // Sideways only, frame widths per ms: see the veer test below.
+        val sideways = ArrayList<Double>()
         var lowest = run.first().y
         /*
          * AT THE STUMPS THE DELIVERY IS OVER. Once the ball has come down to the batter's
@@ -54,7 +56,18 @@ object FlightTrim {
                 val tooFast = speed > recent * MAX_SPEEDUP + SPEED_SLACK_PER_MS
                 val turnedBack = abs(across) > TURN_MIN_ACROSS && (q.x - p.x) * across < 0 && abs(q.x - p.x) > TURN_MIN_STEP
                 val roseTooFar = lowest - q.y > MAX_RISE
-                if (tooFast || turnedBack || roseTooFar) return run.subList(0, i)
+                /*
+                 * A FAR BALL DOES NOT LEAP SIDEWAYS. At 30 fps (net01, 2026-10-30) ten clean
+                 * points came down to the stumps, then after 100 ms the track jumped 0.043 across
+                 * and back up — the batter — slower overall than [MAX_SPEEDUP] allows and no
+                 * higher than a bounce may rise, so it stayed, and the fit refused the whole
+                 * delivery. Its sideways speed was five times the ball's own. A turn off the
+                 * pitch bends the way across by degrees, never a leap of [SIDE_JUMP] in a step.
+                 */
+                val dx = abs(q.x - p.x).toDouble()
+                val recentSide = sideways.takeLast(RECENT).sorted()[RECENT / 2]
+                val veered = dx > SIDE_JUMP && dx / dt > recentSide * SIDE_SPEEDUP
+                if (tooFast || turnedBack || roseTooFar || veered) return run.subList(0, i)
             }
             if (stumps != null) {
                 /*
@@ -75,6 +88,7 @@ object FlightTrim {
                 if (abs(q.x - stumps.x) <= NEAR_STUMPS_ACROSS && abs(q.y - stumps.y) <= NEAR_STUMPS_DOWN) reachedStumps = true
             }
             speeds += speed
+            sideways += abs(q.x - p.x) / dt
             if (q.y > lowest) lowest = q.y
         }
         return run
@@ -103,6 +117,10 @@ object FlightTrim {
     /** After arriving, this far off to a side, or this far up the picture, is not the ball. */
     private const val AWAY_FROM_STUMPS_ACROSS = 0.09
     private const val AWAY_FROM_STUMPS_UP = 0.08
+
+    /** A late step this far across (frame widths), at this many times the ball's sideways speed, is not the ball. */
+    private const val SIDE_JUMP = 0.03
+    private const val SIDE_SPEEDUP = 3.0
 
     /** Anywhere in the flight, a gap this many times the track's usual spacing (and at least this long) ends it. */
     private const val MAX_GAP_SPACINGS = 12L

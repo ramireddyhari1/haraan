@@ -297,7 +297,7 @@ private fun FlightReplayContent(
             delay(playMs.toLong())
             when (hits) {
                 true -> cricketThud(context, Thud.WICKET)
-                false -> cricketThud(context, Thud.TICK)
+                false -> cricketThud(context, Thud.MISS)
                 null -> Unit
             }
         }

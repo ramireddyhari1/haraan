@@ -20,6 +20,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -218,165 +220,37 @@ fun DrawScope.drawWicketLock(
         drawWicketLock(bowlerLock, box, density, guideReveal = 0f)
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // 2. GROUND ANCHORS & AMBIENT CONTACT SHADOWS (REPLACES CLUNKY CYAN BAR)
-    // ─────────────────────────────────────────────────────────────────────────
-    val stumpWidth = (span * 0.11f).coerceIn(with(density) { 4.dp.toPx() }, with(density) { 13.dp.toPx() })
-    val stumpBases = listOf(left, mid, right)
-    val stumpTops = stumpBases.map { b ->
-        Offset(b.x + upX * stumpHeight, b.y + upY * stumpHeight)
-    }
-
-    // Realistic ambient contact shadows under the stump bases
-    stumpBases.forEach { basePt ->
-        drawOval(
-            color = Color.Black.copy(alpha = 0.50f * alpha),
-            topLeft = Offset(basePt.x - stumpWidth * 0.85f, basePt.y - stumpWidth * 0.35f),
-            size = androidx.compose.ui.geometry.Size(stumpWidth * 1.7f, stumpWidth * 0.7f),
-        )
-    }
-
-    // Subtle optical lock indicator: fine brackets at the base ends
-    val bracketColor = Color.White.copy(alpha = 0.70f * alpha)
-    val bracketStroke = with(density) { 1.2.dp.toPx() }
-    val bracketLen = stumpWidth * 0.9f
-    // Left bracket [
-    drawLine(bracketColor, Offset(left.x - perpX * bracketLen, left.y - perpY * bracketLen), left, bracketStroke)
-    drawLine(bracketColor, left, Offset(left.x + upX * bracketLen, left.y + upY * bracketLen), bracketStroke)
-    // Right bracket ]
-    drawLine(bracketColor, Offset(right.x + perpX * bracketLen, right.y + perpY * bracketLen), right, bracketStroke)
-    drawLine(bracketColor, right, Offset(right.x + upX * bracketLen, right.y + upY * bracketLen), bracketStroke)
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // 3. TURNED ENGLISH WILLOW STUMPS WITH BRASS FERRULE GROUND SPIKES
-    // ─────────────────────────────────────────────────────────────────────────
-    stumpBases.forEachIndexed { idx, basePt ->
-        val topPt = stumpTops[idx]
-
-        // 3D cylindrical lighting gradient across the stump width
-        val gradStart = Offset(basePt.x - perpX * stumpWidth * 0.5f, basePt.y - perpY * stumpWidth * 0.5f)
-        val gradEnd = Offset(basePt.x + perpX * stumpWidth * 0.5f, basePt.y + perpY * stumpWidth * 0.5f)
-        val willowGradient = Brush.linearGradient(
-            colorStops = arrayOf(
-                0.00f to Color(0xFF3B1E08).copy(alpha = alpha), // Deep wood shadow edge
-                0.15f to Color(0xFF6B3A11).copy(alpha = alpha), // Warm timber shadow
-                0.36f to Color(0xFFFBF4EB).copy(alpha = alpha), // Specular varnish sheen
-                0.54f to Color(0xFFD99B4B).copy(alpha = alpha), // Warm golden English willow
-                0.78f to Color(0xFFA56625).copy(alpha = alpha), // Amber heartwood
-                1.00f to Color(0xFF45220A).copy(alpha = alpha), // Rim shadow edge
-            ),
-            start = gradStart,
-            end = gradEnd,
-        )
-
-        // Spike transition point (bottom 12% of stump is brass ferrule spike)
-        val ferruleH = stumpHeight * 0.12f
-        val ferruleTopPt = Offset(basePt.x + upX * ferruleH, basePt.y + upY * ferruleH)
-
-        // Wooden shaft from ferrule to top
-        drawLine(
-            brush = willowGradient,
-            start = ferruleTopPt,
-            end = topPt,
-            strokeWidth = stumpWidth,
-            cap = StrokeCap.Butt,
-        )
-
-        // Brass ferrule ground spike (golden metallic taper)
-        val brassGradient = Brush.linearGradient(
-            colorStops = arrayOf(
-                0.00f to Color(0xFF5C4700).copy(alpha = alpha),
-                0.25f to Color(0xFFD4AF37).copy(alpha = alpha),
-                0.50f to Color(0xFFFFF8DC).copy(alpha = alpha),
-                0.75f to Color(0xFFD4AF37).copy(alpha = alpha),
-                1.00f to Color(0xFF705800).copy(alpha = alpha),
-            ),
-            start = gradStart,
-            end = gradEnd,
-        )
-
-        // Draw ferrule spike as tapered path to ground
-        val ferrulePath = Path().apply {
-            moveTo(ferruleTopPt.x - perpX * stumpWidth * 0.48f, ferruleTopPt.y - perpY * stumpWidth * 0.48f)
-            lineTo(ferruleTopPt.x + perpX * stumpWidth * 0.48f, ferruleTopPt.y + perpY * stumpWidth * 0.48f)
-            lineTo(basePt.x + perpX * stumpWidth * 0.15f, basePt.y + perpY * stumpWidth * 0.15f)
-            lineTo(basePt.x - perpX * stumpWidth * 0.15f, basePt.y - perpY * stumpWidth * 0.15f)
-            close()
+    /*
+     * THE REAL STUMPS, FRAMED — NOT PAINTED OVER.
+     *
+     * This drew a set of "turned English willow" stumps with brass ferrules, varnish sheen,
+     * contact shadows and two-piece bails over the camera's own picture of the stumps — at both
+     * ends. The real stumps are right there; a costume drawn on top of them is what made the
+     * screen read as generated. Four hairline corners now frame the stumps the phone has
+     * locked: they say "these" and leave the wood as the camera sees it.
+     */
+    val pad = (span * 0.18f).coerceAtLeast(with(density) { 3.dp.toPx() })
+    val corner = (span * 0.32f).coerceIn(with(density) { 5.dp.toPx() }, with(density) { 14.dp.toPx() })
+    val stroke = with(density) { 1.3.dp.toPx() }
+    val ink = Color.White.copy(alpha = 0.85f * alpha)
+    val under = Color.Black.copy(alpha = 0.35f * alpha)
+    // Feet, pushed out a little; tops at the stumps' height above them.
+    val bl = Offset(left.x - perpX * pad, left.y - perpY * pad)
+    val br = Offset(right.x + perpX * pad, right.y + perpY * pad)
+    val lift = stumpHeight + pad
+    val tl = Offset(bl.x + upX * lift, bl.y + upY * lift)
+    val tr = Offset(br.x + upX * lift, br.y + upY * lift)
+    /** One corner at [at]: an arm [corner] long along each of [a] and [b]. */
+    fun cornerAt(at: Offset, ax: Float, ay: Float, bx: Float, by: Float) {
+        for ((colour, width) in listOf(under to stroke * 2.4f, ink to stroke)) {
+            drawLine(colour, at, Offset(at.x + ax * corner, at.y + ay * corner), width, StrokeCap.Round)
+            drawLine(colour, at, Offset(at.x + bx * corner, at.y + by * corner), width, StrokeCap.Round)
         }
-        drawPath(ferrulePath, brassGradient)
-
-        // Turned brass ferrule ring
-        drawLine(
-            color = Color(0xFFFFE082).copy(alpha = alpha),
-            start = Offset(ferruleTopPt.x - perpX * stumpWidth * 0.52f, ferruleTopPt.y - perpY * stumpWidth * 0.52f),
-            end = Offset(ferruleTopPt.x + perpX * stumpWidth * 0.52f, ferruleTopPt.y + perpY * stumpWidth * 0.52f),
-            strokeWidth = with(density) { 1.5.dp.toPx() },
-            cap = StrokeCap.Round,
-        )
-
-        // Turned neck groove near top
-        val neckPt = Offset(topPt.x - upX * stumpWidth * 0.7f, topPt.y - upY * stumpWidth * 0.7f)
-        val neckStart = Offset(neckPt.x - perpX * stumpWidth * 0.45f, neckPt.y - perpY * stumpWidth * 0.45f)
-        val neckEnd = Offset(neckPt.x + perpX * stumpWidth * 0.45f, neckPt.y + perpY * stumpWidth * 0.45f)
-        drawLine(
-            color = Color(0xFF2E1505).copy(alpha = 0.85f * alpha),
-            start = neckStart,
-            end = neckEnd,
-            strokeWidth = with(density) { 1.2.dp.toPx() },
-            cap = StrokeCap.Round,
-        )
-
-        // Domed top cap with bail groove
-        drawCircle(
-            color = Color(0xFFFDE68A).copy(alpha = alpha),
-            radius = stumpWidth * 0.48f,
-            center = topPt,
-        )
-        drawCircle(
-            color = Color(0xFF8B5A2B).copy(alpha = alpha * 0.7f),
-            radius = stumpWidth * 0.22f,
-            center = topPt,
-        )
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // 4. HANDCRAFTED TWO-PIECE BAILS (Off-Bail & Leg-Bail with Turned Barrels)
-    // ─────────────────────────────────────────────────────────────────────────
-    val bailSpigotWidth = stumpWidth * 0.45f
-    val bailBarrelWidth = stumpWidth * 0.72f
-    val bailLift = Offset(upX * stumpWidth * 0.45f, upY * stumpWidth * 0.45f)
-
-    val bailWoodBrush = Brush.linearGradient(
-        colorStops = arrayOf(
-            0.0f to Color(0xFFFFF7ED).copy(alpha = alpha),
-            0.4f to Color(0xFFE0A94F).copy(alpha = alpha),
-            1.0f to Color(0xFF5A3010).copy(alpha = alpha),
-        ),
-        start = stumpTops[0],
-        end = stumpTops[2],
-    )
-
-    // Bail 1 (Left to Middle)
-    val b1Start = stumpTops[0] + bailLift - Offset(perpX * stumpWidth * 0.15f, perpY * stumpWidth * 0.15f)
-    val b1End = stumpTops[1] + bailLift + Offset(perpX * stumpWidth * 0.05f, perpY * stumpWidth * 0.05f)
-    val b1Mid = Offset((b1Start.x + b1End.x) / 2f, (b1Start.y + b1End.y) / 2f)
-    // Spigot line
-    drawLine(bailWoodBrush, b1Start, b1End, strokeWidth = bailSpigotWidth, cap = StrokeCap.Round)
-    // Turned central barrel
-    val b1BarrelStart = Offset(b1Mid.x - perpX * span * 0.12f, b1Mid.y - perpY * span * 0.12f)
-    val b1BarrelEnd = Offset(b1Mid.x + perpX * span * 0.12f, b1Mid.y + perpY * span * 0.12f)
-    drawLine(bailWoodBrush, b1BarrelStart, b1BarrelEnd, strokeWidth = bailBarrelWidth, cap = StrokeCap.Round)
-
-    // Bail 2 (Middle to Right)
-    val b2Start = stumpTops[1] + bailLift - Offset(perpX * stumpWidth * 0.05f, perpY * stumpWidth * 0.05f)
-    val b2End = stumpTops[2] + bailLift + Offset(perpX * stumpWidth * 0.15f, perpY * stumpWidth * 0.15f)
-    val b2Mid = Offset((b2Start.x + b2End.x) / 2f, (b2Start.y + b2End.y) / 2f)
-    // Spigot line
-    drawLine(bailWoodBrush, b2Start, b2End, strokeWidth = bailSpigotWidth, cap = StrokeCap.Round)
-    // Turned central barrel
-    val b2BarrelStart = Offset(b2Mid.x - perpX * span * 0.12f, b2Mid.y - perpY * span * 0.12f)
-    val b2BarrelEnd = Offset(b2Mid.x + perpX * span * 0.12f, b2Mid.y + perpY * span * 0.12f)
-    drawLine(bailWoodBrush, b2BarrelStart, b2BarrelEnd, strokeWidth = bailBarrelWidth, cap = StrokeCap.Round)
+    cornerAt(bl, perpX, perpY, upX, upY)
+    cornerAt(br, -perpX, -perpY, upX, upY)
+    cornerAt(tl, perpX, perpY, -upX, -upY)
+    cornerAt(tr, -perpX, -perpY, -upX, -upY)
 }
 
 /**
@@ -909,6 +783,11 @@ private class LengthBand(val label: String, val fromM: Double, val toM: Double, 
 /** Band names are stretched this many times along the pitch, road-marking style. */
 private const val LABEL_STRETCH = 3.0
 
+private const val GOOD_LENGTH = "GOOD LENGTH"
+
+/** The one tint on the guide: the good length. Grass-safe, not a glow. */
+private val GOOD_TINT = Color(0xFF22C55E)
+
 private val LENGTH_BANDS = listOf(
     LengthBand("YORKER", 0.0, 1.0, Color(0xFFF43F5E)),
     LengthBand("FULL", 1.0, 3.0, Color(0xFFF59E0B)),
@@ -961,6 +840,21 @@ private fun DrawScope.drawLengthGuide(
     if (visible <= 0.3) return
     val laid = visible * reveal.coerceIn(0f, 1f)
 
+    /*
+     * THE LINES RUN ALL THE WAY TO THE BOWLER'S STUMPS. The bands end at 14 m (SHORT), and
+     * the pitch's edges and the stumps line used to end with them — so the last six metres,
+     * round the bowler's stumps, had no marking at all, and the bowler's set stood on bare
+     * ground with no creases beside it. With that set in view, the edges and the stumps line
+     * are laid the whole length to it, and its creases are painted as the batter's are.
+     */
+    val bowlerAt = bowlersEnd?.let { ground.lengthTo(it.base.x * fw to it.base.y * fh) }
+    val pitchLen = bowlerAt ?: visible
+    // Their feet above the controls: laid exactly to them (visibleTo works in quarter metres
+    // and stopped just short, so the bowler's creases were never painted).
+    val bowlerSeen = bowlerAt != null && ground.project(bowlerAt, 0.0)?.let { it.second <= limitFrameY } == true
+    val laidFull = (if (bowlerSeen) pitchLen else minOf(ground.visibleTo(limitFrameY, pitchLen), pitchLen))
+        .coerceAtLeast(visible) * reveal.coerceIn(0f, 1f)
+
     val halfW = PitchGeometry.RETURN_CREASE_HALF_WIDTH_M
     val stumpHalf = PitchGeometry.STUMP_SET_WIDTH_M / 2.0
     val hairline = with(density) { 0.6.dp.toPx() }
@@ -1007,53 +901,52 @@ private fun DrawScope.drawLengthGuide(
         }
     }
 
-    // ── The bands: a glow off each band's leading edge, fading across it ──────────────
-    // A flat tint over a busy floor (tiles, worn grass) mixes into mud; light that falls
-    // off from the edge reads as a lit surface and leaves the ground itself visible.
+    /*
+     * THE BANDS FADE INTO THE GROUND TOWARDS THE CAMERA. They used to stop as a hard-edged
+     * slab — the nearest band the biggest, brightest thing in the picture, which is what made
+     * the guide look stuck on rather than painted on. The bands alone are drawn into a layer
+     * and faded over their nearest stretch, so the far end, where the ball pitches, carries
+     * the colour; the chalk lines and creases stay full strength to the bowler's stumps.
+     */
+    val fadeFrom = at(laid * GUIDE_FADE_START, 0.0)
+    val fadeTo = at(laid, 0.0)
+    val faded = fadeFrom != null && fadeTo != null && fadeTo.y - fadeFrom.y > 4f
+    if (faded) drawContext.canvas.saveLayer(Rect(Offset.Zero, size), androidx.compose.ui.graphics.Paint())
+
+    /*
+     * THE LENGTHS AS A GROUNDSMAN WOULD MARK THEM. Five colours, each a glow fading off its
+     * edge, read as a rainbow laid on the pitch — generated, not marked. Now: a chalk line at
+     * each length the app names, and one flat tint on the good length, the band a bowler aims
+     * for. Nothing glows.
+     */
+    LENGTH_BANDS.firstOrNull { it.label == GOOD_LENGTH }?.takeIf { it.fromM < laid }?.let { good ->
+        patch(good.fromM, minOf(good.toM, laid), -halfW, halfW)?.let { drawPath(it, GOOD_TINT.copy(alpha = 0.16f * alpha)) }
+    }
     for (band in LENGTH_BANDS) {
         if (band.fromM >= laid) break
-        val to = minOf(band.toM, laid)
-        val path = patch(band.fromM, to, -halfW, halfW) ?: continue
-        val from = at(band.fromM, 0.0) ?: continue
-        val end = at(to, 0.0) ?: continue
-        drawPath(
-            path,
-            Brush.linearGradient(
-                colorStops = arrayOf(
-                    0.00f to band.colour.copy(alpha = 0.30f * alpha),
-                    0.45f to band.colour.copy(alpha = 0.10f * alpha),
-                    1.00f to band.colour.copy(alpha = 0.03f * alpha),
-                ),
-                start = from,
-                end = end,
+        if (band.fromM > 0.0) paintAcross(band.fromM, -halfW, halfW, 0.035, Color.White.copy(alpha = 0.78f * alpha))
+    }
+    if (faded) {
+        drawRect(
+            Brush.verticalGradient(
+                0f to Color.Black,
+                1f to Color.Black.copy(alpha = GUIDE_FADE_END),
+                startY = fadeFrom!!.y,
+                endY = fadeTo!!.y,
             ),
+            blendMode = BlendMode.DstIn,
         )
-        if (band.fromM > 0.0) paintAcross(band.fromM, -halfW, halfW, 0.04, band.colour.copy(alpha = 0.95f * alpha))
+        drawContext.canvas.restore()
     }
 
     // ── The pitch's edges ───────────────────────────────────────────────────────────
-    for (side in listOf(-halfW, halfW)) paintAlong(side, 0.0, laid, 0.03, Color.White.copy(alpha = 0.55f * alpha))
+    for (side in listOf(-halfW, halfW)) paintAlong(side, 0.0, laidFull, 0.03, Color.White.copy(alpha = 0.55f * alpha))
 
     // ── The stumps line: the wicket's width, straight down the pitch ─────────────────
     // What an LBW is judged against, so it is the one thing drawn over everything else.
-    patch(0.0, laid, -stumpHalf, stumpHalf)?.let { path ->
-        val from = at(0.0, 0.0)
-        val end = at(laid, 0.0)
-        if (from != null && end != null) {
-            drawPath(
-                path,
-                Brush.linearGradient(
-                    colorStops = arrayOf(
-                        0f to Color(0xFF7DD3FC).copy(alpha = 0.34f * alpha),
-                        1f to Color(0xFF7DD3FC).copy(alpha = 0.16f * alpha),
-                    ),
-                    start = from,
-                    end = end,
-                ),
-            )
-        }
-    }
-    for (side in listOf(-stumpHalf, stumpHalf)) paintAlong(side, 0.0, laid, 0.025, Color(0xFFE0F2FE).copy(alpha = 0.95f * alpha))
+    // A flat wash with hairline edges: a gradient glow down it read as a light beam, not paint.
+    patch(0.0, laidFull, -stumpHalf, stumpHalf)?.let { drawPath(it, Color.White.copy(alpha = 0.12f * alpha)) }
+    for (side in listOf(-stumpHalf, stumpHalf)) paintAlong(side, 0.0, laidFull, 0.02, Color.White.copy(alpha = 0.70f * alpha))
 
     // ── The creases, at the Laws' widths ──────────────────────────────────────────────
     val chalk = Color.White.copy(alpha = 0.95f * alpha)
@@ -1063,6 +956,14 @@ private fun DrawScope.drawLengthGuide(
         for (side in listOf(-halfW, halfW)) {
             paintAlong(side, 0.0, PitchGeometry.POPPING_CREASE_AHEAD_M, 0.05, chalk)
         }
+    }
+    // The bowler's end, once the lines have been laid to it: its bowling crease through the
+    // stumps, the popping crease in front, and a return crease each side of the stumps.
+    if (bowlerAt != null && laidFull >= bowlerAt - 0.01) {
+        val popping = bowlerAt - PitchGeometry.POPPING_CREASE_AHEAD_M
+        paintAcross(bowlerAt, -halfW, halfW, 0.05, chalk)
+        paintAcross(popping, -1.83, 1.83, 0.05, chalk)
+        for (side in listOf(-halfW, halfW)) paintAlong(side, popping, bowlerAt, 0.05, chalk)
     }
 
     // ── The names, painted on the pitch ───────────────────────────────────────────────
@@ -1081,8 +982,9 @@ private fun DrawScope.drawLengthGuide(
         this.typeface = typeface ?: Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
         textSize = 120f
         letterSpacing = 0.04f
-        color = android.graphics.Color.argb((235 * alpha).toInt(), 255, 255, 255)
-        setShadowLayer(6f, 0f, 3f, android.graphics.Color.argb((140 * alpha).toInt(), 0, 0, 0))
+        // Paint on a pitch, not a sticker on the screen: part-see-through, a slight shadow.
+        color = android.graphics.Color.argb((165 * alpha).toInt(), 255, 255, 255)
+        setShadowLayer(3f, 0f, 1.5f, android.graphics.Color.argb((90 * alpha).toInt(), 0, 0, 0))
     }
     val metrics = textPaint.fontMetrics
     val textH = metrics.descent - metrics.ascent
@@ -1090,20 +992,14 @@ private fun DrawScope.drawLengthGuide(
     val right = halfW - 0.10
     val roomAcross = right - left
     /*
-     * Bands too far down the pitch to carry painted words — from a camera at chest height
-     * 15 m back, YORKER, FULL and GOOD LENGTH together are a strip a few pixels deep — are
-     * named beside the pitch instead, flat and readable. They used to be left out, and the
-     * guide then showed coloured lines nobody could name.
+     * A band too far down the pitch to carry painted words — from a camera at chest height 15 m
+     * back, YORKER, FULL and GOOD LENGTH together are a strip a few pixels deep — keeps only its
+     * chalk line and the metres at its end ([drawMetreMarks]).
      */
-    val flat = ArrayList<Pair<LengthBand, Double>>()
     for (band in LENGTH_BANDS) {
-        val seenMid = (band.fromM + minOf(band.toM, laid)) / 2
         if (band.fromM >= laid) break
-        if (band.toM > laid + 0.01) {
-            // Not all of it is in view: no room to paint the word, but it can be named.
-            flat.add(band to seenMid)
-            continue
-        }
+        // Not all of it in view: no room to paint the word.
+        if (band.toM > laid + 0.01) continue
         val textW = textPaint.measureText(band.label)
         val aspect = textW / textH
         val across = minOf(roomAcross, 1.0)
@@ -1117,15 +1013,12 @@ private fun DrawScope.drawLengthGuide(
         val tr = at(a0, w1) ?: continue
         val br = at(a1, w1) ?: continue
         val bl = at(a1, w0) ?: continue
-        // Past the controls: leave it out. Too small to read as paint: name it flat instead.
+        // Past the controls: leave it out.
         if (bl.y > safeBottomY) continue
         // Too small to read as paint, or running off the side of the screen (a wicket right
-        // of centre put YORKER half off the edge): name it flat beside the pitch instead.
+        // of centre put YORKER half off the edge): the line and its metres are enough.
         val offSide = minOf(tl.x, bl.x) < 0f || maxOf(tr.x, br.x) > size.width
-        if (bl.y - tl.y < with(density) { 8.dp.toPx() } || offSide) {
-            flat.add(band to (band.fromM + band.toM) / 2)
-            continue
-        }
+        if (bl.y - tl.y < with(density) { 8.dp.toPx() } || offSide) continue
         val m = android.graphics.Matrix()
         val ok = m.setPolyToPoly(
             floatArrayOf(0f, 0f, textW, 0f, textW, textH, 0f, textH), 0,
@@ -1138,62 +1031,55 @@ private fun DrawScope.drawLengthGuide(
         canvas.drawText(band.label, 0f, -metrics.ascent, textPaint)
         canvas.restore()
     }
-    drawFlatBandLabels(flat, ::at, halfW, density, alpha, safeBottomY, typeface)
+    drawMetreMarks(::at, halfW, laid, density, alpha, safeBottomY)
 }
 
+/** The guide fades from this share of its laid length towards the camera… */
+private const val GUIDE_FADE_START = 0.55
+/** …down to this much of its strength at the near end. */
+private const val GUIDE_FADE_END = 0.18f
+
 /**
- * Band names as plain labels beside the pitch's edge, at each band's depth: a dot in the
- * band's colour and the name in white. Nearest band first, because it has the most room;
- * a label that would overlap the one before it is dropped rather than stacked.
+ * THE METRES, AT EACH CHALK LINE. Band names floated beside the pitch with a coloured dot each
+ * — a legend, the look of a generated chart. What a line on a pitch means is how far it is
+ * from the stumps, so that is what is written at its end, small, right of the pitch (left
+ * when there is no room). Nearest first; one that would overlap the last is left out.
  */
-private fun DrawScope.drawFlatBandLabels(
-    bands: List<Pair<LengthBand, Double>>,
+private fun DrawScope.drawMetreMarks(
     at: (Double, Double) -> Offset?,
     halfW: Double,
+    laid: Double,
     density: Density,
     alpha: Float,
     safeBottomY: Float,
-    typeface: Typeface?,
 ) {
-    if (bands.isEmpty()) return
     val canvas = drawContext.canvas.nativeCanvas
     val paint = Paint().apply {
         isAntiAlias = true
-        this.typeface = typeface ?: Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-        textSize = with(density) { 10.5.sp.toPx() }
-        letterSpacing = 0.06f
-        color = android.graphics.Color.argb((240 * alpha).toInt(), 255, 255, 255)
-        setShadowLayer(with(density) { 2.dp.toPx() }, 0f, 1f, android.graphics.Color.argb((200 * alpha).toInt(), 0, 0, 0))
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        textSize = with(density) { 10.sp.toPx() }
+        color = android.graphics.Color.argb((215 * alpha).toInt(), 255, 255, 255)
+        setShadowLayer(with(density) { 1.5.dp.toPx() }, 0f, 1f, android.graphics.Color.argb((170 * alpha).toInt(), 0, 0, 0))
     }
     val fm = paint.fontMetrics
     val textH = fm.descent - fm.ascent
+    val pad = with(density) { 6.dp.toPx() }
     val gap = with(density) { 2.dp.toPx() }
-    val pad = with(density) { 7.dp.toPx() }
-    val dotR = with(density) { 3.dp.toPx() }
     var lastTop = Float.MAX_VALUE
-    // Nearest the camera first: the largest bands, lowest on the screen.
-    for ((band, alongM) in bands.sortedByDescending { it.second }) {
-        val edge = at(alongM, halfW) ?: continue
-        val y = edge.y
-        if (y > safeBottomY) continue
-        val top = y - textH / 2
+    for (m in LENGTH_BANDS.map { it.fromM }.filter { it > 0.0 && it < laid }.sortedDescending()) {
+        val edge = at(m, halfW) ?: continue
+        if (edge.y > safeBottomY) continue
+        val top = edge.y - textH / 2
         if (top + textH + gap > lastTop) continue
-        val textW = paint.measureText(band.label)
-        // Right of the pitch, unless that runs off the screen: then left of it.
-        val rightX = edge.x + pad
-        val x: Float
-        val dotX: Float
-        if (rightX + dotR * 3 + textW < size.width - pad) {
-            dotX = rightX + dotR
-            x = rightX + dotR * 3
+        val label = "${m.toInt()} m"
+        val w = paint.measureText(label)
+        val x = if (edge.x + pad + w < size.width - pad) {
+            edge.x + pad
         } else {
-            val leftEdge = at(alongM, -halfW) ?: continue
-            x = leftEdge.x - pad - textW
-            dotX = x + textW + dotR * 2
-            if (x < pad) continue
+            val other = at(m, -halfW) ?: continue
+            (other.x - pad - w).takeIf { it >= pad } ?: continue
         }
-        drawCircle(band.colour.copy(alpha = alpha), dotR, Offset(dotX, y))
-        canvas.drawText(band.label, x, y - (fm.ascent + fm.descent) / 2, paint)
+        canvas.drawText(label, x, edge.y - (fm.ascent + fm.descent) / 2, paint)
         lastTop = top
     }
 }

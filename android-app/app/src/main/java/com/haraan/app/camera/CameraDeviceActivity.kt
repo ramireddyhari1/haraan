@@ -28,6 +28,22 @@ class CameraDeviceActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         val code = pairingCodeFrom(intent?.data?.toString())
+        /*
+         * Debug builds: `haraan://camera/TEST?video=net.mp4` feeds a filmed delivery from the
+         * app's files folder to the live analyser instead of the lens. A bare file name only.
+         */
+        val videoFeed = if (com.haraan.app.BuildConfig.DEBUG) {
+            intent?.data?.getQueryParameter("video")
+                ?.takeIf { it.isNotBlank() && !it.contains('/') && !it.contains("..") }
+                ?.let { java.io.File(getExternalFilesDir(null), it) }
+                ?.takeIf { it.isFile }
+                ?.absolutePath
+        } else {
+            null
+        }
+
+        // Debug builds: `?quality=highest` (or 1080p30 …) for the field-test session.
+        val testQuality = if (com.haraan.app.BuildConfig.DEBUG) intent?.data?.getQueryParameter("quality") else null
 
         setContent {
             ThannaTheme {
@@ -39,6 +55,8 @@ class CameraDeviceActivity : ComponentActivity() {
                     },
                     requestCameraPermission = { onResult -> permissionCallback = onResult; askForCamera() },
                     onExit = { finish() },
+                    videoFeed = videoFeed,
+                    testQuality = testQuality,
                 )
             }
         }

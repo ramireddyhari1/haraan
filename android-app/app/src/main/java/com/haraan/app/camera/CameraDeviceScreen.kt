@@ -66,7 +66,9 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.withFrameMillis
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -152,6 +154,10 @@ fun CameraDeviceScreen(
     hasCameraPermission: () -> Boolean,
     requestCameraPermission: ((Boolean) -> Unit) -> Unit,
     onExit: () -> Unit,
+    /** Debug builds: a video file filmed elsewhere, fed to the live analyser in place of the lens. See [VideoCameraFeed]. */
+    videoFeed: String? = null,
+    /** Debug builds: the field-test session's recording quality, as /control would set it. */
+    testQuality: String? = null,
 ) {
     val repo = remember { CameraDeviceRepository() }
     val scope = rememberCoroutineScope()
@@ -173,6 +179,7 @@ fun CameraDeviceScreen(
                 matchId = "debug_match",
                 matchTitle = "Live Camera · Field Test",
                 venue = "Cricket Ground",
+                videoQuality = com.haraan.app.data.videoQualityOf(testQuality),
             )
             return@LaunchedEffect
         }
@@ -198,6 +205,7 @@ fun CameraDeviceScreen(
             joined != null -> CameraMode(
                 session = joined,
                 repo = repo,
+                videoFeed = videoFeed,
                 hasCameraPermission = hasCameraPermission,
                 requestCameraPermission = requestCameraPermission,
                 onDropped = {
@@ -656,6 +664,7 @@ private fun JoinScene(
 private fun CameraMode(
     session: CameraSession,
     repo: CameraDeviceRepository,
+    videoFeed: String?,
     hasCameraPermission: () -> Boolean,
     requestCameraPermission: ((Boolean) -> Unit) -> Unit,
     onDropped: () -> Unit,
@@ -968,6 +977,8 @@ private fun CameraMode(
     val bowlersEndFilter = remember { com.haraan.app.vision.BowlersEndFilter() }
     // The stumps steadied over many frames, for measuring the flight: see SteadyWicket.
     val steadyWicket = remember { com.haraan.app.vision.SteadyWicket() }
+    // Its value as of the last frame, for drawing on the UI thread: see drawingLock.
+    var steadyDrawLock by remember { mutableStateOf<com.haraan.app.vision.WicketLock?>(null) }
     // The batter's stumps looked for where the bowler's say: see FarWicketSearch.
     val farWicketSearch = remember { com.haraan.app.vision.FarWicketSearch() }
     // The corridor the live tracker was last given, for tracking the saved clip the same way.
@@ -992,7 +1003,8 @@ private fun CameraMode(
     val deviceRoll by rememberDeviceRoll(enabled = showAdminPanel)
     /** Holds the shutter fast while filming; see [ShutterControl]. */
     val shutter = remember { ShutterControl() }
-    rememberDeviceTiltFeed()
+    // The phone's own gravity says nothing about footage another camera took.
+    if (videoFeed == null) rememberDeviceTiltFeed()
 
     /** The wicket placed by hand, two taps at the base of the outer stumps. */
     var wicketTapping by remember { mutableStateOf(false) }
@@ -1056,6 +1068,16 @@ private fun CameraMode(
      * metrics have already been taken.
      */
     var calledFlight by remember { mutableStateOf<List<com.haraan.app.vision.BallSighting>?>(null) }
+    /*
+     * THE BALL IS READ BEFORE IT IS SHOWN. When a flight is called the result is held back for
+     * [RESULT_AFTER_MS] while "Reading the ball…" shows on the live picture: the tracker keeps
+     * looking (a later, longer track replaces a false start), and in Auto the saved clip is
+     * tracked again at its full rate. Then the replay plays with whatever is best by then.
+     * [analysingSince] is when the reading started (uptime ms), null when nothing is being read.
+     */
+    var analysingSince by remember { mutableStateOf<Long?>(null) }
+    // The saved clip's own track of this ball, when its re-analysis landed while it was read.
+    var refinedTrack by remember { mutableStateOf<List<com.haraan.app.vision.BallSighting>?>(null) }
 
     /*
      * The 3D replay of the last ball. Opens on its own when a ball is called and a 3D
@@ -1084,6 +1106,9 @@ private fun CameraMode(
     // Fulltrack-style setup: line both sets of stumps up in boxes. Opens by itself on the
     // behind-the-bowler camera, where the stumps are the whole calibration.
     var setupAligning by remember { mutableStateOf(session.role == com.haraan.app.data.MatchDeviceRole.LBW_REVIEW) }
+    // The phone's tilt when Setup was done, for telling a knocked tripod from a batter in the way.
+    var setupTilt by remember { mutableStateOf<com.haraan.app.vision.DeviceTilt.Reading?>(null) }
+    var setupNote by remember { mutableStateOf<String?>(null) }
     var showAr by remember { mutableStateOf(false) }
     var replayClip by remember { mutableStateOf<ReplayClip?>(null) }
     var showVideo by remember { mutableStateOf(false) }
@@ -1217,8 +1242,10 @@ private fun CameraMode(
                     // While a ball is being filmed, a small upright copy of each frame looked
                     // at, for the replay straight after it.
                     if (trackingLive) {
-                        runCatching { image.toBitmap() }.getOrNull()
-                            ?.let { replayFrames.add(stampMs.toDouble(), it, image.imageInfo.rotationDegrees) }
+                        // A video frame comes upright already; the ring recycles what it is given.
+                        val filmed = image as? VideoFeedFrame
+                        runCatching { filmed?.picture?.copy(android.graphics.Bitmap.Config.ARGB_8888, false) ?: image.toBitmap() }.getOrNull()
+                            ?.let { replayFrames.add(stampMs.toDouble(), it, if (filmed != null) 0 else image.imageInfo.rotationDegrees) }
                     }
                     val turn = ((image.imageInfo.rotationDegrees % 360) + 360) % 360
                     val sideways = turn == 90 || turn == 270
@@ -1230,8 +1257,12 @@ private fun CameraMode(
                     }
                     if (uprightWidthPx != frameW) {
                         uprightWidthPx = frameW
-                        cameraIntrinsics = lens?.intrinsics(image.width, image.height, sideways)
-                            ?: com.haraan.app.vision.CameraIntrinsics.assumed(70.0, uprightAspect)
+                        cameraIntrinsics = if (image is VideoFeedFrame) {
+                            VideoCameraFeed.INTRINSICS
+                        } else {
+                            lens?.intrinsics(image.width, image.height, sideways)
+                                ?: com.haraan.app.vision.CameraIntrinsics.assumed(70.0, uprightAspect)
+                        }
                     }
 
                     /*
@@ -1439,6 +1470,7 @@ private fun CameraMode(
                                 cameraMove, uprightAspect, frameMs,
                             )
                             steadyWicket.add(wicketLock, frameMs, nearNow)
+                            steadyDrawLock = steadyWicket.value()
                         }
                         // From behind the bowler, look only along the delivery's corridor and
                         // expect the ball to head for the batter's stumps. See setCorridor.
@@ -1603,6 +1635,7 @@ private fun CameraMode(
                                     timestampMs = frameClockMs,
                                 )
                                 steadyWicket.add(wicketLock, frameClockMs, nearNow)
+                                steadyDrawLock = steadyWicket.value()
                             }
                             val now = System.currentTimeMillis()
                             if (now < validationUntilMs) {
@@ -1796,6 +1829,19 @@ private fun CameraMode(
                     }
                 },
             )
+            /*
+             * A VIDEO IN PLACE OF THE LENS (debug): the camera stays bound — the shutter still
+             * records, so the clip flow runs — but its frames are dropped and the video's are
+             * analysed instead, and shown over the viewfinder.
+             */
+            val feed = remember(videoFeed) { videoFeed?.let { VideoCameraFeed(it, analyzer, analysisExecutor) } }
+            if (feed != null) {
+                androidx.compose.runtime.DisposableEffect(feed) {
+                    feed.start()
+                    onDispose { feed.stop() }
+                }
+                VideoFeedPicture(feed)
+            }
             // Bound here rather than in the view's factory, so a new quality from /control
             // rebinds the same view instead of needing a new screen.
             LaunchedEffect(previewView, videoQuality) {
@@ -1805,7 +1851,7 @@ private fun CameraMode(
                     target,
                     lifecycleOwner,
                     analysisExecutor,
-                    analyzer,
+                    if (feed != null) ImageAnalysis.Analyzer { it.close() } else analyzer,
                     videoQuality,
                     shutter,
                 ) { capture, analysis, fps ->
@@ -1815,14 +1861,11 @@ private fun CameraMode(
                 }
             }
         } else {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    "Camera access is needed to film the match.",
-                    color = Ink,
-                    fontSize = 15.sp,
-                    modifier = Modifier.padding(32.dp),
-                )
-            }
+            CameraAccessNeeded(
+                hasCameraPermission = hasCameraPermission,
+                requestCameraPermission = requestCameraPermission,
+                onGranted = { granted = true },
+            )
         }
 
         // Status, top: which role this phone is playing and whether the match still
@@ -2119,7 +2162,7 @@ private fun CameraMode(
         }
         if (granted) {
             Canvas(Modifier.fillMaxSize()) {
-                val lock = wicketLock ?: return@Canvas
+                val lock = drawingLock(wicketLock ?: return@Canvas, steadyDrawLock)
                 val frameW = uprightWidthPx
                 drawWicketLock(
                     lock = lock,
@@ -2531,7 +2574,10 @@ private fun CameraMode(
                     .padding(top = 62.dp, start = 14.dp, end = 14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                if (recording) {
+                val reading = analysingSince
+                if (reading != null) {
+                    ReadingBallChip(reading)
+                } else if (recording) {
                     RecTimecode(recording = true, fps = recordingFps)
                 } else {
                     // Two words for the player. Everything else is in the developer readout.
@@ -2930,13 +2976,22 @@ private fun CameraMode(
                 deliveryFlash++
                 view.performHapticFeedback(Feel.TICK)
             }
-            showFlight(flight, true)
             if (autoSegment && recording) {
-                // A beat after the ball for the clip, then the segment closes and is kept.
-                delay(AUTO_TAIL_MS)
-                activeRecording?.stop()
-                activeRecording = null
+                // A beat after the ball for the clip, then the segment closes and is kept —
+                // alongside the reading, so its full-rate re-analysis can land inside it.
+                launch {
+                    delay(AUTO_TAIL_MS)
+                    activeRecording?.stop()
+                    activeRecording = null
+                }
             }
+            // A newer, longer flight replacing this one restarts the reading (the effect is keyed on it).
+            analysingSince = android.os.SystemClock.uptimeMillis()
+            delay(RESULT_AFTER_MS)
+            analysingSince = null
+            // The saved clip's track when it saw more of the ball, else what the live tracker held.
+            val best = refinedTrack?.takeIf { it.size > flight.size } ?: flight
+            showFlight(best, true)
         }
 
         /*
@@ -2981,6 +3036,8 @@ private fun CameraMode(
             lastBounce = null
             lastMetrics = null
             calledFlight = null
+            analysingSince = null
+            refinedTrack = null
             showReplay = false
             showAr = false
             showVideo = false
@@ -3032,7 +3089,8 @@ private fun CameraMode(
                      * are on screen. Worked out here only when it never was — a ball the
                      * tracker lost early, or a hot phone that paused tracking.
                      */
-                    if (lastMetrics == null) showFlight(calledFlight ?: vision.track(), true)
+                    // Not while the ball is being read: the reading shows it when it is done.
+                    if (lastMetrics == null && analysingSince == null) showFlight(calledFlight ?: vision.track(), true)
                     // The window closed. Nobody pressed stop, so this is the only way to
                     // know it is shut and the next delivery can be armed.
                     view.performHapticFeedback(Feel.TICK)
@@ -3056,7 +3114,8 @@ private fun CameraMode(
                     }.isSuccess
                     val pathForClip = arPath
                         ?: com.haraan.app.vision.ArPath.fromTrack(vision.track(), uprightAspect, wicketLock, lastMetrics?.lbw)
-                    if (copied && !pathForClip.isEmpty) {
+                    // With a video standing in for the lens the recording is of whatever the phone faces.
+                    if (copied && !pathForClip.isEmpty && videoFeed == null) {
                         replayClip = ReplayClip(replayFile, clipStartSensorMs, pathForClip)
                     }
                     /*
@@ -3071,7 +3130,7 @@ private fun CameraMode(
                      */
                     val live = calledFlight ?: vision.track()
                     val startMs = clipStartSensorMs
-                    if (copied && startMs != null && live.size >= com.haraan.app.vision.FlightEnd.MIN_FLIGHT_POINTS) {
+                    if (videoFeed == null && copied && startMs != null && live.size >= com.haraan.app.vision.FlightEnd.MIN_FLIGHT_POINTS) {
                         val generation = clipGeneration
                         val corridorNow = corridorRef.get()
                         val lockNow = steadyWicket.value() ?: wicketLock
@@ -3098,6 +3157,11 @@ private fun CameraMode(
                             if (refined == null || generation != clipGeneration || recording) return@launch
                             if (refined.track.size <= live.size) return@launch
                             refinedFps = refined.fps
+                            // Still being read: handed to the reading, which shows it.
+                            if (analysingSince != null) {
+                                refinedTrack = refined.track
+                                return@launch
+                            }
                             showFlight(refined.track, false)
                             arPath?.takeIf { !it.isEmpty }?.let { replayClip = ReplayClip(replayFile, startMs, it) }
                         }
@@ -3211,6 +3275,7 @@ private fun CameraMode(
             recording && trackedPoints > 0 -> "Ball seen in $trackedPoints frames$trackWord"
             recording -> "Filming this ball"
             uploadError != null -> uploadError!!
+            setupNote != null -> setupNote!!
             // The shown flight was tracked again from the saved clip at its full rate.
             refinedFps != null && live -> "Ball tracked from the %.0f fps clip".format(refinedFps)
             // Said out loud rather than left to a small coloured dot. Somebody holding
@@ -3306,8 +3371,10 @@ private fun CameraMode(
                     /*
                      * Both sets known at once: the detector's reading where it has one inside
                      * the box, the box itself where it has not — the person put them there.
+                     * Either way the batter's stumps are HELD from here, as Fulltrack's
+                     * calibration is: a batter standing in front of them no longer loses them.
                      */
-                    if (!farFound) {
+                    if (!farFound || !wicketTracker.pinCurrent()) {
                         wicketTracker.lockManually(
                             baseLeft = guide.far.baseLeft,
                             baseRight = guide.far.baseRight,
@@ -3315,9 +3382,11 @@ private fun CameraMode(
                             kind = com.haraan.app.vision.WicketKind.STUMPS,
                             frameAspect = uprightAspect,
                         )
-                        wicketLock = wicketTracker.lock()
-                        wicketDiagnostics = wicketTracker.diagnostics()
                     }
+                    wicketLock = wicketTracker.lock()
+                    wicketDiagnostics = wicketTracker.diagnostics()
+                    setupTilt = com.haraan.app.vision.DeviceTilt.steady()
+                    setupNote = null
                     if (!nearFound) {
                         val k = com.haraan.app.vision.PitchGeometry.STUMP_CENTRES_SPAN_M / com.haraan.app.vision.PitchGeometry.STUMP_SET_WIDTH_M
                         bowlersEndBase = com.haraan.app.vision.BowlersEnd(
@@ -3331,6 +3400,17 @@ private fun CameraMode(
                 onCancel = { setupAligning = false },
             )
         }
+        SetupMovedWatch(setupTilt) {
+            // Only a lock Setup (or a hand) placed is let go: the detector's own keeps re-deciding.
+            if (wicketTracker.diagnostics().lockSource == com.haraan.app.vision.WicketLockSource.MANUAL) {
+                wicketTracker.clearManualLock()
+                wicketLock = wicketTracker.lock()
+                wicketDiagnostics = wicketTracker.diagnostics()
+            }
+            setupTilt = null
+            setupNote = "The phone moved since Setup · tap Setup again"
+            scope.launch { com.haraan.app.ui.matches.cricketThud(ctx, com.haraan.app.ui.matches.Thud.UNDO) }
+        }
         val result = liveResult
         if (result != null && liveSequence == null) {
             LiveResultOverlay(
@@ -3338,6 +3418,7 @@ private fun CameraMode(
                 uprightAspect = uprightAspect,
                 speedKmh = result.speedKmh,
                 onReplay = { liveSequence = result }.takeIf { result.frames.size >= 2 || result.flight != null },
+                flight = result.flight,
             )
         }
         liveSequence?.let { seq ->
@@ -3394,6 +3475,92 @@ internal class LiveReplay(
     /** Which ball: its first sighting on the camera's clock. */
     val ballMs: Long = 0L,
 )
+
+/**
+ * NO CAMERA YET, AND A WAY TO GET ONE. The screen used to say only that access was needed, with
+ * nothing to tap: a camera person who answered the system prompt "Don't allow" (or whose
+ * "Only this time" ran out) was stuck. A tap asks again; once Android stops showing the prompt
+ * it opens this app's settings, and coming back re-checks.
+ */
+@Composable
+private fun CameraAccessNeeded(
+    hasCameraPermission: () -> Boolean,
+    requestCameraPermission: ((Boolean) -> Unit) -> Unit,
+    onGranted: () -> Unit,
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var refused by remember { mutableStateOf(false) }
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME && hasCameraPermission()) onGranted()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    Column(
+        Modifier.fillMaxSize().padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            "Camera access is needed to film the match.",
+            color = Ink,
+            fontSize = 15.sp,
+            textAlign = TextAlign.Center,
+        )
+        if (refused) {
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "It's turned off for Haraan. Allow Camera in settings, then come back.",
+                color = Ink.copy(alpha = 0.6f),
+                fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+            )
+        }
+        Spacer(Modifier.height(18.dp))
+        PrimaryButton(if (refused) "Open settings" else "Allow camera", enabled = true) {
+            if (refused) {
+                runCatching {
+                    context.startActivity(
+                        android.content.Intent(
+                            android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            android.net.Uri.fromParts("package", context.packageName, null),
+                        ),
+                    )
+                }
+            } else {
+                requestCameraPermission { ok -> if (ok) onGranted() else refused = true }
+            }
+        }
+    }
+}
+
+/**
+ * THE TRIPOD WAS KNOCKED. After Setup the stumps are held even when nobody can see them, so the
+ * one thing that must undo it is the phone itself moving: its tilt, from gravity, settling more
+ * than [SETUP_MOVED_DEG] from where Setup left it. Small bumps are followed by the camera-motion
+ * carry; a re-aimed phone is not, and calls [onMoved] once. No reading (no sensor, or a video
+ * standing in for the lens) never calls it.
+ */
+@Composable
+private fun SetupMovedWatch(setupTilt: com.haraan.app.vision.DeviceTilt.Reading?, onMoved: () -> Unit) {
+    LaunchedEffect(setupTilt) {
+        val at = setupTilt ?: return@LaunchedEffect
+        val limit = Math.toRadians(SETUP_MOVED_DEG)
+        while (true) {
+            kotlinx.coroutines.delay(500)
+            val now = com.haraan.app.vision.DeviceTilt.steady() ?: continue
+            if (kotlin.math.abs(now.pitchRad - at.pitchRad) > limit || kotlin.math.abs(now.rollRad - at.rollRad) > limit) {
+                onMoved()
+                return@LaunchedEffect
+            }
+        }
+    }
+}
+
+/** How far the phone's tilt may settle from Setup's before the held stumps are let go. */
+private const val SETUP_MOVED_DEG = 2.0
 
 /** The one commitment on the screen: solid brand blue, and it dips under a thumb. */
 @Composable
@@ -4634,7 +4801,38 @@ private fun DeliveryDetectedFlash(trigger: Int, modifier: Modifier = Modifier) {
 private const val AUTO_TAIL_MS = 1_200L
 
 /** The result sits on the live picture this long before the replay plays itself. */
-private const val AUTO_REPLAY_AFTER_MS = 1_000L
+private const val AUTO_REPLAY_AFTER_MS = 0L
+
+/** How long a called ball is read before its result and replay are shown; see analysingSince. */
+private const val RESULT_AFTER_MS = 2_000L
+
+/**
+ * "Reading the ball…" with a bar that fills over [RESULT_AFTER_MS] from [since] (uptime ms):
+ * the person knows the result is coming, and when.
+ */
+@Composable
+private fun ReadingBallChip(since: Long) {
+    var now by remember(since) { mutableLongStateOf(android.os.SystemClock.uptimeMillis()) }
+    LaunchedEffect(since) {
+        while (now - since < RESULT_AFTER_MS) {
+            withFrameMillis { now = android.os.SystemClock.uptimeMillis() }
+        }
+    }
+    val share = ((now - since).toFloat() / RESULT_AFTER_MS).coerceIn(0f, 1f)
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(Scrim)
+            .padding(horizontal = 14.dp, vertical = 7.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("Reading the ball…", color = Ink.copy(alpha = 0.92f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Spacer(Modifier.height(5.dp))
+        Box(Modifier.width(96.dp).height(2.dp).clip(RoundedCornerShape(1.dp)).background(Ink.copy(alpha = 0.18f))) {
+            Box(Modifier.fillMaxWidth(share).fillMaxHeight().background(Color(0xFF2563EB)))
+        }
+    }
+}
 
 /** The pause before the next Auto segment starts. */
 private const val AUTO_REARM_MS = 400L
@@ -5122,8 +5320,38 @@ private fun <T> lockFrameRate(builder: androidx.camera.core.ExtendableBuilder<T>
 
 private const val TARGET_FPS = 30
 
+/** "Highest" never asks above this: what a session with preview, analysis and video can run. */
+private const val HIGHEST_MAX_FPS = 60
+
+/** "Highest" records at most this many bits a second, so a 9.5 s clip stays under 50 MB. */
+private const val HIGHEST_BITRATE = 32_000_000
+
 /** The live analyser skips frames closer together than this: ~30 a second at 60 fps. */
 private const val LIVE_MIN_FRAME_MS = 20L
+
+/**
+ * THE STUMPS AND THE GROUND ARE DRAWN FROM THE STEADIED LOCK, NOT THIS FRAME'S.
+ *
+ * The far set is a few pixels wide, and the live lock moves by one or two of them from frame
+ * to frame. The length guide is solved from it, so the whole pitch of bands swam and shook
+ * on a phone standing still. The steadied lock ([com.haraan.app.vision.SteadyWicket]: medians
+ * over the recent confirmed frames) is drawn instead, with the live lock's state, so a
+ * coasting lock still looks coasting. A hand-placed (Setup) lock never jitters and is drawn as
+ * it is; so is a live lock that has left the steady one behind — the phone was moved.
+ */
+private fun drawingLock(
+    live: com.haraan.app.vision.WicketLock,
+    steady: com.haraan.app.vision.WicketLock?,
+): com.haraan.app.vision.WicketLock {
+    if (steady == null || live.source == com.haraan.app.vision.WicketLockSource.MANUAL) return live
+    if (live.kind != steady.kind) return live
+    val span = steady.anchor.span(1f).toDouble().coerceAtLeast(1e-4)
+    val off = kotlin.math.hypot(live.anchor.base.x - steady.anchor.base.x, live.anchor.base.y - steady.anchor.base.y)
+    return if (off > span * DRAW_STEADY_MAX_SPANS) live else live.copy(anchor = steady.anchor)
+}
+
+/** How far (in the stumps' own widths) the live lock may sit from the steady one and still be drawn there. */
+private const val DRAW_STEADY_MAX_SPANS = 1.0
 
 /**
  * WHICH CAMERA THE 3D FLIGHT IS FITTED THROUGH.
@@ -5183,6 +5411,14 @@ internal fun battersEndOnly(
         val set = (s as? com.haraan.app.vision.WicketSighting.Stumps)?.set ?: return@filterNot false
         val span = set.spanX
         if (span > 0f && focal * com.haraan.app.vision.PitchGeometry.STUMP_CENTRES_SPAN_M / span < BOWLERS_END_MAX_M) {
+            return@filterNot true
+        }
+        /*
+         * ...NOR FARTHER THAN A WICKET CAN BE. Pointed at a laptop on a desk (2026-10-28, Motorola
+         * Edge 70 Pro) the comb found "stumps" in the edge of a box and the screen said READY at
+         * 44-48 m — twice any pitch. The detector reaches 40 m by design; past that it is clutter.
+         */
+        if (span > 0f && focal * com.haraan.app.vision.PitchGeometry.STUMP_CENTRES_SPAN_M / span > BATTERS_END_MAX_M) {
             return@filterNot true
         }
         val near = bowlersEnd ?: return@filterNot false
@@ -5248,6 +5484,9 @@ internal fun bowlersEndOf(
 
 /** Nearer than this, a set of stumps is the bowler's end the camera stands behind. */
 private const val BOWLERS_END_MAX_M = 4.0
+
+/** The farthest the batter's stumps can be: the comb's designed reach. See [battersEndOnly]. */
+private const val BATTERS_END_MAX_M = 40.0
 
 /** A typical phone main camera, ~39° across a portrait frame, when the lens is not known yet. */
 private const val ASSUMED_FOCAL_FW = 1.4
@@ -5501,17 +5740,25 @@ private fun bindCamera(
          */
         val resolution = if (videoQuality == "720p60") Quality.HD else Quality.FHD
         val wantFps = if (videoQuality == "1080p30") 30 else 60
+        val highest = videoQuality == com.haraan.app.data.VIDEO_QUALITY_HIGHEST
 
-        fun buildCapture(fps: Int?): VideoCapture<Recorder> {
+        fun buildCapture(fps: Int?, quality: Quality = resolution): VideoCapture<Recorder> {
             val recorder = Recorder.Builder()
                 .setQualitySelector(
-                    QualitySelector.from(
-                        resolution,
-                        // Steps down rather than up: a handset that cannot do the asked size
-                        // should film the delivery smaller, not refuse to film it.
-                        androidx.camera.video.FallbackStrategy.lowerQualityOrHigherThan(Quality.SD),
-                    ),
+                    if (highest) {
+                        // Exactly the size being tried: the search below steps down itself.
+                        QualitySelector.from(quality)
+                    } else {
+                        QualitySelector.from(
+                            quality,
+                            // Steps down rather than up: a handset that cannot do the asked size
+                            // should film the delivery smaller, not refuse to film it.
+                            androidx.camera.video.FallbackStrategy.lowerQualityOrHigherThan(Quality.SD),
+                        )
+                    },
                 )
+                // The biggest size a phone offers would overrun the 50 MB a review accepts.
+                .apply { if (highest) setTargetVideoEncodingBitRate(HIGHEST_BITRATE) }
                 .build()
             return VideoCapture.Builder(recorder)
                 .apply { if (fps != null) setTargetFrameRate(android.util.Range(fps, fps)) }
@@ -5528,8 +5775,8 @@ private fun bindCamera(
          * is only ever seen at the higher rate.
          */
         var analysis: ImageAnalysis? = null
-        fun bindWith(fps: Int?): Pair<VideoCapture<Recorder>, androidx.camera.core.Camera>? = runCatching {
-            val capture = buildCapture(fps)
+        fun bindWith(fps: Int?, quality: Quality = resolution): Pair<VideoCapture<Recorder>, androidx.camera.core.Camera>? = runCatching {
+            val capture = buildCapture(fps, quality)
             val rate = fps ?: TARGET_FPS
             val a = analysisAt(rate)
             provider.unbindAll()
@@ -5554,10 +5801,39 @@ private fun bindCamera(
          * bright sun — a third of every delivery's ball sightings gone, bigger jumps between
          * the rest, and a REC chip that said 30 regardless. A fixed 30 is asked for by name.
          */
-        val high = if (wantFps > 30) bindWith(wantFps) else null
+        /*
+         * "HIGHEST THIS PHONE CAN FILM" (/control). Every rate the back camera offers, the
+         * fastest first - no faster than the 60 an ordinary session can run beside preview and
+         * analysis - and at each, the biggest size it records, 4K down to 720p. The first pair
+         * that binds AND keeps its rate wins: frame rate before pixels, as everywhere else here.
+         */
+        var chosenSize: Quality = resolution
+        val best: Pair<Pair<VideoCapture<Recorder>, androidx.camera.core.Camera>, Int>? = if (!highest) null else run {
+            val info = runCatching { CameraSelector.DEFAULT_BACK_CAMERA.filter(provider.availableCameraInfos).firstOrNull() }.getOrNull()
+                ?: return@run null
+            val rates = (info.supportedFrameRateRanges.map { it.upper }.filter { it in 24..HIGHEST_MAX_FPS } + 30)
+                .distinct().sortedDescending()
+            val offered = runCatching {
+                Recorder.getVideoCapabilities(info).getSupportedQualities(androidx.camera.core.DynamicRange.SDR).toSet()
+            }.getOrDefault(emptySet())
+            val sizes = listOf(Quality.UHD, Quality.FHD, Quality.HD).filter { it in offered }.ifEmpty { listOf(Quality.FHD) }
+            android.util.Log.i(ANALYSIS_TAG, "highest: rates $rates, sizes offered $offered")
+            for (fps in rates) for (q in sizes) {
+                val b = bindWith(fps, q)
+                if (b != null && supports(b, fps)) {
+                    chosenSize = q
+                    return@run b to fps
+                }
+            }
+            null
+        }
+        val high = if (best == null && wantFps > 30) bindWith(wantFps) else null
         val bound: Pair<VideoCapture<Recorder>, androidx.camera.core.Camera>?
         val gotFps: Int
-        if (high != null && supports(high, wantFps)) {
+        if (best != null) {
+            bound = best.first
+            gotFps = best.second
+        } else if (high != null && supports(high, wantFps)) {
             bound = high
             gotFps = wantFps
         } else {
@@ -5573,7 +5849,8 @@ private fun bindCamera(
         if (bound != null) {
             android.util.Log.i(
                 ANALYSIS_TAG,
-                "camera bound: asked $wantFps, got $gotFps, supported " +
+                "camera bound ($videoQuality): asked ${if (highest) "highest" else wantFps}, got $gotFps fps at " +
+                    "${if (chosenSize == Quality.UHD) "4K" else if (chosenSize == Quality.HD) "720p" else "1080p"}, supported " +
                     bound.second.cameraInfo.supportedFrameRateRanges.joinToString(),
             )
             shutter.attach(bound.second)

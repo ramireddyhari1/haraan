@@ -72,6 +72,13 @@ enum class Thud {
      * knock on any phone, and the scorer's thumb learns "that was the go, not a run".
      */
     DELIVERY,
+
+    /**
+     * Ball tracking: it went PAST the stumps. A soft double brush that fades — felt clearly
+     * outdoors, where the lightest [TICK] was lost, but never a knock: the knocks mean the
+     * stumps were hit ([WICKET]).
+     */
+    MISS,
 }
 
 /** Shared with the post-match result, which buzzes through the same rules. */
@@ -123,6 +130,11 @@ suspend fun cricketThud(context: Context, kind: Thud) {
                 Thud.DELIVERY -> vibrator.vibrate(
                     VibrationEffect.createOneShot(55, VibrationEffect.DEFAULT_AMPLITUDE)
                 )
+                Thud.MISS -> {
+                    vibrator.vibrate(click)
+                    delay(85)
+                    vibrator.vibrate(light)
+                }
             }
             return
         }
@@ -139,6 +151,8 @@ suspend fun cricketThud(context: Context, kind: Thud) {
             Thud.UNDO -> longArrayOf(0, 20, 60, 20) to intArrayOf(0, 90, 0, 90)
             // A rising swell with no gaps — the run-up, felt as one gathering motion.
             Thud.DELIVERY -> longArrayOf(0, 22, 22, 22, 18) to intArrayOf(0, 50, 100, 170, 230)
+            // Firm, then half as strong: the ball brushing past rather than striking.
+            Thud.MISS -> longArrayOf(0, 28, 70, 22) to intArrayOf(0, 150, 0, 70)
         }
         vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, -1))
     } catch (e: kotlinx.coroutines.CancellationException) {

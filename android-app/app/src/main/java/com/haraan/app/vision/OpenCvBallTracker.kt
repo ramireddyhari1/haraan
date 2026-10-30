@@ -247,6 +247,8 @@ class OpenCvBallTracker(
             bodyMargin = (4 * detail).toInt()
             val gray = toGray(luma, width, height, rowStride, turn) ?: return null
             framesSeen++
+            frameGapMs = lastFrameMs?.let { timestampMs - it } ?: 0L
+            lastFrameMs = timestampMs
 
             // The phone was turned. Start the difference again from this frame rather than
             // compare two orientations, and drop the track with it: a path that jumps a
@@ -425,9 +427,20 @@ class OpenCvBallTracker(
         return (vx * tx + vy * ty) / (vn * tn) >= kotlin.math.cos(Math.toRadians(maxDeg))
     }
 
-    /** In a corridor, with a flight confirmed and followed for a while: the far end, near. */
-    private fun following(): Boolean =
-        corridor != null && (confirmedTrack?.points?.size ?: 0) >= CORRIDOR_HOLD_POINTS
+    /**
+     * In a corridor, with a flight confirmed and followed for a while: the far end, near.
+     *
+     * "A while" is TIME, not points. It was eight points — 66 ms at 120 fps, but 266 ms at the
+     * 30 fps a phone analyses live, by which time the ball was down to three pixels and the
+     * normal floors had already erased it: at 30 fps no bench delivery was ever followed past
+     * its fourth sighting (2026-10-30). A few points over [FOLLOW_MIN_MS] is the same claim
+     * at any rate.
+     */
+    private fun following(): Boolean {
+        if (corridor == null) return false
+        val pts = confirmedTrack?.points ?: return false
+        return pts.size >= FOLLOW_MIN_POINTS && pts.last().timestampMs - pts.first().timestampMs >= FOLLOW_MIN_MS
+    }
 
     /*
      * THE CORRIDOR IS A FUNNEL, NOT A BOX. The hand can be anywhere across the top of the
@@ -1160,6 +1173,10 @@ class OpenCvBallTracker(
         tentativeTracks.clear()
     }
 
+    /** The time between the last two frames looked at, and when the last one was. */
+    private var frameGapMs = 0L
+    private var lastFrameMs: Long? = null
+
     private fun handleMissOnNoCandidate(timestampMs: Long) {
         if (confirmedTrack != null) {
             missedConfirmedFrames++
@@ -1170,7 +1187,19 @@ class OpenCvBallTracker(
                 trackingState = TrackingState.LOST
             }
         }
-        tentativeTracks.clear()
+        /*
+         * A FRAME WITH NOTHING IN IT IS A MISS, NOT A RESET. In a corridor a track is forgiven
+         * a missed frame inside [CORRIDOR_TENTATIVE_GAP_MS] — but only on frames that had some
+         * other candidate; a frame with none wiped every track. At 30 fps one faint frame just
+         * after release threw the start of the flight away (bench, IMG_6053). Only at slow
+         * rates: at 120 fps an empty frame is 8 ms and the old rule is right — kept tracks
+         * there let a stray start beat the real flight (net01). Outside a corridor, as before.
+         */
+        if (corridor != null && frameGapMs >= SLOW_FRAME_GAP_MS) {
+            tentativeTracks.removeAll { timestampMs - it.lastPoint.timestampMs > CORRIDOR_TENTATIVE_GAP_MS }
+        } else {
+            tentativeTracks.clear()
+        }
     }
 
     private fun resetTrackingState() {
@@ -1296,6 +1325,8 @@ class OpenCvBallTracker(
         sightings.clear()
         resetTrackingState()
         framesSeen = 0
+        lastFrameMs = null
+        frameGapMs = 0L
         framesWithCandidate = 0
         rejectedGlobalMotion = 0
         rejectedSize = 0
@@ -1375,6 +1406,14 @@ class OpenCvBallTracker(
 
         /** A coasting corridor flight this long is not replaced by a newcomer. */
         const val CORRIDOR_HOLD_POINTS = 8
+
+        /** A confirmed corridor flight is being followed once it is this long ([following])… */
+        const val FOLLOW_MIN_MS = 60L
+        /** …and has at least this many points. */
+        const val FOLLOW_MIN_POINTS = 3
+
+        /** Frames this far apart (slower than ~40 fps) keep their tracks through an empty frame. */
+        const val SLOW_FRAME_GAP_MS = 25L
 
         /** While following a corridor flight, the raw floor's share of [MIN_AREA_PX]. */
         const val FOLLOWING_RAW_FLOOR = 0.6

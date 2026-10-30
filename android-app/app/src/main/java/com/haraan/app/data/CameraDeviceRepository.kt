@@ -25,7 +25,7 @@ data class CameraSession(
     val matchId: String,
     val matchTitle: String,
     val venue: String,
-    /** 1080p60, 1080p30 or 720p60, from /control. Known before the first frame is bound. */
+    /** 1080p60, 1080p30, 720p60 or highest, from /control. Known before the first frame is bound. */
     val videoQuality: String = DEFAULT_VIDEO_QUALITY,
     /** Hours to keep sent clips in the gallery, from /control. Null from an older server. */
     val clipKeepHours: Int? = null,
@@ -73,8 +73,11 @@ data class CameraAccess(
 /** What the camera records at when nobody has said otherwise: frame rate before pixels. */
 const val DEFAULT_VIDEO_QUALITY = "1080p60"
 
+/** The best this phone can film: its fastest rate, then its biggest size at that rate. */
+const val VIDEO_QUALITY_HIGHEST = "highest"
+
 internal fun videoQualityOf(raw: String?): String =
-    raw?.takeIf { it in setOf("1080p60", "1080p30", "720p60") } ?: DEFAULT_VIDEO_QUALITY
+    raw?.takeIf { it in setOf("1080p60", "1080p30", "720p60", VIDEO_QUALITY_HIGHEST) } ?: DEFAULT_VIDEO_QUALITY
 
 /** What the camera learns each time it checks in. */
 data class CameraHeartbeat(

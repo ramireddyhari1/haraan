@@ -356,6 +356,7 @@ private fun ResultPreview(p: Phase.Playing) {
                 uprightAspect = 9f / 16f,
                 speedKmh = d.speedKmh,
                 onReplay = { replaying = true },
+                flight = d.flight,
             )
         }
         if (replaying) {
