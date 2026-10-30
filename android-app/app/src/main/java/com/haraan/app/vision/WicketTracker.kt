@@ -1172,6 +1172,21 @@ class WicketTracker {
             ordered
         }
         anchor = WicketAnchor(l, r, top)
+        holdAsManual(kind)
+    }
+
+    /**
+     * MOVED BY HAND — the markings' Adjust. [to] is taken exactly as given: it is a lock
+     * this tracker already held (stump CENTRES), dragged, so [lockManually]'s edge-to-centre
+     * step would shrink the wicket a little on every movement of the finger.
+     */
+    fun placeManually(to: WicketAnchor, frameAspect: Float = aspect) {
+        if (frameAspect > 0f) aspect = frameAspect
+        anchor = to
+        holdAsManual(WicketKind.STUMPS)
+    }
+
+    private fun holdAsManual(kind: WicketKind) {
         this.kind = kind
         source = WicketLockSource.MANUAL
         state = WicketTrackState.CONFIRMED

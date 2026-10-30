@@ -600,6 +600,20 @@ class WicketTrackerTest {
         )
     }
 
+    /** Adjust drags a held lock: moved as given, never shrunk by the edge-to-centre step. */
+    @Test
+    fun `a lock placed by hand keeps its width however often it is moved`() {
+        val tracker = WicketTracker()
+        tracker.lockManually(Point2(0.45, 0.7), Point2(0.55, 0.7), frameAspect = aspect)
+        val before = tracker.lock()!!.anchor
+        var a = before
+        repeat(50) { a = a.map { p -> Point2(p.x + 0.001, p.y) }; tracker.placeManually(a, aspect) }
+        val after = tracker.lock()!!
+        assertEquals(before.span(aspect).toDouble(), after.anchor.span(aspect).toDouble(), 1e-9)
+        assertEquals(before.base.x + 0.05, after.base.x, 1e-9)
+        assertEquals(WicketLockSource.MANUAL, after.source)
+    }
+
     @Test
     fun `clearing a hand-placed lock gives the wicket back to the detector`() {
         val tracker = WicketTracker()

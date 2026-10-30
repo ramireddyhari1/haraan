@@ -1010,6 +1010,11 @@ private fun CameraMode(
 
     /** The wicket placed by hand, two taps at the base of the outer stumps. */
     var wicketTapping by remember { mutableStateOf(false) }
+    // The markings' Adjust: both sets dragged into place by hand (see MarkingsAdjust).
+    var adjusting by remember { mutableStateOf(false) }
+    // Set by Adjust: the bowler's stumps stay where the hand put them, not where the detector
+    // next sees them. Cleared by Reset, Setup, a turn of the phone, or the phone being moved.
+    var bowlersEndPinned by remember { mutableStateOf(false) }
 
     /*
      * CALIBRATING FROM THE STUMPS, AND WHICH END THE PHONE IS AT.
@@ -1180,6 +1185,9 @@ private fun CameraMode(
         cameraMotion.reset()
         wicketTaps = emptyList()
         wicketTapping = false
+        // Placed in the old orientation: describes nothing in this one.
+        bowlersEndPinned = false
+        adjusting = false
     }
 
     DisposableEffect(Unit) {
@@ -1467,7 +1475,7 @@ private fun CameraMode(
                                 cameraMove, uprightAspect, frameMs,
                             )
                             wicketLock = step.lock
-                            bowlersEndBase = step.bowlersEnd
+                            if (!bowlersEndPinned) bowlersEndBase = step.bowlersEnd
                             steadyDrawLock = steadyWicket.value()
                         }
                         // From behind the bowler, look only along the delivery's corridor and
@@ -1603,7 +1611,7 @@ private fun CameraMode(
                                     cameraMove, uprightAspect, frameClockMs,
                                 )
                                 wicketLock = step.lock
-                                bowlersEndBase = step.bowlersEnd
+                                if (!bowlersEndPinned) bowlersEndBase = step.bowlersEnd
                                 steadyDrawLock = steadyWicket.value()
                             }
                             val now = System.currentTimeMillis()
@@ -2719,18 +2727,20 @@ private fun CameraMode(
                     active = setupAligning,
                     onClick = { setupAligning = !setupAligning },
                 ) { tint -> CalibrateGlyph(Modifier.size(20.dp), tint) }
+                // Something to put right once anything is known; tapping the feet before that.
+                // Clearing a hand-placed lock is Adjust's Reset.
+                val canAdjust = manual || wicketLock != null || bowlersEndBase != null
                 ToolButton(
                     // Says what a tap will do, not what the state is called.
-                    label = if (manual) "Clear" else "Wicket",
-                    active = manual,
+                    label = if (canAdjust) "Adjust" else "Wicket",
+                    active = adjusting || manual,
                     onClick = {
-                        if (manual) {
-                            wicketTracker.clearManualLock()
-                            wicketLock = wicketTracker.lock()
-                            wicketDiagnostics = wicketTracker.diagnostics()
-                            wicketTaps = emptyList()
+                        wicketTaps = emptyList()
+                        if (canAdjust) {
+                            // The lines are what the rings are placed by.
+                            showGuide = true
+                            adjusting = true
                         } else {
-                            wicketTaps = emptyList()
                             wicketTapping = true
                         }
                     },
@@ -2987,8 +2997,8 @@ private fun CameraMode(
          * THE AUTO LOOP. Starts the next segment whenever nothing else needs the screen: not
          * recording, no replay up, nobody tapping out a calibration.
          */
-        LaunchedEffect(autoMode, recording, showAr, showReplay, showVideo, liveSequence, setupAligning, stumpCalTapping, wicketTapping, videoCapture) {
-            if (!autoMode || recording || showAr || showReplay || showVideo || liveSequence != null || setupAligning || stumpCalTapping || wicketTapping) {
+        LaunchedEffect(autoMode, recording, showAr, showReplay, showVideo, liveSequence, setupAligning, stumpCalTapping, wicketTapping, adjusting, videoCapture) {
+            if (!autoMode || recording || showAr || showReplay || showVideo || liveSequence != null || setupAligning || stumpCalTapping || wicketTapping || adjusting) {
                 return@LaunchedEffect
             }
             if (videoCapture == null || !granted) return@LaunchedEffect
@@ -3423,6 +3433,7 @@ private fun CameraMode(
                     wicketDiagnostics = wicketTracker.diagnostics()
                     setupTilt = com.haraan.app.vision.DeviceTilt.steady()
                     setupNote = null
+                    bowlersEndPinned = false
                     if (!nearFound) {
                         val k = com.haraan.app.vision.PitchGeometry.STUMP_CENTRES_SPAN_M / com.haraan.app.vision.PitchGeometry.STUMP_SET_WIDTH_M
                         bowlersEndBase = com.haraan.app.vision.BowlersEnd(
@@ -3436,6 +3447,57 @@ private fun CameraMode(
                 onCancel = { setupAligning = false },
             )
         }
+        if (adjusting && granted && !recording) {
+            // Where a set has never been seen, its ring starts where Setup's box would be.
+            val guide = com.haraan.app.vision.StumpAlignGuide.guide(cameraIntrinsics?.focalFw ?: 1.4, uprightAspect)
+            val k = com.haraan.app.vision.PitchGeometry.STUMP_CENTRES_SPAN_M / com.haraan.app.vision.PitchGeometry.STUMP_SET_WIDTH_M
+            MarkingsAdjust(
+                uprightAspect = uprightAspect,
+                far = wicketLock?.takeIf { it.kind == com.haraan.app.vision.WicketKind.STUMPS }?.anchor
+                    ?: com.haraan.app.vision.WicketAnchor(
+                        com.haraan.app.vision.Point2(guide.far.centreX - guide.far.width * k / 2, guide.far.baseY),
+                        com.haraan.app.vision.Point2(guide.far.centreX + guide.far.width * k / 2, guide.far.baseY),
+                        com.haraan.app.vision.Point2(guide.far.centreX, guide.far.topY),
+                    ),
+                near = bowlersEndBase ?: com.haraan.app.vision.BowlersEnd(
+                    com.haraan.app.vision.Point2(guide.near.centreX, guide.near.baseY),
+                    guide.near.width * k,
+                ),
+                onFar = { moved ->
+                    wicketTracker.placeManually(moved, uprightAspect)
+                    wicketLock = wicketTracker.lock()
+                    wicketDiagnostics = wicketTracker.diagnostics()
+                },
+                onNear = { moved ->
+                    bowlersEndPinned = true
+                    bowlersEndBase = moved
+                },
+                onReset = {
+                    // Back to the detector for both sets.
+                    wicketTracker.clearManualLock()
+                    wicketLock = wicketTracker.lock()
+                    wicketDiagnostics = wicketTracker.diagnostics()
+                    bowlersEndPinned = false
+                    bowlersEndFilter.clear()
+                    view.performHapticFeedback(Feel.REMOVE)
+                    adjusting = false
+                },
+                onDone = { far, near ->
+                    // Held from here, and let go if the phone is moved — as Setup's are. Both
+                    // sets, dragged or not: a detected lock left alone would still be let go
+                    // the next time the batter hid it.
+                    wicketTracker.placeManually(far, uprightAspect)
+                    wicketLock = wicketTracker.lock()
+                    wicketDiagnostics = wicketTracker.diagnostics()
+                    bowlersEndPinned = true
+                    bowlersEndBase = near
+                    setupTilt = com.haraan.app.vision.DeviceTilt.steady()
+                    setupNote = null
+                    view.performHapticFeedback(Feel.COMMIT)
+                    adjusting = false
+                },
+            )
+        }
         SetupMovedWatch(setupTilt) {
             // Only a lock Setup (or a hand) placed is let go: the detector's own keeps re-deciding.
             if (wicketTracker.diagnostics().lockSource == com.haraan.app.vision.WicketLockSource.MANUAL) {
@@ -3443,6 +3505,7 @@ private fun CameraMode(
                 wicketLock = wicketTracker.lock()
                 wicketDiagnostics = wicketTracker.diagnostics()
             }
+            bowlersEndPinned = false
             setupTilt = null
             setupNote = "The phone moved since Setup · tap Setup again"
             scope.launch { com.haraan.app.ui.matches.cricketThud(ctx, com.haraan.app.ui.matches.Thud.UNDO) }
