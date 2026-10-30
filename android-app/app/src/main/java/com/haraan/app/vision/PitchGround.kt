@@ -12,7 +12,17 @@ import kotlin.math.sqrt
  * between the outer stumps' centres (frame widths) — the same Laws-sized set as the batter's,
  * so the two widths together say how far apart they look.
  */
-data class BowlersEnd(val base: Point2, val spanFw: Double)
+data class BowlersEnd(
+    val base: Point2,
+    val spanFw: Double,
+    /**
+     * How far above the base the middle stump's top is, in frame HEIGHTS, when the detector
+     * measured it. Drawn from directly: the pitch model's guess put the corner marks well
+     * above or below the real tops whenever its lens or height was a little out — and net
+     * stumps on a stand are not the Laws' proportions anyway.
+     */
+    val riseFh: Double? = null,
+)
 
 /**
  * THE BOWLER'S STUMPS DO NOT MOVE; WHAT IS SEEN OF THEM DOES.
@@ -56,7 +66,12 @@ class BowlersEndFilter(private val keep: Int = KEEP) {
         val ms = median(seen.map { it.spanFw })
         val near = seen.filter { abs(it.base.x - mx) <= ms * 0.5 && abs(it.base.y - my) <= ms * 0.5 && abs(it.spanFw - ms) <= ms * 0.15 }
         if (near.size < MIN_SIGHTINGS) return null
-        return BowlersEnd(Point2(median(near.map { it.base.x }), median(near.map { it.base.y })), median(near.map { it.spanFw }))
+        val rises = near.mapNotNull { it.riseFh }
+        return BowlersEnd(
+            Point2(median(near.map { it.base.x }), median(near.map { it.base.y })),
+            median(near.map { it.spanFw }),
+            rises.takeIf { it.isNotEmpty() }?.let { median(it) },
+        )
     }
 
     fun clear() = seen.clear()

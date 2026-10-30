@@ -3439,6 +3439,7 @@ private fun CameraMode(
                         bowlersEndBase = com.haraan.app.vision.BowlersEnd(
                             com.haraan.app.vision.Point2(guide.near.centreX, guide.near.baseY),
                             guide.near.width * k,
+                            guide.near.baseY - guide.near.topY,
                         )
                     }
                     view.performHapticFeedback(Feel.COMMIT)
@@ -3462,6 +3463,7 @@ private fun CameraMode(
                 near = bowlersEndBase ?: com.haraan.app.vision.BowlersEnd(
                     com.haraan.app.vision.Point2(guide.near.centreX, guide.near.baseY),
                     guide.near.width * k,
+                    guide.near.baseY - guide.near.topY,
                 ),
                 onFar = { moved ->
                     wicketTracker.placeManually(moved, uprightAspect)
@@ -5584,7 +5586,7 @@ internal fun bowlersEndOf(
         .mapNotNull { (it as? com.haraan.app.vision.WicketSighting.Stumps)?.set }
         .filter { it.spanX > 0f && focal * com.haraan.app.vision.PitchGeometry.STUMP_CENTRES_SPAN_M / it.spanX < BOWLERS_END_MAX_M }
         .maxByOrNull { it.spanX }
-        ?.let { com.haraan.app.vision.BowlersEnd(it.baseMiddle, it.spanX.toDouble()) }
+        ?.let { com.haraan.app.vision.BowlersEnd(it.baseMiddle, it.spanX.toDouble(), it.middle.height.toDouble().takeIf { h -> h > 0.0 }) }
 }
 
 /** Nearer than this, a set of stumps is the bowler's end the camera stands behind. */

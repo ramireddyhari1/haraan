@@ -193,13 +193,14 @@ fun DrawScope.drawWicketLock(
     /*
      * THE BOWLER'S STUMPS, DRAWN AS THE BATTER'S ARE. Both ends of the pitch are landmarks the
      * guide is laid between; marking only one left the other looking unrecognised. The same
-     * stumps, at the bowler's set's own base and width, its height from the pitch model when
-     * the lens is known.
+     * stumps, at the bowler's set's own base and width, its height as the detector measured
+     * it — the pitch model's guess only when no top was seen.
      */
     if (bowlersEnd != null) {
         val near = bowlersEnd
         val half = near.spanFw / 2.0
-        val top = if (camera != null && framePx != null) {
+        val measured = near.riseFh?.let { Point2(near.base.x, near.base.y - it) }
+        val top = measured ?: if (camera != null && framePx != null) {
             val (fw, fh) = framePx
             PitchGround.best(lock, camera, fw, fh, bowlersEnd = near)?.let { g ->
                 val pc = g.pitchCamera(fw, fh)
