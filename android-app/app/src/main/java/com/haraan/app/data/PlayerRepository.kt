@@ -97,6 +97,10 @@ data class FeedPost(
   val authorName: String,
   val authorUsername: String?,
   val authorAvatar: String?,
+  /** Pinned to the top of the feed from /control. */
+  val pinned: Boolean = false,
+  /** Featured by Haraan from /control. */
+  val featured: Boolean = false,
 )
 
 /** One comment on a post. */
@@ -123,6 +127,30 @@ data class FeedStory(
 data class HomeFeed(
   val stories: List<FeedStory>,
   val posts: List<FeedPost>,
+  val rules: HomeFeedRules = HomeFeedRules(),
+)
+
+/**
+ * The feed switches an admin flips in /control → ActionBoard Home → Feed rules. Defaults are
+ * "everything on", which is also what a server older than the rules sends (no `rules` key).
+ */
+data class HomeFeedRules(
+  val enabled: Boolean = true,
+  val message: String? = null,
+  val postingEnabled: Boolean = true,
+  val commentsEnabled: Boolean = true,
+)
+
+/** Report reasons, keyed as the server's PostReport::REASONS. */
+val POST_REPORT_REASONS: List<Pair<String, String>> = listOf(
+  "spam" to "Spam",
+  "nudity" to "Nudity or sexual content",
+  "violence" to "Violence or dangerous acts",
+  "harassment" to "Harassment or bullying",
+  "hate" to "Hate speech",
+  "false_info" to "False information",
+  "not_sport" to "Not about sport",
+  "other" to "Something else",
 )
 
 /** One member of a team squad. Registered players have a Player ID; guests have a name only. */
@@ -718,7 +746,14 @@ class PlayerRepository(
       val posts = buildList {
         if (postArr != null) for (i in 0 until postArr.length()) parseFeedPost(postArr.getJSONObject(i))?.let { add(it) }
       }
-      HomeFeed(stories = stories, posts = posts)
+      val rulesJson = root.optJSONObject("rules")
+      val rules = if (rulesJson == null) HomeFeedRules() else HomeFeedRules(
+        enabled = rulesJson.optBoolean("enabled", true),
+        message = rulesJson.optString("message", null).clean(),
+        postingEnabled = rulesJson.optBoolean("posting_enabled", true),
+        commentsEnabled = rulesJson.optBoolean("comments_enabled", true),
+      )
+      HomeFeed(stories = stories, posts = posts, rules = rules)
     } catch (_: Exception) {
       null
     } finally {
@@ -795,6 +830,34 @@ class PlayerRepository(
       connection.responseCode in 200..299
     } catch (_: Exception) {
       false
+    } finally {
+      connection.disconnect()
+    }
+  }
+
+  /**
+   * Report a post to Haraan's moderators. Returns null on failure, else whether the report
+   * took the post down (enough people reported it), so the caller can drop it from the list.
+   */
+  suspend fun reportPost(token: String, postId: Long, reason: String, details: String?): Boolean? = withContext(Dispatchers.IO) {
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/posts/$postId/report").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      connectTimeout = 10000
+      readTimeout = 10000
+      setRequestProperty("Accept", "application/json")
+      setRequestProperty("Content-Type", "application/json")
+      setRequestProperty("Authorization", "Bearer $token")
+    }
+    try {
+      val body = JSONObject().put("reason", reason)
+      if (!details.isNullOrBlank()) body.put("details", details)
+      connection.outputStream.use { it.write(body.toString().toByteArray()) }
+      if (connection.responseCode !in 200..299) return@withContext null
+      val text = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
+      JSONObject(text).optBoolean("hidden", false)
+    } catch (_: Exception) {
+      null
     } finally {
       connection.disconnect()
     }
@@ -897,6 +960,8 @@ class PlayerRepository(
       authorName = author?.optString("name", null).clean() ?: "Player",
       authorUsername = author?.optString("username", null).clean(),
       authorAvatar = author?.optString("avatar", null).clean(),
+      pinned = json.optBoolean("pinned", false),
+      featured = json.optBoolean("featured", false),
     )
   }
 

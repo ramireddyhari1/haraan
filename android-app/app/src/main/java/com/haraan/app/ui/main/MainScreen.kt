@@ -5959,6 +5959,9 @@ private fun HomeFeedScreen(
   // Owner actions: the post being edited (caption) / confirmed for delete.
   var editPost by remember { mutableStateOf<com.haraan.app.data.FeedPost?>(null) }
   var deletePost by remember { mutableStateOf<com.haraan.app.data.FeedPost?>(null) }
+  // Someone else's post being reported (null = sheet closed).
+  var reportPost by remember { mutableStateOf<com.haraan.app.data.FeedPost?>(null) }
+  val rules = feed?.rules ?: com.haraan.app.data.HomeFeedRules()
 
   val reload: suspend () -> Unit = {
     loading = feed == null
@@ -5976,6 +5979,27 @@ private fun HomeFeedScreen(
       loading && feed == null -> {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
           androidx.compose.material3.CircularProgressIndicator(color = HaraanColors.EventsBlue)
+        }
+      }
+      // Switched off in /control → ActionBoard Home → Feed rules.
+      !rules.enabled -> {
+        Column(
+          modifier = Modifier.fillMaxSize().padding(32.dp),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.Center,
+        ) {
+          Text(
+            "Home is taking a break",
+            color = HaraanColors.TextPrimary,
+            style = HaraanTypography.TitleMedium.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold),
+          )
+          Spacer(Modifier.height(6.dp))
+          Text(
+            rules.message ?: "Check back soon.",
+            color = HaraanColors.TextSecondary,
+            style = HaraanTypography.BodyMedium,
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+          )
         }
       }
       posts.isEmpty() && (feed?.stories.isNullOrEmpty()) -> {
@@ -6003,12 +6027,14 @@ private fun HomeFeedScreen(
             style = HaraanTypography.BodyMedium,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
           )
-          Spacer(Modifier.height(16.dp))
-          HaraanButton(
-            text = "Create a post",
-            onClick = onCreatePost,
-            containerColor = HaraanColors.EventsBlue,
-          )
+          if (rules.postingEnabled) {
+            Spacer(Modifier.height(16.dp))
+            HaraanButton(
+              text = "Create a post",
+              onClick = onCreatePost,
+              containerColor = HaraanColors.EventsBlue,
+            )
+          }
         }
       }
       else -> {
@@ -6061,7 +6087,7 @@ private fun HomeFeedScreen(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
               ) {
-                item { StoryBubble(story = null, onClick = onCreatePost) }
+                if (rules.postingEnabled) item { StoryBubble(story = null, onClick = onCreatePost) }
                 items(stories) { story ->
                   StoryBubble(
                     story = story,
@@ -6133,6 +6159,7 @@ private fun HomeFeedScreen(
               },
               onEditCaption = { editPost = post },
               onDelete = { deletePost = post },
+              onReport = { if (!tokenProvider().isNullOrBlank()) reportPost = post },
             )
           }
         }
@@ -6182,6 +6209,76 @@ private fun HomeFeedScreen(
       },
       dismissButton = {
         androidx.compose.material3.TextButton(onClick = { editPost = null }) { Text("Cancel", color = HaraanColors.TextSecondary) }
+      },
+      containerColor = Color.White,
+    )
+  }
+
+  // Report: pick a reason, optional note. Reports go to /control → ActionBoard Home.
+  reportPost?.let { rp ->
+    var reason by remember(rp.id) { mutableStateOf<String?>(null) }
+    var details by remember(rp.id) { mutableStateOf("") }
+    var sending by remember(rp.id) { mutableStateOf(false) }
+    androidx.compose.material3.AlertDialog(
+      onDismissRequest = { if (!sending) reportPost = null },
+      title = { Text("Report this post", fontWeight = FontWeight.Bold) },
+      text = {
+        Column {
+          Text(
+            "Haraan's team reviews every report. The player isn't told who reported them.",
+            color = HaraanColors.TextSecondary,
+            fontSize = 13.sp,
+          )
+          Spacer(Modifier.height(8.dp))
+          com.haraan.app.data.POST_REPORT_REASONS.forEach { (key, label) ->
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .clickable { reason = key }
+                .padding(vertical = 2.dp),
+              verticalAlignment = Alignment.CenterVertically,
+            ) {
+              androidx.compose.material3.RadioButton(selected = reason == key, onClick = { reason = key })
+              Text(label, color = HaraanColors.TextPrimary, fontSize = 14.sp)
+            }
+          }
+          Spacer(Modifier.height(6.dp))
+          OutlinedTextField(
+            value = details,
+            onValueChange = { if (it.length <= 500) details = it },
+            placeholder = { Text("Anything else? (optional)", color = HaraanColors.TextMuted) },
+            modifier = Modifier.fillMaxWidth(),
+            minLines = 2,
+            shape = RoundedCornerShape(12.dp),
+          )
+        }
+      },
+      confirmButton = {
+        androidx.compose.material3.TextButton(
+          enabled = reason != null && !sending,
+          onClick = {
+            val token = tokenProvider() ?: return@TextButton
+            val picked = reason ?: return@TextButton
+            sending = true
+            scope.launch {
+              val hidden = repository.reportPost(token, rp.id, picked, details.trim().ifBlank { null })
+              sending = false
+              if (hidden == null) {
+                android.widget.Toast.makeText(context, "Couldn't send the report. Try again.", android.widget.Toast.LENGTH_SHORT).show()
+              } else {
+                if (hidden) posts = posts.filterNot { it.id == rp.id }
+                android.widget.Toast.makeText(context, "Thanks — we'll take a look.", android.widget.Toast.LENGTH_SHORT).show()
+                reportPost = null
+              }
+            }
+          },
+        ) { Text("Report", color = HaraanColors.EventsBlue, fontWeight = FontWeight.Bold) }
+      },
+      dismissButton = {
+        androidx.compose.material3.TextButton(onClick = { reportPost = null }, enabled = !sending) {
+          Text("Cancel", color = HaraanColors.TextSecondary)
+        }
       },
       containerColor = Color.White,
     )
@@ -6293,6 +6390,7 @@ private fun FeedPostCard(
   onToggleSave: () -> Unit = {},
   onEditCaption: () -> Unit = {},
   onDelete: () -> Unit = {},
+  onReport: () -> Unit = {},
 ) {
   var menuOpen by remember { mutableStateOf(false) }
   Column(modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp)) {
@@ -6328,6 +6426,19 @@ private fun FeedPostCard(
           Text("@$it", color = HaraanColors.TextMuted, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
       }
+      if (post.pinned || post.featured) {
+        Text(
+          text = if (post.pinned) "Pinned" else "Featured",
+          color = HaraanColors.EventsBlue,
+          fontSize = 10.5.sp,
+          fontWeight = FontWeight.Bold,
+          modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(HaraanColors.EventsBlue.copy(alpha = 0.08f))
+            .padding(horizontal = 7.dp, vertical = 2.dp),
+        )
+        Spacer(Modifier.width(4.dp))
+      }
       // Overflow menu: the owner can edit the caption or delete; anyone can share.
       Box {
         Icon(
@@ -6354,6 +6465,10 @@ private fun FeedPostCard(
             DropdownMenuItem(
               text = { Text("Share") },
               onClick = { menuOpen = false; onShare() },
+            )
+            DropdownMenuItem(
+              text = { Text("Report", color = HaraanColors.LiveRed) },
+              onClick = { menuOpen = false; onReport() },
             )
           }
         }
