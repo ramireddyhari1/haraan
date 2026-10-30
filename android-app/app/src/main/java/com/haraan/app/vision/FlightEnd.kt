@@ -89,6 +89,35 @@ object FlightEnd {
         return null
     }
 
+    /**
+     * DID ANYTHING HERE TRAVEL TOWARDS THE STUMPS?
+     *
+     * Every delivery, filmed from either end, heads for the striker's wicket. Somebody
+     * walking about at the far end, a hand going up, a ball tossed back to the bowler — all
+     * of them made "flights" that went quiet like a ball does, were called, and drew a long
+     * trail and a "the wicket is behind the ball" verdict over the picture. Asked of every
+     * run, not just the last: a ball the bat sends back the way it came is still a delivery
+     * before it.
+     *
+     * Towards means the gap to the wicket's base closed by at least [MIN_APPROACH] of the
+     * distance the run covered: a fall at the far end or a throw across the pitch covers
+     * plenty of picture without getting much nearer.
+     */
+    fun travelsToward(track: List<BallSighting>, wicket: WicketLock, frameAspect: Float): Boolean {
+        val base = BallPath.flatten(wicket.base, frameAspect)
+        return TrailGeometry.runs(track).any { run ->
+            if (run.size < MIN_FLIGHT_POINTS) return@any false
+            val first = BallPath.flatten(run.first(), frameAspect)
+            val last = BallPath.flatten(run.last(), frameAspect)
+            val covered = hypot(last.x - first.x, last.y - first.y)
+            val closed = hypot(first.x - base.x, first.y - base.y) - hypot(last.x - base.x, last.y - base.y)
+            covered >= MIN_FLIGHT_EXTENT_FW && closed >= covered * MIN_APPROACH
+        }
+    }
+
+    /** Share of a run's movement that has to be towards the wicket for it to be a delivery. */
+    const val MIN_APPROACH = 0.35
+
     private fun atWicket(ball: BallPath.Flat, wicket: WicketLock, aspect: Float): Boolean {
         val base = BallPath.flatten(wicket.base, aspect)
         val reach = maxOf(wicket.span * AT_WICKET_SPANS, MIN_AT_WICKET_FW)

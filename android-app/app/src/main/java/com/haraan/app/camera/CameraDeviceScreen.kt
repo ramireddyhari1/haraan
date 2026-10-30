@@ -1530,7 +1530,21 @@ private fun CameraMode(
                             ) != null
                         }
                         val flight = replaced ?: vision.track()
-                        if (replaced != null || com.haraan.app.vision.FlightEnd.check(flight, frameMs, uprightAspect, wicketLock) != null) {
+                        val ended = replaced != null || com.haraan.app.vision.FlightEnd.check(flight, frameMs, uprightAspect, wicketLock) != null
+                        // Done, but never came towards the stumps: a person, not a ball. Let go
+                        // before it is drawn as a delivery, and keep watching.
+                        // A called ball keeps its trail; a stray afterwards just cannot replace it.
+                        val lockNow = wicketLock
+                        val towards = !ended || lockNow == null ||
+                            com.haraan.app.vision.FlightEnd.travelsToward(flight, lockNow, uprightAspect)
+                        if (!towards) {
+                            if (calledFlight == null) {
+                                vision.reset()
+                                ballTrail = emptyList()
+                                latestBall = null
+                                trackedPoints = 0
+                            }
+                        } else if (ended) {
                             val called = calledFlight
                             if (called == null) {
                                 calledFlight = flight
@@ -1690,6 +1704,8 @@ private fun CameraMode(
     // The last ball this phone filmed (by cue or by hand), so one BALL is filmed once — a
     // clip that hit the ten-second cap while the ball is still "in play" is not re-armed.
     var lastFilmedSeq by remember { androidx.compose.runtime.mutableIntStateOf(0) }
+    // When the clip now recording was armed, on the uptime clock — the age of an Auto segment.
+    var clipArmedAtMs by remember { androidx.compose.runtime.mutableLongStateOf(0L) }
     // The latest cue, for the manual button: pressed during a ball the cue missed, its
     // clip still carries that ball's number and REVIEW finds it.
     var latestCue by remember { mutableStateOf<com.haraan.app.data.BallCue?>(null) }
@@ -1724,6 +1740,24 @@ private fun CameraMode(
                     if (cue.seq == filming && cue.cancelled) discardClip = true
                     activeRecording?.stop()
                     activeRecording = null
+                }
+                /*
+                 * The scorer's BALL while Auto is filming a segment of its own. That used
+                 * to be ignored — the phone was "already recording" — and the result tap
+                 * could not end a clip that belonged to no ball, so with Auto on the
+                 * scorer lost the camera altogether. A young segment becomes this ball's
+                 * clip (it already holds the run-up); an old one would hit the ten-second
+                 * cap mid-delivery, so it is cut and the next tick films the ball afresh.
+                 */
+                if (recording && autoSegment && filming == null && wanted != null && wanted != lastFilmedSeq) {
+                    if (android.os.SystemClock.uptimeMillis() - clipArmedAtMs <= ADOPT_SEGMENT_MAX_AGE_MS) {
+                        autoSegment = false
+                        clipBallSeq = wanted
+                        lastFilmedSeq = wanted
+                    } else {
+                        activeRecording?.stop()
+                        activeRecording = null
+                    }
                 }
                 // A new ball is being bowled and nothing is filming it yet.
                 if (!recording && wanted != null && wanted != lastFilmedSeq) {
@@ -3023,8 +3057,10 @@ private fun CameraMode(
             val wasAuto = armingAuto
             armingAuto = false
             autoSegment = wasAuto
+            val filmedBefore = lastFilmedSeq
             if (ballSeq != null) lastFilmedSeq = ballSeq
             clipBallSeq = ballSeq
+            clipArmedAtMs = android.os.SystemClock.uptimeMillis()
             discardClip = false
             uploadError = null
             // A fresh delivery: the previous track must not bleed into this one.
@@ -3047,6 +3083,7 @@ private fun CameraMode(
             replayClip = null
             refinedFps = null
             clipGeneration++
+            val thisGeneration = clipGeneration
             clipStartSensorMs = null
             pendingClipStart.set(false)
             trackingLive = true
@@ -3068,12 +3105,20 @@ private fun CameraMode(
                 targetFile = clipFile,
                 onStarted = { pendingClipStart.set(true) },
                 onFinished = { file, durationMs ->
+                    // The watchdog below already gave up on this clip, and a newer one may
+                    // be recording: its state is not this clip's to reset.
+                    if (thisGeneration != clipGeneration) {
+                        runCatching { file.delete() }
+                        return@startClip
+                    }
+                    // Read now, not at arming: the scorer's BALL can adopt a segment mid-way.
+                    val stillAuto = autoSegment
                     recording = false
                     trackingLive = false
                     clipBallSeq = null
                     autoSegment = false
                     // An Auto segment nothing was bowled in: gone, without a buzz.
-                    if (wasAuto && calledFlight == null) {
+                    if (stillAuto && calledFlight == null) {
                         runCatching { file.delete() }
                         return@startClip
                     }
@@ -3090,7 +3135,14 @@ private fun CameraMode(
                      * tracker lost early, or a hot phone that paused tracking.
                      */
                     // Not while the ball is being read: the reading shows it when it is done.
-                    if (lastMetrics == null && analysingSince == null) showFlight(calledFlight ?: vision.track(), true)
+                    if (lastMetrics == null && analysingSince == null) {
+                        // A track still open at the end is shown only if it came at the stumps.
+                        val open = vision.track().takeIf { t ->
+                            val l = wicketLock
+                            l == null || com.haraan.app.vision.FlightEnd.travelsToward(t, l, uprightAspect)
+                        }
+                        (calledFlight ?: open)?.let { showFlight(it, true) }
+                    }
                     // The window closed. Nobody pressed stop, so this is the only way to
                     // know it is shut and the next delivery can be armed.
                     view.performHapticFeedback(Feel.TICK)
@@ -3210,11 +3262,40 @@ private fun CameraMode(
             // on — with the scorer's result now ending clips early, that could be the next
             // ball's clip, cut off a second in.
             val thisRecording = activeRecording
+            /*
+             * THE RECORDER REFUSED. Usually the previous clip still finalising, or the
+             * camera rebinding. `recording` was already true, and nothing would ever have
+             * set it back — no clip, so no Finalize — which left the phone deaf to every
+             * later BALL and its own button greyed out. Undone instead, so the next cue
+             * tick simply tries again.
+             */
+            if (thisRecording == null) {
+                recording = false
+                trackingLive = false
+                clipBallSeq = null
+                autoSegment = false
+                lastFilmedSeq = filmedBefore
+                if (ballSeq == null && !wasAuto) view.performHapticFeedback(Feel.REMOVE)
+                return
+            }
             scope.launch {
                 delay(REVIEW_CLIP_MS)
                 if (activeRecording === thisRecording) {
                     activeRecording?.stop()
                     activeRecording = null
+                }
+                /*
+                 * A Finalize that never comes — the camera unbound under the recorder —
+                 * would hold `recording` true for good, the same deafness as above. Past
+                 * the cap and a grace, this clip is let go so the next ball can be filmed.
+                 */
+                delay(FINALIZE_GRACE_MS)
+                if (recording && clipGeneration == thisGeneration) {
+                    clipGeneration++
+                    recording = false
+                    trackingLive = false
+                    clipBallSeq = null
+                    autoSegment = false
                 }
             }
         }
@@ -5251,6 +5332,12 @@ private const val TRAIL_FADE_TO = 0.85f
 private const val MAX_MISSED_HEARTBEATS = 3
 
 private const val REVIEW_CLIP_MS = 9_500L
+
+/** After the cap's stop, how long a clip's Finalize may take before the clip is let go. */
+private const val FINALIZE_GRACE_MS = 5_000L
+
+/** An Auto segment younger than this becomes the scorer's ball's clip rather than being cut. */
+private const val ADOPT_SEGMENT_MAX_AGE_MS = 3_000L
 
 /** How often the camera asks whether the scorer's BALL window is open. */
 private const val CUE_IDLE_MS = 1_000L

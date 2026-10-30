@@ -314,12 +314,21 @@ fun ScoringScreen(
             // so a failure is not worth a toast that interrupts the scorer mid-over.
             scope.launch {
                 val token = scoringToken() ?: return@launch
+                val tappedAt = android.os.SystemClock.uptimeMillis()
                 persistLock.withLock {
                     if (!cancel && !ensureStarted(token, after)) return@withLock
-                    repo.sendScoreAction(
-                        token, matchId,
-                        JSONObject().put("type", if (cancel) "delivery_cancel" else "delivery")
-                    )
+                    val action = JSONObject().put("type", if (cancel) "delivery_cancel" else "delivery")
+                    /*
+                     * A paired camera films on this signal, so one dropped request on
+                     * ground data is a ball nobody filmed. Tried again — but only in the
+                     * first couple of seconds, while the bowler is still running in: a
+                     * BALL landing after the result would start a ball nobody is bowling.
+                     */
+                    var sent = repo.sendScoreAction(token, matchId, action).ok
+                    while (!sent && android.os.SystemClock.uptimeMillis() - tappedAt < DELIVERY_RETRY_WINDOW_MS) {
+                        kotlinx.coroutines.delay(DELIVERY_RETRY_GAP_MS)
+                        sent = repo.sendScoreAction(token, matchId, action).ok
+                    }
                 }
             }
         },
@@ -2562,3 +2571,7 @@ private fun reduce(s: ScorerState, ev: String): ScorerState {
         else -> s
     }
 }
+
+/** How long after BALL a lost delivery signal is still worth resending, and the gap between tries. */
+private const val DELIVERY_RETRY_WINDOW_MS = 2_500L
+private const val DELIVERY_RETRY_GAP_MS = 500L

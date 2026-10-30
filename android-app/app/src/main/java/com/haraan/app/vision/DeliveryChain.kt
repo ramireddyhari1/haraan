@@ -123,6 +123,11 @@ class DeliveryChain(
         }
         val track = replaced ?: ball.track()
         if (replaced == null && FlightEnd.check(track, ts, aspect, l) == null) return emptyList()
+        // Done, but never came at the stumps: someone walking about, not a delivery.
+        if (!FlightEnd.travelsToward(track, l, aspect)) {
+            if (replaced == null) ball.reset()
+            return emptyList()
+        }
         // Measured from the steadied stumps, not this frame's: see [SteadyWicket].
         val called = call(track, (steadyLock.value() ?: l).withFarSpan(), ts)
         // A fresh start for the next ball, as an Auto segment does.

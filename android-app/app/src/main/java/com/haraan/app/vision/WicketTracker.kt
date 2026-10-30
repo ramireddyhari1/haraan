@@ -998,7 +998,18 @@ class WicketTracker {
             note = "stumps found — replacing the stone"
             return currentLock()
         }
-        val outright = lockUnseenSinceItAppeared && best.hits >= DISSENT_FRAMES
+        /*
+         * NOT THE PERSON STANDING IN FRONT OF IT. Someone walking in front of the stumps
+         * hides them and, in the same frames, offers the detector two legs or a pair of pads
+         * right beside them — which used to win in five frames and carry every marking on
+         * the screen onto the person. Beside the lock, while the camera is still tracked, a
+         * challenger has to outlast the coast itself; far from it (the phone was repointed,
+         * the first lock was a fence) five frames are still enough.
+         */
+        val held = anchor
+        val besideLock = held != null &&
+            distance(best.anchor.base, held.base) <= held.span(aspect) * OCCLUDER_SPANS
+        val outright = lockUnseenSinceItAppeared && best.hits >= DISSENT_FRAMES && !besideLock
         val onMerit = best.hits >= DISSENT_FRAMES * 3 && best.scoreEma > scoreEma + CHALLENGER_SCORE_MARGIN
         if (!outright && !onMerit) return null
 
@@ -1567,18 +1578,22 @@ class WicketTracker {
         /**
          * Longest a lock may go unseen with the camera tracked.
          *
-         * Three seconds: a striker taking guard in front of the far stumps, the keeper
-         * settling, the bowler's delivery stride. Long enough for every routine occlusion of
+         * Six seconds: a striker taking guard in front of the far stumps, the keeper
+         * settling, the bowler's delivery stride, a fielder walking through to fetch the
+         * ball. Three was too short in the nets, where someone is always in the way. Long enough for every routine occlusion of
          * a wicket filmed from behind the arm; and the lock does not vanish after it — its
          * place is remembered for [MEMORY_MS].
          */
-        const val MAX_COAST_MS = 3_000L
+        const val MAX_COAST_MS = 6_000L
 
         /** How long a lost lock's place is remembered for instant re-acquisition. */
         const val MEMORY_MS = 30_000L
 
         /** Agreeing sightings away from the lock before the lock is the thing that is wrong. */
         const val DISSENT_FRAMES = 5
+
+        /** Within this many of the lock's own spans a challenger is taken for whoever is hiding it. */
+        const val OCCLUDER_SPANS = 3f
 
         /** How much better a challenger seen ALONGSIDE the lock must score to replace it. */
         const val CHALLENGER_SCORE_MARGIN = 0.15f
@@ -1607,8 +1622,10 @@ class WicketTracker {
 
         /** Gates, as multiples of the locked wicket's own span in the picture. */
         const val LOCK_GATE_SPANS = 0.9f
-        const val REACQUIRE_GATE_SPANS = 2.0f
-        const val MANUAL_NUDGE_GATE_SPANS = 1.2f
+        // Not wider than the lock gate by much: two legs beside hidden stumps sat inside 2.0.
+        const val REACQUIRE_GATE_SPANS = 1.2f
+        // Tight: a leg or a pad beside hand-placed stumps used to drag them along.
+        const val MANUAL_NUDGE_GATE_SPANS = 0.5f
 
         /** Largest ratio between two spans that are still the same wicket. */
         const val SPAN_RATIO = 1.45f
@@ -1625,9 +1642,10 @@ class WicketTracker {
 
         /** How hard each state pulls the anchor towards the newest sighting. */
         const val TENTATIVE_BLEND = 0.5f
-        const val REACQUIRE_BLEND = 0.6f
+        // The first sighting after a coast is often the occluder's edge, not the stumps.
+        const val REACQUIRE_BLEND = 0.3f
         const val CONFIRMED_BLEND = 0.18f
-        const val MANUAL_NUDGE_WEIGHT = 0.06f
+        const val MANUAL_NUDGE_WEIGHT = 0.02f
 
         /** How fast the detector's score is followed. */
         const val SCORE_SMOOTHING = 0.25f

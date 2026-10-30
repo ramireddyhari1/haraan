@@ -1,6 +1,8 @@
 package com.haraan.app.vision
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -109,5 +111,39 @@ class FlightEndTest {
         val old = flight()
         val fresh = flight(count = 2).map { it.copy(timestampMs = it.timestampMs + 5_000L) }
         assertNull(FlightEnd.check(old + fresh, fresh.last().timestampMs + 2_000L, aspect))
+    }
+
+    // ---- towards the stumps ----------------------------------------------------------------
+
+    @Test
+    fun `a ball bowled at the stumps travels towards them`() {
+        // Behind the arm: up the picture from 0.80 to 0.40, wicket base at 0.30.
+        assertTrue(FlightEnd.travelsToward(flight(), lock(baseY = 0.30), aspect))
+    }
+
+    @Test
+    fun `filmed from behind the batter a ball coming down the picture travels towards them`() {
+        assertTrue(FlightEnd.travelsToward(flight(fromY = 0.45, toY = 0.75), lock(baseY = 0.85), aspect))
+    }
+
+    /** The screenshot: something rising at the far end, away from the striker's stumps. */
+    @Test
+    fun `something moving away from the stumps is not a delivery`() {
+        assertFalse(FlightEnd.travelsToward(flight(fromY = 0.55, toY = 0.38), lock(baseY = 0.85), aspect))
+    }
+
+    @Test
+    fun `a throw across the pitch is not a delivery`() {
+        val across = (0 until 10).map { i ->
+            BallSighting(timestampMs = i * 33L, x = 0.2f + i * 0.06f, y = 0.5f, trackingConfidence = 0.8f, areaPx = 40)
+        }
+        assertFalse(FlightEnd.travelsToward(across, lock(baseY = 0.85), aspect))
+    }
+
+    @Test
+    fun `a ball the bat sends back is still a delivery before it`() {
+        val inbound = flight(fromY = 0.45, toY = 0.75)
+        val back = flight(fromY = 0.75, toY = 0.50).map { it.copy(timestampMs = it.timestampMs + 2_000L) }
+        assertTrue(FlightEnd.travelsToward(inbound + back, lock(baseY = 0.85), aspect))
     }
 }

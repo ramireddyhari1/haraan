@@ -380,11 +380,12 @@ class WicketTrackerTest {
 
     /**
      * One lump on one frame is not a reason to throw away a confirmed stumps lock — that was
-     * a single-frame hard commitment. It is a challenger, and it takes over only if it
-     * persists while the stumps are not seen. It never BLENDS: a stone carries no scale.
+     * a single-frame hard commitment. It is a challenger. Right where the stumps were it is
+     * most likely a batter's pads, so it waits out the whole coast before it takes over. It
+     * never BLENDS: a stone carries no scale.
      */
     @Test
-    fun `a stone where stumps were locked challenges and takes over only if it persists`() {
+    fun `a stone where stumps were locked takes over only once the coast is over`() {
         val tracker = WicketTracker()
         tracker.feed(stumps(), frames = WicketTracker.CONFIRM_FRAMES)
         val once = tracker.onFrame(stone(), steady(), aspect, 200L)
@@ -392,11 +393,34 @@ class WicketTrackerTest {
         assertEquals(WicketTrackState.TEMPORARILY_LOST, once.state)
 
         var last: WicketLock? = null
-        for (i in 1 until WicketTracker.DISSENT_FRAMES) {
+        for (i in 1 until WicketTracker.DISSENT_FRAMES * 4) {
             last = tracker.onFrame(stone(), steady(), aspect, 200L + i * 33L)
         }
+        assertEquals("pads in front of the stumps are not the wicket", WicketKind.STUMPS, last!!.kind)
+
+        var t = 200L + WicketTracker.DISSENT_FRAMES * 4 * 33L
+        while (t < 200L + WicketTracker.MAX_COAST_MS + 33L * WicketTracker.STONE_CONFIRM_FRAMES * 2) {
+            last = tracker.onFrame(stone(), steady(), aspect, t)
+            t += 33L
+        }
         assertEquals(WicketKind.STONE, last!!.kind)
-        assertEquals(WicketTrackState.TENTATIVE, last.state)
+    }
+
+    /**
+     * Someone walks in front of the stumps: the stumps vanish and the detector sees "stumps"
+     * — two legs — right beside them, frame after frame. The lock must stay where it was.
+     */
+    @Test
+    fun `legs beside hidden stumps do not carry the lock onto the person`() {
+        val tracker = WicketTracker()
+        tracker.feed(stumps(x = 0.5f), frames = WicketTracker.CONFIRM_FRAMES)
+
+        var last: WicketLock? = null
+        for (i in 0 until 60) last = tracker.onFrame(stumps(x = 0.68f), steady(), aspect, 200L + i * 33L)
+
+        assertEquals(0.5, last!!.base.x, 0.01)
+        assertEquals(WicketTrackState.TEMPORARILY_LOST, last.state)
+        assertEquals(0, tracker.diagnostics().drops)
     }
 
     // ---- scale ---------------------------------------------------------------------------
