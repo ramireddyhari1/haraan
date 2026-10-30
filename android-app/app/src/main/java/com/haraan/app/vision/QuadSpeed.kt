@@ -199,6 +199,8 @@ object QuadSpeed {
      */
     const val MIN_KMH = 15.0
     const val MAX_KMH = 175.0
+    /** The most a delivery's way in may lean across the pitch, in degrees. */
+    const val MAX_IN_ANGLE_DEG = 8.0
 
     /** A bounce fitted just behind the stump line is a full toss fitted low; metres behind is not a ball. */
     const val MIN_BOUNCE_ALONG_M = -0.5
@@ -328,6 +330,16 @@ object QuadSpeed {
         val kmh = hypot(v[2], v[3]) * 3.6
         if (kmh < MIN_KMH || kmh > MAX_KMH || kmh.isNaN()) {
             return FitResult.Refused("the fit gave %.0f km/h, which is not a delivery".format(kmh))
+        }
+        /*
+         * A DELIVERY GOES DOWN THE PITCH, NOT ACROSS IT. From the edge of the return crease to
+         * a wide on the far side is about 9°; every delivery on the board came in within 5°.
+         * On net01 (2026-10-30) something sliding sideways at chest height past the batter
+         * fitted at 9.5° and 17°, read 123 km/h, and was shown as a second ball.
+         */
+        val inDeg = Math.toDegrees(kotlin.math.atan2(abs(v[2]), -v[3]))
+        if (inDeg > MAX_IN_ANGLE_DEG) {
+            return FitResult.Refused("the fitted ball crosses the pitch at %.0f°, which is not a delivery".format(inDeg))
         }
         /*
          * WHERE IT PITCHED MUST BE ON THE PITCH. A wrong camera — corners "found" in the

@@ -191,7 +191,7 @@ class DeliveryChain(
         log(
             "called ${track.size} pts ${track.first().timestampMs}..${track.last().timestampMs}ms y ${"%.3f".format(track.first().y)}..${"%.3f".format(track.maxOf { it.y })} " +
                 "lock=${"%.3f,%.3f".format(lock.anchor.base.x, lock.anchor.base.y)} near=${bowlersEnd?.base} " +
-                "fit=${f?.let { "bounce %.2f out=${it.hasOutLeg} hits=${it.hitsStumps} ground %.1f".format(it.bounceY, it.groundKmh) }
+                "fit=${f?.let { "bounce %.2f across %.2f in %.1f° out=${it.hasOutLeg} hits=${it.hitsStumps} ground %.1f".format(it.bounceY, it.bounceX, Math.toDegrees(kotlin.math.atan2(it.inVx, -it.inVy)), it.groundKmh) }
                     ?: refusal(track, lock, ground)} " +
                 "trimmed=${FlightTrim.receding(TrailGeometry.runs(track).lastOrNull().orEmpty(), aspect, lock.anchor.base).size} " +
                 "atStumps=${FlightMetrics.reachedStumps(FlightTrim.receding(track, aspect, lock.anchor.base), lock, aspect)} span=${"%.4f".format(lock.anchor.span(aspect))} measurable=${lock.isMeasurable} " +
