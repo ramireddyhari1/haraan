@@ -67,6 +67,12 @@ internal class VideoCameraFeed(
     val picture: StateFlow<Bitmap?> = shown
 
     @Volatile private var running = false
+
+    /** Where each time round the clip started on the camera clock, in ms, oldest first. */
+    private val origins = java.util.concurrent.CopyOnWriteArrayList<Double>()
+
+    /** The camera-clock time of the clip's first frame on the pass that showed [sensorMs]. */
+    fun clipStartFor(sensorMs: Double): Double? = origins.lastOrNull { it <= sensorMs }
     private var thread: Thread? = null
 
     fun start() {
@@ -101,6 +107,7 @@ internal class VideoCameraFeed(
                     return
                 }
                 val wallStart = SystemClock.elapsedRealtimeNanos()
+                origins += originNs / 1e6
                 var lastPtsMs = 0.0
                 var frames = 0
                 try {

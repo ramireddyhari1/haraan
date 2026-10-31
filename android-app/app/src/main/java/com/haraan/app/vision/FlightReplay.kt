@@ -236,6 +236,36 @@ object ReplayTextures {
 /** The slow turn round the stumps after the ball has arrived. */
 private const val HOLD_ORBIT_MS = 2_600
 
+// Slow motion, about three times: a real delivery is over in half a second, and much
+// slower than this the answer takes longer to arrive than the ball did to be bowled.
+private fun replayPlayMs(startMs: Double, endMs: Double) = ((endMs - startMs) * 3.0).coerceIn(1_500.0, 2_600.0).toInt()
+
+/**
+ * THE 3D REPLAY AS FRAMES, for a saved video: the director's cut the screen plays — the same
+ * shots, the same slow motion, the turn round the stumps — drawn at any moment of its own
+ * clock instead of the display's. Call [draw] with rising times, as the camera eases.
+ */
+internal class ReplayFrameRenderer(private val flight: Flight3d) {
+    private val startMs = flight.releaseMs
+    private val endMs = flight.stumpsMs?.takeIf { it > startMs } ?: flight.lastSeenMs
+    private val playMs = replayPlayMs(startMs, endMs)
+    private val follower = CameraFollower()
+
+    /** From release to the end of the turn round the stumps. */
+    val durationMs: Int = playMs + HOLD_ORBIT_MS
+
+    fun draw(scope: DrawScope, atMs: Int) {
+        val progress = (atMs.toDouble() / playMs).coerceIn(0.0, 1.0)
+        val hold = ((atMs - playMs).toDouble() / HOLD_ORBIT_MS).coerceIn(0.0, 1.0)
+        val shot = ShotContext(flight, startMs, endMs, hold)
+        // +1: the follower reads a zero clock as "first frame".
+        val camera = follower.follow(ReplayView.AUTO.cameraAt(progress, shot), atMs * 1_000_000L + 1)
+        val bails = if (flight.hitsStumps == true) FastOutSlowInEasing.transform(((atMs - playMs) / 550f).coerceIn(0f, 1f)) else 0f
+        scope.drawRect(Night)
+        scope.drawScene(camera, flight, startMs, startMs + (endMs - startMs) * progress, ReplayTextures.grain, ReplayTextures.crowd, ReplayTextures.turf, bails)
+    }
+}
+
 @Composable
 private fun FlightReplayContent(
     flight: Flight3d,
@@ -274,9 +304,7 @@ private fun FlightReplayContent(
 
     val startMs = flight.releaseMs
     val endMs = flight.stumpsMs?.takeIf { it > startMs } ?: flight.lastSeenMs
-    // Slow motion, about three times: a real delivery is over in half a second, and much
-    // slower than this the answer takes longer to arrive than the ball did to be bowled.
-    val playMs = ((endMs - startMs) * 3.0).coerceIn(1_500.0, 2_600.0).toInt()
+    val playMs = replayPlayMs(startMs, endMs)
     val hits = flight.hitsStumps
 
     val context = LocalContext.current

@@ -14,12 +14,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -46,6 +54,10 @@ import com.haraan.app.vision.StumpAlignGuide
  * when the detector sees stumps in it, and Done locks both at once — the detector's own
  * reading where it has one, the box where it has not — so the first ball is tracked with
  * the wickets already known.
+ *
+ * THE BOXES MOVE. A tripod is never exactly where the guide assumes, and at night the
+ * detector may not see stumps at all, so each box can be dragged onto its stumps and sized
+ * by its corner handle. Done then locks them where they were put.
  */
 @Composable
 internal fun StumpAlignSetup(
@@ -55,13 +67,55 @@ internal fun StumpAlignSetup(
     farSeen: Point2?,
     /** The bowler's stumps' base as the detector sees them now, or null. */
     nearSeen: Point2?,
-    onDone: (farFound: Boolean, nearFound: Boolean) -> Unit,
+    /** Where the boxes were left: the batter's set, then the bowler's. */
+    onDone: (farFound: Boolean, nearFound: Boolean, far: StumpAlignGuide.Box, near: StumpAlignGuide.Box) -> Unit,
     onCancel: () -> Unit,
 ) {
-    val farOk = farSeen != null && guide.far.contains(farSeen, FAR_PAD_ACROSS, FAR_PAD_DOWN)
-    val nearOk = nearSeen != null && guide.near.contains(nearSeen, NEAR_PAD_ACROSS, NEAR_PAD_DOWN)
+    var far by remember(guide) { mutableStateOf(guide.far) }
+    var near by remember(guide) { mutableStateOf(guide.near) }
+    var farMoved by remember(guide) { mutableStateOf(false) }
+    var nearMoved by remember(guide) { mutableStateOf(false) }
+    val farOk = farSeen != null && far.contains(farSeen, FAR_PAD_ACROSS, FAR_PAD_DOWN)
+    val nearOk = nearSeen != null && near.contains(nearSeen, NEAR_PAD_ACROSS, NEAR_PAD_DOWN)
     Box(Modifier.fillMaxSize()) {
-        Canvas(Modifier.fillMaxSize()) {
+        Canvas(
+            Modifier
+                .fillMaxSize()
+                .pointerInput(guide, uprightAspect) {
+                    // Taken by where the finger first came down, not where it had got to once
+                    // it counted as a drag: on the small box that was already outside it.
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        val frame = FrameBox.letterbox(size.width.toFloat(), size.height.toFloat(), uprightAspect)
+                        if (frame.width <= 0f) return@awaitEachGesture
+                        val at = down.position
+                        val reach = 26.dp.toPx()
+                        fun inside(b: StumpAlignGuide.Box, across: Double, d: Double) = b.contains(frame.toFrame(at), across, d)
+                        // What the finger took hold of: a box to move, or a corner to size it by.
+                        val grabbed = when {
+                            (handleOf(far, FAR_PAD_ACROSS, FAR_PAD_DOWN, frame) - at).getDistance() <= reach -> Grab.FAR_SIZE
+                            (handleOf(near, NEAR_PAD_ACROSS, NEAR_PAD_DOWN, frame) - at).getDistance() <= reach -> Grab.NEAR_SIZE
+                            // The small box first: it sits over the far end of the large one.
+                            inside(far, FAR_PAD_ACROSS, FAR_PAD_DOWN) -> Grab.FAR_MOVE
+                            inside(near, NEAR_PAD_ACROSS, NEAR_PAD_DOWN) -> Grab.NEAR_MOVE
+                            else -> null
+                        } ?: return@awaitEachGesture
+                        down.consume()
+                        drag(down.id) { change ->
+                            val moved = change.positionChange()
+                            change.consume()
+                            val dx = moved.x / frame.width.toDouble()
+                            val dy = moved.y / frame.height.toDouble()
+                            when (grabbed) {
+                                Grab.FAR_MOVE -> { far = far.moved(dx, dy); farMoved = true }
+                                Grab.NEAR_MOVE -> { near = near.moved(dx, dy); nearMoved = true }
+                                Grab.FAR_SIZE -> { far = far.sized(dx, uprightAspect); farMoved = true }
+                                Grab.NEAR_SIZE -> { near = near.sized(dx, uprightAspect); nearMoved = true }
+                            }
+                        }
+                    }
+                },
+        ) {
             val frame = FrameBox.letterbox(size.width, size.height, uprightAspect)
             fun drawGuide(b: StumpAlignGuide.Box, across: Double, down: Double, ok: Boolean) {
                 val r = b.padded(across, down)
@@ -81,6 +135,10 @@ internal fun StumpAlignSetup(
                     cornerRadius = CornerRadius(6.dp.toPx()),
                     style = Stroke(2.dp.toPx()),
                 )
+                // The handle that sizes it, at its outer top-right corner.
+                val handle = handleOf(b, across, down, frame)
+                drawCircle(Color.White, 7.dp.toPx(), handle)
+                drawCircle(tone, 7.dp.toPx(), handle, style = Stroke(2.dp.toPx()))
                 // Where the three stumps should stand inside it, faintly.
                 for (k in 0..2) {
                     val x = b.baseLeft.x + (b.baseRight.x - b.baseLeft.x) * k / 2.0
@@ -93,23 +151,15 @@ internal fun StumpAlignSetup(
                     )
                 }
             }
-            drawGuide(guide.far, FAR_PAD_ACROSS, FAR_PAD_DOWN, farOk)
-            drawGuide(guide.near, NEAR_PAD_ACROSS, NEAR_PAD_DOWN, nearOk)
+            drawGuide(far, FAR_PAD_ACROSS, FAR_PAD_DOWN, farOk || farMoved)
+            // The stumps' own size inside the small box, which is mostly room for error.
+            run {
+                val tl = frame.toView(Point2(far.baseLeft.x, far.topY))
+                val br = frame.toView(Point2(far.baseRight.x, far.baseY))
+                drawRect(Color.White.copy(alpha = 0.8f), topLeft = tl, size = Size(br.x - tl.x, br.y - tl.y), style = Stroke(1.dp.toPx()))
+            }
+            drawGuide(near, NEAR_PAD_ACROSS, NEAR_PAD_DOWN, nearOk || nearMoved)
         }
-
-        Text(
-            "Line the stumps up in the boxes",
-            color = Color.White,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold,
-            modifier = Modifier
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(top = 12.dp)
-                .clip(RoundedCornerShape(999.dp))
-                .background(Color.Black.copy(alpha = 0.55f))
-                .padding(horizontal = 14.dp, vertical = 7.dp),
-        )
 
         Column(
             Modifier
@@ -122,15 +172,23 @@ internal fun StumpAlignSetup(
                 .background(Color(0xE60A1120))
                 .padding(16.dp),
         ) {
+            // Down here with the rest, not at the top where the camera's own chips sit.
+            Text(
+                "Drag each box onto its stumps · corner dot to size",
+                color = Color.White,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Spacer(Modifier.height(6.dp))
             Text(
                 "Tripod about 1.3 m high, 4 m behind the bowler's stumps, looking straight down the pitch.",
                 color = Color.White.copy(alpha = 0.85f),
                 fontSize = 13.sp,
             )
             Spacer(Modifier.height(10.dp))
-            Status("Batter's stumps — small box", farOk)
+            Status("Batter's stumps — small box", farOk, farMoved)
             Spacer(Modifier.height(4.dp))
-            Status("Bowler's stumps — large box", nearOk)
+            Status("Bowler's stumps — large box", nearOk, nearMoved)
             Spacer(Modifier.height(14.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
                 Text(
@@ -155,7 +213,7 @@ internal fun StumpAlignSetup(
                         .weight(2f)
                         .clip(RoundedCornerShape(999.dp))
                         .background(Brand)
-                        .clickable { onDone(farOk, nearOk) }
+                        .clickable { onDone(farOk, nearOk, far, near) }
                         .padding(vertical = 12.dp),
                 )
             }
@@ -164,17 +222,52 @@ internal fun StumpAlignSetup(
 }
 
 @Composable
-private fun Status(label: String, ok: Boolean) {
+private fun Status(label: String, ok: Boolean, placed: Boolean) {
+    val good = ok || placed
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(9.dp).clip(CircleShape).background(if (ok) Found else Wanted))
+        Box(Modifier.size(9.dp).clip(CircleShape).background(if (good) Found else Wanted))
         Spacer(Modifier.size(8.dp))
         Text(
-            if (ok) "$label · found" else "$label · line them up",
-            color = Color.White.copy(alpha = if (ok) 0.95f else 0.7f),
+            when {
+                ok -> "$label · found"
+                placed -> "$label · placed by hand"
+                else -> "$label · drag it onto them"
+            },
+            color = Color.White.copy(alpha = if (good) 0.95f else 0.7f),
             fontSize = 12.sp,
         )
     }
 }
+
+private enum class Grab { FAR_MOVE, NEAR_MOVE, FAR_SIZE, NEAR_SIZE }
+
+/** Where a box's sizing dot sits on screen: the padded box's top-right corner. */
+private fun handleOf(b: StumpAlignGuide.Box, across: Double, down: Double, frame: FrameBox): Offset {
+    val r = b.padded(across, down)
+    return frame.toView(Point2(r[2], r[1]))
+}
+
+/** The box carried by ([dx], [dy]) of the frame, kept on the picture. */
+private fun StumpAlignGuide.Box.moved(dx: Double, dy: Double): StumpAlignGuide.Box {
+    val ddx = dx.coerceIn(-baseLeft.x, 1.0 - baseRight.x)
+    val ddy = dy.coerceIn(-topY, 1.0 - baseY)
+    return StumpAlignGuide.Box(Point2(baseLeft.x + ddx, baseLeft.y + ddy), Point2(baseRight.x + ddx, baseRight.y + ddy), topY + ddy)
+}
+
+/**
+ * The box grown by its corner moving [dx] across: wider and taller together, as a set of
+ * stumps is at any distance, standing on the same base.
+ */
+private fun StumpAlignGuide.Box.sized(dx: Double, aspect: Float): StumpAlignGuide.Box {
+    val newWidth = (width + 2 * dx).coerceIn(MIN_BOX_W, MAX_BOX_W)
+    val k = newWidth / width
+    val h = (baseY - topY) * k
+    val half = newWidth / 2
+    return StumpAlignGuide.Box(Point2(centreX - half, baseLeft.y), Point2(centreX + half, baseRight.y), (baseY - h).coerceAtLeast(0.0))
+}
+
+private const val MIN_BOX_W = 0.01
+private const val MAX_BOX_W = 0.6
 
 private val Wanted = Color(0xFFE5484D)
 private val Found = Color(0xFF16A34A)

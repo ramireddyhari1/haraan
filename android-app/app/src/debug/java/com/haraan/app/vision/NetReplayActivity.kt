@@ -386,7 +386,7 @@ private fun SetupPreview(p: Phase.Playing) {
             uprightAspect = 9f / 16f,
             farSeen = p.farBase,
             nearSeen = p.nearBase,
-            onDone = { _, _ -> },
+            onDone = { _, _, _, _ -> },
             onCancel = {},
         )
     }

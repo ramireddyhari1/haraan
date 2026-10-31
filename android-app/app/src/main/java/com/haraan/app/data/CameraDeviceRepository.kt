@@ -31,6 +31,8 @@ data class CameraSession(
     val clipKeepHours: Int? = null,
     /** May this match use its cameras right now. Null from an older server, which never gated them. */
     val cameraAccess: CameraAccess? = null,
+    /** Save each tracked ball, path and 3D drawn in, to the Gallery. From /control; on from an older server. */
+    val saveTrackingVideos: Boolean = true,
     /** The ball set when the match was made ("tennis", "leather"…), for release speed. */
     val ballType: String? = null,
 )
@@ -90,6 +92,8 @@ data class CameraHeartbeat(
     val videoQuality: String? = null,
     /** Re-read every beat: the booked slot ending pauses the camera; a new one resumes it. */
     val cameraAccess: CameraAccess? = null,
+    /** Gallery saving switched in /control. Null from an older server. */
+    val saveTrackingVideos: Boolean? = null,
 )
 
 /**
@@ -203,6 +207,7 @@ open class CameraDeviceRepository {
             videoQuality = videoQualityOf(data.optString("videoQuality")),
             clipKeepHours = if (data.has("clipKeepHours")) data.optInt("clipKeepHours", -1).takeIf { it >= 0 } else null,
             cameraAccess = CameraAccess.from(data.optJSONObject("cameraAccess")),
+            saveTrackingVideos = data.optBoolean("saveTrackingVideos", true),
             ballType = data.optString("ballType").takeIf { it.isNotBlank() && it != "null" },
         )
     }
@@ -230,6 +235,7 @@ open class CameraDeviceRepository {
             videoQuality = data.optString("videoQuality").takeIf { it.isNotBlank() }?.let { videoQualityOf(it) },
             clipKeepHours = if (data.has("clipKeepHours")) data.optInt("clipKeepHours", -1).takeIf { it >= 0 } else null,
             cameraAccess = CameraAccess.from(data.optJSONObject("cameraAccess")),
+            saveTrackingVideos = if (data.has("saveTrackingVideos")) data.optBoolean("saveTrackingVideos", true) else null,
         )
     }
 

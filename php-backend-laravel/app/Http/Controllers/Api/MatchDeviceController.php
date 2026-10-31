@@ -230,6 +230,8 @@ final class MatchDeviceController extends Controller
             // Known before the first frame, so the camera binds at the right rate.
             'videoQuality' => \App\Support\PlatformRules::string('creation.camera_video_quality'),
             'clipKeepHours' => \App\Support\PlatformRules::int('creation.camera_clip_keep_hours'),
+            // Save each tracked ball, path and 3D drawn in, to the phone's Gallery. /control.
+            'saveTrackingVideos' => \App\Support\PlatformRules::bool('creation.camera_save_tracking_videos'),
             // Until when this camera may film and track. See CameraAccess.
             'cameraAccess' => $access,
             // The ball set when the match was made: how fast it slows in the air decides the
@@ -265,6 +267,8 @@ final class MatchDeviceController extends Controller
             // How long the camera keeps a sent clip in its own gallery. Admin-set, in
             // /control → Platform rules → Tournaments & matches.
             'clipKeepHours' => \App\Support\PlatformRules::int('creation.camera_clip_keep_hours'),
+            // Re-read every beat, so /control can switch Gallery saving on or off mid-match.
+            'saveTrackingVideos' => \App\Support\PlatformRules::bool('creation.camera_save_tracking_videos'),
             // What the camera records at, from /control. Applied between balls.
             'videoQuality' => \App\Support\PlatformRules::string('creation.camera_video_quality'),
             // Re-asked every beat: the booked slot ending pauses the camera; a new one resumes it.
