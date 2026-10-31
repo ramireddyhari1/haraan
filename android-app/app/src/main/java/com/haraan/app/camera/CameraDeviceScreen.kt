@@ -1092,6 +1092,10 @@ private fun CameraMode(
      * it, so it never stands between the operator and a delivery.
      */
     var showReplay by remember { mutableStateOf(false) }
+    // The flight an open 3D replay is playing, held when the next ball starts filming under it.
+    var heldReplayFlight by remember { mutableStateOf<com.haraan.app.vision.Flight3d?>(null) }
+    // The ball whose after-ball replay last played itself, so it plays once.
+    var playedBallMs by remember { androidx.compose.runtime.mutableLongStateOf(-1L) }
 
     /*
      * AFTER A BALL, IN ORDER: the path on the real picture, then the 3D replay, and the clip
@@ -1729,6 +1733,39 @@ private fun CameraMode(
             }
             // Tighter while filming, so the stop lands close to the result tap.
             delay(if (recording) CUE_FILMING_MS else CUE_IDLE_MS)
+        }
+    }
+
+    /*
+     * Debug builds on the TEST code, where there is no scorer: a broadcast stands in for the
+     * scorer's taps, so the hand-over from one ball to the next can be tried on a desk.
+     *   adb shell am broadcast -a com.haraan.app.DEBUG_CUE --es do ball     (BALL)
+     *   adb shell am broadcast -a com.haraan.app.DEBUG_CUE --es do result   (the result)
+     */
+    if (com.haraan.app.BuildConfig.DEBUG && session.sessionToken == "debug_token") {
+        DisposableEffect(Unit) {
+            var seq = 0
+            val receiver = object : android.content.BroadcastReceiver() {
+                override fun onReceive(c: android.content.Context?, intent: android.content.Intent?) {
+                    when (intent?.getStringExtra("do")) {
+                        "ball" -> {
+                            seq++
+                            armRef.value?.invoke(seq)
+                        }
+                        "result" -> {
+                            activeRecording?.stop()
+                            activeRecording = null
+                        }
+                    }
+                }
+            }
+            androidx.core.content.ContextCompat.registerReceiver(
+                ctx,
+                receiver,
+                android.content.IntentFilter("com.haraan.app.DEBUG_CUE"),
+                androidx.core.content.ContextCompat.RECEIVER_EXPORTED,
+            )
+            onDispose { ctx.unregisterReceiver(receiver) }
         }
     }
 
@@ -2938,7 +2975,12 @@ private fun CameraMode(
                         ?: groundCamera?.let { cam -> com.haraan.app.vision.ArPath.fromFlight(f3, cam) }
                 } ?: com.haraan.app.vision.ArPath.fromTrack(flight, uprightAspect, wicketLock, metrics.lbw)
                 arPath = path
+                // The flight and a beat after it, not the whole reading: the frames used to run on
+                // through the seconds the ball was being read, and the 3D waited behind them.
+                val framesEnd = maxOf(flight.lastOrNull()?.timestampMs?.toDouble() ?: 0.0, path.endMs) + REPLAY_TAIL_MS
                 val frames = flight.firstOrNull()?.let { replayFrames.since(it.timestampMs - ReplayFrameRing.LEAD_MS) }.orEmpty()
+                    .filter { it.first <= framesEnd }
+                android.util.Log.i(ANALYSIS_TAG, "result: ball ${flight.firstOrNull()?.timestampMs}, ${flight.size} pts, replay $replay, played $playedBallMs")
                 when {
                     !replay -> liveResult?.let { old -> liveResult = LiveReplay(old.frames, path, metrics.flight3d?.speedKmh, metrics.flight3d, old.ballMs) }
                     // As a ball-tracking camera shows it: on the live picture, at once, and left
@@ -3028,6 +3070,30 @@ private fun CameraMode(
             clipArmedAtMs = android.os.SystemClock.uptimeMillis()
             discardClip = false
             uploadError = null
+            /*
+             * THE LAST BALL'S REPLAY IS NOT THROWN AWAY BY THE NEXT ONE.
+             *
+             * The scorer taps the result and then BALL for the next delivery, often while this
+             * phone is still reading the last ball or playing its 3D. Arming used to wipe all
+             * of it, so the stadium vanished mid-flight and a ball still being read was never
+             * shown at all. Now a ball still being read is shown at once, and a replay already
+             * playing finishes over the new clip, which records underneath it, then closes
+             * itself (see the overlays below).
+             */
+            val stillReading = calledFlight?.takeIf { analysingSince != null }
+            android.util.Log.i(ANALYSIS_TAG, "arm ball $ballSeq: replay playing ${liveSequence != null}, 3D open $showReplay, still reading ${stillReading != null}")
+            if (stillReading != null) {
+                analysingSince = null
+                showFlight(refinedTrack?.takeIf { it.size > stillReading.size } ?: stillReading, true)
+                liveResult?.let { r ->
+                    playedBallMs = r.ballMs
+                    if (r.frames.size >= 2 || r.flight != null) liveSequence = r
+                }
+            }
+            if (showReplay) {
+                heldReplayFlight = lastMetrics?.flight3d
+                if (heldReplayFlight == null) showReplay = false
+            }
             // A fresh delivery: the previous track must not bleed into this one.
             ballStep.reset()
             trackedPoints = 0
@@ -3039,10 +3105,8 @@ private fun CameraMode(
             calledFlight = null
             analysingSince = null
             refinedTrack = null
-            showReplay = false
             showAr = false
             showVideo = false
-            liveSequence = null
             replayFrames.clear()
             arPath = null
             replayClip = null
@@ -3382,10 +3446,17 @@ private fun CameraMode(
          * and the stadium. Keyed to the ball, so a result refined from the saved clip does not
          * start it again; the Replay button plays it again on demand.
          */
-        LaunchedEffect(liveResult?.ballMs) {
+        // Also keyed on the screen coming free: a result that lands while the last ball's replay
+        // is still finishing plays straight after it instead of never.
+        LaunchedEffect(liveResult?.ballMs, liveSequence == null) {
             val r = liveResult ?: return@LaunchedEffect
+            if (r.ballMs == playedBallMs) return@LaunchedEffect
             delay(AUTO_REPLAY_AFTER_MS)
-            if (liveResult?.ballMs == r.ballMs && liveSequence == null) liveSequence = liveResult
+            if (liveResult?.ballMs == r.ballMs && liveSequence == null) {
+                playedBallMs = r.ballMs
+                liveSequence = liveResult
+                android.util.Log.i(ANALYSIS_TAG, "after-ball replay starts: ball ${r.ballMs}, ${r.frames.size} frames, 3D ${r.flight != null}")
+            }
         }
         // The last ball's result stays until the next ball is seen in flight.
         LaunchedEffect(trackedPoints, recording, calledFlight) {
@@ -3528,9 +3599,17 @@ private fun CameraMode(
                 path = seq.path,
                 speedKmh = seq.speedKmh,
                 flight = seq.flight,
-                // In Auto nobody may be holding the phone: the stadium closes itself.
-                stadiumAutoCloseMs = if (autoMode) AUTO_REPLAY_HOLD_MS else null,
-                onDone = { liveSequence = null },
+                // In Auto nobody may be holding the phone, and with the next ball filming the
+                // viewfinder is needed back: the stadium closes itself once it has played.
+                stadiumAutoCloseMs = when {
+                    recording -> 0L
+                    autoMode -> AUTO_REPLAY_HOLD_MS
+                    else -> null
+                },
+                onDone = {
+                    android.util.Log.i(ANALYSIS_TAG, "after-ball replay done (recording $recording)")
+                    liveSequence = null
+                },
             )
         }
         val clipToPlay = replayClip
@@ -3546,14 +3625,21 @@ private fun CameraMode(
                 },
             )
         }
-        val replayFlight = lastMetrics?.flight3d
+        val replayFlight = heldReplayFlight ?: lastMetrics?.flight3d
         if (showReplay && replayFlight != null) {
             com.haraan.app.vision.FlightReplayOverlay(
                 flight = replayFlight,
-                onClose = { showReplay = false },
+                onClose = {
+                    showReplay = false
+                    heldReplayFlight = null
+                },
                 // In Auto nobody may be holding the phone: it closes itself and the next
-                // segment starts.
-                autoCloseAfterMs = if (autoMode) AUTO_REPLAY_HOLD_MS else null,
+                // segment starts. A ball filming underneath closes it once it has played.
+                autoCloseAfterMs = when {
+                    recording -> 0L
+                    autoMode -> AUTO_REPLAY_HOLD_MS
+                    else -> null
+                },
             )
         }
         if (showGallery) {
@@ -4905,7 +4991,10 @@ private const val AUTO_TAIL_MS = 1_200L
 private const val AUTO_REPLAY_AFTER_MS = 0L
 
 /** How long a called ball is read before its result and replay are shown; see analysingSince. */
-private const val RESULT_AFTER_MS = 2_000L
+private const val RESULT_AFTER_MS = 1_200L
+
+/** How much of the picture after the ball's last sighting the after-ball replay keeps. */
+private const val REPLAY_TAIL_MS = 600.0
 
 /**
  * "Reading the ball…" with a bar that fills over [RESULT_AFTER_MS] from [since] (uptime ms):

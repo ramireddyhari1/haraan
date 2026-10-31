@@ -33,6 +33,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.setValue
@@ -64,6 +66,8 @@ import com.haraan.app.ui.Feel
 import com.haraan.app.ui.matches.Thud
 import com.haraan.app.ui.matches.cricketThud
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -276,6 +280,9 @@ private fun FlightReplayContent(
     val hits = flight.hitsStumps
 
     val context = LocalContext.current
+    // Read live, not captured at the start: a replay opened with no auto-close is asked to
+    // close itself when the scorer's next ball starts filming underneath it.
+    val autoClose by rememberUpdatedState(autoCloseAfterMs)
     LaunchedEffect(flight, generation) {
         bails.snapTo(0f)
         play.snapTo(0f)
@@ -309,11 +316,11 @@ private fun FlightReplayContent(
         play.animateTo(1f, tween(playMs, easing = LinearEasing))
         launch { hold.animateTo(1f, tween(HOLD_ORBIT_MS, easing = LinearEasing)) }
         if (hits == true) bails.animateTo(1f, tween(550, easing = FastOutSlowInEasing))
-        if (autoCloseAfterMs != null) {
-            // The turn round the stumps plays out before the replay closes itself.
-            delay(maxOf(autoCloseAfterMs, HOLD_ORBIT_MS.toLong()))
-            onClose()
-        }
+        // The turn round the stumps plays out before the replay closes itself.
+        val playedAt = android.os.SystemClock.uptimeMillis()
+        val closeAfter = snapshotFlow { autoClose }.filterNotNull().first()
+        delay(maxOf(closeAfter, HOLD_ORBIT_MS.toLong()) - (android.os.SystemClock.uptimeMillis() - playedAt))
+        onClose()
     }
     LaunchedEffect(view) {
         if (previous != view) {
