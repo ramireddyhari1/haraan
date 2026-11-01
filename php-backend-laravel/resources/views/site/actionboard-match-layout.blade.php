@@ -178,7 +178,7 @@
                     <div class="mdx-lastball {{ $ballInPlay ? 'is-bowling' : '' }}">
                         <div class="mdx-lastball-lbl"><span class="lb-bowl">BOWLING</span></div>
                         <div class="mdx-ump-slot">
-                            <svg class="mdx-ump" viewBox="0 0 100 118" data-call="{{ $umpCall }}" aria-label="{{ $umpCaption }}"></svg>
+                            <svg class="mdx-ump" viewBox="0 0 100 118" data-call="{{ $umpCall }}" data-key="{{ ($d['overs'] ?? '') . '|' . count((array) ($d['thisOver'] ?? [])) . '|' . $lastBall }}" aria-label="{{ $umpCaption }}"></svg>
                             <div class="mdx-ump-cap">{{ $umpCaption }}</div>
                         </div>
                         {{-- The scorer tapped BALL: a delivery down the pitch, looping until the
@@ -286,9 +286,48 @@
     </nav>
 
     <script>
-        // Six tabs overflow a phone: keep the open one in view, as the app's tab row does.
-        window.addEventListener('load', function () { var on = document.querySelector('.mdx-tabs .mdx-tab.is-on'); if (on && on.scrollIntoView) on.scrollIntoView({ block: 'nearest', inline: 'center' }); });
+        // Tabs behave like the app's pager rather than six separate pages:
+        //  · the bar and tab strip stick as one block, lifting off the content once scrolled;
+        //  · a tap gives a light tick and keeps the reader at the tab strip (no jump to the
+        //    top and back down past the hero) on the next tab's page.
+        (function () {
+            var root = document.querySelector('.mdx'), bar = document.querySelector('.mdx-bar'), tabs = document.querySelector('.mdx-tabs');
+            if (!root || !bar || !tabs) return;
+            var KEY = 'mdxTabStick' + @json((string) $id);
+            function stickTop() { tabs.style.top = bar.offsetHeight + 'px'; }
+            // Measured once styles apply (they load after this markup), and on any resize.
+            document.addEventListener('DOMContentLoaded', stickTop);
+            window.addEventListener('load', stickTop);
+            window.addEventListener('resize', stickTop);
+            if ('ResizeObserver' in window) new ResizeObserver(stickTop).observe(bar);
+            function lift() { root.classList.toggle('is-scrolled', tabs.getBoundingClientRect().top <= bar.offsetHeight + 0.5 && window.scrollY > 4); }
+            window.addEventListener('scroll', lift, { passive: true });
+            lift();
+            var land = false;
+            try { land = !!sessionStorage.getItem(KEY); sessionStorage.removeItem(KEY); } catch (e) {}
+            // After the tab body is parsed — before then the page is too short to scroll to it.
+            // The browser resets scroll for a fresh navigation after DOMContentLoaded, so the
+            // landing is applied then and held through load.
+            if (land) {
+                if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+                // Instant: the site's smooth scrolling would otherwise glide down past the hero.
+                var toStrip = function () { window.scrollTo({ top: tabs.offsetTop - bar.offsetHeight, behavior: 'instant' }); lift(); };
+                document.addEventListener('DOMContentLoaded', toStrip);
+                window.addEventListener('pagereveal', toStrip);
+                window.addEventListener('load', function () { toStrip(); requestAnimationFrame(toStrip); });
+            }
+            tabs.addEventListener('click', function (e) {
+                var a = e.target.closest('.mdx-tab');
+                if (!a) return;
+                if (navigator.vibrate) { try { navigator.vibrate(8); } catch (x) {} }
+                if (a.classList.contains('is-on')) { e.preventDefault(); return; }
+                // Read past the hero: land the next tab at the strip too.
+                try { if (tabs.getBoundingClientRect().top <= bar.offsetHeight + 1) sessionStorage.setItem(KEY, '1'); } catch (x) {}
+            });
+        })();
     </script>
+    {{-- Tab pages are fetched ahead on touch, so the switch lands without a white wait. --}}
+    <script type="speculationrules">{"prefetch":[{"source":"document","where":{"selector_matches":".mdx-tab"},"eagerness":"moderate"}]}</script>
 
     <div class="mdx-content">
         @yield('match_content')
@@ -337,6 +376,34 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
     color: #334155; cursor: pointer; text-decoration: none; transition: background .15s;
 }
 .mdx-ic:hover { background: #E9EFF6; }
+/* ── Physical feel: things you press give a little, like the app's pressScale ── */
+.mdx-ic { transition: background .15s, transform .12s cubic-bezier(.2,0,0,1); }
+.mdx-ic:active { transform: scale(.92); background: #E2E8F0; }
+.mdx-tab .mdx-tab-ic { transition: transform .14s cubic-bezier(.2,0,0,1); }
+.mdx-tab:active .mdx-tab-ic { transform: scale(.84); }
+.mdx-tab:active span { opacity: .7; }
+.cm-row, .cm-prow, .mdx-sc-row { transition: background .12s; }
+.cm-row:active, .cm-prow:active, .mdx-sc-row:active { background: #F8FAFC; }
+.mdx-overchip { transition: transform .12s cubic-bezier(.2,0,0,1); }
+.mdx-overchip:active { transform: scale(.97); }
+/* An AdSense spot says "Advertisement" only once Google actually fills it — an unfilled
+   unit was leaving a bare label over empty space at the foot of every tab. */
+.mdx-sponsor:has(.abs-gad):not(:has(ins[data-ad-status="filled"])) .abs-ad__label { display: none; }
+.mdx-sponsor ins[data-ad-status="unfilled"] { display: none !important; }
+/* The bar and tabs stick as one sheet and lift once content slides under them. */
+.mdx-bar, .mdx-tabs { transition: box-shadow .2s ease; }
+.mdx.is-scrolled .mdx-tabs { box-shadow: 0 8px 16px -10px rgba(15,23,42,.22); }
+.mdx.is-scrolled .mdx-hairline { opacity: 0; }
+/* Tab to tab, the bar, hero and tab strip hold still while only the body crossfades. */
+@view-transition { navigation: auto; }
+.mdx-bar { view-transition-name: mdx-bar; }
+.mdx-hero-wrap { view-transition-name: mdx-hero; }
+.mdx-tabs { view-transition-name: mdx-tabs; }
+::view-transition-old(root) { animation: mdxFadeOut .14s ease both; }
+::view-transition-new(root) { animation: mdxFadeIn .2s ease both; }
+@keyframes mdxFadeOut { to { opacity: 0; } }
+@keyframes mdxFadeIn { from { opacity: 0; transform: translateY(6px); } }
+@media (prefers-reduced-motion: reduce) { ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; } }
 .mdx-ic svg { width: 19px; height: 19px; }
 .mdx-share.is-done { background: #DCFCE7; color: #16A34A; border-color: #BBF7D0; }
 .mdx-bar-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
@@ -555,7 +622,11 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-fow-chip span { color: var(--muted); font-size: 10px; }
 
 /* ── Commentary tab ── */
-.mdx-overchips { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+/* The over strip runs to the screen edges and snaps over by over, like the app's row. */
+.mdx-overchips { display: flex; gap: 10px; overflow-x: auto; margin: 0 -16px; padding: 2px 16px 4px; scroll-padding: 0 16px;
+    scroll-snap-type: x proximity; scrollbar-width: none; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+.mdx-overchips::-webkit-scrollbar { display: none; }
+.mdx-overchips > * { scroll-snap-align: start; }
 .mdx-overchip { display: flex; align-items: center; gap: 9px; border: 1px solid var(--border); background: #fff; border-radius: 12px; padding: 7px 10px; flex: 0 0 auto; }
 .mdx-overchip.current { background: rgba(37,99,235,.06); border-color: rgba(37,99,235,.4); }
 .mdx-overchip .ol { text-align: center; min-width: 26px; }
@@ -818,7 +889,16 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
         function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
         var reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
-        if (reduced) { st.rise = 0; st.p = target.slice(); st.finger = call === 'OUT' ? 1 : 0; paint(0); return; }
+        // A ball he has already signalled (moving between tabs, a refetch) is not a new
+        // moment: he is simply standing there with the signal, as the app keys on the ball.
+        var seenKey = 'mdxUmp' + @json((string) $id), ballKey = svg.getAttribute('data-key') || '';
+        var seen = false;
+        try { seen = sessionStorage.getItem(seenKey) === ballKey; sessionStorage.setItem(seenKey, ballKey); } catch (e) {}
+        if (reduced || seen) {
+            st.rise = 0; st.p = target.slice(); st.finger = call === 'OUT' ? 1 : 0; paint(0);
+            if (!reduced) (function idle(now) { paint(now, true); requestAnimationFrame(idle); })(performance.now());
+            return;
+        }
 
         // A fresh 4, 6 or wicket: the card flashes first and he stays down until it has.
         var held = ['FOUR', 'SIX', 'OUT'].indexOf(call) >= 0 && document.querySelector('.mdx-hero-card.is-fresh');

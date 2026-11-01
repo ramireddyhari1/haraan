@@ -274,14 +274,14 @@
 .cm-head .cm-h-name { flex: 1; text-align: left; letter-spacing: 1px; }
 .cm-mini i:empty { width: 8px; flex: 0 0 auto; }
 .c30 { width: 30px; } .c34 { width: 34px; } .c36 { width: 36px; } .c38 { width: 38px; } .c48 { width: 48px; }
-.cm-prow { padding: 16px; gap: 12px; }
+.cm-prow { padding: 16px; }
 .cm-prow > span { font-size: 14px; color: var(--ink2); text-align: center; font-variant-numeric: tabular-nums; }
 .cm-prow > span.c48, .cm-prow > span.c36 { font-size: 13px; }
 .cm-prow > .cm-strong { color: var(--ink); font-weight: 600; }
-.cm-face { width: 46px; height: 46px; border-radius: 50%; object-fit: cover; background: var(--bg); flex: 0 0 auto; }
-.cm-who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.cm-face { width: 46px; height: 46px; border-radius: 50%; object-fit: cover; background: var(--bg); flex: 0 0 auto; margin-right: 12px; }
+.cm-who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding-right: 6px; }
 .cm-who b { font-size: 14px; font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 4px; }
-.cm-who > span { display: flex; align-items: center; gap: 6px; }
+.cm-who > span { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 6px; }
 .cm-who em { white-space: nowrap; font-style: normal; font-size: 10px; letter-spacing: 1px; color: var(--ink2); }
 .cm-xp { font-style: normal; font-size: 9px; font-weight: 700; color: #2563EB; background: rgba(37,99,235,.12); padding: 1px 6px; border-radius: 6px; white-space: nowrap; }
 .cm-tick { width: 14px; height: 14px; flex: 0 0 auto; }
@@ -338,5 +338,13 @@
 .cm-mile-txt em { font-style: normal; color: var(--acc); font-size: 10px; font-weight: 800; letter-spacing: 1.5px; }
 .cm-mile-txt b { margin-top: 6px; font-size: 18px; font-weight: 900; line-height: 22px; color: var(--ink); }
 .cm-mile-txt span { margin-top: 7px; font-size: 12.5px; font-weight: 600; color: var(--ink2); }
+/* Narrow phones (360 and under): a smaller face buys the name column its room. */
+@media (max-width: 380px) {
+    .cm-prow { padding: 14px 12px; }
+    .cm-head { padding-left: 12px; padding-right: 12px; }
+    .cm-face { width: 38px; height: 38px; margin-right: 10px; }
+    .c30 { width: 26px; } .c34 { width: 30px; } .c38 { width: 32px; } .c48 { width: 42px; } .c36 { width: 32px; }
+    .cm-mini i:empty { width: 2px; }
+}
 </style>
 @endsection

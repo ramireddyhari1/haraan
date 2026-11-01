@@ -22,6 +22,8 @@
     $facts = [];
     if (trim((string) ($d['status'] ?? '')) !== '') $facts[] = ['icon' => 'status', 'k' => 'Status', 'v' => $d['status']];
     if ($venueOk) $facts[] = ['icon' => 'venue', 'k' => 'Venue', 'v' => $venue];
+    // "Starts" when the creator set a time, "Started" when that is simply when scoring began.
+    if (trim((string) ($d['startLabel'] ?? '')) !== '') $facts[] = ['icon' => 'time', 'k' => !empty($d['startIsScheduled']) ? 'Starts' : 'Started', 'v' => $d['startLabel']];
     if (trim((string) ($d['toss'] ?? '')) !== '') $facts[] = ['icon' => 'toss', 'k' => 'Toss', 'v' => $d['toss']];
 
     $cards = is_array($d['inningsCards'] ?? null) ? $d['inningsCards'] : [];
@@ -32,10 +34,10 @@
             if (is_array($m)) {
                 $name = trim((string) ($m['name'] ?? ''));
                 $pid = trim((string) ($m['id'] ?? ($m['player_id'] ?? '')));
-                if ($name !== '' && strtolower($name) !== 'null') $out[] = ['name' => $name, 'guest' => ($pid === '' || strtolower($pid) === 'null')];
+                if ($name !== '' && strtolower($name) !== 'null') $out[] = ['name' => $name, 'photo' => trim((string) ($m['photo'] ?? '')), 'guest' => ($pid === '' || strtolower($pid) === 'null')];
             } else {
                 $name = trim((string) $m);
-                if ($name !== '' && strtolower($name) !== 'null') $out[] = ['name' => $name, 'guest' => false];
+                if ($name !== '' && strtolower($name) !== 'null') $out[] = ['name' => $name, 'photo' => '', 'guest' => false];
             }
         }
         return $out;
@@ -45,37 +47,27 @@
         [$team2Full, $normSquad($d['awaySquad'] ?? []), $col2],
     ];
 
-    $factIcon = [
-        'status' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4.9 4.9a10 10 0 0 0 0 14.2M19.1 4.9a10 10 0 0 1 0 14.2M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4"/><circle cx="12" cy="12" r="2" fill="currentColor" stroke="none"/></svg>',
-        'venue'  => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-5.5-7-11a7 7 0 0 1 14 0c0 5.5-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/></svg>',
-        'toss'   => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v6c0 1.66 3.58 3 8 3s8-1.34 8-3V6M4 12v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/></svg>',
-    ];
 @endphp
 
-{{-- ── Matchup overview ── --}}
-<div class="mdx-card">
-    @if($competition !== '')<div class="info-format">{{ $competition }}</div>@endif
+{{-- ── Matchup overview (InfoTab MatchOverviewCard): teams on one line, then plain fact rows ── --}}
+<div class="mdx-card info-card">
+    @if($competition !== '')<div class="info-eyebrow">{{ strtoupper($competition) }}</div>@endif
     <div class="info-matchup">
-        <div class="info-team">
-            <span class="info-crest" style="background:{{ $col1 }}">@if($logo1!=='')<img src="{{ $logo1 }}" alt="">@else{{ hrn_team_code($team1Full) }}@endif</span>
-            <b>{{ $team1Full }}</b>
+        <div class="info-side">
+            <span class="info-crest" @if($logo1==='')style="background:{{ $col1 }}"@endif>@if($logo1!=='')<img src="{{ $logo1 }}" alt="">@else{{ hrn_team_code($team1Full) }}@endif</span>
+            <b>{{ strtoupper($team1Full) }}</b>
         </div>
-        <span class="info-vs">VS</span>
-        <div class="info-team">
-            <span class="info-crest" style="background:{{ $col2 }}">@if($logo2!=='')<img src="{{ $logo2 }}" alt="">@else{{ hrn_team_code($team2Full) }}@endif</span>
-            <b>{{ $team2Full }}</b>
+        <span class="info-vs">vs</span>
+        <div class="info-side is-r">
+            <b>{{ strtoupper($team2Full) }}</b>
+            <span class="info-crest" @if($logo2==='')style="background:{{ $col2 }}"@endif>@if($logo2!=='')<img src="{{ $logo2 }}" alt="">@else{{ hrn_team_code($team2Full) }}@endif</span>
         </div>
     </div>
     @if(count($facts) > 0)
-        <div class="info-facts">
-            @foreach($facts as $f)
-                <div class="info-fact">
-                    {!! $factIcon[$f['icon']] !!}
-                    <span class="fk">{{ $f['k'] }}</span>
-                    <span class="fv">{{ $f['v'] }}</span>
-                </div>
-            @endforeach
-        </div>
+        <div class="info-rule"></div>
+        @foreach($facts as $f)
+            <div class="info-fact"><span>{{ $f['k'] }}</span><b>{{ $f['v'] }}</b></div>
+        @endforeach
     @endif
 </div>
 
@@ -83,8 +75,6 @@
 @foreach($cards as $card)
     @php
         $runs = (int) ($card['runs'] ?? 0); $wkts = (int) ($card['wickets'] ?? 0);
-        $bt = (int) ($card['battingTeam'] ?? 1);
-        $innCol = $bt === 2 ? $col2 : $col1;
         $battingName = (string) ($card['battingName'] ?? '');
         $batters = is_array($card['batters'] ?? null) ? $card['batters'] : [];
         $bowlers = is_array($card['bowlers'] ?? null) ? $card['bowlers'] : [];
@@ -93,46 +83,27 @@
         $hasBat = $topBat && (int)($topBat['runs']??0) > 0;
         $hasBowl = $topBowl && (int)($topBowl['wickets']??0) > 0;
     @endphp
-    <div class="mdx-card info-inn" style="--inn:{{ $innCol }}">
+    <div class="mdx-card info-card">
         <div class="info-inn-top">
-            <span class="info-inn-crest" style="background:{{ $innCol }}">{{ hrn_team_code($battingName) }}</span>
             <div class="info-inn-id">
-                <span class="info-inn-eyebrow">Innings {{ $card['number'] ?? '' }}</span>
-                <span class="info-inn-name">{{ $battingName }}</span>
+                <span class="info-inn-eyebrow">INNINGS {{ $card['number'] ?? '' }}</span>
+                <b>{{ $battingName }}</b>
             </div>
             <div class="info-inn-score">
-                <b>{{ $runs }}<i>/{{ $wkts }}</i></b>
+                <b>{{ $runs }}/{{ $wkts }}</b>
                 <span>{{ $card['overs'] ?? '0.0' }} ov · RR {{ $card['runRate'] ?? '0.00' }}</span>
             </div>
         </div>
-        @if($hasBat || $hasBowl)
-            <div class="info-perf-wrap">
-                @if($hasBat)
-                    <div class="info-perf">
-                        <span class="info-perf-av" style="background:{{ hrn_mono_color($topBat['name'] ?? '') }}">{{ hrn_initial($topBat['name'] ?? '') }}</span>
-                        <div class="info-perf-meta">
-                            <span class="info-perf-role">Top scorer</span>
-                            <span class="info-perf-name">{{ $topBat['name'] ?? '' }}</span>
-                        </div>
-                        <span class="info-perf-pill">{{ (int)$topBat['runs'] }} ({{ (int)($topBat['balls']??0) }})</span>
-                    </div>
-                @endif
-                @if($hasBowl)
-                    <div class="info-perf">
-                        <span class="info-perf-av" style="background:{{ hrn_mono_color($topBowl['name'] ?? '') }}">{{ hrn_initial($topBowl['name'] ?? '') }}</span>
-                        <div class="info-perf-meta">
-                            <span class="info-perf-role">Best bowler</span>
-                            <span class="info-perf-name">{{ $topBowl['name'] ?? '' }}</span>
-                        </div>
-                        <span class="info-perf-pill">{{ (int)$topBowl['wickets'] }}-{{ (int)($topBowl['runs']??0) }} ({{ hrn_overs_from_balls((int)($topBowl['balls']??0)) }})</span>
-                    </div>
-                @endif
-            </div>
+        @if($hasBat)
+            <div class="info-hl"><span>Top scorer</span><b>{{ $topBat['name'] ?? '' }}&ensp;{{ (int)$topBat['runs'] }} ({{ (int)($topBat['balls']??0) }})</b></div>
+        @endif
+        @if($hasBowl)
+            <div class="info-hl"><span>Best bowler</span><b>{{ $topBowl['name'] ?? '' }}&ensp;{{ (int)$topBowl['wickets'] }}-{{ (int)($topBowl['runs']??0) }} ({{ hrn_overs_from_balls((int)($topBowl['balls']??0)) }})</b></div>
         @endif
     </div>
 @endforeach
 
-{{-- ── Squads (flush list, not another boxed card) ── --}}
+{{-- ── Squads: two a row, a quiet disc each (a face when the player has one) ── --}}
 @foreach($squads as [$teamName, $squad, $teamCol])
     @if(count($squad) > 0)
         @php
@@ -140,17 +111,20 @@
             foreach ($squad as $m) { if ($m['guest']) $hasGuest = true; else $hasReal = true; }
             $showGuest = $hasReal && $hasGuest;
         @endphp
-        <div class="mdx-card">
+        <div class="mdx-card info-card">
             <div class="info-squad-head">
-                <span class="info-inn-crest" style="width:30px;height:30px;font-size:11px;background:{{ $teamCol }}">{{ hrn_team_code($teamName) }}</span>
-                <b>{{ $teamName }}</b>
-                <span class="info-chip">{{ count($squad) }} players</span>
+                <span>{{ strtoupper($teamName) }}</span>
+                <span>{{ count($squad) }} players</span>
             </div>
             <div class="info-players">
                 @foreach($squad as $m)
                     <div class="info-player">
-                        <span class="info-player-av" style="background:{{ hrn_mono_color($m['name']) }}">{{ hrn_initial($m['name']) }}</span>
-                        <span>{{ $m['name'] }}</span>
+                        @if($m['photo'] !== '')
+                            <img class="info-player-av" src="{{ $m['photo'] }}" alt="" loading="lazy">
+                        @else
+                            <span class="info-player-av">{{ hrn_initial($m['name']) }}</span>
+                        @endif
+                        <span class="info-player-name">{{ $m['name'] }}</span>
                         @if($showGuest && $m['guest'])<em class="info-guest">G</em>@endif
                     </div>
                 @endforeach
@@ -160,70 +134,42 @@
 @endforeach
 
 <style>
-/* ── Info tab design system (8pt spacing · tabular numerals · layered surfaces) ── */
-.info-format {
-    display: inline-flex; align-self: center; margin: 0 auto 16px;
-    background: #EEF4FF; color: #2563EB; font-size: 11px; font-weight: 700;
-    letter-spacing: .3px; padding: 5px 13px; border-radius: 999px;
-}
-.mdx-content .info-format { display: flex; width: fit-content; }
-
-.info-matchup { display: flex; align-items: flex-start; gap: 12px; }
-.info-team { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.info-crest {
-    width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center;
-    color: #fff; font-size: 15px; font-weight: 800; overflow: hidden;
-    box-shadow: 0 0 0 3px #fff, 0 3px 10px rgba(15,23,42,.14);
-}
+/* Info tab, as InfoTab.kt draws it: three plain cards, rows not tiles. */
+.info-card { padding: 18px; }
+.info-eyebrow { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 1px; margin-bottom: 14px; }
+.info-matchup { display: flex; align-items: center; }
+.info-side { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
+.info-side.is-r { justify-content: flex-end; text-align: right; }
+.info-side b { font-size: 12px; font-weight: 700; color: var(--ink); line-height: 1.3; min-width: 0; overflow-wrap: anywhere; }
+.info-crest { width: 34px; height: 34px; border-radius: 50%; flex: 0 0 auto; display: grid; place-items: center; overflow: hidden;
+    background: #fff; border: 1px solid #CBD5E1; color: #fff; font-size: 11px; font-weight: 800; }
 .info-crest img { width: 100%; height: 100%; object-fit: cover; }
-.info-team b { font-size: 14px; font-weight: 700; color: #0F172A; text-align: center; line-height: 1.25; }
-.info-vs {
-    flex: 0 0 auto; margin-top: 12px; width: 32px; height: 32px; border-radius: 50%;
-    background: #0F172A; color: #fff; display: grid; place-items: center; font-size: 10px; font-weight: 800;
-}
+.info-vs { flex: 0 0 auto; padding: 0 8px; color: var(--muted); font-size: 12px; }
+.info-rule { height: 1px; background: var(--border); margin: 16px 0; }
+.info-fact { display: flex; align-items: flex-start; font-size: 13px; }
+.info-fact + .info-fact { margin-top: 12px; }
+.info-fact span { width: 88px; flex: 0 0 auto; color: var(--muted); }
+.info-fact b { flex: 1; min-width: 0; font-weight: 600; color: var(--ink); }
 
-.info-facts { display: flex; gap: 8px; margin-top: 20px; }
-.info-fact {
-    flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px;
-    text-align: center; padding: 12px 8px; background: #F6F8FB; border-radius: 12px;
-}
-.info-fact svg { width: 18px; height: 18px; color: #64748B; }
-.info-fact .fk { font-size: 9.5px; font-weight: 700; letter-spacing: .5px; color: #94A3B8; text-transform: uppercase; }
-.info-fact .fv { font-size: 12.5px; font-weight: 700; color: #0F172A; line-height: 1.3; }
+.info-inn-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+.info-inn-id { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.info-inn-eyebrow { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+.info-inn-id b { font-size: 15px; font-weight: 700; color: var(--ink); }
+.info-inn-score { text-align: right; flex: 0 0 auto; }
+.info-inn-score b { display: block; font-family: 'Archivo Black', sans-serif; font-weight: 400; font-size: 22px; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1.15; }
+.info-inn-score span { font-size: 11px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+.info-hl { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 12px; }
+.info-hl + .info-hl { margin-top: 8px; }
+.info-hl span { font-size: 12px; color: var(--muted); flex: 0 0 auto; }
+.info-hl b { font-size: 13px; font-weight: 600; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
 
-/* Innings */
-.info-inn { border-left: 3px solid var(--inn); }
-.info-inn-top { display: flex; align-items: center; gap: 12px; }
-.info-inn-crest {
-    width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
-    color: #fff; font-size: 12px; font-weight: 800; flex: 0 0 auto;
-    box-shadow: 0 0 0 2px #fff, 0 2px 6px rgba(15,23,42,.12);
-}
-.info-inn-id { display: flex; flex-direction: column; min-width: 0; }
-.info-inn-eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .5px; color: #94A3B8; text-transform: uppercase; }
-.info-inn-name { font-size: 16px; font-weight: 800; color: #0F172A; line-height: 1.2; margin-top: 2px; }
-.info-inn-score { margin-left: auto; text-align: right; }
-.info-inn-score b { font-size: 28px; font-weight: 800; letter-spacing: -1px; color: #0F172A; font-variant-numeric: tabular-nums; }
-.info-inn-score b i { font-size: 17px; font-weight: 800; font-style: normal; color: #94A3B8; }
-.info-inn-score span { display: block; font-size: 11px; font-weight: 600; color: #94A3B8; margin-top: 3px; font-variant-numeric: tabular-nums; }
-
-.info-perf-wrap { margin-top: 16px; padding-top: 4px; border-top: 1px solid #F1F5F9; }
-.info-perf { display: flex; align-items: center; gap: 10px; padding: 10px 0; }
-.info-perf + .info-perf { border-top: 1px solid #F5F7FA; }
-.info-perf-av { width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 12px; font-weight: 700; flex: 0 0 auto; }
-.info-perf-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.info-perf-role { font-size: 9.5px; font-weight: 700; letter-spacing: .5px; color: #94A3B8; text-transform: uppercase; }
-.info-perf-name { font-size: 14px; font-weight: 600; color: #0F172A; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.info-perf-pill { flex: 0 0 auto; font-size: 12.5px; font-weight: 800; color: #0F172A; background: #F1F5F9; border-radius: 9px; padding: 6px 11px; font-variant-numeric: tabular-nums; }
-
-/* Squads */
-.info-squad-head { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
-.info-squad-head b { font-size: 15px; font-weight: 800; color: #0F172A; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.info-chip { margin-left: auto; flex: 0 0 auto; background: #F1F5F9; color: #475569; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 999px; }
-.info-players { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 14px; }
-.info-player { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.info-player-av { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-size: 11px; font-weight: 700; flex: 0 0 auto; }
-.info-player span { font-size: 13px; font-weight: 600; color: #0F172A; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.info-guest { flex: 0 0 auto; font-style: normal; background: #E2E8F0; color: #475569; font-size: 8px; font-weight: 700; padding: 1px 5px; border-radius: 5px; }
+.info-squad-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 12px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 1px; }
+.info-squad-head span:last-child { letter-spacing: 0; font-weight: 600; flex: 0 0 auto; }
+.info-players { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 10px; }
+.info-player { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.info-player-av { width: 26px; height: 26px; border-radius: 50%; flex: 0 0 auto; display: grid; place-items: center; object-fit: cover;
+    background: var(--bg); border: 1px solid var(--border); color: var(--ink2); font-size: 11px; font-weight: 700; }
+.info-player-name { font-size: 13px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.info-guest { flex: 0 0 auto; font-style: normal; background: var(--border); color: var(--ink2); font-size: 8px; font-weight: 700; padding: 1px 5px; border-radius: 5px; }
 </style>
 @endsection
