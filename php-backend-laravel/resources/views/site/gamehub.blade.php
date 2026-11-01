@@ -520,6 +520,209 @@
     .down em svg { transition: transform .2s; }
     .down:hover em svg { transform: translateX(2px); }
 
+    /* Open plot at the end of a short venue row. */
+    .dfill {
+        display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 6px;
+        min-height: 100%; padding: 24px 22px; border-radius: 24px; border: 1.5px dashed #93B4F5; background: rgba(255, 255, 255, .6);
+        color: inherit; text-decoration: none; transition: background-color .15s, border-color .15s, transform .16s cubic-bezier(.2, .7, .3, 1);
+    }
+    .dfill[hidden] { display: none; }
+    .dfill:hover { background: #fff; border-color: var(--blue); transform: translateY(-2px); }
+    .dfill__art { width: 200px; max-width: 100%; height: auto; margin-bottom: 6px; }
+    .dfill strong { font-size: 17px; font-weight: 800; letter-spacing: -.015em; }
+    .dfill span { max-width: 300px; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+    .dfill em { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; font-style: normal; font-size: 14px; font-weight: 800; color: var(--blue); }
+    .dfill em svg { transition: transform .2s; }
+    .dfill:hover em svg { transform: translateX(3px); }
+    .dfill__flag { transform-origin: 150px 25px; }
+    @media (prefers-reduced-motion: no-preference) {
+        .dfill:hover .dfill__flag { animation: dfill-wave .9s ease-in-out infinite alternate; }
+        @keyframes dfill-wave { from { transform: scaleX(1); } to { transform: scaleX(.86) skewY(-4deg); } }
+    }
+
+    /* Sections under the grid share one heading. */
+    .drow, .dplayers { margin-top: 34px; }
+    .drow__head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 14px; }
+    .drow__head > div { flex: 1; min-width: 0; }
+    .drow__head h2, .dfaq h2, .dcities h2, .dapp h2 { margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.025em; color: var(--ink); }
+    .drow__head p { margin: 4px 0 0; font-size: 13.5px; color: var(--muted); }
+    .drow__live { display: inline-flex; align-items: center; gap: 6px; font-weight: 700; color: #DC2626; }
+    .drow__live i { width: 7px; height: 7px; border-radius: 50%; background: #DC2626; animation: dab-pulse 1.6s ease-out infinite; }
+    .drow__all { flex: none; font-size: 14px; font-weight: 700; color: var(--blue); text-decoration: none; }
+    .drow__all:hover { text-decoration: underline; }
+    .drow__keys { flex: none; display: inline-flex; gap: 8px; }
+    .drow.is-static .drow__keys { display: none; }
+    .drow__key {
+        display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line); background: #fff;
+        color: var(--ink); cursor: pointer; box-shadow: 0 1px 2px rgba(15, 23, 42, .06); transition: border-color .15s, color .15s, transform .08s;
+    }
+    .drow__key:hover:not(:disabled) { border-color: var(--blue); color: var(--blue); }
+    .drow__key:active:not(:disabled) { transform: scale(.94); }
+    .drow__key:disabled { color: #CBD5E1; cursor: default; box-shadow: none; }
+    .drow__track {
+        display: grid; grid-auto-flow: column; grid-auto-columns: calc((100% - 3 * 18px) / 4); gap: 18px;
+        overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; padding: 4px 2px 14px; margin: -4px -2px -14px;
+    }
+    .drow__track::-webkit-scrollbar { display: none; }
+    .drow__track > * { scroll-snap-align: start; }
+    .drow__track.is-photos { grid-auto-columns: calc((100% - 4 * 18px) / 5); }
+
+    /* Banner strip: the loud row. Solid brand blue, one drawing each. */
+    .dpromos { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; margin-top: 8px; }
+    .dpromos:has(> :nth-child(3):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    @media (max-width: 1180px) { .dpromos, .dpromos:has(> :nth-child(3):last-child) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .dpromo {
+        position: relative; overflow: hidden; display: flex; flex-direction: column; min-height: 210px; padding: 22px 22px 20px;
+        border-radius: 24px; background: var(--blue); color: #fff; text-decoration: none;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, .2) inset, 0 14px 28px -18px rgba(30, 58, 138, .9);
+        transition: transform .16s cubic-bezier(.2, .7, .3, 1), box-shadow .16s;
+    }
+    .dpromo.is-deep { background: var(--deep); }
+    .dpromo:hover { transform: translateY(-3px); box-shadow: 0 1px 0 rgba(255, 255, 255, .2) inset, 0 22px 34px -18px rgba(30, 58, 138, .95); }
+    .dpromo:active { transform: translateY(1px); }
+    .dpromo > strong { position: relative; z-index: 1; max-width: 75%; font-size: 21px; line-height: 1.18; font-weight: 800; letter-spacing: -.025em; text-wrap: balance; }
+    .dpromo > span { position: relative; z-index: 1; max-width: 72%; margin-top: 8px; font-size: 13.5px; line-height: 1.45; color: rgba(255, 255, 255, .78); }
+    .dpromo > em {
+        position: relative; z-index: 1; align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; margin-top: auto;
+        height: 38px; padding: 0 4px 0 15px; border-radius: 999px; background: #fff; color: var(--deep);
+        font-style: normal; font-size: 14px; font-weight: 800; box-shadow: 0 2px 0 rgba(15, 23, 42, .18);
+    }
+    .dpromo > em i { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--blue); color: #fff; transition: transform .22s cubic-bezier(.2, .9, .3, 1.2); }
+    .dpromo.is-deep > em i { background: var(--deep); }
+    .dpromo:hover > em i { transform: translateX(3px); }
+    .dpromo__art { position: absolute; right: -8px; bottom: -6px; width: 150px; height: auto; transition: transform .4s cubic-bezier(.2, .7, .3, 1); }
+    .dpromo:hover .dpromo__art { transform: translate(-4px, -4px) rotate(-3deg); }
+    .dpromo__art * { fill: none; stroke: rgba(255, 255, 255, .55); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .dpromo__art .is-bold { stroke: #fff; stroke-width: 3; }
+    .dpromo__art .is-faint { stroke: rgba(255, 255, 255, .28); }
+    .dpromo__art .is-dash { stroke-dasharray: 4 6; stroke: rgba(255, 255, 255, .45); }
+    .dpromo__art .is-fill { fill: #FDE68A; stroke: #FDE68A; }
+    .dpromo__art .is-ink { stroke: #B45309; stroke-width: 1.5; }
+
+    /* Match cards. */
+    .dmatch {
+        display: flex; flex-direction: column; gap: 9px; min-width: 0; padding: 14px 16px 14px; border-radius: 20px; background: #fff;
+        color: inherit; text-decoration: none; box-shadow: 0 12px 28px -20px rgba(15, 23, 42, .35), 0 1px 2px rgba(15, 23, 42, .07);
+        border: 1.5px solid transparent; transition: transform .16s cubic-bezier(.2, .7, .3, 1), border-color .15s;
+    }
+    .dmatch.is-live { border-color: #FECACA; }
+    .dmatch:hover { transform: translateY(-3px); border-color: var(--blue); }
+    .dmatch__top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    .dmatch__pill { flex: none; display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 9px; border-radius: 999px; background: #FEF2F2; color: #DC2626; font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+    .dmatch__pill i { width: 6px; height: 6px; border-radius: 50%; background: #DC2626; animation: dab-pulse 1.6s ease-out infinite; }
+    .dmatch__pill.is-done { background: #F1F5F9; color: var(--muted); letter-spacing: 0; text-transform: none; font-weight: 700; }
+    .dmatch__comp { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--faint); }
+    .dmatch__row { display: flex; align-items: center; gap: 10px; font-size: 14.5px; color: var(--muted); }
+    .dmatch__row.is-strong { color: var(--ink); font-weight: 700; }
+    .dmatch__logo { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: #EEF2F7; font-size: 10.5px; font-weight: 800; color: #475569; overflow: hidden; }
+    .dmatch__logo img { width: 100%; height: 100%; object-fit: cover; }
+    .dmatch__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dmatch__score { flex: none; font-weight: 800; font-variant-numeric: tabular-nums; color: inherit; }
+    .dmatch__score small { margin-left: 4px; font-size: 11.5px; font-weight: 600; color: var(--faint); }
+    .dmatch__foot { margin-top: auto; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 12.5px; font-weight: 600; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dmatch:not(.is-live) .dmatch__foot { color: #15803D; }
+
+    /* Player photos. */
+    .dphoto { position: relative; display: block; aspect-ratio: 4 / 5; border-radius: 20px; overflow: hidden; background: #E2E8F0; box-shadow: 0 12px 28px -20px rgba(15, 23, 42, .5); }
+    .dphoto > img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .5s cubic-bezier(.2, .7, .3, 1); }
+    .dphoto:hover > img { transform: scale(1.05); }
+    .dphoto::after { content: ""; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 55%, rgba(15, 23, 42, .72)); pointer-events: none; }
+    .dphoto__by { position: absolute; z-index: 1; left: 12px; right: 12px; bottom: 11px; display: flex; align-items: center; gap: 8px; color: #fff; }
+    .dphoto__by b { flex: 1; min-width: 0; font-size: 13px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dphoto__by small { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; }
+    .dphoto__av { flex: none; display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; overflow: hidden; background: var(--blue); font-size: 11px; font-weight: 800; box-shadow: 0 0 0 2px #fff; }
+    .dphoto__av img { width: 100%; height: 100%; object-fit: cover; }
+
+    /* Top players. */
+    .dplayers__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 18px; }
+    .dplayer {
+        position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 22px 14px 18px;
+        border-radius: 22px; background: #fff; color: inherit; text-decoration: none;
+        box-shadow: 0 12px 28px -20px rgba(15, 23, 42, .35), 0 1px 2px rgba(15, 23, 42, .07); transition: transform .16s cubic-bezier(.2, .7, .3, 1);
+    }
+    .dplayer:hover { transform: translateY(-3px); }
+    .dplayer.is-first { box-shadow: 0 0 0 1.5px #EAB308, 0 14px 30px -18px rgba(234, 179, 8, .6); }
+    .dplayer__rank { position: absolute; top: 12px; left: 14px; font-size: 13px; font-weight: 800; color: var(--faint); font-variant-numeric: tabular-nums; }
+    .dplayer.is-first .dplayer__rank { color: #CA8A04; }
+    .dplayer__av { display: grid; place-items: center; width: 68px; height: 68px; border-radius: 50%; overflow: hidden; background: #EFF4FF; color: var(--deep); font-size: 24px; font-weight: 800; box-shadow: 0 0 0 3px #fff, 0 0 0 4.5px var(--blue); }
+    .dplayer.is-first .dplayer__av { box-shadow: 0 0 0 3px #fff, 0 0 0 4.5px #EAB308; }
+    .dplayer__av img { width: 100%; height: 100%; object-fit: cover; }
+    .dplayer b { margin-top: 14px; max-width: 100%; font-size: 15px; font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .dplayer small { margin-top: 2px; font-size: 12.5px; color: var(--muted); }
+    .dplayer__xp { margin-top: 10px; font-size: 12.5px; color: var(--muted); }
+    .dplayer__xp strong { font-size: 15px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
+    .dplayer__xp i { font-style: normal; }
+
+    /* App panel: copy on the left, the QR as a pass on the right. */
+    .dapp {
+        display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 40px; margin-top: 34px; padding: 34px 40px;
+        border-radius: 28px; background: #fff; border: 1.5px solid var(--blue);
+        box-shadow: 0 10px 24px -14px rgba(37, 99, 235, .45), 0 2px 4px -2px rgba(15, 23, 42, .08);
+        background-image: radial-gradient(circle at 100% 0, #EEF4FF 0, transparent 46%);
+    }
+    .dapp__eyebrow { font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--blue); }
+    .dapp h2 { margin-top: 8px; font-size: clamp(26px, 2.3vw, 32px); line-height: 1.15; text-wrap: balance; }
+    .dapp p { max-width: 520px; margin: 10px 0 0; font-size: 15px; line-height: 1.55; color: var(--muted); }
+    .dapp__keys { display: flex; flex-wrap: wrap; align-items: center; gap: 18px; margin-top: 22px; }
+    .dapp__play {
+        display: inline-flex; align-items: center; gap: 11px; height: 52px; padding: 0 22px 0 18px; border-radius: 16px; background: var(--blue); color: #fff; text-decoration: none;
+        box-shadow: 0 1px 0 rgba(255, 255, 255, .25) inset, 0 2px 0 var(--blue-lip), 0 8px 16px -8px rgba(37, 99, 235, .8); transition: transform .08s, box-shadow .08s;
+    }
+    .dapp__play:active { transform: translateY(2px); box-shadow: 0 0 0 var(--blue-lip); }
+    .dapp__play span { display: flex; flex-direction: column; font-size: 16px; font-weight: 800; line-height: 1.1; }
+    .dapp__play small { font-size: 11px; font-weight: 600; opacity: .8; }
+    .dapp__apk { font-size: 14px; font-weight: 700; color: var(--blue); text-decoration: none; }
+    .dapp__apk:hover { text-decoration: underline; }
+    .dapp__pass { margin: 0; padding: 16px 16px 12px; border-radius: 22px; background: #fff; text-align: center; box-shadow: 0 0 0 1px var(--line), 0 18px 34px -20px rgba(15, 23, 42, .45); transform: rotate(2deg); transition: transform .3s cubic-bezier(.2, .8, .3, 1.2); }
+    .dapp:hover .dapp__pass { transform: rotate(0); }
+    .dapp__qr { width: 150px; height: 150px; border-radius: 8px; overflow: hidden; background: #F8FAFC; }
+    .dapp__qr img, .dapp__qr canvas { display: block; width: 100% !important; height: 100% !important; image-rendering: pixelated; }
+    .dapp__pass figcaption { margin-top: 10px; font-size: 12px; font-weight: 700; color: var(--muted); }
+
+    /* The page's own app panel replaces the footer's smaller app band (desktop only). */
+    @media (min-width: 721px) { body:has(#pulse-app) .mfoot__cta { display: none; } }
+
+    /* Questions. */
+    .dfaq { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr); gap: 40px; margin-top: 40px; }
+    .dfaq__intro p { margin: 8px 0 0; font-size: 14px; line-height: 1.5; color: var(--muted); }
+    .dfaq__intro a { display: inline-flex; align-items: center; gap: 6px; margin-top: 14px; font-size: 14px; font-weight: 700; color: var(--blue); text-decoration: none; }
+    .dfaq__intro a:hover { text-decoration: underline; }
+    .dfaq__list { display: flex; flex-direction: column; gap: 10px; }
+    .dfaq__item { border-radius: 18px; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .07); transition: box-shadow .15s; }
+    .dfaq__item[open] { box-shadow: 0 0 0 1.5px var(--blue), 0 10px 24px -16px rgba(37, 99, 235, .45); }
+    .dfaq__item summary { display: flex; align-items: center; gap: 14px; padding: 17px 20px; cursor: pointer; list-style: none; font-size: 15.5px; font-weight: 700; letter-spacing: -.01em; color: var(--ink); }
+    .dfaq__item summary::-webkit-details-marker { display: none; }
+    .dfaq__item summary i { position: relative; flex: none; width: 26px; height: 26px; margin-left: auto; border-radius: 50%; background: #F1F5F9; transition: background-color .15s, transform .25s; }
+    .dfaq__item summary i::before, .dfaq__item summary i::after { content: ""; position: absolute; left: 50%; top: 50%; width: 10px; height: 2px; margin: -1px 0 0 -5px; border-radius: 2px; background: #475569; }
+    .dfaq__item summary i::after { transform: rotate(90deg); transition: transform .25s; }
+    .dfaq__item[open] summary i { background: var(--blue); }
+    .dfaq__item[open] summary i::before, .dfaq__item[open] summary i::after { background: #fff; }
+    .dfaq__item[open] summary i::after { transform: rotate(0); }
+    .dfaq__item p { margin: -4px 0 0; padding: 0 20px 18px; font-size: 14.5px; line-height: 1.6; color: #475569; }
+
+    /* City links. */
+    .dcities { margin-top: 40px; padding: 26px 0 8px; border-top: 1px solid #DCE3EC; }
+    .dcities h2 { font-size: 17px; }
+    .dcities__list { display: flex; flex-wrap: wrap; gap: 8px 10px; margin-top: 12px; }
+    .dcities__list a { display: inline-flex; align-items: center; height: 36px; padding: 0 14px; border-radius: 999px; background: #fff; border: 1px solid var(--line); font-size: 13.5px; font-weight: 600; color: #334155; text-decoration: none; transition: border-color .15s, color .15s; }
+    .dcities__list a:hover { border-color: var(--blue); color: var(--deep); }
+
+    @media (prefers-reduced-motion: reduce) {
+        .dpromo, .dpromo__art, .dmatch, .dphoto > img, .dplayer, .dapp__pass, .dfill { transition: none; }
+        .drow__live i, .dmatch__pill i { animation: none; }
+    }
+    @media (max-width: 1280px) {
+        .drow__track { grid-auto-columns: calc((100% - 2 * 18px) / 3); }
+        .drow__track.is-photos { grid-auto-columns: calc((100% - 3 * 18px) / 4); }
+    }
+    @media (max-width: 900px) {
+        .drow__track { grid-auto-columns: calc((100% - 18px) / 2); }
+        .drow__track.is-photos { grid-auto-columns: calc((100% - 2 * 18px) / 3); }
+        .dfaq { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+        .dapp { grid-template-columns: minmax(0, 1fr); padding: 28px; }
+        .dapp__pass { display: none; }
+    }
+
     /* Tablet: the rail moves above the grid as a row of panels. */
     @media (max-width: 1100px) {
         .dhub__body { grid-template-columns: minmax(0, 1fr); }
@@ -1000,6 +1203,23 @@
                             </span>
                         </a>
                     @endforeach
+                    {{-- A short row ends in an open plot instead of blank canvas; the JS
+                         stretches it over whatever columns the venues left empty. --}}
+                    @if($pulse['fill'])
+                        <a class="dfill" href="/become-a-partner" hidden>
+                            <svg class="dfill__art" viewBox="0 0 220 120" aria-hidden="true">
+                                <rect x="20" y="16" width="180" height="88" rx="8" fill="#F5F8FF" stroke="#93B4F5" stroke-width="1.6" stroke-dasharray="6 5"/>
+                                <path d="M110 22v76M20 40h22v40H20M200 40h-22v40h22" fill="none" stroke="#BFD3FB" stroke-width="1.4" stroke-dasharray="4 4"/>
+                                <circle cx="110" cy="60" r="16" fill="none" stroke="#BFD3FB" stroke-width="1.4" stroke-dasharray="4 4"/>
+                                <path class="dfill__pole" d="M150 58V18" stroke="#1E3A8A" stroke-width="2" stroke-linecap="round"/>
+                                <path class="dfill__flag" d="M150 18h24l-6 7 6 7h-24z" fill="#2563EB"/>
+                                <ellipse cx="150" cy="59" rx="6" ry="2" fill="#1E3A8A" opacity=".2"/>
+                            </svg>
+                            <strong>Your ground here</strong>
+                            <span>Own a turf or court{{ $dWhere ? ' in ' . $dWhere : '' }}? List it and take bookings online, with walk-ins in the same calendar.</span>
+                            <em>List your ground<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"></path></svg></em>
+                        </a>
+                    @endif
                 </div>
             @else
                 <div class="dhub__none">
@@ -1093,6 +1313,201 @@
             </a>
         </aside>
     </div>
+
+    {{-- ============================================================= --}}
+    {{-- Below the grid: the rest of Pulse, full width. Each section is --}}
+    {{-- switched and worded in /control → Platform → Pulse desktop    --}}
+    {{-- page, and drops out when it has nothing real to show.         --}}
+    {{-- ============================================================= --}}
+    @php
+        $dArrow = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"></path></svg>';
+        $dRowKeys = '<span class="drow__keys">'
+            .'<button type="button" class="drow__key" data-drow="prev" aria-label="Back"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg></button>'
+            .'<button type="button" class="drow__key" data-drow="next" aria-label="More"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg></button>'
+            .'</span>';
+        // Each banner gets a line drawing for what its button opens.
+        $dPromoArt = function (string $url): string {
+            $u = strtolower($url);
+            $g = fn (string $inner) => '<svg class="dpromo__art" viewBox="0 0 140 110" aria-hidden="true">'.$inner.'</svg>';
+            return match (true) {
+                str_contains($u, 'actionboard') => $g(
+                    '<path d="M58 96V34M70 96V34M82 96V34"/><path d="M55 34h30" class="is-bold"/><path d="M14 98h112" class="is-faint"/>'
+                    .'<path d="M18 30c18-22 52-24 74-6" class="is-dash"/><circle cx="104" cy="32" r="8" class="is-fill"/><path d="M98 28c4 2 8 6 9 10" class="is-ink"/>'),
+                str_contains($u, 'partner') => $g(
+                    '<rect x="14" y="22" width="112" height="70" rx="6"/><path d="M70 22v70"/><circle cx="70" cy="57" r="11"/>'
+                    .'<path d="M14 40h16v34H14M126 40h-16v34h16"/><path d="M96 54V8" class="is-bold"/><path d="M96 8h22l-6 7 6 7H96z" class="is-fill"/>'),
+                str_contains($u, 'leaderboard') => $g(
+                    '<path d="M18 96h104" class="is-faint"/><path d="M50 96V50h40v46M18 96V66h32M90 96V74h32"/>'
+                    .'<path d="M70 18l5.5 11 12 1.8-8.7 8.4 2 12L70 45.6 59.2 51.2l2-12-8.7-8.4 12-1.8z" class="is-fill"/><path d="M67 74h6M34 82h0M106 86h0" class="is-bold"/>'),
+                str_contains($u, 'app') || str_contains($u, 'play.google') || str_contains($u, '.apk') => $g(
+                    '<rect x="44" y="8" width="52" height="94" rx="10"/><path d="M62 16h16" class="is-bold"/>'
+                    .'<path d="M54 30h32v40H54z" class="is-faint"/><circle cx="70" cy="50" r="9" class="is-fill"/><path d="M54 80h32M54 88h20" class="is-faint"/>'),
+                default => $g('<rect x="14" y="22" width="112" height="70" rx="6"/><path d="M70 22v70"/><circle cx="70" cy="57" r="11"/>'),
+            };
+        };
+    @endphp
+
+    @if(count($pulse['promos']))
+        <section class="dpromos" aria-label="Haraan">
+            @foreach($pulse['promos'] as $promo)
+                <a class="dpromo {{ $loop->odd ? '' : 'is-deep' }}" href="{{ $promo['url'] }}" @if($promo['external']) target="_blank" rel="noopener" @endif>
+                    <strong>{{ $promo['title'] }}</strong>
+                    @if($promo['line'])<span>{{ $promo['line'] }}</span>@endif
+                    <em>{{ $promo['cta'] }}<i>{!! $dArrow !!}</i></em>
+                    {!! $dPromoArt($promo['url']) !!}
+                </a>
+            @endforeach
+        </section>
+    @endif
+
+    @if(count($pulse['matches']))
+        @php $dLiveCount = collect($pulse['matches'])->where('live', true)->count(); @endphp
+        <section class="drow" aria-label="{{ $pulse['matchesTitle'] }}">
+            <header class="drow__head">
+                <div>
+                    <h2>{{ $pulse['matchesTitle'] }}</h2>
+                    <p>
+                        @if($dLiveCount)<span class="drow__live"><i></i>{{ $dLiveCount }} live now</span> · @endif
+                        Scored ball by ball by players on Haraan.
+                    </p>
+                </div>
+                <a class="drow__all" href="/gamehub/actionboard">Open the board</a>
+                {!! $dRowKeys !!}
+            </header>
+            <div class="drow__track">
+                @foreach($pulse['matches'] as $m)
+                    @php
+                        $dCricket = $m['sport'] === 'Cricket';
+                        $dTeams = collect([$m['home'], $m['away']]);
+                        if ($dCricket && $m['live']) {
+                            $dTeams = $dTeams->sortByDesc(fn ($t) => (bool) $t['batting'])->values();
+                        }
+                        $dHigh = $dCricket ? null : $dTeams->max(fn ($t) => (int) $t['score']);
+                    @endphp
+                    <a class="dmatch {{ $m['live'] ? 'is-live' : '' }}" href="/gamehub/actionboard/match/{{ $m['id'] }}">
+                        <span class="dmatch__top">
+                            @if($m['live'])
+                                <span class="dmatch__pill"><i></i>Live</span>
+                            @else
+                                <span class="dmatch__pill is-done">{{ $m['when'] ?: 'Finished' }}</span>
+                            @endif
+                            <span class="dmatch__comp">{{ collect([$m['sport'], $m['competition']])->filter()->unique()->implode(' · ') }}</span>
+                        </span>
+                        @foreach($dTeams as $team)
+                            @php
+                                $dIcon = hrn_team_icon($team['logo'] ?? '', $team['emblem'] ?? '');
+                                $dStrong = $dCricket ? ($m['live'] && $team['batting']) : ($dHigh > 0 && (int) $team['score'] === $dHigh);
+                            @endphp
+                            <span class="dmatch__row {{ $dStrong ? 'is-strong' : '' }}">
+                                <span class="dmatch__logo">@if($dIcon !== '')<img src="{{ $dIcon }}" alt="" loading="lazy">@else{{ \Illuminate\Support\Str::of($team['abbr'])->substr(0, 2)->upper() }}@endif</span>
+                                <span class="dmatch__name">{{ $team['name'] }}</span>
+                                <span class="dmatch__score">{{ $team['score'] }}@if($team['overs'])<small>({{ $team['overs'] }})</small>@endif</span>
+                            </span>
+                        @endforeach
+                        <span class="dmatch__foot">{{ $m['live'] ? ($m['place'] ?: 'Follow ball by ball') : $m['result'] }}</span>
+                    </a>
+                @endforeach
+            </div>
+        </section>
+    @endif
+
+    @if(count($pulse['photos']))
+        <section class="drow" aria-label="{{ $pulse['photosTitle'] }}">
+            <header class="drow__head">
+                <div>
+                    <h2>{{ $pulse['photosTitle'] }}</h2>
+                    <p>Posted by players on the ActionBoard Home feed.</p>
+                </div>
+                <a class="drow__all" href="/feed">Open the feed</a>
+                {!! $dRowKeys !!}
+            </header>
+            <div class="drow__track is-photos">
+                @foreach($pulse['photos'] as $ph)
+                    <a class="dphoto" href="/feed">
+                        <img src="{{ $ph['image'] }}" alt="{{ $ph['caption'] ?: 'Photo by ' . $ph['name'] }}" loading="lazy" decoding="async">
+                        <span class="dphoto__by">
+                            <span class="dphoto__av">@if($ph['avatar'])<img src="{{ $ph['avatar'] }}" alt="" loading="lazy">@else{{ \Illuminate\Support\Str::of($ph['name'])->substr(0, 1)->upper() }}@endif</span>
+                            <b>{{ $ph['name'] }}</b>
+                            @if($ph['likes'])<small><svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M12 21s-7.5-4.6-9.6-9.1C.9 8.6 3 5 6.6 5c2 0 3.4 1.1 4.4 2.6C12 6.1 13.4 5 15.4 5 19 5 21.1 8.6 19.6 11.9 17.5 16.4 12 21 12 21z"/></svg>{{ $ph['likes'] }}</small>@endif
+                        </span>
+                    </a>
+                @endforeach
+            </div>
+        </section>
+    @endif
+
+    @if(count($pulse['players']))
+        <section class="dplayers" aria-label="{{ $pulse['playersTitle'] }}">
+            <header class="drow__head">
+                <div>
+                    <h2>{{ $pulse['playersTitle'] }}</h2>
+                    <p>Ranked XP{{ $pulse['playersWhere'] ? ' in ' . $pulse['playersWhere'] : '' }}, {{ now()->format('F') }}. The board starts again on the 1st.</p>
+                </div>
+                <a class="drow__all" href="/gamehub/leaderboard">Full leaderboard</a>
+            </header>
+            <div class="dplayers__grid">
+                @foreach($pulse['players'] as $p)
+                    <a class="dplayer {{ $p['rank'] === 1 ? 'is-first' : '' }}" href="/player/{{ $p['player_id'] }}">
+                        <span class="dplayer__rank">#{{ $p['rank'] }}</span>
+                        <span class="dplayer__av">@if($p['avatar'])<img src="{{ $p['avatar'] }}" alt="" loading="lazy">@else{{ \Illuminate\Support\Str::of($p['name'])->substr(0, 1)->upper() }}@endif</span>
+                        <b>{{ $p['name'] }}</b>
+                        <small>{{ $p['district'] }}</small>
+                        <span class="dplayer__xp"><strong>{{ number_format($p['xp']) }}</strong> XP @if($p['matches'])<i>· {{ $p['matches'] }} {{ \Illuminate\Support\Str::plural('match', $p['matches']) }}</i>@endif</span>
+                    </a>
+                @endforeach
+            </div>
+        </section>
+    @endif
+
+    @if($pulse['app'])
+        <section class="dapp" id="pulse-app" aria-label="Get the Haraan app">
+            <div class="dapp__copy">
+                <span class="dapp__eyebrow">Haraan app</span>
+                <h2>{{ $pulse['app']['title'] }}</h2>
+                <p>{{ $pulse['app']['text'] }}</p>
+                <div class="dapp__keys">
+                    <a class="dapp__play" href="{{ $pulse['app']['play'] }}" target="_blank" rel="noopener">
+                        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M4 3.5v17a1 1 0 0 0 1.5.86L20 13a1.15 1.15 0 0 0 0-2L5.5 2.64A1 1 0 0 0 4 3.5z" fill="currentColor"/></svg>
+                        <span><small>Get it on</small>Google Play</span>
+                    </a>
+                    @if($pulse['app']['apk'])<a class="dapp__apk" href="{{ $pulse['app']['apk'] }}">Or download the APK</a>@endif
+                </div>
+            </div>
+            <figure class="dapp__pass">
+                <div class="dapp__qr" id="dappQr" data-link="{{ $pulse['app']['qr'] }}" title="QR code for the Haraan app"></div>
+                <figcaption>Scan with your phone camera</figcaption>
+            </figure>
+        </section>
+    @endif
+
+    @if(count($pulse['faq']))
+        <section class="dfaq" aria-label="{{ $pulse['faqTitle'] }}">
+            <div class="dfaq__intro">
+                <h2>{{ $pulse['faqTitle'] }}</h2>
+                <p>About booking grounds and scoring matches on Haraan.</p>
+                <a href="/support">Ask us something else{!! $dArrow !!}</a>
+            </div>
+            <div class="dfaq__list">
+                @foreach($pulse['faq'] as $f)
+                    <details class="dfaq__item" @if($loop->first) open @endif>
+                        <summary>{{ $f['q'] }}<i aria-hidden="true"></i></summary>
+                        <p>{{ $f['a'] }}</p>
+                    </details>
+                @endforeach
+            </div>
+        </section>
+    @endif
+
+    @if(count($pulse['cities']))
+        <nav class="dcities" aria-label="{{ $pulse['citiesTitle'] }}">
+            <h2>{{ $pulse['citiesTitle'] }}</h2>
+            <div class="dcities__list">
+                @foreach($pulse['cities'] as $c)
+                    <a href="{{ $c['url'] }}">Turfs in {{ $c['name'] }}</a>
+                @endforeach
+            </div>
+        </nav>
+    @endif
 </section>
 
 <script>
@@ -1122,10 +1537,67 @@ document.addEventListener('DOMContentLoaded', () => {
         chip.addEventListener('blur', off);
     });
 
-    const sort = document.getElementById('dhubSort');
     const grid = document.getElementById('dhubGrid');
+    // The open plot takes exactly the columns the last row left empty, and hides
+    // when the venues fill their rows.
+    const fill = grid?.querySelector('.dfill');
+    const placeFill = () => {
+        if (!fill) return;
+        const cols = getComputedStyle(grid).gridTemplateColumns.split(' ').filter(Boolean).length || 1;
+        const left = grid.querySelectorAll('.dvc').length % cols;
+        fill.hidden = left === 0;
+        fill.style.gridColumn = left ? 'span ' + (cols - left) : '';
+        fill.classList.toggle('is-wide', cols - left > 1);
+    };
+    placeFill();
+    addEventListener('resize', placeFill, { passive: true });
+
+    // Rows that scroll sideways: arrow keys in the heading, greyed at either end.
+    document.querySelectorAll('.drow').forEach(row => {
+        const track = row.querySelector('.drow__track');
+        const prev = row.querySelector('[data-drow="prev"]');
+        const next = row.querySelector('[data-drow="next"]');
+        if (!track || !prev || !next) return;
+        const sync = () => {
+            const max = track.scrollWidth - track.clientWidth;
+            row.classList.toggle('is-static', max < 4);
+            prev.disabled = track.scrollLeft < 4;
+            next.disabled = track.scrollLeft > max - 4;
+        };
+        const step = dir => track.scrollBy({ left: dir * track.clientWidth * 0.85, behavior: 'smooth' });
+        prev.addEventListener('click', () => step(-1));
+        next.addEventListener('click', () => step(1));
+        track.addEventListener('scroll', sync, { passive: true });
+        addEventListener('resize', sync, { passive: true });
+        sync();
+    });
+
+    // The app QR is drawn only when its panel comes near the screen.
+    const qr = document.getElementById('dappQr');
+    if (qr && qr.offsetParent !== null) {
+        const draw = () => {
+            if (qr.childNodes.length || !window.QRCode) return;
+            new window.QRCode(qr, { text: qr.dataset.link, width: 220, height: 220, colorDark: '#0F172A', colorLight: '#ffffff', correctLevel: window.QRCode.CorrectLevel.M });
+            qr.removeAttribute('title');
+        };
+        const load = () => {
+            if (window.QRCode) return draw();
+            const s = document.createElement('script');
+            s.src = @json(asset('js/qrcode.min.js'));
+            s.onload = draw;
+            document.head.appendChild(s);
+        };
+        if ('IntersectionObserver' in window) {
+            const io = new IntersectionObserver(es => { if (es.some(e => e.isIntersecting)) { io.disconnect(); load(); } }, { rootMargin: '400px' });
+            io.observe(qr);
+        } else {
+            load();
+        }
+    }
+
+    const sort = document.getElementById('dhubSort');
     if (!sort || !grid) return;
-    const cards = Array.from(grid.children);
+    const cards = Array.from(grid.querySelectorAll('.dvc'));
     const num = (el, k) => parseFloat(el.dataset[k]) || 0;
     const by = {
         order:  (a, b) => num(a, 'order') - num(b, 'order'),
@@ -1136,6 +1608,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     sort.addEventListener('change', () => {
         cards.sort(by[sort.value] || by.order).forEach(c => grid.appendChild(c));
+        if (fill) grid.appendChild(fill);
     });
 });
 </script>

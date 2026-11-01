@@ -29,6 +29,7 @@ use App\Support\EventViewRecorder;
 use App\Support\MatchGeocoder;
 use App\Support\MatchProximity;
 use App\Support\MediaUrl;
+use App\Support\PlatformRules;
 use App\Support\SeoUrl;
 use App\Support\Membership\MemberFeature;
 use Illuminate\Contracts\View\View;
@@ -521,7 +522,9 @@ final class PublicWebController extends Controller
         $sportCounts = $venues->groupBy('category')->map->count();
 
         // Live now: real in-progress matches for the mobile live strip (app parity).
-        $liveMatches = LiveMatch::where('status', 'Live')
+        // Private matches are reachable by join code only, never listed.
+        $liveMatches = LiveMatch::visibleTo(auth()->user())
+            ->where('status', 'Live')
             ->orderByDesc('created_at')
             ->limit(8)
             ->get()
@@ -546,6 +549,17 @@ final class PublicWebController extends Controller
         $popularVenues = $filteredVenues->sortByDesc(fn ($v) => (float) $v->rating)->take(5)->values();
         $moreVenues = $filteredVenues->whereNotIn('id', $popularVenues->pluck('id'))->values();
 
+        $pulse = $this->pulseDesktopSections($city, $selectedSport);
+        $faqLd = $pulse['faq'] === [] ? [] : [[
+            '@context' => 'https://schema.org',
+            '@type' => 'FAQPage',
+            'mainEntity' => array_map(fn (array $f): array => [
+                '@type' => 'Question',
+                'name' => $f['q'],
+                'acceptedAnswer' => ['@type' => 'Answer', 'text' => $f['a']],
+            ], $pulse['faq']),
+        ]];
+
         return view('site.gamehub', [
             'title' => 'Pulse — book turfs, courts & play',
             'seo' => [
@@ -560,7 +574,9 @@ final class PublicWebController extends Controller
                     ['name' => 'Haraan', 'url' => url('/')],
                     ['name' => 'Pulse'],
                 ],
+                'jsonld' => $faqLd,
             ],
+            'pulse' => $pulse,
             'venues' => $venues,
             'sportCounts' => $sportCounts,
             'liveMatches' => $liveMatches,
@@ -570,6 +586,151 @@ final class PublicWebController extends Controller
             'popularVenues' => $popularVenues,
             'moreVenues' => $moreVenues,
         ]);
+    }
+
+    /**
+     * The sections under the desktop Pulse grid, each switched and worded in /control →
+     * Platform → Pulse desktop page (`pulse_web` rules). Everything is read from real rows;
+     * a section with nothing to show comes back empty and the view drops it.
+     *
+     * @return array{promos: list<array>, matches: list<array>, photos: list<array>, players: list<array>, playersWhere: ?string, app: ?array, cities: list<array>, faq: list<array{q: string, a: string}>}
+     */
+    private function pulseDesktopSections(?string $city, string $selectedSport): array
+    {
+        $on = static fn (string $k): bool => PlatformRules::bool('pulse_web.'.$k);
+        $appOn = $on('app_enabled');
+        $playLink = PlatformRules::string('app.update_url');
+
+        // Banners: "Title | Line | Button | Link", one per line.
+        $promos = [];
+        if ($on('promos_enabled')) {
+            foreach (preg_split('/\R/', PlatformRules::string('pulse_web.promos')) as $line) {
+                $parts = array_map('trim', explode('|', $line));
+                if (count($parts) < 4 || $parts[0] === '' || $parts[2] === '') {
+                    continue;
+                }
+                $url = $parts[3];
+                // A jump to the app section only works while that section is on.
+                if ($url === '#pulse-app' && ! $appOn) {
+                    $url = $playLink;
+                }
+                if (! preg_match('~^(/|https://|#)~', $url)) {
+                    continue;
+                }
+                $promos[] = ['title' => $parts[0], 'line' => $parts[1], 'cta' => $parts[2], 'url' => $url, 'external' => str_starts_with($url, 'https://')];
+                if (count($promos) === 4) {
+                    break;
+                }
+            }
+        }
+
+        // ActionBoard: live first, then the latest finished. Same public-list rule as the
+        // board itself; a non-cricket sport chip keeps only that sport's matches.
+        $matches = [];
+        if ($on('matches_enabled')) {
+            $limit = PlatformRules::int('pulse_web.matches_limit');
+            $base = fn () => LiveMatch::visibleTo(auth()->user())
+                ->when($selectedSport !== 'All', fn ($q) => $selectedSport === 'Cricket'
+                    ? $q->where(fn ($w) => $w->whereNull('sport')->orWhere('sport', '')->orWhereRaw('lower(sport) = ?', ['cricket']))
+                    : $q->whereRaw('lower(sport) = ?', [strtolower($selectedSport)]));
+            $live = $base()->where('status', 'Live')->orderByDesc('updated_at')->limit($limit)->get();
+            $done = $base()->whereNotIn('status', ['Live', 'Scheduled', 'Upcoming', 'Draft'])
+                ->orderByRaw('coalesce(completed_at, updated_at) desc')
+                ->limit(max(0, $limit - $live->count()))->get();
+
+            foreach ($live->concat($done) as $m) {
+                $row = $this->decorateLiveStrip($m);
+                $sport = strtolower(trim((string) $m->sport)) ?: 'cricket';
+                if ($sport !== 'cricket') {
+                    // Wickets and overs are cricket's; other sports show the plain score.
+                    foreach (['home', 'away'] as $side) {
+                        $row[$side]['score'] = (string) (int) $m->{$side.'_score'};
+                        $row[$side]['overs'] = '';
+                    }
+                }
+                $isLive = $m->status === 'Live';
+                $result = trim((string) ($m->result ?? ''));
+                if ($result === '' && ! in_array($m->status, ['Completed', 'Finished'], true)) {
+                    $result = (string) $m->status; // older rows kept the result in status
+                }
+                $row['live'] = $isLive;
+                $row['sport'] = ucfirst($sport);
+                $row['result'] = $isLive ? '' : ($result !== '' ? $result : 'Finished');
+                $row['when'] = $isLive ? '' : ($m->completed_at ?? $m->updated_at)?->diffForHumans();
+                $row['place'] = (string) ($m->venue ?: $m->locality ?: '');
+                $matches[] = $row;
+            }
+        }
+
+        // Players' photos need the Home feed service, which ships separately.
+        $photos = [];
+
+        // This month's ranked board: the chosen city, else all of India.
+        $players = [];
+        $playersWhere = null;
+        if ($on('players_enabled')) {
+            $limit = PlatformRules::int('pulse_web.players_limit');
+            $board = app(LeaderboardService::class);
+            if ($city) {
+                $players = $board->monthly('district', null, $city, $limit);
+                $playersWhere = $players !== [] ? $city : null;
+            }
+            if ($players === []) {
+                $players = $board->monthly('india', null, null, $limit);
+                $playersWhere = $players !== [] ? 'India' : null;
+            }
+            $players = array_map(fn (array $p): array => ['avatar' => MediaUrl::resolve($p['avatar'] ?? null)] + $p, $players);
+        }
+
+        $app = $appOn ? [
+            'title' => PlatformRules::string('pulse_web.app_title'),
+            'text' => PlatformRules::string('pulse_web.app_text'),
+            'qr' => PlatformRules::string('pulse_web.app_link'),
+            'play' => $playLink,
+            'apk' => PlatformRules::string('app.apk_url'),
+        ] : null;
+
+        // Every city with a published venue, busiest first.
+        $cities = [];
+        if ($on('cities_enabled')) {
+            $cities = Venue::published()->whereNotNull('city')->where('city', '!=', '')
+                ->selectRaw('city, count(*) as n')->groupBy('city')->orderByDesc('n')->orderBy('city')->limit(40)->get()
+                ->map(fn ($r): array => [
+                    'name' => trim((string) $r->city),
+                    'count' => (int) $r->n,
+                    'url' => route('site.venues.city', ['city' => strtolower(preg_replace('/[^a-zA-Z0-9]+/', '-', trim((string) $r->city)) ?: 'kadapa')]),
+                ])->all();
+        }
+
+        $faq = [];
+        if ($on('faq_enabled')) {
+            foreach (preg_split('/\R/', PlatformRules::string('pulse_web.faq')) as $line) {
+                [$q, $a] = array_pad(array_map('trim', explode('|', $line, 2)), 2, '');
+                if ($q !== '' && $a !== '') {
+                    $faq[] = ['q' => $q, 'a' => $a];
+                }
+                if (count($faq) === 10) {
+                    break;
+                }
+            }
+        }
+
+        return [
+            'fill' => $on('fill_card'),
+            'promos' => $promos,
+            'matches' => $matches,
+            'matchesTitle' => PlatformRules::string('pulse_web.matches_title'),
+            'photos' => $photos,
+            'photosTitle' => '',
+            'players' => $players,
+            'playersTitle' => PlatformRules::string('pulse_web.players_title'),
+            'playersWhere' => $playersWhere,
+            'app' => $app,
+            'cities' => $cities,
+            'citiesTitle' => PlatformRules::string('pulse_web.cities_title'),
+            'faq' => $faq,
+            'faqTitle' => PlatformRules::string('pulse_web.faq_title'),
+        ];
     }
 
     /**
