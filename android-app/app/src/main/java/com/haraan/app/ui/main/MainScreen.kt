@@ -787,6 +787,7 @@ internal fun MainAppContainer(
         onBack = { showActionBoardDetail = false },
         onMatchClick = { matchId -> onItemClick(com.haraan.app.MatchDetails(id = matchId)) },
         onTournamentClick = { id -> onItemClick(com.haraan.app.TournamentDetails(id)) },
+        onVenueClick = { venue -> onItemClick(venue) },
         onJoinByCode = { code -> onItemClick(com.haraan.app.MatchDetails(code = code)) },
         onHomeClick = {
           showActionBoardDetail = false
@@ -4169,12 +4170,40 @@ private fun DistrictActionBoardScreen(
   onSignedOutCompletely: () -> Unit = {},
   onSessionChanged: () -> Unit = {},
   onTournamentClick: (String) -> Unit = {},
+  onVenueClick: (com.haraan.app.VenueDetail) -> Unit = {},
 ) {
   CrexMatchesScreen(
     onBack, onMatchClick, onHomeClick, onJoinByCode, onOpenChat,
-    onSignedOutCompletely, onSessionChanged, onTournamentClick,
+    onSignedOutCompletely, onSessionChanged, onTournamentClick, onVenueClick,
   )
 }
+
+/**
+ * Keeps the open conversation across a pushed screen (a match or venue opened from a chat
+ * card). Only what the header needs: the thread reloads its messages, and the unread count is
+ * dropped on purpose — the "new messages" line belongs to the first opening, not the return.
+ */
+private val ChatThreadSaver = androidx.compose.runtime.saveable.listSaver<com.haraan.app.data.ChatThread?, Any>(
+  save = { t ->
+    if (t == null) emptyList()
+    else listOf(t.id, t.playerId.orEmpty(), t.name, t.avatar.orEmpty(), t.isGroup, t.memberCount)
+  },
+  restore = { v ->
+    if (v.size < 6) null
+    else com.haraan.app.data.ChatThread(
+      id = v[0] as Long,
+      playerId = (v[1] as String).ifBlank { null },
+      name = v[2] as String,
+      username = null,
+      avatar = (v[3] as String).ifBlank { null },
+      lastMessage = null,
+      lastMessageAt = null,
+      unreadCount = 0,
+      isGroup = v[4] as Boolean,
+      memberCount = v[5] as Int,
+    )
+  },
+)
 
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
@@ -4190,6 +4219,8 @@ private fun CrexMatchesScreen(
   onSessionChanged: () -> Unit = {},
   /** Opens a tournament's page (a pushed destination, so Back returns here). */
   onTournamentClick: (String) -> Unit = {},
+  /** Opens a venue's page — a venue card tapped in a chat. */
+  onVenueClick: (com.haraan.app.VenueDetail) -> Unit = {},
 ) {
   val view = LocalView.current
 
@@ -4212,10 +4243,20 @@ private fun CrexMatchesScreen(
   // Player-to-player DMs. `showChatList` is the destination; `openThread` is the one
   // conversation on top of it. `showNewGroup` is the group-create flow; `chatReload` is
   // bumped after create/leave so the list re-fetches without a manual round trip.
-  var showChatList by remember { mutableStateOf(false) }
+  //
+  // Saveable, both of them: a card tapped in a chat opens the match or venue as a pushed
+  // screen, and coming Back must land in the same conversation — not on the board.
+  var showChatList by androidx.compose.runtime.saveable.rememberSaveable(key = "ab_chat_list") { mutableStateOf(false) }
   var showNewGroup by remember { mutableStateOf(false) }
   var chatReload by remember { mutableStateOf(0) }
-  var openThread by remember { mutableStateOf<com.haraan.app.data.ChatThread?>(null) }
+  // Fixed keys, not positional ones: this screen composes in stages after it is rebuilt, and a
+  // position-derived key came back different, so Back from a card silently lost the chat.
+  var openThread by androidx.compose.runtime.saveable.rememberSaveable(key = "ab_open_thread", stateSaver = ChatThreadSaver) {
+    mutableStateOf<com.haraan.app.data.ChatThread?>(null)
+  }
+  // A player card tapped inside a conversation opens their profile OVER the thread, so Back
+  // returns to the chat (the search profile sits underneath the thread and would be hidden).
+  var chatProfileId by androidx.compose.runtime.saveable.rememberSaveable(key = "ab_chat_profile") { mutableStateOf<String?>(null) }
   val dmRepository = remember { com.haraan.app.data.DirectMessageRepository() }
   var showCreateWizard by remember { mutableStateOf(false) }
   // Asked for from outside (post-match "Play again"): open the wizard through the same gate.
@@ -5624,18 +5665,20 @@ private fun CrexMatchesScreen(
       // Receipts for the open thread, refreshed by every fetch below.
       var threadDeliveredAt by remember(thread.id) { mutableStateOf<String?>(null) }
       var threadReadAt by remember(thread.id) { mutableStateOf<String?>(null) }
+      // Who is reading and whether "typing…" is on — both arrive with the first page.
+      var threadViewerId by remember(thread.id) { mutableStateOf(0L) }
+      var threadTyping by remember(thread.id) { mutableStateOf(false) }
       // Where a message can be forwarded: the viewer own threads, fetched once when this
       // one opens. Empty on failure, which simply hides the Forward action rather than
       // offering a picker that cannot deliver.
-      val chatThreads by produceState(initialValue = emptyList<com.haraan.app.data.ChatThread>(), thread.id) {
+      //
+      // The same fetch says whether sharing cards is switched on in /control.
+      val inbox by produceState<com.haraan.app.data.DirectMessageRepository.ThreadsResult.Ready?>(initialValue = null, thread.id) {
         val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
-        value = if (token == null) {
-          emptyList()
-        } else {
-          (dmRepository.threads(token) as? com.haraan.app.data.DirectMessageRepository.ThreadsResult.Ready)
-            ?.threads.orEmpty()
-        }
+        value = if (token == null) null
+          else dmRepository.threads(token) as? com.haraan.app.data.DirectMessageRepository.ThreadsResult.Ready
       }
+      val chatThreads = inbox?.threads.orEmpty()
       com.haraan.app.ui.social.ChatThreadScreen(
         title = thread.name,
         avatar = thread.avatar,
@@ -5660,6 +5703,53 @@ private fun CrexMatchesScreen(
             page.messages
           }
         },
+        // Opens on the newest 50 and walks back a page at a time; the server caps the size
+        // at the /control "Messages per load" setting.
+        loadPage = { beforeId ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) {
+            com.haraan.app.data.DirectMessageRepository.ThreadPage(emptyList(), ok = false)
+          } else {
+            val page = dmRepository.page(token, thread.id, beforeId = beforeId, limit = 50)
+            if (beforeId == null && page.ok) {
+              threadDeliveredAt = page.theirDeliveredAt
+              threadReadAt = page.theirReadAt
+              threadViewerId = page.viewerId
+              threadTyping = page.typingIndicator
+            }
+            page
+          }
+        },
+        shareEnabled = inbox?.shareCards == true,
+        viewerId = threadViewerId,
+        onTyping = if (threadTyping) {
+          {
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            if (token != null) dmRepository.typing(token, thread.id)
+          }
+        } else null,
+        searchShare = { type, q ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) emptyList() else dmRepository.shareSearch(token, type, q)
+        },
+        refreshCard = { card ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else dmRepository.shareCard(token, card.type, card.id)
+        },
+        onOpenShare = { card ->
+          when (card.type) {
+            "match" -> onMatchClick(card.id)
+            "venue" -> onVenueClick(
+              com.haraan.app.VenueDetail(
+                id = card.id,
+                title = card.title,
+                location = card.subtitle,
+                imageUrl = card.image.orEmpty(),
+              )
+            )
+            "player" -> chatProfileId = card.id
+          }
+        },
         onUnsend = { messageId ->
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
           token != null && dmRepository.unsend(token, thread.id, messageId)
@@ -5668,9 +5758,9 @@ private fun CrexMatchesScreen(
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
           token != null && dmRepository.react(token, thread.id, messageId, emoji)
         },
-        send = { body, replyToId ->
+        send = { body, replyToId, share ->
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
-          if (token == null) null else dmRepository.send(token, thread.id, body, replyToId)
+          if (token == null) null else dmRepository.send(token, thread.id, body, replyToId, share)
         },
         onForward = { messageId, target ->
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
@@ -5694,6 +5784,53 @@ private fun CrexMatchesScreen(
           // the list kept showing what it loaded when the tab was first opened.
           chatReload++
         },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    // A player card tapped in a conversation: their profile, drawn over the thread so Back
+    // returns to the chat. Message from here re-points the open thread at that player.
+    chatProfileId?.let { playerId ->
+      com.haraan.app.ui.profile.PlayerProfileScreen(
+        onBack = { chatProfileId = null },
+        fetchProfile = {
+          val token = com.haraan.app.data.TokenStore.getToken(context)
+          profileRepository.fetchPlayer(token, playerId)
+        },
+        onToggleFollow = { follow ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else playerRepository.setFollowing(token, playerId, follow)
+        },
+        onSetBlocked = { blocked ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else playerRepository.setBlocked(token, playerId, blocked)
+        },
+        onReport = { reason, details ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          token != null && playerRepository.reportPlayer(token, playerId, reason, details)
+        },
+        onOpenFollowers = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWERS, name) },
+        onOpenFollowing = { pid, name -> followList = Triple(pid, com.haraan.app.ui.social.FollowRelation.FOLLOWING, name) },
+        onMessage = { pid, name ->
+          scope.launch {
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            when (val r = if (token == null) null else dmRepository.openWith(token, pid)) {
+              is com.haraan.app.data.DirectMessageRepository.OpenChatResult.Ready -> {
+                chatProfileId = null
+                openThread = com.haraan.app.data.ChatThread(
+                  id = r.conversationId, playerId = pid, name = name,
+                  username = null, avatar = null, lastMessage = null,
+                  lastMessageAt = null, unreadCount = 0,
+                )
+              }
+              is com.haraan.app.data.DirectMessageRepository.OpenChatResult.NotAllowed ->
+                Toast.makeText(context, "You can message players who follow you back.", Toast.LENGTH_LONG).show()
+              else ->
+                Toast.makeText(context, "Couldn't open the chat. Try again.", Toast.LENGTH_SHORT).show()
+            }
+          }
+        },
+        onOpenTournament = onTournamentClick,
         modifier = Modifier.statusBarsPadding(),
       )
     }

@@ -8,6 +8,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Conversation;
 use App\Models\User;
 use App\Services\DirectMessageService;
+use App\Support\ChatShareCards;
+use App\Support\PlatformRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -43,6 +45,11 @@ final class DirectMessageController extends Controller
 
         return response()->json([
             'unread_total' => $this->dm->unreadTotal($me),
+            // Where this player's chat list listens for "your inbox moved". Null when the
+            // live inbox is off in /control — the app then simply doesn't subscribe.
+            'inbox_channel' => DirectMessageService::inboxChannel($me),
+            // Whether the + (share a match / venue / player) button should show.
+            'share_cards' => PlatformRules::bool('chat.share_cards'),
             'results' => $conversations->map(fn (Conversation $c) => $this->card($c, $me))->values(),
         ]);
     }
@@ -93,12 +100,31 @@ final class DirectMessageController extends Controller
         // quiet thread answers with an empty array.
         $since = $request->query('since_id');
         $since = is_numeric($since) ? (int) $since : null;
+        // ?before_id= pages BACKWARDS: the messages older than the oldest one the client holds,
+        // for when the reader scrolls to the top.
+        $before = $request->query('before_id');
+        $before = is_numeric($before) ? (int) $before : null;
 
-        $query = $conversation->messages()->orderBy('id');
         if ($since !== null && $since > 0) {
-            $query->where('id', '>', $since);
+            $messages = $conversation->messages()->where('id', '>', $since)->orderBy('id')->limit(300)->get();
+            $hasMore = null;
+        } else {
+            // The NEWEST page, read newest-first and flipped back to reading order.
+            //
+            // This used to be `orderBy('id')->limit(300)` — the OLDEST 300 — so a conversation
+            // past 300 messages opened on its first week and never showed anything newer. A
+            // build that asks for no `limit` still gets 300, just the latest 300.
+            $limit = $request->has('limit')
+                ? max(1, min((int) $request->query('limit'), PlatformRules::int('chat.page_size')))
+                : 300;
+            $query = $conversation->messages()->orderByDesc('id');
+            if ($before !== null && $before > 0) {
+                $query->where('id', '<', $before);
+            }
+            $page = $query->limit($limit + 1)->get();
+            $hasMore = $page->count() > $limit;
+            $messages = $page->take($limit)->reverse()->values();
         }
-        $messages = $query->limit(300)->get();
 
         // Who sent each line — needed so a GROUP thread can label incoming bubbles.
         // Resolved from a lookup (not the participant list) because a sender may have
@@ -125,6 +151,18 @@ final class DirectMessageController extends Controller
             ? collect()
             : User::query()->whereIn('id', $quoted->pluck('sender_id')->unique()->all())->get()->keyBy('id');
 
+        // Shared cards for this page, one build per distinct thing — a match shared five times
+        // in a busy group is read once.
+        $cards = [];
+        if (PlatformRules::bool('chat.share_cards')) {
+            foreach ($messages as $m) {
+                if ($m->share_type !== null && $m->deleted_at === null) {
+                    $key = $m->share_type.':'.$m->share_ref;
+                    $cards[$key] ??= ChatShareCards::resolve((string) $m->share_type, (string) $m->share_ref, $me);
+                }
+            }
+        }
+
         // When the OTHER side last had these messages delivered and read. Sent back as two
         // timestamps rather than a status per message: the client compares them against each
         // message's own time, which is the same answer in a fraction of the payload.
@@ -142,8 +180,17 @@ final class DirectMessageController extends Controller
 
         return response()->json([
             'is_group' => (bool) $conversation->is_group,
+            // Who is reading, so the client can ignore the echo of its own typing signal
+            // (which arrives on the same public thread channel as everyone else's).
+            'viewer_id' => (int) $me->id,
+            // Whether this conversation shows and sends "typing…" — a /control switch.
+            'typing_indicator' => PlatformRules::bool('chat.typing_indicator'),
             // Tells an appending client this was a delta, not the whole thread.
             'since_id' => $since,
+            'before_id' => $before,
+            // Whether anything older is left to load. Null on a since_id delta, which says
+            // nothing about history.
+            'has_more' => $hasMore,
             // ISO-8601 with an offset, NOT the raw column.
             //
             // A DB::table() read hands back "2026-08-20 10:14:05" — a UTC instant with
@@ -157,7 +204,7 @@ final class DirectMessageController extends Controller
                 ? \Illuminate\Support\Carbon::parse($counterpart->last_read_at)->toIso8601String()
                 : null,
             'title' => $conversation->title,
-            'results' => $messages->map(function ($m) use ($me, $senders, $reactions, $quoted, $quotedSenders) {
+            'results' => $messages->map(function ($m) use ($me, $senders, $reactions, $quoted, $quotedSenders, $cards) {
                 $sender = $senders->get($m->sender_id);
 
                 return [
@@ -171,6 +218,11 @@ final class DirectMessageController extends Controller
                     // An unsent message keeps its place in the thread but carries no words.
                     'deleted' => $m->deleted_at !== null,
                     'forwarded' => (bool) $m->is_forwarded,
+                    // A shared match / venue / player, built for THIS reader at read time.
+                    // Null for plain text, for an unsent message, and while sharing is off.
+                    'share' => $m->deleted_at === null && $m->share_type !== null
+                        ? $cards[$m->share_type.':'.$m->share_ref] ?? null
+                        : null,
                     // What this message is replying to, flattened for the bubble that draws
                     // it. Null when it replies to nothing, or when the quoted message is gone.
                     'reply_to' => $m->reply_to_id !== null
@@ -372,11 +424,32 @@ final class DirectMessageController extends Controller
         }
 
         $data = $request->validate([
-            'body' => ['required', 'string', 'max:2000'],
-                    // Quoting another message in this thread. Membership and same-thread
+            // Words are optional only when the message carries a card.
+            'body' => ['required_without:share', 'nullable', 'string', 'max:2000'],
+            // Quoting another message in this thread. Membership and same-thread
             // are enforced in the service, not here.
             'reply_to_id' => ['nullable', 'integer'],
+            'share' => ['nullable', 'array'],
+            'share.type' => ['required_with:share', 'string', 'in:'.implode(',', ChatShareCards::TYPES)],
+            'share.id' => ['required_with:share', 'string', 'max:64'],
         ]);
+
+        $shareType = $data['share']['type'] ?? null;
+        $shareRef = isset($data['share']['id']) ? trim((string) $data['share']['id']) : null;
+        if ($shareType !== null) {
+            if (! PlatformRules::bool('chat.share_cards')) {
+                return response()->json(['error' => 'Sharing into chat is switched off right now.'], 403);
+            }
+            // You can share only what you can see — so nobody can push a private match's
+            // card into a thread by guessing its id.
+            if (! ChatShareCards::canShare($shareType, (string) $shareRef, $me)) {
+                return response()->json(['error' => 'That cannot be shared.'], 422);
+            }
+        }
+        $body = trim((string) ($data['body'] ?? ''));
+        if ($body === '' && $shareType === null) {
+            return response()->json(['error' => 'Write a message first.'], 422);
+        }
 
         // Re-check on every send, not just at thread creation: an unfollow must stop a
         // 1:1, otherwise a thread opened while mutual stays open forever. A GROUP is
@@ -394,8 +467,11 @@ final class DirectMessageController extends Controller
         $message = $this->dm->sendAndBroadcast(
             $conversation,
             $me,
-            trim($data['body']),
+            $body,
             isset($data['reply_to_id']) ? (int) $data['reply_to_id'] : null,
+            false,
+            $shareType,
+            $shareRef,
         );
 
         return response()->json([
@@ -404,7 +480,68 @@ final class DirectMessageController extends Controller
             'sender_id' => (int) $message->sender_id,
             'mine' => true,
             'sent_at' => $message->created_at?->toIso8601String(),
+            'share' => $shareType !== null ? ChatShareCards::resolve($shareType, (string) $shareRef, $me) : null,
         ], 201);
+    }
+
+    /**
+     * POST /api/dm/{id}/typing — "I'm typing in this thread." No body: nothing typed is sent.
+     * 202 whether it was broadcast or throttled; the client just keeps typing.
+     */
+    public function typing(Request $request, int $id): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+
+        return response()->json(['sent' => $this->dm->typing($conversation, $me)], 202);
+    }
+
+    /**
+     * GET /api/dm/share/search?type=match|venue|player&q= — what the share picker lists.
+     * Every row is a finished card, so the picker shows exactly what the chat will.
+     */
+    public function shareSearch(Request $request): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        if (! $me instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+        if (! PlatformRules::bool('chat.share_cards')) {
+            return response()->json(['results' => []]);
+        }
+
+        $type = (string) $request->query('type', '');
+        if (! in_array($type, ChatShareCards::TYPES, true)) {
+            return response()->json(['error' => 'Unknown type'], 422);
+        }
+
+        return response()->json([
+            'results' => ChatShareCards::search($type, mb_substr((string) $request->query('q', ''), 0, 60), $me),
+        ]);
+    }
+
+    /**
+     * GET /api/dm/share/card?type=&id= — one card, fresh. A LIVE match card on screen asks
+     * for this while it is visible, so the score in the chat moves with the match.
+     */
+    public function shareCard(Request $request): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        if (! $me instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $type = (string) $request->query('type', '');
+        $card = PlatformRules::bool('chat.share_cards')
+            ? ChatShareCards::resolve($type, mb_substr((string) $request->query('id', ''), 0, 64), $me)
+            : null;
+
+        return $card === null
+            ? response()->json(['error' => 'Not found'], 404)
+            : response()->json($card);
     }
 
     /**

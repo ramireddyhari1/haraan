@@ -392,9 +392,14 @@ Route::middleware('auth.jwt')->prefix('dm')->group(function (): void {
     Route::get('/eligible', [DirectMessageController::class, 'eligible']);
     // Group creation. Registered before /{id}/* so "group" is never read as an id.
     Route::post('/group', [DirectMessageController::class, 'group']);
+    // Sharing a match / venue / player into a chat: the picker's list, and one card refreshed.
+    Route::get('/share/search', [DirectMessageController::class, 'shareSearch']);
+    Route::get('/share/card', [DirectMessageController::class, 'shareCard']);
     Route::post('/with/{playerId}', [DirectMessageController::class, 'with']);
     Route::get('/{id}/messages', [DirectMessageController::class, 'messages'])->whereNumber('id');
     Route::post('/{id}/messages', [DirectMessageController::class, 'send'])->whereNumber('id');
+    // "Typing…" — a signal with no content, throttled server-side.
+    Route::post('/{id}/typing', [DirectMessageController::class, 'typing'])->whereNumber('id');
     // Unsend your own message — the long-press action. Sender-only, enforced in the service.
     Route::delete('/{id}/messages/{message}', [DirectMessageController::class, 'unsend'])->whereNumber('id')->whereNumber('message');
     // React to a message — the emoji row on long press. Same emoji again clears it.

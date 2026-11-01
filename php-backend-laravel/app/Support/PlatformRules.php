@@ -52,6 +52,7 @@ final class PlatformRules
         'venue_photos' => ['label' => 'Venue photos', 'description' => 'The checks a new venue photo must pass before it can be uploaded in /control, and the warning venue owners see on the Become-a-partner form. Photos already on a venue are never re-checked.', 'workspace' => 'admin'],
         'waitlist' => ['label' => 'Waitlist', 'description' => 'What happens when a waitlisted slot frees up.', 'workspace' => 'admin'],
         'creation' => ['label' => 'Tournaments & matches', 'description' => 'Creation limits and how “near you” is measured.', 'workspace' => 'admin'],
+        'chat' => ['label' => 'ActionBoard chat', 'description' => 'Player-to-player messages in the ActionBoard Chat tab: how much of a conversation loads at once, the live inbox, and sharing matches, venues and players into a chat as cards.', 'workspace' => 'gamehub'],
         'xp' => ['label' => 'XP & trust', 'description' => 'The ActionBoard ranking economy. A change applies the next time a match’s XP is awarded; XP already on the ledger is not rewritten.', 'workspace' => 'admin'],
         'otp' => ['label' => 'Sign-in codes', 'description' => 'One-time codes sent by SMS, WhatsApp and email.', 'workspace' => 'admin'],
         'whatsapp_bot' => ['label' => 'WhatsApp booking bot', 'description' => 'Customers who message Haraan’s WhatsApp number can find a venue near them and book a court in the chat. Staff replying in a venue’s WhatsApp Desk pauses the bot for that customer.', 'workspace' => 'admin'],
@@ -294,6 +295,10 @@ final class PlatformRules
         'whatsapp_bot.handoff' => ['section' => 'whatsapp_bot', 'type' => self::TYPE_TEXT, 'default' => 'Sure — someone from the venue will reply here. Type “menu” any time to book again.', 'max' => 300, 'label' => 'When the customer asks for a person', 'help' => ''],
 
         'ai.daily_call_budget' => ['section' => 'ai', 'type' => self::TYPE_INT, 'default' => 0, 'min' => 0, 'max' => 1000000, 'label' => 'Most AI calls per day, whole platform', 'help' => '0 = no cap. Once reached, AI features fall back until midnight (IST).'],
+        'chat.page_size' => ['section' => 'chat', 'type' => self::TYPE_INT, 'default' => 50, 'min' => 20, 'max' => 200, 'label' => 'Messages per load', 'help' => 'How many messages a conversation opens with, and how many more load each time a player scrolls to the top.'],
+        'chat.live_inbox' => ['section' => 'chat', 'type' => self::TYPE_BOOL, 'default' => true, 'label' => 'Live inbox', 'help' => 'The chat list updates the moment a message arrives. Off: it updates when the player opens the Chat tab. Open conversations stay live either way.'],
+        'chat.typing_indicator' => ['section' => 'chat', 'type' => self::TYPE_BOOL, 'default' => true, 'label' => 'Show “typing…”', 'help' => 'Players see when the other person is typing — in the conversation and on the chat list. Only the fact of typing is sent, never the words.'],
+        'chat.share_cards' => ['section' => 'chat', 'type' => self::TYPE_BOOL, 'default' => true, 'label' => 'Share matches, venues and players', 'help' => 'The + button in a conversation. Off: nobody can share a new card, and cards already sent show as a plain line.'],
     ];
 
     /** Keys whose name suggests a credential. Rules must never hold one. */

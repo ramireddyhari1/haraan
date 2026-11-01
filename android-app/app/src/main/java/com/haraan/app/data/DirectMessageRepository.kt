@@ -61,6 +61,36 @@ data class ChatMessage(
   /** Who sent it — used to label incoming bubbles in a GROUP thread. */
   val senderName: String? = null,
   val senderAvatar: String? = null,
+  /** A shared match / venue / player. Null for plain text. */
+  val share: SharedCard? = null,
+  /** Who sent it — matched against a "typing" signal to name the typist in a group. */
+  val senderId: Long = 0L,
+)
+
+/**
+ * A match, venue or player shared into a chat, as the server built it for THIS viewer.
+ *
+ * Built at read time, never stored as a copy: a live match's [line] is the score now, and
+ * [available] is false when the reader may not see it (a private match they're not in, a venue
+ * taken down) — the card then shows only its neutral [title].
+ */
+data class SharedCard(
+  /** "match", "venue" or "player". */
+  val type: String,
+  /** Match id, venue id, or Player ID (HRN…). */
+  val id: String,
+  val available: Boolean,
+  val title: String,
+  val subtitle: String = "",
+  val image: String? = null,
+  /** The score for a match, "From ₹600/hr" for a venue. */
+  val line: String = "",
+  /** LIVE / UPCOMING / RESULT, a rating, VERIFIED. */
+  val badge: String? = null,
+  /** A finished match's result line. */
+  val note: String? = null,
+  val live: Boolean = false,
+  val sport: String = "",
 )
 
 /** A player you may start a chat or group with — a mutual follow. */
@@ -90,7 +120,14 @@ class DirectMessageRepository(
    * it never reached the server.
    */
   sealed interface ThreadsResult {
-    data class Ready(val threads: List<ChatThread>, val unreadTotal: Int) : ThreadsResult
+    data class Ready(
+      val threads: List<ChatThread>,
+      val unreadTotal: Int,
+      /** The public channel this inbox listens on. Null = live inbox off in /control. */
+      val inboxChannel: String? = null,
+      /** Whether the share (+) button shows in a conversation — a /control switch. */
+      val shareCards: Boolean = false,
+    ) : ThreadsResult
     data object Failed : ThreadsResult
   }
 
@@ -135,7 +172,12 @@ class DirectMessageRepository(
           add(parseThread(arr.getJSONObject(i)))
         }
       }
-      ThreadsResult.Ready(list, json.optInt("unread_total", 0))
+      ThreadsResult.Ready(
+        threads = list,
+        unreadTotal = json.optInt("unread_total", 0),
+        inboxChannel = json.optString("inbox_channel", null).cleanNull(),
+        shareCards = json.optBoolean("share_cards", false),
+      )
     } catch (_: Exception) {
       ThreadsResult.Failed
     } finally {
@@ -182,6 +224,14 @@ class DirectMessageRepository(
     val messages: List<ChatMessage>,
     val theirDeliveredAt: String? = null,
     val theirReadAt: String? = null,
+    /** More history above this page. False on a delta, where the question doesn't arise. */
+    val hasMore: Boolean = false,
+    /** False when the call failed — an empty page and a failed one must not look alike. */
+    val ok: Boolean = true,
+    /** The reader's own user id, so their own "typing" echo can be ignored. */
+    val viewerId: Long = 0L,
+    /** Whether "typing…" is switched on in /control. */
+    val typingIndicator: Boolean = false,
   )
 
   /** Kept for callers that only want the lines. */
@@ -191,19 +241,30 @@ class DirectMessageRepository(
     sinceId: Long? = null,
   ): List<ChatMessage> = page(token, conversationId, sinceId).messages
 
+  /**
+   * [limit] asks for the newest page of that size; with [beforeId] it is the page just above
+   * that message — what scrolling to the top loads. [sinceId] is the "what's new" delta.
+   */
   suspend fun page(
     token: String,
     conversationId: Long,
     sinceId: Long? = null,
+    beforeId: Long? = null,
+    limit: Int? = null,
   ): ThreadPage = withContext(Dispatchers.IO) {
+    val query = buildList {
+      if (sinceId != null && sinceId > 0) add("since_id=$sinceId")
+      if (beforeId != null && beforeId > 0) add("before_id=$beforeId")
+      if (limit != null && limit > 0) add("limit=$limit")
+    }
     val path = "/api/dm/$conversationId/messages" +
-      if (sinceId != null && sinceId > 0) "?since_id=$sinceId" else ""
+      if (query.isEmpty()) "" else "?" + query.joinToString("&")
     val c = conn(path, "GET", token)
     try {
-      if (c.responseCode !in 200..299) return@withContext ThreadPage(emptyList())
+      if (c.responseCode !in 200..299) return@withContext ThreadPage(emptyList(), ok = false)
       val body = BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() }
       val root = JSONObject(body)
-      val arr = root.optJSONArray("results") ?: return@withContext ThreadPage(emptyList())
+      val arr = root.optJSONArray("results") ?: return@withContext ThreadPage(emptyList(), ok = false)
       val lines = buildList {
         for (i in 0 until arr.length()) {
           val o = arr.getJSONObject(i)
@@ -237,6 +298,8 @@ class DirectMessageRepository(
               },
               senderName = o.optString("sender_name", null).cleanNull(),
               senderAvatar = o.optString("sender_avatar", null).cleanNull(),
+              share = o.optJSONObject("share")?.let(::parseCard),
+              senderId = o.optLong("sender_id", 0L),
             )
           )
         }
@@ -245,9 +308,12 @@ class DirectMessageRepository(
         messages = lines,
         theirDeliveredAt = root.optString("their_delivered_at", null).cleanNull(),
         theirReadAt = root.optString("their_read_at", null).cleanNull(),
+        hasMore = root.optBoolean("has_more", false),
+        viewerId = root.optLong("viewer_id", 0L),
+        typingIndicator = root.optBoolean("typing_indicator", false),
       )
     } catch (_: Exception) {
-      ThreadPage(emptyList())
+      ThreadPage(emptyList(), ok = false)
     } finally {
       c.disconnect()
     }
@@ -313,11 +379,15 @@ class DirectMessageRepository(
     conversationId: Long,
     body: String,
     replyToId: Long? = null,
+    share: SharedCard? = null,
   ): ChatMessage? =
     withContext(Dispatchers.IO) {
       val c = conn("/api/dm/$conversationId/messages", "POST", token)
       try {
-        val payload = JSONObject().put("body", body).also { if (replyToId != null && replyToId > 0) it.put("reply_to_id", replyToId) }.toString()
+        val payload = JSONObject().put("body", body).also {
+          if (replyToId != null && replyToId > 0) it.put("reply_to_id", replyToId)
+          if (share != null) it.put("share", JSONObject().put("type", share.type).put("id", share.id))
+        }.toString()
         c.outputStream.use { it.write(payload.toByteArray()) }
         if (c.responseCode !in 200..299) return@withContext null
         val res = BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() }
@@ -327,6 +397,7 @@ class DirectMessageRepository(
           body = o.optString("body", body),
           mine = true,
           sentAt = o.optString("sent_at", null).cleanNull(),
+          share = o.optJSONObject("share")?.let(::parseCard) ?: share,
         )
       } catch (_: Exception) {
         null
@@ -334,6 +405,74 @@ class DirectMessageRepository(
         c.disconnect()
       }
     }
+
+  /**
+   * "I'm typing here." Fire-and-forget: nothing typed is sent, the server throttles it, and a
+   * failure costs only the dots on the other phone.
+   */
+  suspend fun typing(token: String, conversationId: Long) = withContext(Dispatchers.IO) {
+    val c = conn("/api/dm/$conversationId/typing", "POST", token)
+    try {
+      c.outputStream.use { it.write("{}".toByteArray()) }
+      c.responseCode
+    } catch (_: Exception) {
+      0
+    } finally {
+      c.disconnect()
+    }
+  }
+
+  /**
+   * What the share picker lists for one [type] ("match" / "venue" / "player"), filtered by
+   * [q]. Empty on failure — the picker says "nothing found" either way, and nothing is sent.
+   */
+  suspend fun shareSearch(token: String, type: String, q: String): List<SharedCard> =
+    withContext(Dispatchers.IO) {
+      val path = "/api/dm/share/search?type=" + URLEncoder.encode(type, "UTF-8") +
+        "&q=" + URLEncoder.encode(q.trim(), "UTF-8")
+      val c = conn(path, "GET", token)
+      try {
+        if (c.responseCode !in 200..299) return@withContext emptyList()
+        val body = BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() }
+        val arr = JSONObject(body).optJSONArray("results") ?: return@withContext emptyList()
+        buildList { for (i in 0 until arr.length()) arr.optJSONObject(i)?.let { add(parseCard(it)) } }
+      } catch (_: Exception) {
+        emptyList()
+      } finally {
+        c.disconnect()
+      }
+    }
+
+  /** One card, fresh — a LIVE match card re-reads itself with this while it is on screen. */
+  suspend fun shareCard(token: String, type: String, id: String): SharedCard? =
+    withContext(Dispatchers.IO) {
+      val path = "/api/dm/share/card?type=" + URLEncoder.encode(type, "UTF-8") +
+        "&id=" + URLEncoder.encode(id, "UTF-8")
+      val c = conn(path, "GET", token)
+      try {
+        if (c.responseCode !in 200..299) return@withContext null
+        parseCard(JSONObject(BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() }))
+      } catch (_: Exception) {
+        null
+      } finally {
+        c.disconnect()
+      }
+    }
+
+  private fun parseCard(o: JSONObject): SharedCard = SharedCard(
+    type = o.optString("type"),
+    id = o.optString("id"),
+    available = o.optBoolean("available", false),
+    title = o.optString("title", ""),
+    subtitle = o.optString("subtitle", ""),
+    // Venue photos come back absolute; player avatars are root-relative "/storage/…".
+    image = ApiConfig.mediaUrl(o.optString("image", null).cleanNull()),
+    line = o.optString("line", ""),
+    badge = o.optString("badge", null).cleanNull(),
+    note = o.optString("note", null).cleanNull(),
+    live = o.optBoolean("live", false),
+    sport = o.optString("sport", ""),
+  )
 
   /** Mutual follows — the honest contents of the "add members" picker. */
   suspend fun eligibleMembers(token: String): List<ChatCandidate> = withContext(Dispatchers.IO) {

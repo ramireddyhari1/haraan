@@ -127,6 +127,22 @@ object RealtimeClient {
                     }
                     if (id.isNotBlank()) ChatRealtimeBus.emit(id)
                 }
+                // The chat LIST's nudge, on this user's own keyed channel. No payload worth
+                // reading: the list refetches /api/dm, which is authenticated.
+                "inbox.updated" -> ChatRealtimeBus.emitInbox()
+                // Someone is typing. Arrives on the thread channel AND the other members' inbox
+                // channels, so the same conversation can be heard twice — harmless, the
+                // listeners only extend a timer.
+                "conversation.typing" -> {
+                    val data = frame.opt("data")
+                    val obj = when (data) {
+                        is JSONObject -> data
+                        is String -> JSONObject(data)
+                        else -> null
+                    }
+                    val id = obj?.optString("id").orEmpty()
+                    if (id.isNotBlank()) ChatRealtimeBus.emitTyping(id, obj?.optString("sender_id").orEmpty())
+                }
                 "venue.availability" -> {
                     // A booking, hold, block or slot change at one venue. Id only — the open
                     // venue page refetches /availability, never trusts the frame.

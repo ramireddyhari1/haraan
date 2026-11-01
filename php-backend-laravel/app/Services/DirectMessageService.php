@@ -149,8 +149,10 @@ final class DirectMessageService
         string $body,
         ?int $replyToId = null,
         bool $forwarded = false,
+        ?string $shareType = null,
+        ?string $shareRef = null,
     ): DirectMessage {
-        return DB::transaction(function () use ($conversation, $sender, $body, $replyToId, $forwarded): DirectMessage {
+        return DB::transaction(function () use ($conversation, $sender, $body, $replyToId, $forwarded, $shareType, $shareRef): DirectMessage {
             // A reply may only quote a message from THIS conversation. Quoting across threads
             // would put words from a conversation the reader isn't in onto their screen.
             $replyTo = null;
@@ -163,11 +165,23 @@ final class DirectMessageService
                 'body' => $body,
                 'reply_to_id' => $replyTo,
                 'is_forwarded' => $forwarded,
+                'share_type' => $shareType,
+                'share_ref' => $shareRef,
             ]);
+
+            // A card with no words still needs a line in the thread list — "Shared a match:
+            // Lions vs Tigers" — built for the sender, who has just been allowed to share it.
+            $preview = $body;
+            if ($preview === '' && $shareType !== null && $shareRef !== null) {
+                $preview = \App\Support\ChatShareCards::preview(
+                    $shareType,
+                    \App\Support\ChatShareCards::resolve($shareType, $shareRef, $sender),
+                );
+            }
 
             $conversation->forceFill([
                 'last_message_at' => $message->created_at,
-                'last_message_preview' => mb_substr($body, 0, 200),
+                'last_message_preview' => mb_substr($preview, 0, 200),
                 'last_sender_id' => $sender->id,
             ])->save();
 
@@ -200,12 +214,102 @@ final class DirectMessageService
         string $body,
         ?int $replyToId = null,
         bool $forwarded = false,
+        ?string $shareType = null,
+        ?string $shareRef = null,
     ): DirectMessage {
-        $message = $this->send($conversation, $sender, $body, $replyToId, $forwarded);
+        $message = $this->send($conversation, $sender, $body, $replyToId, $forwarded, $shareType, $shareRef);
 
         \App\Events\ConversationUpdated::dispatch($conversation->id, $sender->id);
+        $this->broadcastInbox($conversation);
 
         return $message;
+    }
+
+    /**
+     * The public channel this user's chat list listens on — or null when the live inbox is
+     * switched off in /control, which tells the app not to subscribe at all.
+     *
+     * An HMAC of the id under the app key, not the id itself: the channel is public (Reverb
+     * has no client auth here), so a guessable name would let anyone watch when someone else
+     * gets messages. Truncated to 32 hex chars, which is still far beyond guessing.
+     */
+    public static function inboxChannel(User $user): ?string
+    {
+        if (! \App\Support\PlatformRules::bool('chat.live_inbox')) {
+            return null;
+        }
+
+        return 'inbox.'.substr(hash_hmac('sha256', 'dm-inbox:'.$user->id, (string) config('app.key')), 0, 32);
+    }
+
+    /**
+     * Nudge every member's inbox. Sent to the sender too: their other phone's list should
+     * move as well, and their own list re-sorts the thread to the top.
+     */
+    public function broadcastInbox(Conversation $conversation): void
+    {
+        if (! \App\Support\PlatformRules::bool('chat.live_inbox')) {
+            return;
+        }
+
+        $channels = User::query()
+            ->whereIn('id', DB::table('conversation_participants')
+                ->where('conversation_id', $conversation->id)
+                ->pluck('user_id'))
+            ->get()
+            ->map(fn (User $u) => (string) self::inboxChannel($u))
+            ->filter()
+            ->values()
+            ->all();
+
+        if ($channels !== []) {
+            // A socket that is down must never fail the send that triggered it.
+            try {
+                \App\Events\InboxUpdated::dispatch($channels);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+    }
+
+    /**
+     * Tell the other members that [$user] is typing here.
+     *
+     * Throttled server-side to one signal per person per thread every 3 seconds, whatever the
+     * client sends — a phone that pings on every keystroke must not turn into a broadcast
+     * storm. Returns false when the signal was dropped (switched off, or throttled).
+     */
+    public function typing(Conversation $conversation, User $user): bool
+    {
+        if (! \App\Support\PlatformRules::bool('chat.typing_indicator')) {
+            return false;
+        }
+
+        $key = "dm-typing:{$conversation->id}:{$user->id}";
+        if (! \Illuminate\Support\Facades\Cache::add($key, 1, now()->addSeconds(3))) {
+            return false;
+        }
+
+        // The other members' inboxes, so their chat list can say "typing…" too. Never the
+        // typist's own: their list has nothing to show for it.
+        $channels = User::query()
+            ->whereIn('id', DB::table('conversation_participants')
+                ->where('conversation_id', $conversation->id)
+                ->where('user_id', '!=', $user->id)
+                ->pluck('user_id'))
+            ->get()
+            ->map(fn (User $u) => (string) self::inboxChannel($u))
+            ->filter()
+            ->values()
+            ->all();
+
+        try {
+            \App\Events\ConversationTyping::dispatch((int) $conversation->id, (int) $user->id, $channels);
+        } catch (\Throwable $e) {
+            report($e);
+        }
+
+        return true;
     }
 
     /**
@@ -257,6 +361,7 @@ final class DirectMessageService
         }
 
         \App\Events\ConversationUpdated::dispatch($conversation->id, $user->id);
+        $this->broadcastInbox($conversation);
 
         return true;
     }
@@ -338,7 +443,15 @@ final class DirectMessageService
             return null;
         }
 
-        return $this->sendAndBroadcast($target, $sender, (string) $source->body, null, true);
+        return $this->sendAndBroadcast(
+            $target,
+            $sender,
+            (string) $source->body,
+            null,
+            true,
+            $source->share_type,
+            $source->share_ref,
+        );
     }
 
     /** Mark everything in [$conversation] read for [$user]. */

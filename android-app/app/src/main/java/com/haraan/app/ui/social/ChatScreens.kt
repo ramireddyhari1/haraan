@@ -87,6 +87,11 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Close
 import com.haraan.app.data.ChatMessage
 import com.haraan.app.data.ChatThread
+import com.haraan.app.data.SharedCard
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.animation.animateContentSize
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.first
 import com.haraan.app.ui.Feel
 import com.haraan.app.ui.pressable
 import com.haraan.app.ui.theme.HaraanColors
@@ -140,6 +145,47 @@ fun ChatListScreen(
 
     BackHandler(enabled = true) { onClose() }
     LaunchedEffect(reloadKey) { result = load() }
+
+    // ── Live inbox ───────────────────────────────────────────────────────────────
+    //
+    // The list used to load when the tab opened and then sit still — a reply arriving while
+    // you looked at it didn't move its row or its badge until you left and came back. The
+    // server now nudges this player's own keyed channel whenever one of their threads moves,
+    // and the list re-reads itself. The channel name comes from the list response, so a
+    // /control switch that turns the live inbox off simply sends no channel.
+    val inboxChannel = (result as? com.haraan.app.data.DirectMessageRepository.ThreadsResult.Ready)?.inboxChannel
+    if (inboxChannel != null) {
+        DisposableEffect(inboxChannel) {
+            com.haraan.app.data.RealtimeClient.subscribe(inboxChannel)
+            onDispose { com.haraan.app.data.RealtimeClient.unsubscribe(inboxChannel) }
+        }
+    }
+    // Threads where the other side is typing right now, with when the signal runs out. Fed by
+    // the same inbox channel; a message landing clears it (that is what the typing became).
+    var typingIn by remember { mutableStateOf<Map<String, Long>>(emptyMap()) }
+    LaunchedEffect(Unit) {
+        com.haraan.app.data.ChatRealtimeBus.typing.collect { t ->
+            typingIn = typingIn + (t.conversationId to System.currentTimeMillis() + TYPING_HOLD_MS)
+        }
+    }
+    LaunchedEffect(typingIn) {
+        if (typingIn.isEmpty()) return@LaunchedEffect
+        val next = typingIn.values.min() - System.currentTimeMillis()
+        kotlinx.coroutines.delay(next.coerceAtLeast(0L) + 50L)
+        val now = System.currentTimeMillis()
+        typingIn = typingIn.filterValues { it > now }
+    }
+    LaunchedEffect(Unit) {
+        com.haraan.app.data.ChatRealtimeBus.inbox.collectLatest {
+            typingIn = emptyMap()
+            // A burst (a group where five people answer at once) collapses into one reload.
+            kotlinx.coroutines.delay(350)
+            // Only a good answer replaces the list: a dropped connection mid-burst must not
+            // swap a full inbox for "Couldn't load messages".
+            val fresh = load()
+            if (fresh is com.haraan.app.data.DirectMessageRepository.ThreadsResult.Ready) result = fresh
+        }
+    }
 
     Column(
         modifier = modifier
@@ -353,7 +399,7 @@ fun ChatListScreen(
                 } else {
                     LazyColumn(Modifier.fillMaxSize()) {
                         items(filtered, key = { it.id }) { t ->
-                            ThreadRow(t) { onOpenThread(t) }
+                            ThreadRow(t, typing = typingIn.containsKey(t.id.toString())) { onOpenThread(t) }
                             // Hairline inset to the text column — the premium messaging
                             // rhythm, and it keeps avatars from crowding the eye.
                             Box(
@@ -429,7 +475,7 @@ private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ThreadRow(thread: ChatThread, onClick: () -> Unit) {
+private fun ThreadRow(thread: ChatThread, typing: Boolean = false, onClick: () -> Unit) {
     val unread = thread.unreadCount > 0
     Row(
         Modifier
@@ -451,14 +497,19 @@ private fun ThreadRow(thread: ChatThread, onClick: () -> Unit) {
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(Modifier.height(3.dp))
-            Text(
-                thread.lastMessage ?: "Say hello",
-                color = if (unread) HaraanColors.TextPrimary else HaraanColors.TextMuted,
-                fontSize = 13.5.sp,
-                fontWeight = if (unread) FontWeight.Medium else FontWeight.Normal,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            // While they type, the preview says so — the reason to open this thread NOW.
+            if (typing) {
+                TypingLabel("typing", 13.5f)
+            } else {
+                Text(
+                    thread.lastMessage ?: "Say hello",
+                    color = if (unread) HaraanColors.TextPrimary else HaraanColors.TextMuted,
+                    fontSize = 13.5.sp,
+                    fontWeight = if (unread) FontWeight.Medium else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
         }
         Spacer(Modifier.width(10.dp))
         // Time above, unread badge below — the standard right rail. A fixed-width
@@ -625,8 +676,25 @@ fun ChatThreadScreen(
     avatar: String?,
     /** Null loads the whole thread; an id loads only what arrived after it. */
     load: suspend (sinceId: Long?) -> List<ChatMessage>,
-    send: suspend (body: String, replyToId: Long?) -> ChatMessage?,
+    send: suspend (body: String, replyToId: Long?, share: SharedCard?) -> ChatMessage?,
     onClose: () -> Unit,
+    /**
+     * One page of history: the newest page when [beforeId] is null, else the page above that
+     * message. Null falls back to [load] for everything (no scrolling back past one load).
+     */
+    loadPage: (suspend (beforeId: Long?) -> com.haraan.app.data.DirectMessageRepository.ThreadPage)? = null,
+    /** Shows the + button that shares a match, venue or player — a /control switch. */
+    shareEnabled: Boolean = false,
+    /** What the share picker lists for one type and search. */
+    searchShare: suspend (type: String, q: String) -> List<SharedCard> = { _, _ -> emptyList() },
+    /** Re-reads one card; a LIVE match card calls it while on screen so the score moves. */
+    refreshCard: suspend (SharedCard) -> SharedCard? = { null },
+    /** A card was tapped: open the match, venue or profile. */
+    onOpenShare: (SharedCard) -> Unit = {},
+    /** Tell the other side this viewer is typing. Null when "typing…" is off in /control. */
+    onTyping: (suspend () -> Unit)? = null,
+    /** This viewer's user id — their own typing signal comes back on the channel and is ignored. */
+    viewerId: Long = 0L,
     isGroup: Boolean = false,
     /**
      * How many messages were unread when this thread was opened, so the reader can be
@@ -672,7 +740,41 @@ fun ChatThreadScreen(
     // count the LIST row carried. Captured on first load and then left alone: opening the
     // thread marks it read, so recomputing on every poll would erase the marker while the
     // reader is still looking at it.
-    var unreadStart by remember { mutableStateOf<Int?>(null) }
+    //
+    // Held as the message's ID, not its index: loading older history puts messages above it,
+    // and an index would then point the line at the wrong message.
+    var unreadFromId by remember { mutableStateOf<Long?>(null) }
+    var unreadMarked by remember { mutableStateOf(false) }
+
+    // History above the loaded page. A thread opens on its newest page; scrolling to the top
+    // asks for the one before it until the server says there is no more.
+    var hasMore by remember { mutableStateOf(false) }
+    var loadingOlder by remember { mutableStateOf(false) }
+    var showSharePicker by remember { mutableStateOf(false) }
+
+    // Who on the other side is typing (their user id), and a tick that restarts the timeout on
+    // every fresh signal. There is no "stopped" signal to wait for: the dots fold away on their
+    // own [TYPING_HOLD_MS] after the last one, or the moment that person's message lands.
+    var typingFrom by remember { mutableStateOf<String?>(null) }
+    var typingTick by remember { mutableStateOf(0) }
+    LaunchedEffect(typingTick) {
+        if (typingTick == 0) return@LaunchedEffect
+        kotlinx.coroutines.delay(TYPING_HOLD_MS)
+        typingFrom = null
+    }
+    if (conversationId > 0L) {
+        LaunchedEffect(conversationId, viewerId) {
+            com.haraan.app.data.ChatRealtimeBus.typing.collect { t ->
+                if (t.conversationId == conversationId.toString() && t.senderId != viewerId.toString() && viewerId > 0L) {
+                    typingFrom = t.senderId
+                    typingTick++
+                }
+            }
+        }
+    }
+    // Typing pings go out at most every 3 seconds — the server throttles too, this just keeps
+    // the phone from making calls it would drop.
+    var lastTypingPing by remember { mutableStateOf(0L) }
 
     // The message a long press opened the sheet on, and whatever the last action had to say.
     var sheetFor by remember { mutableStateOf<ChatMessage?>(null) }
@@ -685,16 +787,45 @@ fun ChatThreadScreen(
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     LaunchedEffect(messages != null) {
         val loaded = messages
-        if (unreadStart == null && loaded != null && unreadCount > 0 && unreadCount < loaded.size) {
-            val candidate = loaded.size - unreadCount
-            // Only when it really points at incoming messages — a count that has drifted
-            // must not draw a line above something this viewer wrote themselves.
-            if (loaded.getOrNull(candidate)?.mine == false) unreadStart = candidate
+        if (!unreadMarked && loaded != null) {
+            unreadMarked = true
+            if (unreadCount > 0 && unreadCount < loaded.size) {
+                val candidate = loaded[loaded.size - unreadCount]
+                // Only when it really points at incoming messages — a count that has drifted
+                // must not draw a line above something this viewer wrote themselves.
+                if (!candidate.mine) unreadFromId = candidate.id
+            }
         }
     }
 
+    // The first page. With paging it is the newest page and whether there is more above it;
+    // without, the whole thread as before.
+    suspend fun loadFirst(): List<ChatMessage> {
+        val pager = loadPage ?: return load(null)
+        val page = pager(null)
+        hasMore = page.hasMore
+        return page.messages
+    }
+
+    // Resize, don't pan, while a conversation is open.
+    //
+    // The manifest's adjustResize sits on <application>, where Android ignores it, so the
+    // activity falls back to PANNING the whole window up when the keyboard opens — and this
+    // screen's imePadding then lifts the composer a second time: the header slid off the top
+    // and a keyboard-high gap opened under the box (seen on a Motorola edge 70 pro). Scoped
+    // to this screen rather than fixed in the manifest, because other screens may lean on the
+    // pan; the previous mode is put back on the way out.
+    val chatView = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(Unit) {
+        val window = (chatView.context as? android.app.Activity)?.window
+        val previous = window?.attributes?.softInputMode
+        @Suppress("DEPRECATION")
+        window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        onDispose { if (window != null && previous != null) window.setSoftInputMode(previous) }
+    }
+
     BackHandler(enabled = true) { onClose() }
-    LaunchedEffect(Unit) { messages = load(null) }
+    LaunchedEffect(Unit) { messages = loadFirst() }
 
     // ── Realtime ──────────────────────────────────────────────────────────────────
     //
@@ -718,6 +849,7 @@ fun ChatThreadScreen(
                     if (fresh.isNotEmpty()) {
                         val known = current?.map { it.id }?.toSet() ?: emptySet()
                         messages = (current ?: emptyList()) + fresh.filterNot { it.id in known }
+                        if (fresh.any { !it.mine && it.senderId.toString() == typingFrom }) typingFrom = null
                     }
                 }
             }
@@ -730,7 +862,7 @@ fun ChatThreadScreen(
     AutoRefresh(20_000L, true) {
         val current = messages
         if (current == null) {
-            messages = load(null)
+            messages = loadFirst()
         } else {
             val fresh = load(current.lastOrNull()?.id)
             if (fresh.isNotEmpty()) {
@@ -744,13 +876,93 @@ fun ChatThreadScreen(
 
     // Keep the newest message in view. The FIRST load jumps — animating a long scroll
     // through a year of history on open looks like a bug — and everything after animates.
+    //
+    // Keyed on the LAST message, not the count: older history arriving at the top changes the
+    // count too, and must leave the reader where they are rather than throw them to the bottom.
+    // The list's item 0 is the history header, so the newest row sits at index n.
     var settledOnce by remember { mutableStateOf(false) }
-    LaunchedEffect(messages?.size, outbox.size) {
+    LaunchedEffect(messages?.lastOrNull()?.id, outbox.size) {
         val n = (messages?.size ?: 0) + outbox.size
         if (n > 0) {
-            if (settledOnce) listState.animateScrollToItem(n - 1)
-            else { listState.scrollToItem(n - 1); settledOnce = true }
+            if (settledOnce) listState.animateScrollToItem(n)
+            else { listState.scrollToItem(n); settledOnce = true }
         }
+    }
+
+    // Keyboard up: keep the conversation's end in view. The list shrinks from the bottom as the
+    // keyboard rises, so without this the newest messages — and any "typing…" dots — slid
+    // under it the moment you tapped to reply. Only when you were already at the end; someone
+    // reading back through history stays where they are.
+    LaunchedEffect(listState) {
+        var lastHeight = 0
+        var wasAtEnd = true
+        androidx.compose.runtime.snapshotFlow {
+            val info = listState.layoutInfo
+            val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+            info.viewportSize.height to (last >= info.totalItemsCount - 2)
+        }.collect { (height, atEnd) ->
+            if (lastHeight > 0 && height < lastHeight && wasAtEnd) {
+                val total = listState.layoutInfo.totalItemsCount
+                if (total > 0) listState.scrollToItem(total - 1)
+            } else {
+                wasAtEnd = atEnd
+            }
+            lastHeight = height
+        }
+    }
+
+    LaunchedEffect(typingFrom != null) {
+        if (typingFrom == null) return@LaunchedEffect
+        val info = listState.layoutInfo
+        val last = info.visibleItemsInfo.lastOrNull()?.index ?: return@LaunchedEffect
+        if (last >= info.totalItemsCount - 3) {
+            // Let the bubble start expanding, then follow it down.
+            kotlinx.coroutines.delay(60)
+            listState.animateScrollToItem(info.totalItemsCount - 1)
+        }
+    }
+
+    // ── Older history ─────────────────────────────────────────────────────────────
+    //
+    // Reaching the top loads the page above. The rows are put back under the reader's thumb
+    // afterwards — without that, the header row stays at the top, the list still reads as
+    // "at the top", and it would pull the whole history in one go.
+    //
+    // Keyed on whether paging EXISTS, not on the lambda: the caller builds a new lambda on
+    // every recomposition, and restarting here mid-load cancelled the fetch and left
+    // `loadingOlder` stuck on, so history stopped loading altogether.
+    val currentLoadPage by androidx.compose.runtime.rememberUpdatedState(loadPage)
+    LaunchedEffect(loadPage != null, settledOnce) {
+        if (currentLoadPage == null || !settledOnce) return@LaunchedEffect
+        androidx.compose.runtime.snapshotFlow { listState.firstVisibleItemIndex <= 2 }
+            .collect { nearTop ->
+                val current = messages
+                val pager = currentLoadPage
+                if (!nearTop || !hasMore || loadingOlder || current.isNullOrEmpty() || pager == null) return@collect
+                loadingOlder = true
+                try {
+                    val page = pager(current.first().id)
+                    if (!page.ok) return@collect
+                    val known = current.map { it.id }.toSet()
+                    val older = page.messages.filterNot { it.id in known }
+                    hasMore = page.hasMore
+                    if (older.isEmpty()) return@collect
+                    // Pin the MESSAGE the reader is looking at, not a row number. Counting
+                    // indexes raced the list's own key-anchoring on a fast fling and threw
+                    // the reader a whole page down; a message id means the same row after.
+                    val anchor = listState.layoutInfo.visibleItemsInfo
+                        .firstOrNull { (it.key as? Long)?.let { k -> k > 0 } == true }
+                    messages = older + (messages ?: emptyList())
+                    androidx.compose.runtime.snapshotFlow { listState.layoutInfo.totalItemsCount }
+                        .first { it >= 1 + current.size + older.size }
+                    if (anchor != null) {
+                        val at = messages?.indexOfFirst { it.id == anchor.key } ?: -1
+                        if (at >= 0) listState.scrollToItem(1 + at, maxOf(0, -anchor.offset))
+                    }
+                } finally {
+                    loadingOlder = false
+                }
+            }
     }
 
     Column(
@@ -785,7 +997,14 @@ fun ChatThreadScreen(
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
                 Text(title, color = HaraanColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (!subtitle.isNullOrBlank()) {
+                // "typing…" takes the line under the name while it lasts — where people look.
+                val typist = typingFrom
+                if (typist != null) {
+                    val who = if (isGroup) {
+                        messages?.lastOrNull { it.senderId.toString() == typist }?.senderName?.substringBefore(' ')
+                    } else null
+                    TypingLabel(if (who != null) "$who is typing" else "typing", 12f)
+                } else if (!subtitle.isNullOrBlank()) {
                     Text(subtitle, color = HaraanColors.TextMuted, fontSize = 12.sp, maxLines = 1)
                 }
             }
@@ -844,6 +1063,15 @@ fun ChatThreadScreen(
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(3.dp),
                 ) {
+                    // Always present, so the newest row's index is stable (see the scroll
+                    // effect): a spinner while older messages load, a quiet marker once the
+                    // whole history is on screen, nothing in between.
+                    item(key = "history") {
+                        HistoryHeader(
+                            loading = loadingOlder,
+                            reachedStart = !hasMore && loadPage != null && list.size >= 20,
+                        )
+                    }
                     // In a group, an incoming bubble shows WHO sent it (grouped: only the
                     // first of a run from the same sender carries the name).
                     itemsIndexed(list, key = { _, m -> m.id }) { i, m ->
@@ -858,7 +1086,7 @@ fun ChatThreadScreen(
                         // Where the reader left off. Drawn once, at the first message they
                         // hadn't seen — the single most useful line in any messenger, and
                         // the data (unread_count) was already on the thread row.
-                        if (unreadStart != null && i == unreadStart) UnreadDivider(unreadCount)
+                        if (unreadFromId != null && m.id == unreadFromId) UnreadDivider(unreadCount)
                         // Consecutive bubbles from the same side hug; a change of speaker
                         // opens a gap. That rhythm is what makes a thread scannable.
                         val tight = prev != null && prev.mine == m.mine && day == dayLabel(prev.sentAt)
@@ -881,6 +1109,8 @@ fun ChatThreadScreen(
                                 null
                             },
                             onLongPress = { sheetFor = m },
+                            onOpenShare = onOpenShare,
+                            refreshCard = refreshCard,
                         )
                     }
                     // In flight, below everything that has landed.
@@ -890,9 +1120,32 @@ fun ChatThreadScreen(
                             // Retry: drop it from the outbox and send it again.
                             outbox = outbox.filterNot { it.tempId == p.tempId }
                             scope.launch {
-                                sendWithOutbox(p.body, p.replyToId, { outbox }, { outbox = it }, send) {
+                                sendWithOutbox(p.body, p.replyToId, p.share, { outbox }, { outbox = it }, send) {
                                     messages = it(messages)
                                 }
+                            }
+                        }
+                    }
+                    // Their dots, where their next message will land. Springs up from the
+                    // composer and folds away; always present as an item so the list's
+                    // indexes don't shift when it comes and goes.
+                    item(key = "typing") {
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = typingFrom != null,
+                            enter = androidx.compose.animation.expandVertically(
+                                androidx.compose.animation.core.spring(dampingRatio = 0.7f, stiffness = 500f),
+                                expandFrom = Alignment.Top,
+                            ) + androidx.compose.animation.fadeIn() +
+                                androidx.compose.animation.slideInVertically(
+                                    androidx.compose.animation.core.spring(dampingRatio = 0.55f, stiffness = 420f),
+                                ) { it / 2 },
+                            exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut(),
+                        ) {
+                            val typist = typingFrom
+                            val from = messages?.lastOrNull { it.senderId.toString() == typist }
+                            TypingBubble {
+                                if (isGroup) Avatar(from?.senderAvatar, from?.senderName ?: "", 26.dp)
+                                else Avatar(avatar, title, 26.dp)
                             }
                         }
                     }
@@ -912,7 +1165,7 @@ fun ChatThreadScreen(
                     note = actionNote,
                     canUnsend = target.mine && !target.deleted && onUnsend != null,
                     onCopy = {
-                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(target.body))
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(target.body.ifBlank { target.share?.title.orEmpty() }))
                         sheetFor = null; showInfoFor = null; actionNote = ""
                     },
                     onUnsend = {
@@ -938,14 +1191,18 @@ fun ChatThreadScreen(
                     onReact = { emoji ->
                         scope.launch {
                             onReact?.invoke(target.id, emoji)
-                            // Re-read so the count is the server's, not a local guess.
-                            val fresh = load(null)
-                            if (fresh.isNotEmpty()) messages = fresh
+                            // Re-read so the count is the server's, not a local guess. Merged
+                            // by id rather than replacing the list, which would drop any older
+                            // history the reader had scrolled back to.
+                            val fresh = (loadPage?.invoke(null)?.messages ?: load(null)).associateBy { it.id }
+                            if (fresh.isNotEmpty()) {
+                                messages = messages?.map { fresh[it.id] ?: it }
+                            }
                             sheetFor = null
                         }
                     },
                     onCopy = {
-                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(target.body))
+                        clipboard.setText(androidx.compose.ui.text.AnnotatedString(target.body.ifBlank { target.share?.title.orEmpty() }))
                         sheetFor = null
                     },
                     onUnsend = {
@@ -984,6 +1241,25 @@ fun ChatThreadScreen(
                     }
                 },
                 onDismiss = { forwarding = null },
+            )
+        }
+
+        if (showSharePicker) {
+            SharePicker(
+                search = searchShare,
+                onPick = { card ->
+                    showSharePicker = false
+                    // Goes through the same outbox as typed text, so a card on a bad
+                    // connection shows "Sending" and "Tap to retry" like any other line.
+                    val quoted = replyingTo?.id
+                    replyingTo = null
+                    scope.launch {
+                        sendWithOutbox("", quoted, card, { outbox }, { outbox = it }, send) { update ->
+                            messages = update(messages)
+                        }
+                    }
+                },
+                onDismiss = { showSharePicker = false },
             )
         }
 
@@ -1072,9 +1348,39 @@ fun ChatThreadScreen(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             verticalAlignment = Alignment.Bottom,
         ) {
+            // Share a match, venue or player. Beside the field, not inside a menu: in a sports
+            // chat "here's the match" is as common as a typed line.
+            //
+            // It folds away while you type — the field takes its room, the way a camera app's
+            // tools step aside once you start a caption — and springs back when the box is empty.
+            androidx.compose.animation.AnimatedVisibility(
+                visible = shareEnabled && draft.isEmpty(),
+                enter = androidx.compose.animation.expandHorizontally(
+                    androidx.compose.animation.core.spring(dampingRatio = 0.6f, stiffness = 500f),
+                ) + androidx.compose.animation.scaleIn(initialScale = 0.6f) + androidx.compose.animation.fadeIn(),
+                exit = androidx.compose.animation.shrinkHorizontally() +
+                    androidx.compose.animation.scaleOut(targetScale = 0.6f) + androidx.compose.animation.fadeOut(),
+            ) {
+                Row {
+                    Box(
+                        Modifier
+                            .size(46.dp)
+                            .pressable(haptic = Feel.SELECT) { showSharePicker = true }
+                            .clip(CircleShape)
+                            .background(HaraanColors.Field),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.Add, "Share a match, venue or player", tint = HaraanColors.EventsBlue, modifier = Modifier.size(22.dp))
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
+            }
+            val composerView = androidx.compose.ui.platform.LocalView.current
             Box(
                 Modifier
                     .weight(1f)
+                    // Grows line by line as you write instead of snapping taller.
+                    .animateContentSize(androidx.compose.animation.core.spring(stiffness = 600f))
                     .clip(RoundedCornerShape(22.dp))
                     .background(HaraanColors.Field)
                     .padding(horizontal = 16.dp, vertical = 11.dp),
@@ -1084,7 +1390,17 @@ fun ChatThreadScreen(
                 }
                 BasicTextField(
                     value = draft,
-                    onValueChange = { draft = it },
+                    onValueChange = { next ->
+                        val text = next.take(MAX_MESSAGE_CHARS)
+                        // A light tick on the first character: the thread has noticed you.
+                        if (draft.isEmpty() && text.isNotEmpty()) composerView.performHapticFeedback(Feel.SELECT)
+                        draft = text
+                        val now = System.currentTimeMillis()
+                        if (onTyping != null && text.isNotBlank() && now - lastTypingPing > 3_000L) {
+                            lastTypingPing = now
+                            scope.launch { onTyping() }
+                        }
+                    },
                     textStyle = androidx.compose.ui.text.TextStyle(
                         color = HaraanColors.TextPrimary,
                         fontSize = 14.5.sp,
@@ -1094,6 +1410,17 @@ fun ChatThreadScreen(
                     maxLines = 5,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                // Only near the limit, where it is useful — a counter from the first letter
+                // turns chatting into form-filling.
+                if (draft.length > MAX_MESSAGE_CHARS - 200) {
+                    Text(
+                        "${draft.length}/$MAX_MESSAGE_CHARS",
+                        color = if (draft.length >= MAX_MESSAGE_CHARS) HaraanColors.Danger else HaraanColors.TextMuted,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.align(Alignment.BottomEnd).offset(y = 9.dp),
+                    )
+                }
             }
             Spacer(Modifier.width(9.dp))
             val canSend = draft.trim().isNotEmpty()
@@ -1114,7 +1441,7 @@ fun ChatThreadScreen(
                         val quoted = replyingTo?.id
                         replyingTo = null
                         scope.launch {
-                            sendWithOutbox(text, quoted, { outbox }, { outbox = it }, send) { update ->
+                            sendWithOutbox(text, quoted, null, { outbox }, { outbox = it }, send) { update ->
                                 messages = update(messages)
                             }
                         }
@@ -1134,12 +1461,17 @@ fun ChatThreadScreen(
     }
 }
 
+/** The server's limit on one message (`max:2000`); the box stops there rather than failing on send. */
+private const val MAX_MESSAGE_CHARS = 2000
+
 /** A message this viewer sent that the server has not confirmed yet. */
 data class PendingMessage(
     val tempId: Long,
     val body: String,
     val failed: Boolean = false,
     val replyToId: Long? = null,
+    /** A card being shared — the pending bubble shows it, and a retry sends it again. */
+    val share: SharedCard? = null,
 )
 
 /**
@@ -1151,17 +1483,18 @@ data class PendingMessage(
 private suspend fun sendWithOutbox(
     text: String,
     replyToId: Long?,
+    share: SharedCard?,
     outbox: () -> List<PendingMessage>,
     setOutbox: (List<PendingMessage>) -> Unit,
-    send: suspend (String, Long?) -> ChatMessage?,
+    send: suspend (String, Long?, SharedCard?) -> ChatMessage?,
     updateMessages: ((List<ChatMessage>?) -> List<ChatMessage>) -> Unit,
 ) {
-    if (text.isBlank()) return
+    if (text.isBlank() && share == null) return
     val tempId = -System.currentTimeMillis()
     // The quote rides with the pending row, so a retry answers the same message rather than
     // quietly becoming a stray line.
-    setOutbox(outbox() + PendingMessage(tempId, text, replyToId = replyToId))
-    val sent = send(text, replyToId)
+    setOutbox(outbox() + PendingMessage(tempId, text, replyToId = replyToId, share = share))
+    val sent = send(text, replyToId, share)
     if (sent == null) {
         setOutbox(outbox().map { if (it.tempId == tempId) it.copy(failed = true) else it })
     } else {
@@ -1180,6 +1513,8 @@ private fun Bubble(
     showTime: Boolean = true,
     status: Receipt? = null,
     onLongPress: (() -> Unit)? = null,
+    onOpenShare: (SharedCard) -> Unit = {},
+    refreshCard: suspend (SharedCard) -> SharedCard? = { null },
 ) {
     Column(
         Modifier.fillMaxWidth(),
@@ -1279,12 +1614,19 @@ private fun Bubble(
                 }
                 Spacer(Modifier.height(6.dp))
             }
-            Text(
-                m.body,
-                color = if (m.mine) Color.White else HaraanColors.TextPrimary,
-                fontSize = 14.5.sp,
-                lineHeight = 20.sp,
-            )
+            m.share?.let { card ->
+                SharedCardView(card, onOpen = onOpenShare, refresh = refreshCard)
+                if (m.body.isNotBlank()) Spacer(Modifier.height(8.dp))
+            }
+            // A card sent on its own has no words; an empty Text would still take a line.
+            if (m.body.isNotBlank() || m.share == null) {
+                Text(
+                    m.body,
+                    color = if (m.mine) Color.White else HaraanColors.TextPrimary,
+                    fontSize = 14.5.sp,
+                    lineHeight = 20.sp,
+                )
+            }
             // Time, and — on your own messages — how far it has got. Both live inside the
             // bubble, on one line, so a run of messages doesn't grow a column of metadata.
             val time = timeLabel(m.sentAt).takeIf { showTime }
@@ -1640,12 +1982,16 @@ private fun ForwardPicker(
 private fun PendingBubble(p: PendingMessage, onRetry: () -> Unit) {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
         BubbleShell(mine = true, dimmed = !p.failed, failed = p.failed, onClick = if (p.failed) onRetry else null) {
-            Text(
-                p.body,
-                color = Color.White,
-                fontSize = 14.5.sp,
-                lineHeight = 20.sp,
-            )
+            // The card as picked — not tappable while in flight, so a tap means "retry".
+            p.share?.let { SharedCardView(it, onOpen = null) }
+            if (p.body.isNotBlank() || p.share == null) {
+                Text(
+                    p.body,
+                    color = Color.White,
+                    fontSize = 14.5.sp,
+                    lineHeight = 20.sp,
+                )
+            }
             Spacer(Modifier.height(3.dp))
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.align(Alignment.End)) {
                 Icon(
@@ -1744,6 +2090,33 @@ private fun UnreadDivider(count: Int) {
             modifier = Modifier.padding(horizontal = 10.dp),
         )
         Box(Modifier.weight(1f).height(1.dp).background(HaraanColors.EventsBlue.copy(alpha = 0.35f)))
+    }
+}
+
+/**
+ * The top of the loaded history: a small spinner while the page above loads, and — once the
+ * server says there is nothing older — a quiet line saying so, so an empty scroll upwards
+ * reads as "that's everything" rather than "it's stuck".
+ */
+@Composable
+private fun HistoryHeader(loading: Boolean, reachedStart: Boolean) {
+    when {
+        loading -> Box(Modifier.fillMaxWidth().padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(
+                color = HaraanColors.EventsBlue,
+                strokeWidth = 2.dp,
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        reachedStart -> Text(
+            "Start of your conversation",
+            color = HaraanColors.TextMuted,
+            fontSize = 11.5.sp,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
+        )
+        // Zero height, but a real item: the scroll maths counts on it being there.
+        else -> Spacer(Modifier.height(1.dp))
     }
 }
 

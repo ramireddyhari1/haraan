@@ -167,7 +167,7 @@ fun MessageActionOverlay(
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                 ) {
                     Text(
-                        if (message.deleted) "This message was unsent" else message.body,
+                        if (message.deleted) "This message was unsent" else message.body.ifBlank { message.share?.title.orEmpty() },
                         color = if (message.mine && !message.deleted) Color.White else HaraanColors.TextPrimary,
                         fontSize = 14.5.sp,
                         lineHeight = 20.sp,
