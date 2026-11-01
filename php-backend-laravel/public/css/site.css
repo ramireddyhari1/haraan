@@ -376,10 +376,16 @@ a {
 	/* Search grows to fill the middle instead of hugging the right edge, but
 	   stays a search box — not an empty hero trough. Capped so the nav + actions
 	   keep real estate on the right. */
-	.topbar__search {
+	.topbar .topbar__search {
 		flex: 1 1 auto;
-		max-width: 460px;
+		max-width: 560px;
 		min-width: 240px;
+	}
+
+	/* Nav + actions end on the container's right edge, the same line every page's
+	   content ends on — not wherever the capped search happens to stop. */
+	.topbar .topnav {
+		margin-left: auto;
 	}
 
 	/* Actions pinned to the far right; nav sits just before them, in flow. A

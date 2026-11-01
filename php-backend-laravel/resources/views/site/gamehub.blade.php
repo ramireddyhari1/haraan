@@ -264,30 +264,25 @@
     }
 
     /* Head panel: the phone's hero band, as a panel. */
+    /* Words on the left, the drawing on the right, both standing on the same
+       baseline; the chips get the full width underneath. The drawing is sized to
+       the words so the panel is only as tall as its content. */
     .dhub__panel {
-        padding: 22px 26px 20px; background: #fff; border: 1.5px solid var(--blue); border-radius: 28px;
+        position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 32px; align-items: center;
+        padding: 26px 32px; background: #fff; border: 1.5px solid var(--blue); border-radius: 28px;
         box-shadow: 0 10px 24px -14px rgba(37, 99, 235, .45), 0 2px 4px -2px rgba(15, 23, 42, .08);
+        background-image: radial-gradient(ellipse 46% 120% at 100% 50%, #F3F7FF 0, transparent 70%);
     }
-    .dhub__panel { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 28px; align-items: end; }
     .dhub__panel > * { position: relative; z-index: 1; }
-    .dhub__intro { grid-column: 1; align-self: start; }
-    .dhub__panel .dhub__chips { grid-column: 1 / -1; }
-
-    /* Pitch markings under the panel, fading out before they reach the title. */
-    .dhub__panel > .dhub__lines {
-        position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; pointer-events: none;
-        -webkit-mask-image: linear-gradient(90deg, transparent 35%, #000 70%);
-        mask-image: linear-gradient(90deg, transparent 35%, #000 70%);
-    }
-    .dhub__lines path { fill: none; stroke: #E6EDF9; stroke-width: 1.5; }
-    .dhub__lines circle { fill: #E6EDF9; }
+    .dhub__intro { grid-column: 1; grid-row: 1; align-self: end; padding-bottom: 6px; }
+    .dhub__panel .dhub__chips { grid-column: 1 / -1; grid-row: 2; }
 
     /* The drawing: courts tilted back onto the ground, between two masts. */
-    .dhub__art { grid-column: 2; grid-row: 1; display: flex; align-items: flex-end; gap: 6px; margin-right: -6px; }
-    .dhub__courts { position: relative; display: flex; align-items: flex-end; gap: 18px; padding: 0 6px 2px; }
+    .dhub__art { grid-column: 2; grid-row: 1; align-self: end; display: flex; align-items: flex-end; gap: 4px; margin: -6px -10px 0 0; }
+    .dhub__courts { position: relative; display: flex; align-items: flex-end; gap: 14px; padding: 0 4px 2px; }
     /* The ground they stand on: one hairline running mast to mast, under the plates. */
-    .dhub__courts::before { content: ""; position: absolute; left: -30px; right: -30px; bottom: 40px; height: 1px; background: linear-gradient(90deg, transparent, #CBD8EE 12%, #CBD8EE 88%, transparent); }
-    .dcourt { display: flex; flex-direction: column; align-items: center; width: 150px; color: var(--blue); }
+    .dhub__courts::before { content: ""; position: absolute; left: -30px; right: -30px; bottom: 36px; height: 1px; background: linear-gradient(90deg, transparent, #CBD8EE 12%, #CBD8EE 88%, transparent); }
+    .dcourt { display: flex; flex-direction: column; align-items: center; width: 124px; color: var(--blue); }
     .dcourt__plate {
         width: 100%; aspect-ratio: 160 / 100; border-radius: 9px; background: #F7FAFF; border: 1.5px solid #BFD3FB;
         transform: perspective(560px) rotateX(36deg); transform-origin: 50% 100%;
@@ -302,7 +297,7 @@
     }
     .dcourt.is-empty { color: var(--faint); }
     .dcourt.is-empty .dcourt__plate { border-style: dashed; background: #FBFCFE; box-shadow: none; }
-    .dcourt__label { display: flex; flex-direction: column; align-items: center; margin-top: 12px; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+    .dcourt__label { display: flex; flex-direction: column; align-items: center; margin-top: 10px; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
     .dcourt__label b { font-size: 13px; font-weight: 800; color: var(--ink); letter-spacing: -.01em; }
     .dcourt.is-on .dcourt__label b { color: var(--deep); }
 
@@ -323,7 +318,7 @@
     }
 
     /* Masts: steel lines; the lamp head glows only while a venue here is open. */
-    .dmast { flex: none; display: block; overflow: visible; }
+    .dmast { flex: none; display: block; overflow: visible; width: 38px; height: 118px; }
     .dmast__pole, .dmast__grid { fill: none; stroke: #94A3B8; stroke-width: 1.2; stroke-linecap: round; }
     .dmast__head { fill: #fff; stroke: #94A3B8; stroke-width: 1.5; }
     .dmast__head.is-lit { fill: #FEF3C7; stroke: #F59E0B; }
@@ -334,14 +329,14 @@
         @keyframes dmast-hum { from { opacity: .75; } to { opacity: 1; } }
     }
     @media (max-width: 1280px) { .dcourt:nth-child(n+4) { display: none; } }
-    @media (max-width: 1000px) { .dhub__art, .dhub__panel > .dhub__lines { display: none; } }
+    @media (max-width: 1000px) { .dhub__art { display: none; } }
 
-    .dhub__crumbs { display: flex; gap: 8px; font-size: 13px; color: var(--muted); }
+    .dhub__crumbs { display: flex; gap: 8px; font-size: 13px; font-weight: 600; color: var(--muted); }
     .dhub__crumbs a { color: var(--muted); text-decoration: none; }
     .dhub__crumbs a:hover { color: var(--ink); }
     .dhub__crumbs span { color: #CBD5E1; }
-    .dhub__panel h1 { margin: 8px 0 0; font-size: clamp(28px, 2.5vw, 36px); line-height: 1.12; font-weight: 800; letter-spacing: -.03em; color: var(--ink); text-wrap: balance; }
-    .dhub__facts { display: flex; flex-wrap: wrap; align-items: center; margin: 8px 0 0; font-size: 14.5px; color: var(--muted); }
+    .dhub__panel h1 { margin: 10px 0 0; font-size: clamp(30px, 2.6vw, 40px); line-height: 1.1; font-weight: 800; letter-spacing: -.032em; color: var(--ink); text-wrap: balance; }
+    .dhub__facts { display: flex; flex-wrap: wrap; align-items: center; margin: 10px 0 0; font-size: 15px; color: var(--muted); }
     .dhub__facts span + span::before { content: ""; display: inline-block; width: 3px; height: 3px; margin: 0 10px 3px; border-radius: 50%; background: #CBD5E1; }
     .dhub__facts b { color: var(--ink); font-weight: 800; font-variant-numeric: tabular-nums; }
     .dhub__facts .is-live { display: inline-flex; align-items: center; gap: 6px; color: #15803D; font-weight: 700; }
@@ -349,9 +344,9 @@
 
     /* Chips: the phone's — icon in a round well; picked = blue tint + edge, well turns solid. */
     .dhub__chips {
-        display: flex; gap: 8px; margin: 18px -26px 0; padding: 2px 26px 4px; overflow-x: auto; scrollbar-width: none;
-        -webkit-mask-image: linear-gradient(90deg, transparent, #000 26px, #000 calc(100% - 40px), transparent);
-        mask-image: linear-gradient(90deg, transparent, #000 26px, #000 calc(100% - 40px), transparent);
+        display: flex; gap: 8px; margin: 18px -32px 0; padding: 4px 32px 2px; overflow-x: auto; scrollbar-width: none;
+        -webkit-mask-image: linear-gradient(90deg, transparent, #000 32px, #000 calc(100% - 44px), transparent);
+        mask-image: linear-gradient(90deg, transparent, #000 32px, #000 calc(100% - 44px), transparent);
     }
     .dhub__chips::-webkit-scrollbar { display: none; }
     .dhub__chip {
@@ -529,8 +524,14 @@
     .dfill[hidden] { display: none; }
     .dfill:hover { background: #fff; border-color: var(--blue); transform: translateY(-2px); }
     .dfill__art { width: 200px; max-width: 100%; height: auto; margin-bottom: 6px; }
+    .dfill__copy { display: flex; flex-direction: column; align-items: center; gap: 6px; }
     .dfill strong { font-size: 17px; font-weight: 800; letter-spacing: -.015em; }
-    .dfill span { max-width: 300px; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+    .dfill__copy > span { max-width: 300px; font-size: 13.5px; line-height: 1.5; color: var(--muted); }
+    /* Spanning two or more columns: drawing beside the words, not a tall empty box. */
+    .dfill.is-wide { flex-direction: row; gap: 32px; text-align: left; }
+    .dfill.is-wide .dfill__art { width: 240px; margin: 0; }
+    .dfill.is-wide .dfill__copy { align-items: flex-start; }
+    .dfill.is-wide strong { font-size: 20px; }
     .dfill em { display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; font-style: normal; font-size: 14px; font-weight: 800; color: var(--blue); }
     .dfill em svg { transition: transform .2s; }
     .dfill:hover em svg { transform: translateX(3px); }
@@ -1065,12 +1066,6 @@
 
 <section class="dhub" aria-label="Pulse venues">
     <header class="dhub__panel">
-        {{-- Pitch markings run under the panel: a halfway line, centre circle and box. --}}
-        <svg class="dhub__lines" viewBox="0 0 1200 260" preserveAspectRatio="xMaxYMid slice" aria-hidden="true">
-            <path d="M1210 40h-96v180h96M1210 92h-40v76h40M1114 100a34 34 0 0 0 0 60"/>
-            <circle cx="1150" cy="130" r="3"/>
-        </svg>
-
         <div class="dhub__intro">
         <nav class="dhub__crumbs" aria-label="Breadcrumb"><a href="/">Haraan</a><span aria-hidden="true">/</span>Pulse</nav>
         <h1>
@@ -1215,9 +1210,11 @@
                                 <path class="dfill__flag" d="M150 18h24l-6 7 6 7h-24z" fill="#2563EB"/>
                                 <ellipse cx="150" cy="59" rx="6" ry="2" fill="#1E3A8A" opacity=".2"/>
                             </svg>
-                            <strong>Your ground here</strong>
-                            <span>Own a turf or court{{ $dWhere ? ' in ' . $dWhere : '' }}? List it and take bookings online, with walk-ins in the same calendar.</span>
-                            <em>List your ground<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"></path></svg></em>
+                            <span class="dfill__copy">
+                                <strong>Your ground here</strong>
+                                <span>Own a turf or court{{ $dWhere ? ' in ' . $dWhere : '' }}? List it and take bookings online, with walk-ins in the same calendar.</span>
+                                <em>List your ground<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"></path></svg></em>
+                            </span>
                         </a>
                     @endif
                 </div>
