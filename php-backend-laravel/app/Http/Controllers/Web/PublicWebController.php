@@ -634,7 +634,9 @@ final class PublicWebController extends Controller
                     ? $q->where(fn ($w) => $w->whereNull('sport')->orWhere('sport', '')->orWhereRaw('lower(sport) = ?', ['cricket']))
                     : $q->whereRaw('lower(sport) = ?', [strtolower($selectedSport)]));
             $live = $base()->where('status', 'Live')->orderByDesc('updated_at')->limit($limit)->get();
-            $done = $base()->whereNotIn('status', ['Live', 'Scheduled', 'Upcoming', 'Draft'])
+            // Abandoned and cancelled games never finished, so they aren't results.
+            $done = $base()->whereNotIn('status', ['Live', 'Scheduled', 'Upcoming', 'Draft', 'Abandoned', 'Cancelled'])
+                ->where(fn ($q) => $q->whereNull('result')->orWhereRaw("lower(result) not in ('abandoned', 'no_result', 'cancelled')"))
                 ->orderByRaw('coalesce(completed_at, updated_at) desc')
                 ->limit(max(0, $limit - $live->count()))->get();
 
@@ -649,7 +651,13 @@ final class PublicWebController extends Controller
                     }
                 }
                 $isLive = $m->status === 'Live';
-                $result = trim((string) ($m->result ?? ''));
+                // `result` holds a code (home / away / tie) on newer rows, a sentence on older ones.
+                $result = match (strtolower(trim((string) ($m->result ?? '')))) {
+                    'home' => $row['home']['name'].' won',
+                    'away' => $row['away']['name'].' won',
+                    'tie' => 'Match tied',
+                    default => trim((string) ($m->result ?? '')),
+                };
                 if ($result === '' && ! in_array($m->status, ['Completed', 'Finished'], true)) {
                     $result = (string) $m->status; // older rows kept the result in status
                 }

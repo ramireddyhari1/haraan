@@ -59,12 +59,16 @@ class PulseDesktopSectionsTest extends TestCase
         $this->match(['home_full' => 'Live Lions']);
         $this->match(['home_full' => 'Done Daredevils', 'status' => 'Completed', 'result' => 'Done Daredevils won by 4 runs', 'completed_at' => now()]);
         $this->match(['home_full' => 'Secret Sixers', 'is_private' => true]);
+        $this->match(['home_full' => 'Rained Rovers', 'status' => 'Abandoned']);
+        $this->match(['home_full' => 'Coded Comets', 'status' => 'Completed', 'result' => 'home']);
 
         $html = $this->get('/gamehub')->assertOk()->getContent();
 
         $this->assertStringContainsString('Live Lions', $html);
         $this->assertStringContainsString('Done Daredevils won by 4 runs', $html);
         $this->assertStringNotContainsString('Secret Sixers', $html);
+        $this->assertStringNotContainsString('Rained Rovers', $html);
+        $this->assertStringContainsString('Coded Comets won', $html);
     }
 
     public function test_empty_sections_hide_themselves(): void
