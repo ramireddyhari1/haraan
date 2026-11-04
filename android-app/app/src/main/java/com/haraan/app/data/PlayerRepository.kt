@@ -48,6 +48,23 @@ data class DiscoveredPlayer(
     ).joinToString(" · ")
 }
 
+/** One "Players to follow" card: the discovery card plus career runs and wickets. */
+data class SpotlightPlayer(
+  val player: DiscoveredPlayer,
+  val runs: Int,
+  val wickets: Int,
+  /** "pro" / "hero" while their plan includes the badge, else null — same rule as the profile. */
+  val memberBadge: String? = null,
+)
+
+/** The /api/players/spotlight answer — the row's heading, where it shows, and its cards. */
+data class PlayerSpotlight(
+  val title: String,
+  val liveEnabled: Boolean,
+  val homeEnabled: Boolean,
+  val players: List<SpotlightPlayer>,
+)
+
 /**
  * Outcome of a directory search.
  *
@@ -726,6 +743,51 @@ class PlayerRepository(
    * Optional auth — a token makes `liked`/`mine` accurate; without one the feed still loads.
    * Null means the call failed; an empty feed is a real, distinguishable state.
    */
+  /**
+   * The "Players to follow" cards for the ActionBoard Live tab and Home feed. /control
+   * decides everything about the row (where it shows, heading, order, pinned players), so
+   * the app only draws what comes back. Null on any failure — the row just doesn't show.
+   */
+  suspend fun spotlight(token: String?): PlayerSpotlight? = withContext(Dispatchers.IO) {
+    val connection = (URL("${baseUrl.trimEnd('/')}/api/players/spotlight").openConnection() as HttpURLConnection).apply {
+      requestMethod = "GET"
+      connectTimeout = 10000
+      readTimeout = 10000
+      setRequestProperty("Accept", "application/json")
+      if (!token.isNullOrBlank()) setRequestProperty("Authorization", "Bearer $token")
+    }
+    try {
+      if (connection.responseCode !in 200..299) return@withContext null
+      val body = BufferedReader(InputStreamReader(connection.inputStream)).use { it.readText() }
+      val root = JSONObject(body)
+      val arr = root.optJSONArray("players")
+      PlayerSpotlight(
+        title = root.optString("title", null).clean() ?: "Players to follow",
+        liveEnabled = root.optBoolean("live_enabled", true),
+        homeEnabled = root.optBoolean("home_enabled", true),
+        players = buildList {
+          if (arr != null) for (i in 0 until arr.length()) {
+            val json = arr.getJSONObject(i)
+            parseDiscovered(json)?.let {
+              add(
+                SpotlightPlayer(
+                  it,
+                  runs = json.optInt("runs", 0),
+                  wickets = json.optInt("wickets", 0),
+                  memberBadge = json.optString("member_badge", null).clean(),
+                )
+              )
+            }
+          }
+        },
+      )
+    } catch (_: Exception) {
+      null
+    } finally {
+      connection.disconnect()
+    }
+  }
+
   suspend fun homeFeed(token: String?): HomeFeed? = withContext(Dispatchers.IO) {
     val connection = (URL("${baseUrl.trimEnd('/')}/api/posts/feed").openConnection() as HttpURLConnection).apply {
       requestMethod = "GET"

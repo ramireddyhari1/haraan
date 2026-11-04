@@ -427,6 +427,10 @@ Route::post('match-devices/heartbeat', [MatchDeviceController::class, 'heartbeat
 Route::post('match-devices/cue', [MatchDeviceController::class, 'cue'])->middleware('throttle:600,1');
 Route::post('match-devices/clips', [MatchDeviceController::class, 'uploadClip']);
 
+// "Players to follow" cards on the ActionBoard Live tab and Home feed. Literal segment
+// registered BEFORE the players/{playerId} catch-all, which would otherwise read it as an id.
+Route::middleware('auth.jwt.optional')->get('players/spotlight', [PlayersController::class, 'spotlight']);
+
 Route::middleware('auth.jwt.optional')->get('players/{playerId}', [PlayersController::class, 'show']);
 
 // Posts are public — a guest opening a shared profile sees the grid, same as the profile

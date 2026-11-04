@@ -4407,6 +4407,12 @@ private fun CrexMatchesScreen(
   }
   LaunchedEffect(Unit) { loadLiveFeed() }
 
+  // "Players to follow" cards on the Live tab. Null = not loaded or failed; the row hides.
+  var spotlight by remember { mutableStateOf<com.haraan.app.data.PlayerSpotlight?>(null) }
+  LaunchedEffect(Unit) {
+    spotlight = playerRepository.spotlight(com.haraan.app.data.TokenStore.getSignedInToken(context))
+  }
+
   // Ads between matches: Haraan sponsors booked into `actionboard_feed` first, else the AdMob
   // unit from /control → Marketing → Ad networks. Empty for a member whose plan has no ads.
   var feedHouseAds by remember { mutableStateOf<List<com.haraan.app.data.AdItem>>(emptyList()) }
@@ -4738,6 +4744,19 @@ private fun CrexMatchesScreen(
               item { CrexLeagueTitle("Matches near you") }
               feedWithAds(sportFeed, feedHouseAds, "live") { rows -> LiveFeedGroup(rows = rows, onMatchClick = onMatchClick) }
               item { Spacer(modifier = Modifier.height(8.dp)) }
+            }
+          }
+          // "Players to follow" under the matches — switched, titled and filled from /control.
+          spotlight?.takeIf { it.liveEnabled && it.players.isNotEmpty() }?.let { s ->
+            item(key = "player-spotlight") {
+              com.haraan.app.ui.social.PlayerSpotlightRow(
+                spotlight = s,
+                repository = playerRepository,
+                tokenProvider = { com.haraan.app.data.TokenStore.getSignedInToken(context) },
+                onOpenPlayer = { pid -> searchedPlayerId = pid },
+                bleed = 16.dp,
+                modifier = Modifier.padding(top = 8.dp, bottom = 8.dp),
+              )
             }
           }
         } else if (selectedTab == 1) {
@@ -6110,6 +6129,11 @@ private fun HomeFeedScreen(
     loading = false
   }
   LaunchedEffect(reloadKey) { reload() }
+  // "Players to follow" row under the stories. Null = not loaded or failed; the row hides.
+  var spotlight by remember { mutableStateOf<com.haraan.app.data.PlayerSpotlight?>(null) }
+  LaunchedEffect(Unit) {
+    spotlight = repository.spotlight(com.haraan.app.data.TokenStore.getSignedInToken(context))
+  }
 
   Box(modifier = modifier.background(Color.White)) {
     when {
@@ -6239,6 +6263,21 @@ private fun HomeFeedScreen(
                 thickness = 1.dp,
                 modifier = Modifier.padding(top = 4.dp),
               )
+            }
+          }
+          // "Players to follow" — switched, titled and filled from /control.
+          spotlight?.takeIf { it.homeEnabled && it.players.isNotEmpty() }?.let { s ->
+            item(key = "player-spotlight") {
+              com.haraan.app.ui.social.PlayerSpotlightRow(
+                spotlight = s,
+                repository = repository,
+                tokenProvider = { com.haraan.app.data.TokenStore.getSignedInToken(context) },
+                onOpenPlayer = onOpenPlayer,
+                modifier = Modifier.padding(top = 14.dp, bottom = 14.dp),
+              )
+            }
+            item {
+              androidx.compose.material3.HorizontalDivider(color = HaraanColors.BorderLight, thickness = 1.dp)
             }
           }
           // Post feed

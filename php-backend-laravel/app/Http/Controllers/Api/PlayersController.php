@@ -26,6 +26,7 @@ use App\Services\PlayerFormService;
 use App\Services\Rewards\BadgeService;
 use App\Support\Membership\MemberFeature;
 use App\Support\OrganizationResolver;
+use App\Support\PlatformRules;
 use App\Support\SportRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -1232,6 +1233,76 @@ final class PlayersController extends Controller
 
         return response()->json([
             'results' => $this->playerCards($rows, $me instanceof User ? $me : null),
+        ]);
+    }
+
+    /**
+     * "Players to follow" — the photo cards on the ActionBoard Live tab and Home feed.
+     *
+     * Everything about the row is /control's (Platform rules → Players to follow): where
+     * it shows, its heading, how many, the order, the filters and the pinned
+     * players. Runs and wickets are the users.career_* totals, which CareerBattingService
+     * rebuilds from the ball log on every completed match.
+     */
+    public function spotlight(Request $request): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $viewer = $me instanceof User ? $me : null;
+        $limit = PlatformRules::int('player_cards.count');
+
+        // Pinned first, in the order /control typed them. The filters don't apply to them.
+        $pinned = collect(preg_split('/[\s,]+/', PlatformRules::string('player_cards.pinned')) ?: [])
+            ->filter()
+            ->map(fn (string $ref) => $this->resolvePlayer($ref))
+            ->filter(fn (?User $u) => $u !== null && $u->id !== $viewer?->id && ! $u->is_guest)
+            ->unique('id')
+            ->values();
+
+        $followed = $viewer !== null && PlatformRules::bool('player_cards.hide_followed')
+            ? $viewer->following()->pluck('users.id')->all()
+            : [];
+
+        $order = PlatformRules::string('player_cards.order');
+        $minMatches = PlatformRules::int('player_cards.min_matches');
+        $rest = User::query()
+            ->where('is_guest', false)
+            ->whereNotNull('player_id')
+            ->where(fn ($sub) => $sub->whereNull('privacy_discoverable')->orWhere('privacy_discoverable', true))
+            ->when($viewer !== null, fn ($q) => $q->where('id', '!=', $viewer->id))
+            ->whereNotIn('id', $pinned->pluck('id')->merge($followed)->all())
+            ->when(PlatformRules::bool('player_cards.photo_only'), fn ($q) => $q->whereNotNull('avatar')->where('avatar', '!=', ''))
+            ->when($minMatches > 0, fn ($q) => $q->where('career_matches', '>=', $minMatches))
+            ->when($order === 'runs', fn ($q) => $q->orderByDesc('career_runs'))
+            ->when($order === 'wickets', fn ($q) => $q->orderByDesc('career_wickets'))
+            ->when($order === 'all_round', fn ($q) => $q->orderByRaw('(COALESCE(career_runs, 0) + 20 * COALESCE(career_wickets, 0)) DESC'))
+            ->when($order === 'xp', fn ($q) => $q->orderByDesc('ranked_xp'))
+            ->when($order === 'matches', fn ($q) => $q->orderByDesc('career_matches'))
+            ->orderByDesc('ranked_xp')
+            ->limit(max(0, $limit - $pinned->count()))
+            ->get();
+
+        $players = $pinned->concat($rest)->take($limit)->values();
+        $entitlements = app(MemberEntitlements::class);
+        $cards = collect($this->playerCards($players, $viewer))
+            ->map(fn (array $card, int $i) => [
+                // A guest has no follow state; null is what the app reads as "sign in to follow".
+                'is_following' => $viewer === null ? null : $card['is_following'],
+            ] + $card + [
+                'runs' => (int) ($players[$i]->career_runs ?? 0),
+                'wickets' => (int) ($players[$i]->career_wickets ?? 0),
+                // Pro / Hero mark — the same rule as the profile's member_badge: the plan code
+                // only while that plan includes the badge.
+                'member_badge' => $entitlements->allows($players[$i], MemberFeature::PROFILE_MEMBER_BADGE)
+                    ? $entitlements->for($players[$i])->plan->code
+                    : null,
+            ])
+            ->all();
+
+        return response()->json([
+            'title' => PlatformRules::string('player_cards.title'),
+            'live_enabled' => PlatformRules::bool('player_cards.live_enabled'),
+            'home_enabled' => PlatformRules::bool('player_cards.home_enabled'),
+            'players' => $cards,
         ]);
     }
 
