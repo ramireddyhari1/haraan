@@ -299,6 +299,11 @@
 .ha-dt-entry .ha-dt-rowmid b { font-size: 15px; font-weight: 700; }
 .ha-dt-entry:active { transform: scale(.985); }
 .ha-dt-card.ha-dt-pad, .ha-dt-slip, .ha-dt-entry { border-radius: 18px; border-color: rgba(15, 23, 42, .08); box-shadow: 0 6px 14px -10px rgba(15, 23, 42, .2); }
+.ha-dt-req { background: #FFF8EC; box-shadow: inset 0 0 0 1px rgba(194,121,10,.22); }
+.ha-dt-req .ha-dt-cap { color: #B06D09; }
+.ha-dt-reqline { display: block; margin-top: 4px; font-size: 16px; font-weight: 700; color: #0F172A; }
+.ha-dt-req .ha-dt-softbtn { margin-top: 10px; }
+.ha-dt-reqno { margin: -4px 4px 12px; color: #B42318; }
 .ha-dt-noacct { display: grid; place-items: center; height: 74px; margin: 10px 0 14px; border: 1.4px dashed #C6D2E6; border-radius: 12px; font-size: 14px; color: #64748B; }
 .ha-dt-slip.is-tap { cursor: pointer; transition: transform .14s; }
 .ha-dt-slip.is-tap:active { transform: scale(.985); }

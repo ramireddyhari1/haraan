@@ -1335,8 +1335,10 @@
     }
 
     /** The destination as a cheque leaf, with Haraan's stamp once finance has checked it. */
+    function needsApproval(p) { return p.change_mode === 'approve' && p.account && p.account.verified; }
+
     function accountSlip(p) {
-        var a = p.account, canEdit = p.can_edit !== false;
+        var a = p.account, canEdit = p.can_edit !== false && !p.pending;
         if (!a) {
             return '<section class="ha-dt-card ha-dt-pad"><small class="ha-dt-cap">Money is sent to</small><div class="ha-dt-noacct">No bank or UPI added yet</div>'
                 + (canEdit ? '<button type="button" class="ha-dt-cta" data-acct>Add bank or UPI</button>' : '') + '</section>';
@@ -1355,7 +1357,24 @@
         return '<section class="ha-dt-card ha-dt-slip' + (canEdit ? ' is-tap' : '') + '"' + (canEdit ? ' data-acct' : '') + '><div class="ha-dt-leaf"><svg class="ha-dt-guill" aria-hidden="true"><defs>' + guilloche('ha-g1') + '</defs><rect width="100%" height="100%" fill="url(#ha-g1)"/></svg>'
             + '<div><small>' + esc(a.method === 'upi' ? 'UPI ID' : (a.bank_name || 'Bank account')) + '</small><b>' + esc(a.method === 'upi' ? a.masked : '•••• ' + String(a.masked || '').slice(-4)) + '</b>'
             + '<p>in the name of ' + esc(a.account_holder || '—') + '</p>' + (a.method !== 'upi' && a.ifsc ? '<p class="is-small">IFSC ' + esc(a.ifsc) + '</p>' : '') + '</div>' + stamp + '</div>'
-            + '<div class="ha-dt-slipfoot"><span>' + esc(foot) + '</span>' + (canEdit ? '<b>Change</b>' : '') + '</div></section>';
+            + '<div class="ha-dt-slipfoot"><span>' + esc(foot) + '</span>' + (canEdit ? '<b>' + (needsApproval(p) ? 'Ask to change' : 'Change') + '</b>' : '') + '</div></section>'
+            + pendingCard(p);
+    }
+
+    /** A change the owner asked for, waiting on Haraan finance — or why the last one was turned down. */
+    function pendingCard(p) {
+        var r = p.pending;
+        if (r) {
+            var line = r.method === 'upi' ? r.masked : (r.bank_name ? r.bank_name + ' · ' : '') + '•••• ' + String(r.masked || '').slice(-4);
+            return '<section class="ha-dt-card ha-dt-pad ha-dt-req"><small class="ha-dt-cap">Change requested · Haraan is checking</small>'
+                + '<b class="ha-dt-reqline">' + esc(line) + '</b><p class="ha-dt-note">in the name of ' + esc(r.account_holder || '—')
+                + '. Money keeps going to your verified account above until Haraan approves this one.</p>'
+                + (p.can_edit !== false ? '<button type="button" class="ha-dt-softbtn" data-acct-cancel>Withdraw request</button>' : '') + '</section>';
+        }
+        if (p.pending_rejected) {
+            return '<p class="ha-dt-note ha-dt-reqno">Your last change wasn’t approved: ' + esc(p.pending_rejected) + '</p>';
+        }
+        return '';
     }
 
     function allowed(on) {
@@ -1371,7 +1390,10 @@
     function whoCanChange(p) {
         var canEdit = p.can_edit !== false, m = p.manager;
         var out = '<section class="ha-dt-card ha-dt-pad"><h4 class="ha-dt-cardtitle">Who can see and change this</h4><div class="ha-dt-accesshead"><span></span><i>See</i><i>Change</i><i>Verify</i></div>'
-            + accessRow('<span class="ha-dt-face">' + (canEdit ? 'You' : 'O') + '</span>', canEdit ? 'You' : 'The venue owner', canEdit ? 'Venue owner' : 'Only they can change it', ['See', 'Change']);
+            + (p.change_mode === 'haraan_only'
+                ? accessRow('<span class="ha-dt-face">You</span>', 'You', 'Haraan manages this account', ['See'])
+                : accessRow('<span class="ha-dt-face">' + (canEdit ? 'You' : 'O') + '</span>', canEdit ? 'You' : 'The venue owner',
+                    p.change_mode === 'approve' ? (canEdit ? 'Venue owner · Haraan approves changes' : 'Only they can ask to change it') : (canEdit ? 'Venue owner' : 'Only they can change it'), ['See', 'Change']));
         if (m) {
             var wa = m.show_whatsapp && m.phone;
             out += accessRow(m.photo_url ? '<img class="ha-dt-face" src="' + esc(m.photo_url) + '" alt="">' : '<span class="ha-dt-face">' + esc(String(m.name || '?').trim().charAt(0).toUpperCase()) + '</span>',
@@ -1451,7 +1473,9 @@
             else out += field('bankName', 'Bank name', st.bankName, 'text', ' autocapitalize="words" maxlength="120"')
                 + field('acct', 'Account number', st.acct, 'text', ' inputmode="numeric" maxlength="18"')
                 + field('ifsc', 'IFSC', st.ifsc, 'text', ' placeholder="HDFC0001234" autocapitalize="characters" maxlength="11"') + '<p class="ha-dt-err" data-ifscwarn hidden>4 letters, a 0, then 6 letters or digits</p>';
-            out += '<p class="ha-dt-note">Saving asks Haraan finance to check it again before the next transfer. Your Haraan manager can see these details to help you.</p>';
+            out += '<p class="ha-dt-note">' + (needsApproval(po.page || {})
+                ? 'Haraan finance checks the new account before it goes live. Until then your money keeps going to your verified account.'
+                : 'Saving asks Haraan finance to check it again before the next transfer.') + ' Your Haraan manager can see these details to help you.</p>';
             s.querySelector('.ha-dt-formbody').innerHTML = out;
             foot();
         }
@@ -1472,8 +1496,10 @@
                 st.saving = true; foot();
                 var body = { method: st.method, accountHolder: st.holder.trim() };
                 if (st.method === 'bank') { body.bankName = st.bankName.trim(); body.accountNumber = st.acct; body.ifsc = st.ifsc; } else body.upiVpa = st.vpa.trim();
-                A.apiSend('POST', 'payouts/account', body).then(function () {
-                    haptic('confirm'); s.close(); A.toast('Saved. Haraan checks it before the next transfer.'); po.stampSeen = false; loadPayouts();
+                A.apiSend('POST', 'payouts/account', body).then(function (r) {
+                    haptic('confirm'); s.close(); A.toast((r && r.message) || 'Saved. Haraan checks it before the next transfer.');
+                    if (!r || r.result !== 'pending') po.stampSeen = false;
+                    loadPayouts();
                 }, function (err) {
                     haptic('reject'); st.saving = false;
                     st.error = err.message && err.message.charAt(0) !== '{' ? err.message : 'Couldn’t save. Check the details and try again.'; foot();
@@ -1657,6 +1683,12 @@
                 if (e.target.closest('[data-sub-back]')) { haptic('tick'); po.view = 'main'; renderPayouts(); loadPayouts(); window.scrollTo(0, 0); return; }
                 if (e.target.closest('[data-invoices]')) { haptic('tick'); po.view = 'invoices'; window.scrollTo(0, 0); if (po.inv) renderInvoices(); loadInvoices(); return; }
                 if (e.target.closest('[data-invretry]')) { loadInvoices(); return; }
+                if (e.target.closest('[data-acct-cancel]')) {
+                    haptic('tick');
+                    A.apiSend('DELETE', 'payouts/account/pending', {}).then(function () { A.toast('Request withdrawn'); loadPayouts(); },
+                        function (err) { A.toast((err && err.message) || 'Couldn’t withdraw. Try again.'); });
+                    return;
+                }
                 if (e.target.closest('[data-acct]')) { haptic('tick'); openAccount(); return; }
                 if (e.target.closest('[data-tax]')) { haptic('tick'); openTax(); return; }
                 if ((b = e.target.closest('[data-kind]'))) { haptic('tick'); po.invFilter = b.dataset.kind || null; renderInvoices(); return; }

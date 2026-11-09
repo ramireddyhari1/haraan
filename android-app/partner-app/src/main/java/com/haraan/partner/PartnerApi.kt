@@ -876,6 +876,15 @@ data class PayoutAccount(
     val changedAt: String? = null,
 )
 
+/** A destination the owner asked for, waiting on Haraan finance. Masked, like the account. */
+data class PayoutPendingChange(
+    val method: String,
+    val accountHolder: String,
+    val bankName: String?,
+    val masked: String,
+    val requestedAt: String?,
+)
+
 /** The partner's Haraan manager, as Payouts names them next to the account. */
 data class PayoutManager(val name: String, val title: String, val photoUrl: String?, val phone: String?, val whatsapp: Boolean)
 
@@ -956,10 +965,19 @@ data class PayoutsPage(
     val collected: Double,
     val account: PayoutAccount?,
     val batches: List<PayoutBatchRow>,
-    /** Only the owner changes the destination; desk staff read it. */
+    /** Only the owner changes the destination (and only if Haraan lets owners); desk staff read it. */
     val canEdit: Boolean = true,
     val manager: PayoutManager? = null,
-)
+    /** A requested change waiting for Haraan finance; money keeps going to [account]. */
+    val pending: PayoutPendingChange? = null,
+    /** Why the last request was turned down. */
+    val pendingRejected: String? = null,
+    /** direct | approve | haraan_only — set by Haraan in /control. */
+    val changeMode: String = "direct",
+) {
+    /** A save will wait for Haraan instead of changing the account now. */
+    val needsApproval: Boolean get() = changeMode == "approve" && account?.verified == true
+}
 
 /** One thing Haraan changed on the partner's account (settlement, venue, manager…). */
 data class PartnerUpdateItem(
@@ -2353,6 +2371,17 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 )
             },
             canEdit = o.optBoolean("can_edit", true),
+            pending = o.optJSONObject("pending")?.let {
+                PayoutPendingChange(
+                    method = it.optString("method", "bank"),
+                    accountHolder = it.optString("account_holder"),
+                    bankName = it.optStringOrNull("bank_name"),
+                    masked = it.optString("masked"),
+                    requestedAt = it.optStringOrNull("requested_at"),
+                )
+            },
+            pendingRejected = o.optStringOrNull("pending_rejected"),
+            changeMode = o.optString("change_mode", "direct"),
             manager = o.optJSONObject("manager")?.let { m ->
                 PayoutManager(
                     name = m.optString("name"),
@@ -2467,7 +2496,10 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         }
     }
 
-    /** Set where settlements are sent. Saving always clears verification. */
+    /**
+     * Set where settlements are sent. Returns the server's line for the toast; [Pair.first]
+     * is true when the change waits for Haraan finance instead of applying now.
+     */
     suspend fun savePayoutAccount(
         token: String,
         method: String,
@@ -2487,7 +2519,13 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
         } else {
             payload.put("upiVpa", upiVpa ?: "")
         }
-        post("/api/partner/payouts/account", payload.toString(), token)
+        val r = runCatching { JSONObject(post("/api/partner/payouts/account", payload.toString(), token)) }.getOrNull()
+        Pair(r?.optString("result") == "pending", r?.optStringOrNull("message"))
+    }
+
+    /** The owner withdraws a change still waiting for Haraan. */
+    suspend fun cancelPayoutChange(token: String) = withContext(Dispatchers.IO) {
+        request("DELETE", "/api/partner/payouts/account/pending", null, token)
         Unit
     }
 

@@ -314,7 +314,7 @@
                 var payload = { method: method, accountHolder: vals.holder.trim() };
                 if (method === 'bank') { payload.bankName = vals.bank.trim(); payload.accountNumber = vals.acct; payload.ifsc = vals.ifsc; }
                 else payload.upiVpa = vals.vpa.trim();
-                A.apiSend('POST', 'payouts/account', payload).then(function () { d.close(); A.toast('Account saved for verification'); loadPayouts(); }, function (err) {
+                A.apiSend('POST', 'payouts/account', payload).then(function (r) { d.close(); A.toast((r && r.message) || 'Account saved for verification'); loadPayouts(); }, function (err) {
                     var el = form.querySelector('.ha-err');
                     el.textContent = err.message || 'Couldn’t save. Try again.';
                     el.hidden = false;

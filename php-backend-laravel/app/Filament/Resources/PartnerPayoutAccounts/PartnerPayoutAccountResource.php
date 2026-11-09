@@ -30,7 +30,9 @@ use Illuminate\Database\Eloquent\Builder;
  *  - Finance / admin: see every partner's full details, add or change them, verify.
  *  - A partner's Haraan manager: sees and changes only the partners assigned to them
  *    (PartnerResource → Haraan manager). They can't verify — someone else vouches.
- *  - The partner: changes it in the app or /partner → Payouts.
+ *  - The partner: changes it in the app or /partner → Payouts. With the platform rule
+ *    payouts.partner_change_mode = approve (default), a change to a VERIFIED account
+ *    waits here as "Change requested" until finance approves or turns it down.
  * Every change goes through PayoutAccountEditor: it clears verification, records who
  * did it (the partner app shows that line), and pushes the owner when it wasn't them.
  */
@@ -58,6 +60,28 @@ class PartnerPayoutAccountResource extends Resource
     public static function canCreate(): bool
     {
         return false; // "Add for a partner" on the list page goes through the editor instead.
+    }
+
+    /** Changes partners asked for that are waiting on finance. */
+    public static function getNavigationBadge(): ?string
+    {
+        try {
+            $n = static::getEloquentQuery()->whereNotNull('pending_at')->count();
+        } catch (\Throwable) {
+            return null; // column not migrated yet — never break the sidebar
+        }
+
+        return $n > 0 ? (string) $n : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
+
+    public static function getNavigationBadgeTooltip(): ?string
+    {
+        return 'Partner account changes waiting for approval';
     }
 
     /** Managers only ever see their own partners. */
@@ -127,6 +151,19 @@ class PartnerPayoutAccountResource extends Resource
                     ->falseIcon('heroicon-m-clock')
                     ->trueColor('success')
                     ->falseColor('warning'),
+                TextColumn::make('pending_at')
+                    ->label('Change requested')
+                    ->badge()
+                    ->color('warning')
+                    ->formatStateUsing(fn (PartnerPayoutAccount $r): string => $r->hasPendingChange()
+                        ? 'To ' . ($r->pendingAsAccount()?->fullLine() ?? '—')
+                        : '')
+                    ->description(fn (PartnerPayoutAccount $r): ?string => $r->hasPendingChange()
+                        ? ($r->pendingAsAccount()?->account_holder ?: 'no name') . ' · asked ' . $r->pending_at?->diffForHumans()
+                        : ($r->pending_note ? 'Last request turned down: ' . $r->pending_note : null))
+                    ->placeholder('—')
+                    ->wrap()
+                    ->sortable(),
                 TextColumn::make('updated_at')
                     ->label('Last changed')
                     ->dateTime('d M Y H:i')
@@ -140,6 +177,16 @@ class PartnerPayoutAccountResource extends Resource
             ])
             ->defaultSort('updated_at', 'desc')
             ->filters([
+                TernaryFilter::make('pending_at')
+                    ->label('Change requested')
+                    ->placeholder('All')
+                    ->trueLabel('Waiting for approval')
+                    ->falseLabel('No request')
+                    ->queries(
+                        true: fn ($q) => $q->whereNotNull('pending_at'),
+                        false: fn ($q) => $q->whereNull('pending_at'),
+                        blank: fn ($q) => $q,
+                    ),
                 TernaryFilter::make('verified_at')
                     ->label('Verification')
                     ->placeholder('All')
@@ -152,12 +199,47 @@ class PartnerPayoutAccountResource extends Resource
                     ),
             ])
             ->recordActions([
+                Action::make('approveChange')
+                    ->label('Approve change')
+                    ->icon('heroicon-m-check-circle')
+                    ->color('success')
+                    ->requiresConfirmation()
+                    ->modalHeading(fn (PartnerPayoutAccount $r): string => 'Approve the new account · ' . ($r->partner?->name ?? 'partner'))
+                    ->modalDescription(fn (PartnerPayoutAccount $r): string => 'Now: ' . $r->fullLine() . ' (' . ($r->account_holder ?: 'no name') . ")\n"
+                        . 'New: ' . ($r->pendingAsAccount()?->fullLine() ?? '—') . ' (' . ($r->pendingAsAccount()?->account_holder ?: 'no name') . ")\n\n"
+                        . 'Check the new account belongs to this partner first (cancelled cheque, passbook or a ₹1 test transfer). Approving makes it live and verified, and tells the partner.')
+                    ->modalSubmitActionLabel('Approve and make live')
+                    ->visible(fn (PartnerPayoutAccount $r): bool => $r->hasPendingChange() && PayoutAccountEditor::staffMayVerify(auth()->user()))
+                    ->action(function (PartnerPayoutAccount $r): void {
+                        app(PayoutAccountEditor::class)->approvePending($r, auth()->user());
+                        Notification::make()->title('New settlement account is live')->body('The partner has been told.')->success()->send();
+                    }),
+
+                Action::make('rejectChange')
+                    ->label('Turn down')
+                    ->icon('heroicon-m-no-symbol')
+                    ->color('danger')
+                    ->modalHeading('Turn down this change')
+                    ->modalDescription(fn (PartnerPayoutAccount $r): string => 'Money keeps going to ' . $r->fullLine() . '. The partner sees the reason below.')
+                    ->schema([
+                        TextInput::make('reason')
+                            ->label('Reason for the partner')
+                            ->default('We could not confirm the new account belongs to you. Please share a cancelled cheque with your Haraan manager.')
+                            ->required()
+                            ->maxLength(240),
+                    ])
+                    ->visible(fn (PartnerPayoutAccount $r): bool => $r->hasPendingChange() && PayoutAccountEditor::staffMayVerify(auth()->user()))
+                    ->action(function (PartnerPayoutAccount $r, array $data): void {
+                        app(PayoutAccountEditor::class)->rejectPending($r, auth()->user(), (string) $data['reason']);
+                        Notification::make()->title('Change turned down')->body('The partner has been told.')->warning()->send();
+                    }),
+
                 Action::make('edit')
                     ->label('Edit')
                     ->icon('heroicon-m-pencil-square')
                     ->color('primary')
                     ->modalHeading(fn (PartnerPayoutAccount $r): string => 'Settlement account · ' . ($r->partner?->name ?? 'partner'))
-                    ->modalDescription('Saving clears verification and tells the partner on their phone who changed it.')
+                    ->modalDescription('Saving clears verification, replaces any change the partner asked for, and tells the partner on their phone who changed it.')
                     ->visible(fn (PartnerPayoutAccount $r): bool => PayoutAccountEditor::staffMayEdit(auth()->user(), (int) $r->partner_id))
                     ->fillForm(fn (PartnerPayoutAccount $r): array => $r->only(['method', 'account_holder', 'bank_name', 'account_number', 'ifsc_code', 'upi_vpa']))
                     ->schema(self::destinationFields())

@@ -103,7 +103,31 @@ class PartnerPayouts extends Page
 
     public function startEditing(): void
     {
-        $this->editing = true;
+        $this->editing = \App\Support\PayoutAccountEditor::partnerMayChange(auth()->user());
+    }
+
+    /** Can this signed-in person change (or ask to change) the destination? */
+    public function canChange(): bool
+    {
+        return \App\Support\PayoutAccountEditor::partnerMayChange(auth()->user());
+    }
+
+    /** Will a save wait for Haraan finance instead of changing it now? */
+    public function needsApproval(): bool
+    {
+        $a = $this->account();
+
+        return $a !== null && $a->isVerified()
+            && \App\Support\PayoutAccountEditor::partnerMode() === \App\Support\PayoutAccountEditor::MODE_APPROVE;
+    }
+
+    public function cancelRequest(): void
+    {
+        $a = $this->account();
+        if ($a !== null && $this->canChange()) {
+            app(\App\Support\PayoutAccountEditor::class)->cancelPending($a);
+            Notification::make()->title('Request withdrawn')->body('Your verified account stays as it is.')->success()->send();
+        }
     }
 
     public function cancelEditing(): void
@@ -148,10 +172,28 @@ class PartnerPayouts extends Page
             'upi_vpa' => $this->method === 'upi' ? strtolower(trim((string) $this->upi_vpa)) : null,
         ];
 
-        // Through the shared editor: clears verification and records who changed it.
-        app(\App\Support\PayoutAccountEditor::class)->save($this->partnerId(), $payload, auth()->user());
+        if (! $this->canChange()) {
+            $this->editing = false;
+            Notification::make()->title('Managed by Haraan')->body('Call your Haraan manager to change your settlement account.')->warning()->send();
+
+            return;
+        }
+
+        // Through the shared editor: either changes it now (clearing verification) or,
+        // for a verified account, sends the change to Haraan finance to approve.
+        [$result] = app(\App\Support\PayoutAccountEditor::class)->submitByPartner($this->partnerId(), $payload, auth()->user());
 
         $this->editing = false;
+
+        if ($result === \App\Support\PayoutAccountEditor::RESULT_PENDING) {
+            Notification::make()
+                ->title('Sent to Haraan for approval')
+                ->body('Your money keeps going to your verified account until Haraan approves the new one.')
+                ->success()
+                ->send();
+
+            return;
+        }
 
         Notification::make()
             ->title('Settlement account saved')

@@ -18,11 +18,18 @@ final class PartnerPayoutAccount extends Model
         'partner_id', 'method', 'account_holder',
         'bank_name', 'account_number', 'ifsc_code', 'upi_vpa', 'verified_at',
         'updated_by_id', 'updated_by_kind', 'verified_by_id',
+        'pending_payload', 'pending_at', 'pending_by_id', 'pending_note',
     ];
 
     protected $casts = [
         'verified_at' => 'datetime',
+        'pending_at' => 'datetime',
+        // Holds a full account number — encrypted at rest (APP_KEY must not change).
+        'pending_payload' => 'encrypted:array',
     ];
+
+    /** Never echo the requested destination into JSON by accident. */
+    protected $hidden = ['pending_payload'];
 
     public function partner(): BelongsTo
     {
@@ -32,6 +39,31 @@ final class PartnerPayoutAccount extends Model
     public function isVerified(): bool
     {
         return $this->verified_at !== null;
+    }
+
+    /** A partner-requested change is waiting for Haraan finance. */
+    public function hasPendingChange(): bool
+    {
+        return is_array($this->pending_payload) && $this->pending_payload !== [];
+    }
+
+    /** The requested destination as an unsaved model, for masking and display. */
+    public function pendingAsAccount(): ?self
+    {
+        if (! $this->hasPendingChange()) {
+            return null;
+        }
+        $p = $this->pending_payload;
+
+        return new self([
+            'partner_id' => $this->partner_id,
+            'method' => $p['method'] ?? null,
+            'account_holder' => $p['account_holder'] ?? null,
+            'bank_name' => $p['bank_name'] ?? null,
+            'account_number' => $p['account_number'] ?? null,
+            'ifsc_code' => $p['ifsc_code'] ?? null,
+            'upi_vpa' => $p['upi_vpa'] ?? null,
+        ]);
     }
 
     /** A single human line describing the destination, with numbers masked. */

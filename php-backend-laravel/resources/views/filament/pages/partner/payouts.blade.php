@@ -66,8 +66,8 @@
                     <p class="ppo-card-sub">Where Haraan sends your money.</p>
                 </div>
 
-                @if ($account && ! $this->editing)
-                    <button type="button" class="ppo-btn ppo-btn-ghost" wire:click="startEditing">Change</button>
+                @if ($account && ! $this->editing && $this->canChange() && ! $account->hasPendingChange())
+                    <button type="button" class="ppo-btn ppo-btn-ghost" wire:click="startEditing">{{ $this->needsApproval() ? 'Ask to change' : 'Change' }}</button>
                 @endif
             </div>
 
@@ -97,6 +97,28 @@
                         {{ $account->isVerified() ? 'Verified' : 'Verification pending' }}
                     </span>
                 </div>
+
+                @if ($pending = $account->pendingAsAccount())
+                    {{-- A change the owner asked for, waiting on finance. --}}
+                    <div class="ppo-req">
+                        <span class="ppo-req-meta">
+                            <span class="ppo-req-k">Change requested · Haraan is checking</span>
+                            <span class="ppo-req-line">{{ $pending->summaryLine() }} · {{ $pending->account_holder }}</span>
+                            <span class="ppo-acct-sub">Asked {{ $account->pending_at?->diffForHumans() }}. Money keeps going to the verified account above until it is approved.</span>
+                        </span>
+                        @if ($this->canChange())
+                            <button type="button" class="ppo-btn ppo-btn-ghost" wire:click="cancelRequest">Withdraw</button>
+                        @endif
+                    </div>
+                @elseif ($account->pending_note)
+                    <p class="ppo-req-no">Your last change wasn’t approved: {{ $account->pending_note }}</p>
+                @endif
+
+                @unless ($this->canChange())
+                    <p class="ppo-note">Haraan manages this account. To change it, call your Haraan manager.</p>
+                @endunless
+            @elseif (! $this->canChange())
+                <p class="ppo-note">Haraan sets up your settlement account. Your Haraan manager will add it with you.</p>
             @else
                 {{-- Editor. The destination fields are never prefilled from a saved
                      account — a change means re-entering where the money goes. --}}
@@ -161,7 +183,11 @@
                         @if ($account)
                             Re-enter the full destination to confirm the change.
                         @endif
-                        Saving clears verification — Haraan re-checks the destination before the next payout.
+                        @if ($this->needsApproval())
+                            Haraan checks the new account before it goes live. Until then your money keeps going to your verified account.
+                        @else
+                            Saving clears verification — Haraan re-checks the destination before the next payout.
+                        @endif
                     </p>
                 </form>
             @endif
@@ -291,6 +317,13 @@
         .ppo-btn-ghost{background:#f1f4f9;color:#475467;box-shadow:inset 0 0 0 1px #e5e9f1;}
         .ppo-btn-ghost:hover{background:#e7ebf2;}
         .ppo-note{font-size:11.5px;color:#98a2b3;margin:0;line-height:1.45;}
+        .ppo-req{display:flex;align-items:center;gap:12px;margin-top:12px;padding:12px 14px;border-radius:12px;
+            background:#fff8ec;box-shadow:inset 0 0 0 1px rgba(194,121,10,.2);}
+        .ppo-req-meta{display:flex;flex-direction:column;min-width:0;flex:1;}
+        .ppo-req-k{font-size:11px;font-weight:700;letter-spacing:.02em;color:#b06d09;}
+        .ppo-req-line{font-size:14px;font-weight:600;color:#1d2433;margin-top:2px;}
+        .ppo-req-no{font-size:12px;color:#b42318;margin:12px 0 0;line-height:1.45;}
+        .ppo-card > .ppo-note{margin-top:10px;}
 
         /* ---- history rows ---- */
         .ppo-row-item{display:flex;align-items:center;gap:12px;padding:12px 4px;

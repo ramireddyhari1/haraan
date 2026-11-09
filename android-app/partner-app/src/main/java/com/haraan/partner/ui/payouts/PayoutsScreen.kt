@@ -132,6 +132,8 @@ fun PayoutsScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
     var reload by remember { mutableIntStateOf(0) }
     var editing by remember { mutableStateOf(false) }
     var invoices by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     if (invoices) {
         InvoicesScreen(api, token, onBack = { invoices = false })
         return
@@ -181,7 +183,24 @@ fun PayoutsScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
                     ) {
                         item { MoneyPathCard(p) }
                         item { InvoicesEntry { invoices = true } }
-                        item { AccountSlip(p.account, p.canEdit, onEdit = { editing = true }) }
+                        item {
+                            AccountSlip(
+                                p.account, p.canEdit && p.pending == null,
+                                changeLabel = if (p.needsApproval) "Ask to change" else "Change",
+                                onEdit = { editing = true },
+                            )
+                        }
+                        if (p.pending != null || !p.pendingRejected.isNullOrBlank() || p.changeMode == "haraan_only") {
+                            item {
+                                PendingChangeCard(p, onWithdraw = {
+                                    scope.launch {
+                                        runCatching { api.cancelPayoutChange(token) }
+                                            .onSuccess { toast(context, "Request withdrawn"); reload++ }
+                                            .onFailure { toast(context, it.message ?: "Couldn't withdraw. Try again.") }
+                                    }
+                                })
+                            }
+                        }
                         item { WhoCanChange(p) }
                         item { Transfers(p.batches) }
                     }
@@ -198,13 +217,14 @@ fun PayoutsScreen(api: PartnerApi, token: String, onBack: () -> Unit) {
     }
 
     if (editing) {
-        val current = (state as? Load.Ready)?.page?.account
+        val pg = (state as? Load.Ready)?.page
         AccountSheet(
             api = api,
             token = token,
-            current = current,
+            current = pg?.account,
+            needsApproval = pg?.needsApproval == true,
             onDismiss = { editing = false },
-            onSaved = { editing = false; reload++ },
+            onSaved = { msg -> editing = false; msg?.let { toast(context, it) }; reload++ },
         )
     }
 }
@@ -356,7 +376,7 @@ private fun DrawScope.coin(c: Offset, r: Float) {
  * comes down once finance has checked it, an empty dashed one until then.
  */
 @Composable
-private fun AccountSlip(a: PayoutAccount?, canEdit: Boolean, onEdit: () -> Unit) {
+private fun AccountSlip(a: PayoutAccount?, canEdit: Boolean, changeLabel: String = "Change", onEdit: () -> Unit) {
     val view = LocalView.current
     val interaction = remember { MutableInteractionSource() }
     Column(
@@ -415,7 +435,7 @@ private fun AccountSlip(a: PayoutAccount?, canEdit: Boolean, onEdit: () -> Unit)
                 fontSize = 12.5.sp, color = Muted, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
             if (canEdit) {
-                Text("Change", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = BrandInk, modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp))
+                Text(changeLabel, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = BrandInk, modifier = Modifier.padding(horizontal = 10.dp, vertical = 10.dp))
             }
         }
     }
@@ -486,6 +506,65 @@ private fun Stamp(verified: Boolean, date: String?) {
     }
 }
 
+// ─── A change waiting on Haraan ─────────────────────────────────────────────
+
+/**
+ * The owner asked to move their money to a new account (Platform rule: Haraan approves).
+ * The verified leaf above keeps receiving settlements; this card says what's waiting.
+ * Also carries why the last request was turned down, or that Haraan manages the account.
+ */
+@Composable
+private fun PendingChangeCard(p: PayoutsPage, onWithdraw: () -> Unit) {
+    val view = LocalView.current
+    val r = p.pending
+    val warnWash = Color(0xFFFFF8EC)
+    Column(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+            .background(if (r != null) warnWash else Color(0xFFF4F7FD))
+            .border(1.dp, if (r != null) Color(0x38C2790A) else Hair, RoundedCornerShape(18.dp))
+            .padding(start = 18.dp, end = 14.dp, top = 14.dp, bottom = 14.dp),
+    ) {
+        when {
+            r != null -> {
+                Text("Change requested · Haraan is checking", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Wait)
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    if (r.method == "upi") r.masked else listOfNotNull(r.bankName?.ifBlank { null }, "•••• " + r.masked.takeLast(4)).joinToString(" · "),
+                    fontSize = 17.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    style = TextStyle(fontFeatureSettings = "tnum"),
+                )
+                Text("in the name of " + r.accountHolder.ifBlank { "—" }, fontSize = 13.sp, color = Ink2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Your money keeps going to your verified account above until Haraan approves this one." +
+                        (shortDate(r.requestedAt)?.let { " Asked $it." } ?: ""),
+                    fontSize = 12.5.sp, lineHeight = 17.sp, color = Muted,
+                )
+                if (p.canEdit) {
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        "Withdraw request", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = BrandInk,
+                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { Haptics.tick(view); onWithdraw() }.padding(vertical = 8.dp),
+                    )
+                }
+            }
+            !p.pendingRejected.isNullOrBlank() -> {
+                Text("Your last change wasn't approved", fontSize = 12.5.sp, fontWeight = FontWeight.Bold, color = Bad)
+                Spacer(Modifier.height(4.dp))
+                Text(p.pendingRejected!!, fontSize = 13.sp, lineHeight = 18.sp, color = Ink2)
+            }
+            else -> Text(
+                "Haraan manages your settlement account. To change it, call your Haraan manager.",
+                fontSize = 13.sp, lineHeight = 18.sp, color = Ink2,
+            )
+        }
+    }
+}
+
+private fun toast(context: android.content.Context, text: String) {
+    android.widget.Toast.makeText(context, text, android.widget.Toast.LENGTH_LONG).show()
+}
+
 // ─── Who can change it ──────────────────────────────────────────────────────
 
 private enum class Can(val label: String) { See("See"), Change("Change"), Verify("Verify") }
@@ -512,10 +591,15 @@ private fun WhoCanChange(p: PayoutsPage) {
         }
         Spacer(Modifier.height(2.dp))
         AccessRow(
-            face = { Initial(if (p.canEdit) "You" else "O") },
-            name = if (p.canEdit) "You" else "The venue owner",
-            role = if (p.canEdit) "Venue owner" else "Only they can change it",
-            can = setOf(Can.See, Can.Change),
+            face = { Initial(if (p.canEdit || p.changeMode == "haraan_only") "You" else "O") },
+            name = if (p.canEdit || p.changeMode == "haraan_only") "You" else "The venue owner",
+            role = when {
+                p.changeMode == "haraan_only" -> "Haraan manages this account"
+                p.changeMode == "approve" -> if (p.canEdit) "Venue owner · Haraan approves changes" else "Only they can ask to change it"
+                p.canEdit -> "Venue owner"
+                else -> "Only they can change it"
+            },
+            can = if (p.changeMode == "haraan_only") setOf(Can.See) else setOf(Can.See, Can.Change),
         )
         p.manager?.let { m ->
             Box(Modifier.padding(start = 50.dp).fillMaxWidth().height(1.dp).background(Hair))
@@ -828,7 +912,14 @@ private fun DrawScope.invoiceLeaf() {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun AccountSheet(api: PartnerApi, token: String, current: PayoutAccount?, onDismiss: () -> Unit, onSaved: () -> Unit) {
+private fun AccountSheet(
+    api: PartnerApi,
+    token: String,
+    current: PayoutAccount?,
+    needsApproval: Boolean,
+    onDismiss: () -> Unit,
+    onSaved: (message: String?) -> Unit,
+) {
     val view = LocalView.current
     val scope = rememberCoroutineScope()
     var method by remember { mutableStateOf(current?.method ?: "upi") }
@@ -904,7 +995,8 @@ private fun AccountSheet(api: PartnerApi, token: String, current: PayoutAccount?
             }
             Spacer(Modifier.height(12.dp))
             Text(
-                "Saving asks Haraan finance to check it again before the next transfer. Your Haraan manager can see these details to help you.",
+                (if (needsApproval) "Haraan finance checks the new account before it goes live. Until then your money keeps going to your verified account."
+                else "Saving asks Haraan finance to check it again before the next transfer.") + " Your Haraan manager can see these details to help you.",
                 fontSize = 12.5.sp, lineHeight = 17.sp, color = Muted,
             )
             error?.let {
@@ -912,17 +1004,17 @@ private fun AccountSheet(api: PartnerApi, token: String, current: PayoutAccount?
                 Text(it, fontSize = 13.sp, color = Bad, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.height(16.dp))
-            BlueButton(if (saving) "Saving…" else "Save account", Modifier.fillMaxWidth(), enabled = valid && !saving) {
+            BlueButton(when { saving -> if (needsApproval) "Sending…" else "Saving…"; needsApproval -> "Send to Haraan"; else -> "Save account" }, Modifier.fillMaxWidth(), enabled = valid && !saving) {
                 saving = true
                 error = null
                 scope.launch {
                     try {
-                        api.savePayoutAccount(
+                        val (_, message) = api.savePayoutAccount(
                             token, method, holder.trim(),
                             bankName.trim().ifBlank { null }, acct.ifBlank { null }, ifsc.ifBlank { null }, vpa.trim().ifBlank { null },
                         )
                         Haptics.confirm(view)
-                        onSaved()
+                        onSaved(message)
                     } catch (e: Exception) {
                         Haptics.reject(view)
                         error = e.message?.takeIf { it.isNotBlank() && !it.startsWith("{") } ?: "Couldn't save. Check the details and try again."

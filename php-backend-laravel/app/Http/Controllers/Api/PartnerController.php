@@ -2955,8 +2955,16 @@ class PartnerController extends Controller
                 'verified_on'    => $account->verified_at?->toIso8601String(),
                 'changed'        => PayoutAccountEditor::changeLine($account, $request->user()),
             ],
-            // Only the owner changes where money goes; desk staff with Reports can read it.
-            'can_edit' => $request->user()->parent_partner_id === null,
+            // A change the owner asked for, waiting on Haraan finance. Money keeps going
+            // to `account` until it's approved.
+            'pending' => $this->pendingChange($account),
+            // Why the last request was turned down, until the next one.
+            'pending_rejected' => $account?->pending_note,
+            // direct | approve | haraan_only (Platform rules → Settlement accounts).
+            'change_mode' => PayoutAccountEditor::partnerMode(),
+            // Only the owner changes where money goes (and only if Haraan lets owners);
+            // desk staff with Reports can read it.
+            'can_edit' => PayoutAccountEditor::partnerMayChange($request->user()),
             // Who else can see and change this, so a change by someone else is never a surprise.
             'manager' => \App\Models\PartnerManager::query()->where('partner_id', $partnerId)->first()?->toCard(),
             'batches' => $batches,
@@ -2995,10 +3003,13 @@ class PartnerController extends Controller
         if ($request->user()->parent_partner_id !== null) {
             return response()->json(['message' => 'Only the venue owner can change the settlement account.'], 403);
         }
+        if (! PayoutAccountEditor::partnerMayChange($request->user())) {
+            return response()->json(['message' => 'Your settlement account is managed by Haraan. Call your Haraan manager to change it.'], 403);
+        }
 
         $partnerId = $request->user()->effectivePartnerId();
 
-        $account = app(PayoutAccountEditor::class)->save($partnerId, [
+        [$result, $account] = app(PayoutAccountEditor::class)->submitByPartner($partnerId, [
             'method'         => $data['method'],
             'account_holder' => $data['accountHolder'],
             'bank_name'      => $data['bankName'] ?? null,
@@ -3009,14 +3020,53 @@ class PartnerController extends Controller
 
         return response()->json([
             'status'  => 'ok',
+            // saved: the account changed now. pending: it waits for Haraan finance and
+            // the verified account keeps receiving money until then.
+            'result'  => $result,
+            'message' => $result === PayoutAccountEditor::RESULT_PENDING
+                ? 'Sent to Haraan. Your money keeps going to your verified account until they approve the new one.'
+                : 'Saved. Haraan checks it before the next transfer.',
             'account' => [
                 'method'         => $account->method,
                 'account_holder' => $account->account_holder,
                 'bank_name'      => $account->bank_name,
                 'masked'         => $this->maskDestination($account),
-                'verified'       => false,
+                'verified'       => $account->verified_at !== null,
             ],
+            'pending' => $this->pendingChange($account),
         ]);
+    }
+
+    /** DELETE /api/partner/payouts/account/pending — the owner withdraws their request. */
+    public function cancelPayoutChange(Request $request): JsonResponse
+    {
+        if ($request->user()->parent_partner_id !== null) {
+            return response()->json(['message' => 'Only the venue owner can change the settlement account.'], 403);
+        }
+        $account = PartnerPayoutAccount::query()->where('partner_id', $request->user()->effectivePartnerId())->first();
+        if ($account !== null) {
+            app(PayoutAccountEditor::class)->cancelPending($account);
+        }
+
+        return response()->json(['status' => 'ok']);
+    }
+
+    /** @return array<string, mixed>|null */
+    private function pendingChange(?PartnerPayoutAccount $account): ?array
+    {
+        $p = $account?->pendingAsAccount();
+        if ($p === null) {
+            return null;
+        }
+
+        return [
+            'method'         => $p->method,
+            'account_holder' => $p->account_holder,
+            'bank_name'      => $p->bank_name,
+            'masked'         => $this->maskDestination($p),
+            'ifsc'           => $p->method === 'bank' ? $p->ifsc_code : null,
+            'requested_at'   => $account->pending_at?->toIso8601String(),
+        ];
     }
 
     /** "HDFC •••• 4821" / "venue@upi" with the handle kept readable. */

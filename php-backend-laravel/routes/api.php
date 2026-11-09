@@ -670,6 +670,7 @@ Route::middleware(['auth.jwt', 'auth.partner'])
             Route::get('/customers', 'customers');
             Route::get('/payouts', 'payouts');
             Route::post('/payouts/account', 'savePayoutAccount');
+            Route::delete('/payouts/account/pending', 'cancelPayoutChange');
         });
 
         // Invoices: settlement statement, commission tax invoice, TDS/TCS certificate, Form 16A.
