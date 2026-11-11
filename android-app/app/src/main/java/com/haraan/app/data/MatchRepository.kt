@@ -1138,9 +1138,18 @@ class MatchRepository(
    * cricket completes through, so a football match earns XP and verification on the
    * identical path rather than a parallel one.
    */
-  suspend fun completeMatch(token: String, matchId: String): Boolean = withContext(Dispatchers.IO) {
+  suspend fun completeMatch(
+    token: String,
+    matchId: String,
+    /**
+     * Cricket ended early: "home" / "away" (that side won), "tie", or "no_result". Null for
+     * a normal finish, where the result the match already carries stands.
+     */
+    outcome: String? = null,
+  ): Boolean = withContext(Dispatchers.IO) {
     try {
-      postJson("/api/matches/$matchId/complete", JSONObject(), token).code in 200..299
+      val body = JSONObject().also { if (outcome != null) it.put("outcome", outcome) }
+      postJson("/api/matches/$matchId/complete", body, token).code in 200..299
     } catch (_: Exception) {
       false
     }

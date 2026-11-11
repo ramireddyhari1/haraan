@@ -163,8 +163,10 @@ class LiveMatch extends Model
     {
         $s = strtolower(trim((string) $status));
 
-        return in_array($s, ['completed', 'finished', 'match tied'], true)
-            || str_contains($s, ' won by ');
+        return in_array($s, ['completed', 'finished', 'match tied', 'no result'], true)
+            || str_contains($s, ' won by ')
+            // A cricket match its scorer ended early with a winner.
+            || str_contains($s, ' won · ended early');
     }
 
     /**

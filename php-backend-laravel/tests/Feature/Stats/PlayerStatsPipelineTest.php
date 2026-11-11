@@ -231,6 +231,87 @@ final class PlayerStatsPipelineTest extends TestCase
         self::assertSame(0, (int) User::query()->where('player_id', 'HRNB1')->value('career_runs'));
     }
 
+    // --------------------------------------------------------- cricket ended early
+
+    /** A 6-over game, three balls into the chase — the shape of the games prod kept losing. */
+    private function cutShortCricket(User $creator): LiveMatch
+    {
+        $m = LiveMatch::create([
+            'title' => 'Ants vs Bees', 'home' => 'ANT', 'away' => 'BEE', 'home_full' => 'Ants', 'away_full' => 'Bees',
+            'home_score' => 0, 'away_score' => 0, 'status' => 'Scheduled', 'sport' => 'cricket',
+            'competition' => '6 Over Match', 'user_id' => $creator->id,
+            'home_squad' => [['id' => 'HRNA1', 'name' => 'Asha'], ['id' => 'HRNA2', 'name' => 'Arun']],
+            'away_squad' => [['id' => 'HRNB1', 'name' => 'Bala'], ['id' => 'HRNB2', 'name' => 'Bhanu']],
+        ]);
+        $h = ['Authorization' => 'Bearer ' . $this->token($creator)];
+        $act = fn (array $body) => $this->withHeaders($h)->postJson("/api/matches/{$m->id}/score-action", $body)->assertSuccessful();
+        $act(['type' => 'start', 'innings' => 1, 'batting_team' => 1, 'striker_id' => 'HRNA1', 'non_striker_id' => 'HRNA2', 'bowler_id' => 'HRNB1']);
+        $act(['type' => 'runs', 'value' => 4]);
+        $act(['type' => 'runs', 'value' => 6]);
+        $act(['type' => 'start', 'innings' => 2, 'batting_team' => 2, 'striker_id' => 'HRNB1', 'non_striker_id' => 'HRNB2', 'bowler_id' => 'HRNA1']);
+        $act(['type' => 'runs', 'value' => 2]);
+        self::assertNull($m->fresh()->completed_at, 'still a chase in progress');
+
+        return $m;
+    }
+
+    public function test_a_cricket_match_ended_early_with_no_result_still_counts_everyones_figures(): void
+    {
+        $creator = $this->user('HRNC0', 'Cricket');
+        foreach (['HRNA1', 'HRNA2', 'HRNB1', 'HRNB2'] as $pid) {
+            $this->user($pid, 'Cricket');
+        }
+        $m = $this->cutShortCricket($creator);
+
+        $this->withHeader('Authorization', 'Bearer ' . $this->token($creator))
+            ->postJson("/api/matches/{$m->id}/complete", ['outcome' => 'no_result'])
+            ->assertOk();
+
+        $m->refresh();
+        self::assertSame('No result', $m->status);
+        self::assertNotNull($m->completed_at);
+        self::assertSame(10, PlayerCareerBatting::query()->where('player_id', 'HRNA1')->value('runs'), 'runs from a no-result game count');
+        self::assertSame('draw', PlayerMatchStat::query()->where('match_id', $m->id)->where('player_id', 'HRNB1')->value('result'));
+
+        // Locked: nothing more can be bowled.
+        $this->withHeader('Authorization', 'Bearer ' . $this->token($creator))
+            ->postJson("/api/matches/{$m->id}/score-action", ['type' => 'runs', 'value' => 1])
+            ->assertStatus(422);
+    }
+
+    public function test_a_cricket_match_ended_early_with_a_winner_credits_that_side(): void
+    {
+        $creator = $this->user('HRNC0', 'Cricket');
+        foreach (['HRNA1', 'HRNB1'] as $pid) {
+            $this->user($pid, 'Cricket');
+        }
+        $m = $this->cutShortCricket($creator);
+
+        $this->withHeader('Authorization', 'Bearer ' . $this->token($creator))
+            ->postJson("/api/matches/{$m->id}/complete", ['outcome' => 'away'])
+            ->assertOk();
+
+        $m->refresh();
+        self::assertSame('Bees won · ended early', $m->status);
+        self::assertTrue(LiveMatch::statusMeansFinished($m->status));
+        self::assertSame('win', PlayerMatchStat::query()->where('match_id', $m->id)->where('player_id', 'HRNB1')->value('result'));
+        self::assertSame('loss', PlayerMatchStat::query()->where('match_id', $m->id)->where('player_id', 'HRNA1')->value('result'));
+    }
+
+    public function test_an_early_end_outcome_is_validated(): void
+    {
+        $creator = $this->user('HRNC0', 'Cricket');
+        $m = $this->cutShortCricket($creator);
+        $h = ['Authorization' => 'Bearer ' . $this->token($creator)];
+
+        $this->withHeaders($h)->postJson("/api/matches/{$m->id}/complete", ['outcome' => 'rain'])->assertStatus(422);
+        self::assertNull($m->fresh()->completed_at);
+
+        $f = $this->footballMatch($creator);
+        $this->withHeaders($h)->postJson("/api/matches/{$f->id}/complete", ['outcome' => 'home'])->assertStatus(422);
+        self::assertNull($f->fresh()->completed_at);
+    }
+
     // ------------------------------------------------------------------- rankings
 
     public function test_rankings_are_written_in_bulk_and_only_where_they_move(): void

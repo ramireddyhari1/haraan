@@ -90,10 +90,11 @@ final class MatchPlayerStatsCalculator
             if (str_contains($text, 'tied') || str_contains($text, 'no result')) {
                 return 'draw';
             }
-            if (! str_contains($text, ' won by ')) {
+            // "KDW won by 3 wickets", or a match the scorer ended early: "KDW won · ended early".
+            if (preg_match('/^(.*?) won(?: by | · )/u', $text, $m) !== 1) {
                 return null;
             }
-            $winner = trim(strstr($text, ' won by ', true));
+            $winner = trim($m[1]);
             foreach (['home' => [$match->home_full, $match->home], 'away' => [$match->away_full, $match->away]] as $side => $names) {
                 foreach ($names as $n) {
                     if (trim((string) $n) !== '' && strtolower(trim((string) $n)) === $winner) {

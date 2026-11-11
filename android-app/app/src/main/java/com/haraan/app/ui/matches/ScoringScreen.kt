@@ -1,5 +1,7 @@
 package com.haraan.app.ui.matches
 
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.outlined.Flag
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -275,6 +277,26 @@ fun ScoringScreen(
         return true
     }
 
+    // Once the server has stamped the finish, take the scorer to their post-match rewards.
+    // Returns true when the rewards screen opened.
+    suspend fun openRewards(): Boolean {
+        val token = TokenStore.getSignedInToken(ctx) ?: return false
+        val rewards = com.haraan.app.data.rewards.RewardsRepository()
+        repeat(8) {
+            kotlinx.coroutines.delay(1500)
+            val outcome = runCatching { rewards.forMatch(token, matchId) }
+            if (outcome.isSuccess) {
+                com.haraan.app.data.rewards.RewardsNav.open(matchId)
+                return true
+            }
+            val err = outcome.exceptionOrNull() as? com.haraan.app.data.rewards.RewardsException
+            // Only "not finished yet" is worth waiting on. Not a player in this match
+            // (404) or rewards off: stay on the scorer rather than open an error.
+            if (err?.code != "match_not_finished") return false
+        }
+        return false
+    }
+
     ScorerLoaded(
         seed = remember(matchId) { seedFrom(data) },
         matchId = matchId,
@@ -285,20 +307,24 @@ fun ScoringScreen(
         onMatchOver = {
             scope.launch {
                 persistLock.withLock { }
-                val token = TokenStore.getSignedInToken(ctx) ?: return@launch
-                val rewards = com.haraan.app.data.rewards.RewardsRepository()
-                repeat(8) {
-                    kotlinx.coroutines.delay(1500)
-                    val outcome = runCatching { rewards.forMatch(token, matchId) }
-                    if (outcome.isSuccess) {
-                        com.haraan.app.data.rewards.RewardsNav.open(matchId)
-                        return@launch
-                    }
-                    val err = outcome.exceptionOrNull() as? com.haraan.app.data.rewards.RewardsException
-                    // Only "not finished yet" is worth waiting on. Not a player in this match
-                    // (404) or rewards off: stay on the scorer rather than open an error.
-                    if (err?.code != "match_not_finished") return@launch
+                openRewards()
+            }
+        },
+        // Ended early by the scorer: every ball already sent lands first, then the finish.
+        onEndMatch = { outcome, done ->
+            scope.launch {
+                val token = scoringToken()
+                if (token == null) { done(false); return@launch }
+                persistLock.withLock { }
+                val ok = repo.completeMatch(token, matchId, outcome)
+                done(ok)
+                if (!ok) {
+                    Toast.makeText(ctx, "Couldn't end the match — check connection.", Toast.LENGTH_LONG).show()
+                    return@launch
                 }
+                // A scorer who isn't a player in it has no rewards to open; the match is
+                // over either way, so leave the scorer for the match screen.
+                if (!openRewards()) onBack()
             }
         },
         alreadyStarted = data.isLive,
@@ -535,8 +561,15 @@ private fun ScorerLoaded(
     onChangeBatsman: (role: String, member: SquadMember) -> Unit = { _, _ -> },
     /** BALL tapped (cancel = false) or the ball in play called off (cancel = true). */
     onDelivery: (after: ScorerState, cancel: Boolean) -> Unit = { _, _ -> },
+    /**
+     * The scorer ends the match before it finished itself: "home"/"away"/"tie"/"no_result".
+     * [done] reports whether the server took it.
+     */
+    onEndMatch: (outcome: String, done: (Boolean) -> Unit) -> Unit = { _, done -> done(false) },
 ) {
     val ctx = LocalContext.current
+    var showEndMatch by remember { mutableStateOf(false) }
+    var ending by remember { mutableStateOf(false) }
     var state by remember { mutableStateOf(seed) }
     var history by remember { mutableStateOf(listOf<ScorerState>()) }
     // Between balls the keypad steps aside for BALL / UNDO. BALL tells viewers the bowler
@@ -893,6 +926,36 @@ private fun ScorerLoaded(
         )
     }
 
+    if (showEndMatch) {
+        val battingSide = if (currentInnings >= 2) 3 - state.battedFirst else state.battedFirst
+        val battingName = if (battingSide == 2) state.team2Name else state.team1Name
+        val target = firstInningsTotal?.let { it + 1 }
+        val situation = buildString {
+            append("$battingName ${state.runs}/${state.wickets} (${oversText(state.balls)} of ${state.maxOvers} ov)")
+            if (currentInnings >= 2 && target != null) {
+                val need = (target - state.runs).coerceAtLeast(0)
+                val left = (state.maxOvers * 6 - state.balls).coerceAtLeast(0)
+                append(" · need $need off $left")
+            } else if (currentInnings < 2) {
+                append(" · 1st innings")
+            }
+        }
+        EndMatchDialog(
+            team1 = state.team1Name.ifBlank { state.team1Code.ifBlank { "Team 1" } },
+            team2 = state.team2Name.ifBlank { state.team2Code.ifBlank { "Team 2" } },
+            situation = situation,
+            ending = ending,
+            onDismiss = { if (!ending) showEndMatch = false },
+            onConfirm = { outcome ->
+                ending = true
+                onEndMatch(outcome) { ok ->
+                    ending = false
+                    if (ok) showEndMatch = false
+                }
+            },
+        )
+    }
+
     Column(Modifier.fillMaxSize().background(ScDark)) {
         // Top bar
         Row(
@@ -916,6 +979,12 @@ private fun ScorerLoaded(
             // Attach another phone to this match — a camera down the pitch, a camera on
             // the bowler, and whatever the next assisted feature needs. Sits before Share
             // because it is about running THIS match, not about telling people about it.
+            // End the match early — rain, light, people leaving. Without it a cut-short game
+            // sat Live until the server abandoned it, and an abandoned game counts for no one.
+            if (!matchOver) {
+                ScCircleIcon(Icons.Outlined.Flag, "End match") { showEndMatch = true }
+                Spacer(Modifier.width(10.dp))
+            }
             ScCircleIcon(Icons.Outlined.Add, "Add match device") { showDevices = true }
             Spacer(Modifier.width(10.dp))
             ScCircleIcon(Icons.Outlined.Share, "Share") {
@@ -2210,6 +2279,138 @@ private fun ChangeBatterConfirm(
 }
 
 // Wicket → how was the batter out? Drives the correct scorecard notation (b / c b / lbw…).
+/**
+ * Ending a cricket match before it finished itself. The scorer picks how it ended; "No
+ * result" leads because it is what a game cut short usually IS, and it is the honest pick
+ * when nobody can say who would have won. Every choice keeps everyone's runs and wickets —
+ * the dialog says so, because that is the reason to end a match rather than walk away.
+ */
+@Composable
+private fun EndMatchDialog(
+    team1: String,
+    team2: String,
+    situation: String,
+    ending: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (outcome: String) -> Unit,
+) {
+    val view = androidx.compose.ui.platform.LocalView.current
+    var picked by remember { mutableStateOf("no_result") }
+    val options = listOf(
+        Triple("no_result", "No result", "Nobody wins"),
+        Triple("home", "$team1 won", null),
+        Triple("away", "$team2 won", null),
+        Triple("tie", "Tie", "Scores level"),
+    )
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(dismissOnBackPress = !ending, dismissOnClickOutside = !ending),
+    ) {
+        Column(
+            Modifier.clip(RoundedCornerShape(20.dp)).background(ScPanel).padding(20.dp)
+        ) {
+            Text("END MATCH", color = ScInk2, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Spacer(Modifier.height(4.dp))
+            Text("How did it end?", color = ScInk, fontSize = 19.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(6.dp))
+            Text(situation, color = ScInk2, fontSize = 13.sp, lineHeight = 18.sp)
+            Spacer(Modifier.height(16.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                options.forEach { (key, label, sub) ->
+                    val on = picked == key
+                    val border by androidx.compose.animation.animateColorAsState(
+                        if (on) ScTeal else ScLine, androidx.compose.animation.core.tween(160), label = "endBorder",
+                    )
+                    val bg by androidx.compose.animation.animateColorAsState(
+                        if (on) ScTeal.copy(alpha = 0.07f) else ScPanel, androidx.compose.animation.core.tween(160), label = "endBg",
+                    )
+                    val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+                    val pressed by interaction.collectIsPressedAsState()
+                    val scale by androidx.compose.animation.core.animateFloatAsState(
+                        if (pressed) 0.97f else 1f, androidx.compose.animation.core.spring(dampingRatio = 0.7f, stiffness = 500f), label = "endPress",
+                    )
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .graphicsLayer { scaleX = scale; scaleY = scale }
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(bg)
+                            .border(if (on) 1.5.dp else 1.dp, border, RoundedCornerShape(14.dp))
+                            .clickable(interactionSource = interaction, indication = null, enabled = !ending) {
+                                if (picked != key) view.performHapticFeedback(com.haraan.app.ui.Feel.SELECT)
+                                picked = key
+                            }
+                            .heightIn(min = 52.dp)
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        // A drawn radio: ring always, filled centre when chosen.
+                        Box(
+                            Modifier.size(20.dp).clip(CircleShape)
+                                .border(2.dp, if (on) ScTeal else ScLine, CircleShape),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            androidx.compose.animation.AnimatedVisibility(
+                                visible = on,
+                                enter = androidx.compose.animation.scaleIn(androidx.compose.animation.core.spring(dampingRatio = 0.5f, stiffness = 600f)),
+                                exit = androidx.compose.animation.scaleOut(),
+                            ) {
+                                Box(Modifier.size(10.dp).clip(CircleShape).background(ScTeal))
+                            }
+                        }
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                label, color = ScInk, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                                maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            )
+                            if (sub != null) Text(sub, color = ScInk2, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+            // The reason to end rather than walk away.
+            Text(
+                "Everyone's runs and wickets still go on their careers. Scoring stops for good.",
+                color = ScInk2, fontSize = 12.5.sp, lineHeight = 17.sp,
+            )
+            Spacer(Modifier.height(18.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .weight(1f)
+                        .height(50.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable(enabled = !ending, onClick = onDismiss),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("Keep scoring", color = ScInk2, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                }
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    Modifier
+                        .weight(1.3f)
+                        .height(50.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(ScTeal)
+                        .clickable(enabled = !ending) {
+                            view.performHapticFeedback(com.haraan.app.ui.Feel.COMMIT)
+                            onConfirm(picked)
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (ending) {
+                        CircularProgressIndicator(color = Color.White, strokeWidth = 2.dp, modifier = Modifier.size(20.dp))
+                    } else {
+                        Text("End match", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun DismissalPicker(onPick: (String) -> Unit) {
     val options = listOf(

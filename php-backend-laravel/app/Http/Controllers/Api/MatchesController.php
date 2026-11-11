@@ -322,10 +322,34 @@ final class MatchesController extends Controller
         }
         $match = $gate;
 
+        // Cricket ended EARLY (rain, light, people leaving): the scorer says how it ended.
+        // Without this a cut-short game could only sit Live until the stale closer marked it
+        // Abandoned — and an abandoned match credits nobody, so every ball of it was lost.
+        // Like a real scorebook, a no-result game still counts everyone's runs and wickets.
+        $status = null;
+        $outcome = $request->input('outcome');
+        if ($outcome !== null && ! $match->isFinished()) {
+            if (strtolower((string) ($match->sport ?: 'cricket')) !== 'cricket') {
+                return response()->json(['error' => 'outcome is only for cricket'], 422);
+            }
+            $home = trim((string) ($match->home_full ?: $match->home)) ?: 'Home';
+            $away = trim((string) ($match->away_full ?: $match->away)) ?: 'Away';
+            $status = match ((string) $outcome) {
+                'home' => $home.' won · ended early',
+                'away' => $away.' won · ended early',
+                'tie' => 'Match tied',
+                'no_result' => 'No result',
+                default => false,
+            };
+            if ($status === false) {
+                return response()->json(['error' => 'outcome must be home, away, tie or no_result'], 422);
+            }
+        }
+
         // Per-player stats, careers, rankings, the ground's record and verification all
         // follow — after the response, so this tap returns at once. A result line cricket
         // already wrote ("KDW won by 3 wickets") is kept rather than replaced by "Completed".
-        app(MatchCompletion::class)->finish($match);
+        app(MatchCompletion::class)->finish($match, $status);
 
         return response()->json(['message' => 'Match completed', 'data' => $match->fresh()]);
     }
