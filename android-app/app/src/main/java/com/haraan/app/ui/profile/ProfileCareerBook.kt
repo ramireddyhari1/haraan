@@ -1,6 +1,11 @@
 package com.haraan.app.ui.profile
 
 import androidx.compose.animation.animateColorAsState
+import kotlinx.coroutines.launch
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -107,46 +112,212 @@ fun CareerBookSection(
     // not expect to be put back on cricket batting for looking at Posts.
     var selected by rememberSaveable { mutableIntStateOf(0) }
     val index = selected.coerceIn(0, book.sports.lastIndex)
-    val record = book.sports[index]
+
+    val view = androidx.compose.ui.platform.LocalView.current
+    // The finger's pull while swiping between sports; springs home on release. At
+    // either end it moves a fraction as far and bumps, so the edge is felt, not guessed.
+    val pull = remember { Animatable(0f) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val many = book.sports.size > 1
 
     Column(Modifier.fillMaxWidth()) {
         // One sport is not a choice, so it gets no switch — the record simply IS the
         // player's cricket. The control appears the day they play something else.
-        if (book.sports.size > 1) {
+        if (many) {
             SportSwitch(book.sports, index) { selected = it }
             Spacer(Modifier.height(18.dp))
         }
-        HeadlineRow(record.headline, key = record.key)
-        val note = record.note
-        if (record.groups.isEmpty() && note != null) {
-            Spacer(Modifier.height(16.dp))
-            // Said plainly rather than filled with zeros, and said by the server: only
-            // it knows whether the line is missing because the player has not played,
-            // because nobody scored the match, or because the sport scores per side.
-            Text(note, color = Text3, fontSize = 13.sp, lineHeight = 19.sp)
+        androidx.compose.animation.AnimatedContent(
+            targetState = index,
+            transitionSpec = {
+                val dir = if (targetState > initialState) 1 else -1
+                (androidx.compose.animation.slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 4 * dir } +
+                    androidx.compose.animation.fadeIn(tween(220)))
+                    .togetherWith(
+                        androidx.compose.animation.slideOutHorizontally(tween(260, easing = FastOutSlowInEasing)) { -it / 4 * dir } +
+                            androidx.compose.animation.fadeOut(tween(160)),
+                    )
+                    .using(androidx.compose.animation.SizeTransform(clip = false))
+            },
+            label = "careerSport",
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer { translationX = pull.value }
+                .then(
+                    if (!many) Modifier else Modifier.pointerInput(book.sports.size) {
+                        var dx = 0f
+                        val flip = 64.dp.toPx()
+                        detectHorizontalDragGestures(
+                            onDragStart = { dx = 0f },
+                            onHorizontalDrag = { change, amount ->
+                                change.consume()
+                                dx += amount
+                                val atEdge = (dx > 0 && selected == 0) || (dx < 0 && selected >= book.sports.lastIndex)
+                                scope.launch { pull.snapTo(dx * if (atEdge) 0.18f else 0.45f) }
+                            },
+                            onDragEnd = {
+                                val target = when {
+                                    dx <= -flip && selected < book.sports.lastIndex -> selected + 1
+                                    dx >= flip && selected > 0 -> selected - 1
+                                    else -> null
+                                }
+                                if (target != null) {
+                                    view.performHapticFeedback(com.haraan.app.ui.Feel.SELECT)
+                                    selected = target
+                                } else if (kotlin.math.abs(dx) >= flip) {
+                                    // Pulled past the last sport: a refusal, not a tick.
+                                    view.performHapticFeedback(com.haraan.app.ui.Feel.REMOVE)
+                                }
+                                scope.launch {
+                                    pull.animateTo(0f, androidx.compose.animation.core.spring(dampingRatio = 0.62f, stiffness = 420f))
+                                }
+                            },
+                            onDragCancel = { scope.launch { pull.animateTo(0f) } },
+                        )
+                    },
+                ),
+        ) { shownIndex ->
+            val record = book.sports[shownIndex.coerceIn(0, book.sports.lastIndex)]
+            // Which slice of cricket: "all", or a format key. Remembered per sport.
+            var fmt by rememberSaveable(record.key) { androidx.compose.runtime.mutableStateOf("all") }
+            val formats = record.formats
+            Column(Modifier.fillMaxWidth()) {
+                if (formats.size >= 2) {
+                    FormatChips(formats, record.matches, fmt) { fmt = it }
+                    Spacer(Modifier.height(14.dp))
+                } else if (formats.size == 1) {
+                    // One format is not a choice — say what it is instead of offering a filter.
+                    FormatLine("All ${formats[0].label}", formats[0].detail)
+                    Spacer(Modifier.height(12.dp))
+                }
+                androidx.compose.animation.AnimatedContent(
+                    targetState = formats.firstOrNull { it.key == fmt }?.key ?: "all",
+                    transitionSpec = {
+                        (androidx.compose.animation.fadeIn(tween(220)) +
+                            androidx.compose.animation.slideInVertically(tween(260, easing = FastOutSlowInEasing)) { it / 24 })
+                            .togetherWith(androidx.compose.animation.fadeOut(tween(140)))
+                            .using(androidx.compose.animation.SizeTransform(clip = false))
+                    },
+                    label = "careerFormat",
+                ) { shownKey ->
+                    val slice = formats.firstOrNull { it.key == shownKey }
+                    val sliceKey = record.key + ":" + shownKey
+                    val groups = slice?.groups ?: record.groups
+                    val note = if (slice != null) slice.note else record.note
+                    Column(Modifier.fillMaxWidth()) {
+                        if (slice != null && formats.size >= 2) {
+                            FormatLine(slice.label, slice.detail)
+                            Spacer(Modifier.height(12.dp))
+                        }
+                        HeadlineRow(slice?.headline ?: record.headline, key = sliceKey)
+                        if (groups.isEmpty() && note != null) {
+                            Spacer(Modifier.height(16.dp))
+                            // Said plainly rather than filled with zeros, and said by the server: only
+                            // it knows whether the line is missing because the player has not played,
+                            // because nobody scored the match, or because the sport scores per side.
+                            CareerNote(note)
+                        }
+                        groups.forEachIndexed { i, group ->
+                            Spacer(Modifier.height(14.dp))
+                            Staggered(index = i, key = sliceKey) { CareerGroupCard(group) }
+                        }
+                        // The wheel and the written read describe the WHOLE career, so they
+                        // belong to "All" only — under T20 they would claim to be about T20.
+                        if (slice == null) {
+                            record.wagon?.let { wagon ->
+                                Spacer(Modifier.height(14.dp))
+                                Staggered(index = groups.size, key = sliceKey) { WagonWheelCard(wagon) }
+                            }
+                            record.analysis?.let { analysis ->
+                                Spacer(Modifier.height(14.dp))
+                                Staggered(index = groups.size + 1, key = sliceKey) { CareerAnalysisCard(analysis) }
+                            }
+                            if (record.analysis == null && record.analysisLocked && showUpgrade && groups.isNotEmpty()) {
+                                Spacer(Modifier.height(14.dp))
+                                Staggered(index = groups.size + 1, key = sliceKey) { LockedCareerReadCard() }
+                            }
+                        }
+                    }
+                }
+            }
         }
-        record.groups.forEachIndexed { i, group ->
-            Spacer(Modifier.height(14.dp))
-            Staggered(index = i, key = record.key) { CareerGroupCard(group) }
+    }
+}
+
+/**
+ * Cricket's formats as filter pills: All, then each format played with its match
+ * count. Same pill language as the ActionBoard's sport filter — solid blue when on —
+ * because it IS the same kind of control. Sinks and ticks under the finger.
+ */
+@Composable
+private fun FormatChips(formats: List<com.haraan.app.data.FormatRecord>, allMatches: Int, selected: String, onSelect: (String) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FormatChip("All", allMatches, selected == "all") { onSelect("all") }
+        formats.forEach { f -> FormatChip(f.label, f.matches, selected == f.key) { onSelect(f.key) } }
+    }
+}
+
+@Composable
+private fun FormatChip(label: String, matches: Int, on: Boolean, onClick: () -> Unit) {
+    val bg by animateColorAsState(if (on) Blue else Surface, tween(200), label = "fmtBg")
+    val fg by animateColorAsState(if (on) Color.White else Text1, tween(200), label = "fmtFg")
+    Row(
+        Modifier
+            .height(38.dp)
+            .pressable(haptic = com.haraan.app.ui.Feel.SELECT, onClick = onClick)
+            .then(if (on) Modifier.premiumCardShadow(radius = 19.dp, ambient = 8.dp, contact = 1.dp) else Modifier)
+            .clip(RoundedCornerShape(19.dp))
+            .background(bg)
+            .then(if (on) Modifier else Modifier.border(1.dp, Color(0xFFE3E8EF), RoundedCornerShape(19.dp)))
+            .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label, color = fg, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Spacer(Modifier.width(6.dp))
+        Text(
+            "$matches",
+            color = if (on) Color.White.copy(alpha = 0.72f) else Text3,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            style = TabularStyle,
+        )
+    }
+}
+
+/** "T20 · 11 to 20 overs a side" — what the slice on screen is. */
+@Composable
+private fun FormatLine(label: String, detail: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = Text1, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        if (detail.isNotBlank()) {
+            Text("  ·  $detail", color = Text3, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
         }
-        // The wheel sits after the disciplines: it is the answer to a question the
-        // tables raise (where DO those boundaries go?), so it reads as a follow-up
-        // rather than as an illustration of nothing yet.
-        record.wagon?.let { wagon ->
-            Spacer(Modifier.height(14.dp))
-            Staggered(index = record.groups.size, key = record.key) { WagonWheelCard(wagon) }
-        }
-        // And the written read last, because it is about everything above it.
-        record.analysis?.let { analysis ->
-            Spacer(Modifier.height(14.dp))
-            Staggered(index = record.groups.size + 1, key = record.key) { CareerAnalysisCard(analysis) }
-        }
-        // Not on their plan: say so to the player themselves, once they have figures worth
-        // reading. Other viewers simply see no card, as before.
-        if (record.analysis == null && record.analysisLocked && showUpgrade && record.groups.isNotEmpty()) {
-            Spacer(Modifier.height(14.dp))
-            Staggered(index = record.groups.size + 1, key = record.key) { LockedCareerReadCard() }
-        }
+    }
+}
+
+/** The server's reason a record is empty, set as an aside rather than as fine print. */
+@Composable
+private fun CareerNote(note: String) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Track.copy(alpha = 0.7f))
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.Top,
+    ) {
+        Box(
+            Modifier
+                .padding(top = 6.dp)
+                .size(6.dp)
+                .clip(androidx.compose.foundation.shape.CircleShape)
+                .background(Text3),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(note, color = Text2, fontSize = 13.sp, lineHeight = 19.sp)
     }
 }
 
@@ -160,55 +331,89 @@ fun CareerBookSection(
 private fun SportSwitch(sports: List<SportRecord>, selected: Int, onSelect: (Int) -> Unit) {
     val scroll = rememberScrollState()
     val crowded = sports.size > 3
-    Row(
+    if (crowded) {
+        // Four+ sports scroll; each segment lifts on its own there (a sliding thumb
+        // under a scrolling row would have to chase it).
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(14.dp))
+                .background(Track)
+                .padding(4.dp)
+                .horizontalScroll(scroll),
+        ) {
+            sports.forEachIndexed { i, sport -> SportSegment(sport, i == selected, Modifier, lifted = true) { onSelect(i) } }
+        }
+        return
+    }
+    // Two or three sports: ONE white thumb that slides to the choice and overshoots a
+    // hair, the way a physical switch is thrown, instead of two cells cross-fading.
+    androidx.compose.foundation.layout.BoxWithConstraints(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
             .background(Track)
-            .padding(4.dp)
-            // Four sports would not fit at once; three do. Scrolling engages only when
-            // it has to, so the common case still fills the width evenly.
-            .then(if (crowded) Modifier.horizontalScroll(scroll) else Modifier),
+            .padding(4.dp),
     ) {
-        sports.forEachIndexed { i, sport ->
-            val on = i == selected
-            val bg by animateColorAsState(
-                targetValue = if (on) Surface else Color.Transparent,
-                animationSpec = tween(220),
-                label = "segBg",
-            )
-            val fg by animateColorAsState(
-                targetValue = if (on) Blue else Text2,
-                animationSpec = tween(220),
-                label = "segFg",
-            )
-            Row(
-                Modifier
-                    .then(if (crowded) Modifier else Modifier.weight(1f))
-                    .pressable(onClick = { onSelect(i) })
-                    .then(
-                        if (on) Modifier.premiumCardShadow(radius = 11.dp, ambient = 7.dp, contact = 1.dp)
-                        else Modifier,
-                    )
-                    .clip(RoundedCornerShape(11.dp))
-                    .background(bg)
-                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(sport.label, color = fg, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                // The match count rides on the segment, so switching sports is never a
-                // guess about which one has anything in it.
-                Spacer(Modifier.width(7.dp))
-                Text(
-                    "${sport.matches}",
-                    color = if (on) Blue.copy(alpha = 0.62f) else Text3,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    style = TabularStyle,
-                )
+        val seg = maxWidth / sports.size
+        val x by androidx.compose.animation.core.animateDpAsState(
+            targetValue = seg * selected,
+            animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.7f, stiffness = 520f),
+            label = "segThumb",
+        )
+        Box(
+            Modifier
+                .layout { m, c ->
+                    val p = m.measure(c)
+                    layout(p.width, p.height) { p.place(x.roundToPx(), 0) }
+                }
+                .width(seg)
+                .height(40.dp)
+                .premiumCardShadow(radius = 11.dp, ambient = 7.dp, contact = 1.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(Surface),
+        )
+        Row(Modifier.fillMaxWidth()) {
+            sports.forEachIndexed { i, sport ->
+                SportSegment(sport, i == selected, Modifier.weight(1f).height(40.dp), lifted = false) { onSelect(i) }
             }
         }
+    }
+}
+
+@Composable
+private fun SportSegment(sport: SportRecord, on: Boolean, modifier: Modifier, lifted: Boolean, onClick: () -> Unit) {
+    val bg by animateColorAsState(
+        targetValue = if (on && lifted) Surface else Color.Transparent,
+        animationSpec = tween(220),
+        label = "segBg",
+    )
+    val fg by animateColorAsState(
+        targetValue = if (on) Blue else Text2,
+        animationSpec = tween(220),
+        label = "segFg",
+    )
+    Row(
+        modifier
+            .pressable(onClick = onClick)
+            .then(if (on && lifted) Modifier.premiumCardShadow(radius = 11.dp, ambient = 7.dp, contact = 1.dp) else Modifier)
+            .clip(RoundedCornerShape(11.dp))
+            .background(bg)
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(sport.label, color = fg, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        // The match count rides on the segment, so switching sports is never a
+        // guess about which one has anything in it.
+        Spacer(Modifier.width(7.dp))
+        Text(
+            "${sport.matches}",
+            color = if (on) Blue.copy(alpha = 0.62f) else Text3,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            style = TabularStyle,
+        )
     }
 }
 
@@ -225,7 +430,9 @@ private fun HeadlineRow(figures: List<CareerFigure>, key: String) {
                 CountUpText(
                     value = figure.value,
                     key = key,
-                    color = Text1,
+                    // A zero (or "-") is true and stays, but quietly: on a one-match
+                    // record "1 · 0 · 0" in equal ink read as three facts of equal weight.
+                    color = if (figure.value == "0" || figure.value == "-") Text3.copy(alpha = 0.8f) else Text1,
                     fontSize = 30.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = (-0.8).sp,

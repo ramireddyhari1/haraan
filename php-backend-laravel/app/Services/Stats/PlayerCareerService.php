@@ -108,7 +108,7 @@ final class PlayerCareerService
      * @param  array<int, PlayerMatchStat>  $rows
      * @return array{0: array<string, int>, 1: array<string, mixed>}
      */
-    private function cricketTotals(array $rows): array
+    public function cricketTotals(array $rows): array
     {
         $t = [
             'batting_innings' => 0, 'runs' => 0, 'balls_faced' => 0, 'fours' => 0, 'sixes' => 0,

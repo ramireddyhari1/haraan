@@ -472,6 +472,54 @@ final class PlayersController extends Controller
         // next to a career that plainly exists.
         $matches = max($matches, (int) ($user->career_matches ?? 0));
 
+        $groups = $this->cricketGroups($bat, $bowl, $field);
+        $runs = (int) ($bat->runs ?? 0);
+        $wickets = (int) ($bowl->wickets ?? 0);
+
+        // An empty cricket career has two different causes and the player deserves to
+        // know which: they have not played yet, or they played a match nobody scored
+        // ball by ball. Neither is "cricket does not track this".
+        $note = null;
+        if ($groups === []) {
+            $note = $matches > 0
+                ? 'These matches were not scored ball by ball, so there is no batting or bowling line from them yet.'
+                : 'Your batting and bowling line builds itself from the first match someone scores ball by ball.';
+        }
+
+        return [
+            'key' => 'cricket',
+            'label' => 'Cricket',
+            'matches' => $matches,
+            'note' => $note,
+            // Where the runs actually went. Only boundaries the scorer placed are in
+            // here, so the wheel is a record of real shots, never a reconstruction.
+            'wagon' => $this->wagon($bat),
+            // Three sentences about the figures above, written by a model that was
+            // handed those figures and forbidden to produce any of its own.
+            'analysis' => $this->careerAnalysis($user),
+            // True when the owner's plan doesn't include the AI read. The app shows its own
+            // player an invitation in the card's place; everyone else simply sees no card.
+            'analysis_locked' => ! app(MemberEntitlements::class)->allows($user, MemberFeature::AI_CAREER_READ),
+            'headline' => [
+                ['label' => 'Matches', 'value' => (string) $matches],
+                ['label' => 'Runs', 'value' => (string) $runs],
+                ['label' => 'Wickets', 'value' => (string) $wickets],
+            ],
+            'groups' => $groups,
+            // The same record cut by format (Gully / T10 / T20 / One Day / Test). The
+            // block above stays the whole career, so older apps read exactly what they did.
+            'formats' => $this->cricketFormats($pid),
+        ];
+    }
+
+    /**
+     * Batting, bowling and fielding cards from one set of career lines. Used for the whole
+     * career (read from the career tables) and for each format (built from match rows).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function cricketGroups(?PlayerCareerBatting $bat, ?PlayerCareerBowling $bowl, ?PlayerCareerFielding $field): array
+    {
         $innings = (int) ($bat->innings ?? 0);
         $outs = (int) ($bat->outs ?? 0);
         $runs = (int) ($bat->runs ?? 0);
@@ -581,37 +629,126 @@ final class PlayersController extends Controller
             ];
         }
 
-        // An empty cricket career has two different causes and the player deserves to
-        // know which: they have not played yet, or they played a match nobody scored
-        // ball by ball. Neither is "cricket does not track this".
-        $note = null;
-        if ($groups === []) {
-            $note = $matches > 0
-                ? 'These matches were not scored ball by ball, so there is no batting or bowling line from them yet.'
-                : 'Your batting and bowling line builds itself from the first match someone scores ball by ball.';
+        return $groups;
+    }
+
+    /**
+     * Cricket formats, by the overs a side the match was set up with. A match stores its
+     * overs, not a name, so the name is read off the length: the same bands the create
+     * screen's presets sit in (Gully 6, T10, T20) plus the long forms.
+     */
+    private const CRICKET_FORMATS = [
+        ['key' => 'gully', 'label' => 'Gully', 'detail' => 'Up to 6 overs a side', 'min' => 1, 'max' => 6],
+        ['key' => 't10', 'label' => 'T10', 'detail' => '7 to 10 overs a side', 'min' => 7, 'max' => 10],
+        ['key' => 't20', 'label' => 'T20', 'detail' => '11 to 20 overs a side', 'min' => 11, 'max' => 20],
+        ['key' => 'odi', 'label' => 'One Day', 'detail' => '21 to 50 overs a side', 'min' => 21, 'max' => 50],
+        ['key' => 'test', 'label' => 'Test', 'detail' => 'More than 50 overs a side', 'min' => 51, 'max' => PHP_INT_MAX],
+    ];
+
+    /** The overs a side a match was created with, or null when it never said. */
+    private static function matchOvers(?string $sportState, ?string $competition): ?int
+    {
+        $state = is_string($sportState) ? json_decode($sportState, true) : null;
+        $overs = is_array($state) ? ($state['format']['overs'] ?? null) : null;
+        if (is_numeric($overs) && (int) $overs > 0) {
+            return (int) $overs;
+        }
+        // Older matches only carry it in the title the server wrote: "10 Over Match".
+        if (is_string($competition) && preg_match('/(\d+)\s*Over/i', $competition, $m) === 1) {
+            return (int) $m[1] > 0 ? (int) $m[1] : null;
         }
 
-        return [
-            'key' => 'cricket',
-            'label' => 'Cricket',
-            'matches' => $matches,
-            'note' => $note,
-            // Where the runs actually went. Only boundaries the scorer placed are in
-            // here, so the wheel is a record of real shots, never a reconstruction.
-            'wagon' => $this->wagon($bat),
-            // Three sentences about the figures above, written by a model that was
-            // handed those figures and forbidden to produce any of its own.
-            'analysis' => $this->careerAnalysis($user),
-            // True when the owner's plan doesn't include the AI read. The app shows its own
-            // player an invitation in the card's place; everyone else simply sees no card.
-            'analysis_locked' => ! app(MemberEntitlements::class)->allows($user, MemberFeature::AI_CAREER_READ),
-            'headline' => [
-                ['label' => 'Matches', 'value' => (string) $matches],
-                ['label' => 'Runs', 'value' => (string) $runs],
-                ['label' => 'Wickets', 'value' => (string) $wickets],
-            ],
-            'groups' => $groups,
-        ];
+        return null;
+    }
+
+    /**
+     * The player's cricket record cut by format, one entry per format they have finished
+     * a match in, in the order of the bands. Empty when nothing is known.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function cricketFormats(string $pid): array
+    {
+        if ($pid === '') {
+            return [];
+        }
+        $rows = \App\Models\PlayerMatchStat::query()
+            ->join('live_matches', 'live_matches.id', '=', 'player_match_stats.match_id')
+            ->whereNotNull('live_matches.completed_at')
+            ->where('player_match_stats.player_id', $pid)
+            ->where('player_match_stats.sport', 'cricket')
+            ->orderBy('live_matches.completed_at')
+            ->get([
+                'player_match_stats.*',
+                'live_matches.sport_state as m_sport_state',
+                'live_matches.competition as m_competition',
+            ]);
+        if ($rows->isEmpty()) {
+            return [];
+        }
+
+        $byFormat = [];
+        foreach ($rows as $row) {
+            $overs = self::matchOvers($row->m_sport_state, $row->m_competition);
+            if ($overs === null) {
+                continue;
+            }
+            foreach (self::CRICKET_FORMATS as $f) {
+                if ($overs >= $f['min'] && $overs <= $f['max']) {
+                    $byFormat[$f['key']][] = $row;
+                    break;
+                }
+            }
+        }
+
+        $careers = app(\App\Services\Stats\PlayerCareerService::class);
+        $out = [];
+        foreach (self::CRICKET_FORMATS as $f) {
+            $list = $byFormat[$f['key']] ?? [];
+            if ($list === []) {
+                continue;
+            }
+            [$t, $b] = $careers->cricketTotals($list);
+
+            // Unsaved career lines, so the format reads through the very same card code
+            // (and the same average / economy rules) as the whole career.
+            $bat = $t['batting_innings'] > 0 ? (new PlayerCareerBatting)->forceFill([
+                'innings' => $t['batting_innings'], 'runs' => $t['runs'], 'balls' => $t['balls_faced'],
+                'fours' => $t['fours'], 'sixes' => $t['sixes'], 'outs' => $t['outs'],
+                'high_score' => $b['high_score'], 'thirties' => $t['thirties'],
+                'fifties' => $t['fifties'], 'hundreds' => $t['hundreds'],
+            ]) : null;
+            $bowl = $t['bowling_innings'] > 0 ? (new PlayerCareerBowling)->forceFill([
+                'innings' => $t['bowling_innings'], 'balls' => $t['balls_bowled'], 'runs' => $t['runs_conceded'],
+                'wickets' => $t['wickets'], 'maidens' => $t['maidens'],
+                'best_wickets' => (int) ($b['best_bowling']['wickets'] ?? 0),
+                'best_runs' => (int) ($b['best_bowling']['runs'] ?? 0),
+                'three_fers' => $t['three_fers'], 'five_fers' => $t['five_fers'],
+            ]) : null;
+            $field = ($t['catches'] + $t['run_outs'] + $t['stumpings']) > 0 ? (new PlayerCareerFielding)->forceFill([
+                'catches' => $t['catches'], 'run_outs' => $t['run_outs'], 'stumpings' => $t['stumpings'],
+            ]) : null;
+
+            $matches = count(array_filter($list, static fn ($r): bool => (bool) $r->played)) ?: count($list);
+            $groups = $this->cricketGroups($bat, $bowl, $field);
+            $out[] = [
+                'key' => $f['key'],
+                'label' => $f['label'],
+                'detail' => $f['detail'],
+                'matches' => $matches,
+                'headline' => [
+                    ['label' => 'Matches', 'value' => (string) $matches],
+                    ['label' => 'Runs', 'value' => (string) $t['runs']],
+                    ['label' => 'Wickets', 'value' => (string) $t['wickets']],
+                ],
+                'groups' => $groups,
+                'note' => $groups === []
+                    ? 'These '.$f['label'].' matches were not scored ball by ball, so there is no batting or bowling line from them yet.'
+                    : null,
+            ];
+        }
+
+        return $out;
     }
 
     /**

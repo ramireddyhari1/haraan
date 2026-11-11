@@ -185,6 +185,23 @@ data class SportRecord(
     val analysis: CareerAnalysis? = null,
     /** The AI read isn't part of this player's plan (server decides; see member plans). */
     val analysisLocked: Boolean = false,
+    /**
+     * Cricket only: the same record cut by format (Gully / T10 / T20 / One Day / Test),
+     * one entry per format the player has finished a match in. Empty from older servers.
+     */
+    val formats: List<FormatRecord> = emptyList(),
+)
+
+/** One cricket format's slice of the career — same shape as the whole sport, minus extras. */
+data class FormatRecord(
+    val key: String,
+    val label: String,
+    /** "11 to 20 overs a side" — what the format means, said by the server. */
+    val detail: String,
+    val matches: Int,
+    val headline: List<CareerFigure>,
+    val groups: List<CareerGroup>,
+    val note: String? = null,
 )
 
 /** [primary] is the player's own sport, and always the first entry in [sports]. */
@@ -402,18 +419,19 @@ class ProfileRepository(
     val sports = mutableListOf<SportRecord>()
     for (i in 0 until sportsJson.length()) {
       val s = sportsJson.optJSONObject(i) ?: continue
-      val groups = mutableListOf<CareerGroup>()
-      val groupsJson = s.optJSONArray("groups")
-      if (groupsJson != null) {
-        for (g in 0 until groupsJson.length()) {
-          val group = groupsJson.optJSONObject(g) ?: continue
-          val lead = group.optJSONObject("lead")
-          groups += CareerGroup(
-            title = group.optString("title"),
-            leadLabel = lead?.optString("label").orEmpty(),
-            leadValue = lead?.optString("value").orEmpty(),
-            stats = parseFigures(group.optJSONArray("stats")),
-            visual = parseVisual(group.optJSONObject("visual")),
+      val groups = parseGroups(s.optJSONArray("groups"))
+      val formats = mutableListOf<FormatRecord>()
+      s.optJSONArray("formats")?.let { arr ->
+        for (k in 0 until arr.length()) {
+          val f = arr.optJSONObject(k) ?: continue
+          formats += FormatRecord(
+            key = f.optString("key"),
+            label = f.optString("label"),
+            detail = f.optString("detail"),
+            matches = f.optInt("matches", 0),
+            headline = parseFigures(f.optJSONArray("headline")),
+            groups = parseGroups(f.optJSONArray("groups")),
+            note = f.optString("note").takeIf { it.isNotBlank() && it != "null" },
           )
         }
       }
@@ -427,10 +445,28 @@ class ProfileRepository(
         wagon = parseWagon(s.optJSONObject("wagon")),
         analysis = parseAnalysis(s.optJSONObject("analysis")),
         analysisLocked = s.optBoolean("analysis_locked", false),
+        formats = formats,
       )
     }
     if (sports.isEmpty()) return null
     return CareerBook(primary = json.optString("primary", "cricket"), sports = sports)
+  }
+
+  private fun parseGroups(arr: org.json.JSONArray?): List<CareerGroup> {
+    if (arr == null) return emptyList()
+    val groups = mutableListOf<CareerGroup>()
+    for (g in 0 until arr.length()) {
+      val group = arr.optJSONObject(g) ?: continue
+      val lead = group.optJSONObject("lead")
+      groups += CareerGroup(
+        title = group.optString("title"),
+        leadLabel = lead?.optString("label").orEmpty(),
+        leadValue = lead?.optString("value").orEmpty(),
+        stats = parseFigures(group.optJSONArray("stats")),
+        visual = parseVisual(group.optJSONObject("visual")),
+      )
+    }
+    return groups
   }
 
   private fun parseWagon(json: JSONObject?): WagonWheel? {
