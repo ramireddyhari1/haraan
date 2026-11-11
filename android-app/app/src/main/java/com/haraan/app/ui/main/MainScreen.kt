@@ -4485,6 +4485,8 @@ private fun CrexMatchesScreen(
     if ((selectedTab == 3 || selectedTab == 4) && districtSummary == null) {
       val token = com.haraan.app.data.TokenStore.getToken(context)
       districtSummary = districtRepository.fetchSummary(token)
+        // Debug builds only: a demo card so the tabs can be checked without a district.
+        ?: com.haraan.app.data.DemoLeaderboard.summary().takeIf { com.haraan.app.data.DemoLeaderboard.enabled }
     }
   }
 
@@ -4881,7 +4883,23 @@ private fun CrexMatchesScreen(
           }
         } else if (selectedTab == 3) {
           districtSummary?.let { summary ->
-            item { DistrictHomeCard(summary) }
+            item {
+              DistrictHomeCard(
+                summary = summary,
+                onLiveClick = { selectedTab = 0 },
+                onLeaderClick = { p, stat ->
+                  selectedLeaderboardPlayer = LeaderboardPlayer(
+                    name = p.name.ifBlank { p.playerId },
+                    team = summary.district,
+                    primaryStat = stat,
+                    secondaryStat = "",
+                    rank = 1,
+                    photoUrl = com.haraan.app.data.ApiConfig.mediaUrl(p.avatar) ?: "",
+                    playerId = p.playerId,
+                  )
+                },
+              )
+            }
             item { Spacer(modifier = Modifier.height(4.dp)) }
           }
           item {
@@ -7703,107 +7721,325 @@ private fun LeaderboardPodium(
 // District Home — the local-identity snapshot at the top of the District tab. Turns
 // the match list into a community: live activity, population, the district's batting/
 // bowling leaders, and where the district ranks within its state.
+//
+// Feel pass (2026-11-12): the three equal boxed count tiles were the "AI built it" tell,
+// so the counts became one line of text, and the only drawing is the state ladder, which
+// carries the real rank. Physical: numbers count up once, ladder bars rise in turn,
+// "live now" pulses and jumps to the Live tab, leaders open the player, every tap ticks.
+private val DistrictBlue = Color(0xFF2563EB)
+private val DistrictLive = Color(0xFFE5484D)
+
 @Composable
-private fun DistrictHomeCard(summary: com.haraan.app.data.DistrictSummary) {
+private fun DistrictHomeCard(
+  summary: com.haraan.app.data.DistrictSummary,
+  onLiveClick: () -> Unit = {},
+  onLeaderClick: (com.haraan.app.data.DistrictTopPlayer, String) -> Unit = { _, _ -> },
+) {
+  // One entrance per card: counts and ladder animate from zero the first time it shows.
+  var shown by remember(summary.district) { mutableStateOf(false) }
+  LaunchedEffect(summary.district) { shown = true }
+
   Card(
     modifier = Modifier
       .fillMaxWidth()
       .padding(vertical = 8.dp)
-      .premiumCardShadow(radius = 14.dp, ambient = 16.dp, contact = 2.dp),
-    shape = RoundedCornerShape(16.dp),
+      .premiumCardShadow(radius = 18.dp, ambient = 18.dp, contact = 2.dp),
+    shape = RoundedCornerShape(18.dp),
     colors = CardDefaults.cardColors(containerColor = Color.White),
     border = BorderStroke(1.dp, Brush.verticalGradient(listOf(Color(0xFFF3F6FA), Color(0xFFD9DFEA)))),
   ) {
-    Column(modifier = Modifier.padding(16.dp)) {
-      Row(verticalAlignment = Alignment.CenterVertically) {
+    Column(modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 8.dp)) {
+      // ── Identity + where we stand in the state ──
+      Row(verticalAlignment = Alignment.Bottom) {
         Column(modifier = Modifier.weight(1f)) {
           Text(
             text = "YOUR DISTRICT",
-            fontSize = 11.sp,
+            fontSize = 10.5.sp,
             fontWeight = FontWeight.Bold,
-            letterSpacing = 0.8.sp,
-            color = Color(0xFF2563EB),
+            letterSpacing = 1.2.sp,
+            color = DistrictBlue,
           )
-          Spacer(Modifier.height(2.dp))
+          Spacer(Modifier.height(4.dp))
           Text(
             text = summary.district,
-            fontSize = 22.sp,
+            fontSize = 28.sp,
+            lineHeight = 30.sp,
             fontWeight = FontWeight.ExtraBold,
+            letterSpacing = (-0.5).sp,
             color = T.Text1,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
           )
-        }
-        // "#4 in Andhra Pradesh" — the district's standing within its state.
-        if (summary.districtRank != null && !summary.state.isNullOrBlank()) {
-          Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier
-              .clip(RoundedCornerShape(12.dp))
-              .background(Color(0xFF2563EB).copy(alpha = 0.08f))
-              .padding(horizontal = 14.dp, vertical = 8.dp),
-          ) {
+          if (!summary.state.isNullOrBlank()) {
             Text(
-              text = "#${summary.districtRank}",
-              fontSize = 20.sp,
-              fontWeight = FontWeight.ExtraBold,
-              color = Color(0xFF2563EB),
-            )
-            Text(
-              text = "in ${summary.state}",
-              fontSize = 10.sp,
+              text = summary.state,
+              fontSize = 12.5.sp,
               fontWeight = FontWeight.Medium,
               color = T.Text3,
+              maxLines = 1,
             )
           }
         }
+        val rank = summary.districtRank
+        val total = summary.districtRankTotal
+        if (rank != null && total != null && total > 1) {
+          Spacer(Modifier.width(12.dp))
+          DistrictStateLadder(rank = rank, total = total, shown = shown)
+        }
       }
 
-      Spacer(Modifier.height(14.dp))
+      Spacer(Modifier.height(16.dp))
 
-      // Snapshot tiles.
-      Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        DistrictStatTile(Modifier.weight(1f), summary.liveMatches.toString(), "Live", Color(0xFF2563EB))
-        DistrictStatTile(Modifier.weight(1f), summary.players.toString(), "Players", T.Text1)
-        DistrictStatTile(Modifier.weight(1f), summary.totalMatches.toString(), "Matches", T.Text1)
+      // ── Pulse line: live now (a door to the Live tab) + the district's size ──
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        DistrictLivePill(live = summary.liveMatches, shown = shown, onClick = onLiveClick)
+        Spacer(Modifier.width(12.dp))
+        val players by animateIntAsState(if (shown) summary.players else 0, tween(700, easing = FastOutSlowInEasing), label = "dPlayers")
+        val matches by animateIntAsState(if (shown) summary.totalMatches else 0, tween(800, easing = FastOutSlowInEasing), label = "dMatches")
+        Text(
+          text = androidx.compose.ui.text.buildAnnotatedString {
+            withStyle(androidx.compose.ui.text.SpanStyle(color = T.Text1, fontWeight = FontWeight.Bold)) { append("$players") }
+            append(if (summary.players == 1) " player" else " players")
+            append("  ·  ")
+            withStyle(androidx.compose.ui.text.SpanStyle(color = T.Text1, fontWeight = FontWeight.Bold)) { append("$matches") }
+            append(if (summary.totalMatches == 1) " match" else " matches")
+          },
+          fontSize = 13.sp,
+          color = T.Text2,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+        )
       }
 
+      // ── Leaders: scorecard figures, each opens the player ──
       if (summary.topBatter != null || summary.topBowler != null) {
         Spacer(Modifier.height(14.dp))
         Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFEEF0F4)))
-        Spacer(Modifier.height(12.dp))
-        summary.topBatter?.let {
-          DistrictLeaderRow("Top Batter", it.name.ifBlank { it.playerId }, "${it.value} runs")
+        Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min)) {
+          summary.topBatter?.let {
+            DistrictLeader(Modifier.weight(1f), "Top batter", it, "runs", shown) { onLeaderClick(it, "${it.value} runs") }
+          }
+          if (summary.topBatter != null && summary.topBowler != null) {
+            Box(
+              Modifier
+                .padding(vertical = 14.dp)
+                .width(1.dp)
+                .fillMaxHeight()
+                .background(Color(0xFFEEF0F4))
+            )
+            Spacer(Modifier.width(10.dp))
+          }
+          summary.topBowler?.let {
+            DistrictLeader(Modifier.weight(1f), "Top bowler", it, "wkts", shown) { onLeaderClick(it, "${it.value} wkts") }
+          }
         }
-        summary.topBowler?.let {
-          if (summary.topBatter != null) Spacer(Modifier.height(10.dp))
-          DistrictLeaderRow("Top Bowler", it.name.ifBlank { it.playerId }, "${it.value} wkts")
-        }
+      } else {
+        Spacer(Modifier.height(10.dp))
       }
     }
   }
 }
 
+// The district's place among its state's districts, drawn: one bar per district, tallest
+// first, ours in blue. Bars rise left to right on entrance. A tap ticks and replays it.
 @Composable
-private fun DistrictStatTile(modifier: Modifier, value: String, label: String, valueColor: Color) {
+private fun DistrictStateLadder(rank: Int, total: Int, shown: Boolean) {
+  val view = androidx.compose.ui.platform.LocalView.current
+  val bars = total.coerceIn(2, 12)
+  // Rank beyond the drawn bars (huge states) pins to the last bar.
+  val ours = (rank - 1).coerceIn(0, bars - 1)
+  val rise = remember { Animatable(0f) }
+  var replay by remember { mutableStateOf(0) }
+  LaunchedEffect(shown, replay) {
+    if (!shown) return@LaunchedEffect
+    rise.snapTo(0f)
+    rise.animateTo(1f, tween(900, delayMillis = if (replay == 0) 150 else 0, easing = FastOutSlowInEasing))
+  }
+  val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
   Column(
-    modifier = modifier
+    horizontalAlignment = Alignment.End,
+    modifier = Modifier
       .clip(RoundedCornerShape(12.dp))
-      .background(T.Surface)
-      .padding(vertical = 12.dp),
-    horizontalAlignment = Alignment.CenterHorizontally,
+      .pressScale(interaction)
+      .clickable(interactionSource = interaction, indication = null) {
+        com.haraan.app.ui.matches.hapticTick(view)
+        replay++
+      }
+      .padding(4.dp),
   ) {
-    Text(value, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold, color = valueColor)
-    Spacer(Modifier.height(2.dp))
-    Text(label, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = T.Text3)
+    Canvas(Modifier.width((bars * 7 + (bars - 1) * 3).dp).height(34.dp)) {
+      val gap = 3.dp.toPx()
+      val w = (size.width - gap * (bars - 1)) / bars
+      val r = androidx.compose.ui.geometry.CornerRadius(w / 2.2f, w / 2.2f)
+      for (i in 0 until bars) {
+        val step = if (bars == 1) 1f else (bars - 1 - i).toFloat() / (bars - 1)
+        val fullH = size.height * (0.34f + 0.66f * step)
+        // Each bar starts a little after the one before it.
+        val p = ((rise.value * (bars + 3) - i) / 3f).coerceIn(0f, 1f)
+        val h = fullH * p
+        if (h <= 0.5f) continue
+        drawRoundRect(
+          color = if (i == ours) DistrictBlue else Color(0xFFE3E7EF),
+          topLeft = Offset(i * (w + gap), size.height - h),
+          size = androidx.compose.ui.geometry.Size(w, h),
+          cornerRadius = r,
+        )
+      }
+    }
+    Spacer(Modifier.height(6.dp))
+    Text(
+      text = androidx.compose.ui.text.buildAnnotatedString {
+        withStyle(androidx.compose.ui.text.SpanStyle(color = DistrictBlue, fontWeight = FontWeight.ExtraBold, fontSize = 15.sp)) {
+          append("#$rank")
+        }
+        append(" of $total")
+      },
+      fontSize = 11.sp,
+      fontWeight = FontWeight.SemiBold,
+      color = T.Text3,
+    )
   }
 }
 
+// "● 4 live now" — the one call to action in the card. Pulses while matches are live,
+// sinks under the finger, ticks, and takes you to the Live tab. Quiet grey when none.
 @Composable
-private fun DistrictLeaderRow(role: String, who: String, stat: String) {
-  Row(verticalAlignment = Alignment.CenterVertically) {
-    Text(role, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = T.Text3, modifier = Modifier.width(84.dp))
-    Text(who, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = T.Text1, maxLines = 1, modifier = Modifier.weight(1f))
-    Text(stat, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF2563EB))
+private fun DistrictLivePill(live: Int, shown: Boolean, onClick: () -> Unit) {
+  val view = androidx.compose.ui.platform.LocalView.current
+  val count by animateIntAsState(if (shown) live else 0, tween(500), label = "dLive")
+  val isLive = live > 0
+  val pulse = rememberInfiniteTransition(label = "dLivePulse")
+  val halo by pulse.animateFloat(
+    initialValue = 0f, targetValue = 1f,
+    animationSpec = infiniteRepeatable(tween(1400, easing = LinearEasing), RepeatMode.Restart),
+    label = "dHalo",
+  )
+  val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+  Row(
+    verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier
+      .heightIn(min = 40.dp)
+      .pressScale(interaction)
+      .clip(RoundedCornerShape(999.dp))
+      .background(if (isLive) DistrictLive.copy(alpha = 0.08f) else Color(0xFFF2F3F7))
+      .clickable(interactionSource = interaction, indication = null, enabled = isLive) {
+        com.haraan.app.ui.matches.hapticTick(view)
+        onClick()
+      }
+      .padding(start = 12.dp, end = 14.dp),
+  ) {
+    Box(Modifier.size(14.dp), contentAlignment = Alignment.Center) {
+      if (isLive) {
+        Canvas(Modifier.fillMaxSize()) {
+          drawCircle(DistrictLive.copy(alpha = 0.35f * (1f - halo)), radius = size.minDimension / 2f * (0.45f + 0.55f * halo))
+        }
+      }
+      Box(
+        Modifier
+          .size(7.dp)
+          .clip(CircleShape)
+          .background(if (isLive) DistrictLive else T.Text3)
+      )
+    }
+    Spacer(Modifier.width(6.dp))
+    Text(
+      text = if (isLive) "$count live now" else "No live matches",
+      fontSize = 13.sp,
+      fontWeight = FontWeight.Bold,
+      color = if (isLive) DistrictLive else T.Text2,
+    )
+    if (isLive) {
+      Spacer(Modifier.width(4.dp))
+      Icon(
+        imageVector = Icons.Default.ChevronRight,
+        contentDescription = null,
+        tint = DistrictLive,
+        modifier = Modifier.size(16.dp),
+      )
+    }
+  }
+}
+
+// One district leader: role, the figure in scorecard weight (counts up), and the name
+// under an initial. The whole half is the touch target.
+@Composable
+private fun DistrictLeader(
+  modifier: Modifier,
+  role: String,
+  who: com.haraan.app.data.DistrictTopPlayer,
+  unit: String,
+  shown: Boolean,
+  onClick: () -> Unit,
+) {
+  val view = androidx.compose.ui.platform.LocalView.current
+  val value by animateIntAsState(if (shown) who.value else 0, tween(900, delayMillis = 200, easing = FastOutSlowInEasing), label = "dLead$role")
+  val interaction = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }
+  val pressed by interaction.collectIsPressedAsState()
+  val name = who.name.ifBlank { who.playerId }
+  Column(
+    modifier = modifier
+      .pressScale(interaction)
+      .clip(RoundedCornerShape(12.dp))
+      .background(if (pressed) Color(0xFFF4F6FA) else Color.Transparent)
+      // No Player ID (demo/seed) = nothing to open, so the half stays inert.
+      .clickable(interactionSource = interaction, indication = null, enabled = who.playerId.isNotBlank()) {
+        com.haraan.app.ui.matches.hapticTick(view)
+        onClick()
+      }
+      .padding(horizontal = 6.dp, vertical = 12.dp),
+  ) {
+    Text(
+      text = role.uppercase(),
+      fontSize = 10.sp,
+      fontWeight = FontWeight.Bold,
+      letterSpacing = 1.sp,
+      color = T.Text3,
+    )
+    Spacer(Modifier.height(4.dp))
+    Row(verticalAlignment = Alignment.Bottom) {
+      Text(
+        text = "%,d".format(value),
+        fontSize = 24.sp,
+        lineHeight = 26.sp,
+        fontWeight = FontWeight.ExtraBold,
+        letterSpacing = (-0.5).sp,
+        color = T.Text1,
+      )
+      Spacer(Modifier.width(4.dp))
+      Text(
+        text = unit,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = T.Text3,
+        modifier = Modifier.padding(bottom = 3.dp),
+      )
+    }
+    Spacer(Modifier.height(8.dp))
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Box(
+        Modifier
+          .size(22.dp)
+          .clip(CircleShape)
+          .background(DistrictBlue.copy(alpha = 0.10f)),
+        contentAlignment = Alignment.Center,
+      ) {
+        Text(
+          text = name.trim().take(1).uppercase().ifBlank { "?" },
+          fontSize = 11.sp,
+          fontWeight = FontWeight.Bold,
+          color = DistrictBlue,
+        )
+      }
+      Spacer(Modifier.width(7.dp))
+      Text(
+        text = name,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = T.Text1,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+      )
+    }
   }
 }
 
@@ -7827,16 +8063,21 @@ private fun CrexLeaderboardSection(
   // screen until the fresh one arrives).
   var boardTick by remember { mutableStateOf(0) }
   AutoRefresh(intervalMs = 0L) { boardTick++ }
+  // True when the board on screen is DemoLeaderboard's (debug builds only).
+  var showingDemo by remember { mutableStateOf(false) }
   val realPlayers by produceState<List<LeaderboardPlayer>?>(null, location, isStateBoard, boardTick, sport) {
-    value = if (location.isNullOrBlank()) {
+    val demo = com.haraan.app.data.DemoLeaderboard
+    value = if (location.isNullOrBlank() && !demo.enabled) {
       null
     } else {
-      leaderboardRepo
-        .fetchBoard(if (isStateBoard) "state" else "district", location, sport = sport)
+      val real = if (location.isNullOrBlank()) emptyList()
+        else leaderboardRepo.fetchBoard(if (isStateBoard) "state" else "district", location, sport = sport)
+      showingDemo = real.isEmpty() && demo.enabled
+      (if (showingDemo) demo.board(isStateBoard, location) else real)
         .map { row ->
           LeaderboardPlayer(
             name = row.name,
-            team = if (isStateBoard) (row.district ?: "") else (row.state ?: location),
+            team = if (isStateBoard) (row.district ?: "") else (row.state ?: location.orEmpty()),
             primaryStat = "${row.xp} XP",
             secondaryStat = if (row.matches > 0) "${row.matches} matches" else "",
             rank = row.rank,
@@ -7918,7 +8159,8 @@ private fun CrexLeaderboardSection(
         isStateBoard -> "State Board"
         else -> "District Board"
       }
-      val subtitle = "${players.size} ranked ${if (players.size == 1) "player" else "players"}"
+      val subtitle = "${players.size} ranked ${if (players.size == 1) "player" else "players"}" +
+        if (showingDemo) " · demo data" else ""
       LeaderboardPodium(title = title, subtitle = subtitle, topPlayers = topThree, onPlayerClick = onPlayerClick)
       Spacer(modifier = Modifier.height(10.dp))
     }

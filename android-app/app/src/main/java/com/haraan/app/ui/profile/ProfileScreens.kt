@@ -1,5 +1,10 @@
 package com.haraan.app.ui.profile
 
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
@@ -2251,51 +2256,145 @@ private fun StatCell(value: String, label: String) {
     }
 }
 
+// ─────────────────────────────────────────────── Stats tab feel pass ───────────
+// 2026-11-12. The Stats tab read as a form: a rank with two stacked chips, a huge blue
+// "0" over an empty bar, and grey squares with padlocks. Each card now has ONE drawn
+// object that carries a real number (medal = rank, ring = level progress, badge rings =
+// achievement progress), numbers count up from zero once, and every drawing answers a
+// tap: the medal swings, the ring refills, a badge shines. Nothing here is invented:
+// no medal past #3, no progress ring without a server "a/b" to draw.
+
+/** Counts from 0 to [target] once, when first shown (AnimatedInt starts AT the target). */
+@Composable
+private fun countUp(target: Int, delayMs: Int = 0, durationMs: Int = 800): Int {
+    val a = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(target) {
+        a.animateTo(target.toFloat(), tween(durationMs, delayMillis = delayMs, easing = FastOutSlowInEasing))
+    }
+    return (a.value + 0.5f).toInt()
+}
+
 // ─────────────────────────────────────────────── District ranking (REAL) ────────
 @Composable
 private fun DistrictRankCard(p: PlayerProfile) {
-    // Was a second full-width saturated gradient sitting directly under the hero's.
-    // Two of them shouted at the same volume, so neither led. On a light surface the
-    // rank is MORE prominent, not less: it is now the only saturated number on a white
-    // card instead of white-on-green competing with the block above it.
+    val view = androidx.compose.ui.platform.LocalView.current
+    val rank = p.rankDistrict
+    // Swing from a tilt into rest the first time; a tap knocks it again.
+    val swing = remember { androidx.compose.animation.core.Animatable(-24f) }
+    var knocks by remember { mutableStateOf(0) }
+    LaunchedEffect(knocks) {
+        if (knocks > 0) swing.snapTo(16f)
+        swing.animateTo(0f, androidx.compose.animation.core.spring(dampingRatio = 0.22f, stiffness = 55f))
+    }
+
     Row(
         Modifier
             .fillMaxWidth()
             .premiumCardShadow(radius = 18.dp, ambient = 14.dp, contact = 2.dp)
             .clip(RoundedCornerShape(18.dp))
             .background(Surface)
-            .padding(18.dp),
+            .pressable(haptic = Feel.TICK) { knocks++ }
+            .padding(start = 18.dp, end = 14.dp, top = 16.dp, bottom = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
-            Text("DISTRICT RANKING", color = Text3, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
-            Spacer(Modifier.height(4.dp))
+            Text("DISTRICT RANK", color = Text3, fontSize = 10.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+            Spacer(Modifier.height(2.dp))
+            if (rank != null) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text("#", color = BlueBright.copy(alpha = 0.55f), fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(bottom = 5.dp))
+                    Text("${countUp(rank, durationMs = 600)}", color = BlueBright, fontSize = 40.sp, lineHeight = 42.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-1).sp)
+                }
+            } else {
+                Text("Unranked", color = Text3, fontSize = 26.sp, fontWeight = FontWeight.ExtraBold)
+            }
             Text(
-                p.rankDistrict?.let { "#${AnimatedInt(it)}" } ?: "Unranked",
-                color = if (p.rankDistrict != null) BlueBright else Text3,
-                fontSize = 34.sp,
-                fontWeight = FontWeight.ExtraBold,
+                p.district?.let { "in $it" } ?: "in your district",
+                color = Text1, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
-            Text("${p.district ?: "Your"} District", color = Text2, fontSize = 13.sp)
+            // The wider ranks, as a sentence, not two more boxes.
+            val wider = buildList {
+                p.rankState?.let { add("#$it in ${p.state ?: "state"}") }
+                p.rankCountry?.let { add("#$it in India") }
+            }
+            if (wider.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    wider.forEachIndexed { i, w ->
+                        if (i > 0) {
+                            Box(Modifier.padding(horizontal = 8.dp).size(3.dp).clip(CircleShape).background(Stroke))
+                        }
+                        Text(w, color = Text2, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                    }
+                }
+            } else if (rank == null) {
+                Spacer(Modifier.height(4.dp))
+                Text("Play a ranked match to get on the board.", color = Text3, fontSize = 12.sp)
+            }
         }
-        // Real wider-context ranks (state / country) instead of an invented monthly delta.
-        Column(horizontalAlignment = Alignment.End) {
-            p.rankState?.let { RankChip("State", "#$it") }
-            p.rankCountry?.let { Spacer(Modifier.height(8.dp)); RankChip("India", "#$it") }
+        // A medal only for a podium place — past #3 there is nothing to hang.
+        if (rank != null && rank in 1..3) {
+            Spacer(Modifier.width(10.dp))
+            RankMedal(
+                rank = rank,
+                modifier = Modifier.graphicsLayer {
+                    rotationZ = swing.value
+                    transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0f)
+                },
+            )
         }
     }
 }
 
+/** A medal on a ribbon, metal by place. The number on it is the rank itself. */
 @Composable
-private fun RankChip(label: String, value: String) {
-    Row(
-        Modifier.clip(RoundedCornerShape(10.dp)).background(BlueTint)
-            .padding(horizontal = 12.dp, vertical = 7.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label, color = BlueBright.copy(alpha = 0.75f), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-        Spacer(Modifier.width(6.dp))
-        Text(value, color = BlueBright, fontSize = 13.sp, fontWeight = FontWeight.ExtraBold)
+private fun RankMedal(rank: Int, modifier: Modifier = Modifier) {
+    val (light, dark) = when (rank) {
+        1 -> Color(0xFFF2CF6B) to Color(0xFFB8860B)
+        2 -> Color(0xFFDDE3EA) to Color(0xFF8E99A8)
+        else -> Color(0xFFEDB07F) to Color(0xFFA8642B)
+    }
+    Box(modifier.width(58.dp).height(78.dp)) {
+        Canvas(Modifier.fillMaxSize()) {
+            val w = size.width
+            val r = 24.dp.toPx()
+            val cy = size.height - r - 2.dp.toPx()
+            // Ribbon: two tails meeting behind the disc.
+            val tail = 13.dp.toPx()
+            fun strip(x0: Float, x1: Float, c: Color) {
+                val path = androidx.compose.ui.graphics.Path().apply {
+                    moveTo(x0 - tail / 2, 0f); lineTo(x0 + tail / 2, 0f)
+                    lineTo(x1 + tail / 2, cy - r * 0.4f); lineTo(x1 - tail / 2, cy - r * 0.4f); close()
+                }
+                drawPath(path, c)
+            }
+            strip(w * 0.22f, w * 0.40f, Blue)
+            strip(w * 0.78f, w * 0.60f, BlueBright)
+            // Disc: soft drop, metal body, darker rim, inner ring.
+            drawCircle(Color.Black.copy(alpha = 0.10f), r, Offset(w / 2, cy + 2.dp.toPx()))
+            drawCircle(
+                Brush.linearGradient(listOf(light, dark), start = Offset(w / 2 - r, cy - r), end = Offset(w / 2 + r, cy + r)),
+                r, Offset(w / 2, cy),
+            )
+            drawCircle(dark.copy(alpha = 0.55f), r, Offset(w / 2, cy), style = DrawStroke(1.5.dp.toPx()))
+            drawCircle(Color.White.copy(alpha = 0.55f), r * 0.74f, Offset(w / 2, cy), style = DrawStroke(1.dp.toPx()))
+            // A highlight across the top-left, the way metal catches light.
+            drawArc(
+                Color.White.copy(alpha = 0.45f), startAngle = 200f, sweepAngle = 70f, useCenter = false,
+                topLeft = Offset(w / 2 - r * 0.86f, cy - r * 0.86f), size = androidx.compose.ui.geometry.Size(r * 1.72f, r * 1.72f),
+                style = DrawStroke(2.dp.toPx(), cap = StrokeCap.Round),
+            )
+        }
+        Box(
+            Modifier.align(Alignment.BottomCenter).padding(bottom = 2.dp).size(48.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text("$rank", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.ExtraBold,
+                style = androidx.compose.ui.text.TextStyle(
+                    shadow = androidx.compose.ui.graphics.Shadow(dark.copy(alpha = 0.8f), Offset(0f, 1.5f), 2f),
+                ))
+        }
     }
 }
 
@@ -2309,40 +2408,72 @@ private fun XpCard(p: PlayerProfile) {
     val toNext = perLevel - into
     val pct = (into.toFloat() / perLevel).coerceIn(0f, 1f)
 
-    Column(
+    // The ring fills once on entrance; a tap empties and refills it.
+    val fill = remember { androidx.compose.animation.core.Animatable(0f) }
+    var refills by remember { mutableStateOf(0) }
+    LaunchedEffect(pct, refills) {
+        if (refills > 0) fill.snapTo(0f)
+        fill.animateTo(pct, tween(1000, delayMillis = if (refills == 0) 200 else 0, easing = FastOutSlowInEasing))
+    }
+
+    Row(
         Modifier
             .fillMaxWidth()
             .premiumCardShadow(radius = 18.dp, ambient = 14.dp, contact = 2.dp)
             .clip(RoundedCornerShape(18.dp))
             .background(Surface)
+            .pressable(haptic = Feel.TICK) { refills++ }
             .padding(18.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("RANKED XP", color = Text3, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                Text("${AnimatedInt(p.rankedXp)}", color = BlueBright, fontSize = 34.sp, fontWeight = FontWeight.ExtraBold)
-                Text("Casual XP: ${p.casualXp}", color = Text2, fontSize = 12.5.sp)
+        // Level ring: the only drawing, and it is the progress to the next level.
+        Box(Modifier.size(78.dp), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.fillMaxSize()) {
+                val sw = 7.dp.toPx()
+                val inset = sw / 2
+                val arcSize = androidx.compose.ui.geometry.Size(size.width - sw, size.height - sw)
+                drawArc(Color(0xFFEEF1F5), -90f, 360f, false, Offset(inset, inset), arcSize, style = DrawStroke(sw))
+                // A dot even at 0%, so the ring reads as "starting here", not broken.
+                val sweep = (360f * fill.value).coerceAtLeast(0.5f)
+                drawArc(BlueBright, -90f, sweep, false, Offset(inset, inset), arcSize, style = DrawStroke(sw, cap = StrokeCap.Round))
             }
-            StatMini("This month", "${p.monthRankedXp}")
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("LEVEL", color = Text3, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("$level", color = Text1, fontSize = 24.sp, lineHeight = 26.sp, fontWeight = FontWeight.ExtraBold)
+            }
         }
-
-        Spacer(Modifier.height(16.dp))
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("Level $level", color = Text1, fontSize = 12.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            Text("$toNext XP to Level ${level + 1}", color = Text3, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-        }
-        Spacer(Modifier.height(8.dp))
-        // Progress bar toward the next level.
-        Box(Modifier.fillMaxWidth().height(9.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xFFEEF1F5))) {
-            Box(
-                Modifier
-                    .fillMaxWidth(pct)
-                    .height(9.dp)
-                    .clip(RoundedCornerShape(5.dp))
-                    // Same single-hue rule as the hero — this card gets screenshotted
-                    // and shared, so it is the most public surface in the app.
-                    .background(HeroGradient),
+        Spacer(Modifier.width(18.dp))
+        Column(Modifier.weight(1f)) {
+            Text("RANKED XP", color = Text3, fontSize = 10.5.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.2.sp)
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text(
+                    "%,d".format(countUp(p.rankedXp)),
+                    color = Text1, fontSize = 30.sp, lineHeight = 32.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.5).sp,
+                )
+                if (p.monthRankedXp > 0) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "+${countUp(p.monthRankedXp, delayMs = 300)} this month",
+                        color = Green, fontSize = 11.5.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .padding(bottom = 5.dp)
+                            .clip(RoundedCornerShape(999.dp))
+                            .background(GreenTint)
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                androidx.compose.ui.text.buildAnnotatedString {
+                    withStyle(androidx.compose.ui.text.SpanStyle(color = Text1, fontWeight = FontWeight.Bold)) { append("$toNext XP") }
+                    append(" to Level ${level + 1}")
+                },
+                color = Text2, fontSize = 12.5.sp,
             )
+            if (p.casualXp > 0) {
+                Text("${"%,d".format(p.casualXp)} casual XP · not ranked", color = Text3, fontSize = 11.5.sp)
+            }
         }
     }
 }
@@ -2352,36 +2483,118 @@ private fun XpCard(p: PlayerProfile) {
 private fun Achievements(items: List<Achievement>) {
     Row(
         Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        items.forEach { AchievementBadge(it) }
+        items.forEachIndexed { i, a -> AchievementBadge(a, index = i) }
     }
 }
 
+/** "12/50" → 0.24; null when the server sent no fraction to draw. */
+private fun progressFraction(progress: String?): Float? {
+    val parts = progress?.split("/") ?: return null
+    if (parts.size != 2) return null
+    val have = parts[0].trim().toFloatOrNull() ?: return null
+    val need = parts[1].trim().toFloatOrNull()?.takeIf { it > 0f } ?: return null
+    return (have / need).coerceIn(0f, 1f)
+}
+
 @Composable
-private fun AchievementBadge(item: Achievement) {
+private fun AchievementBadge(item: Achievement, index: Int = 0) {
     val locked = !item.unlocked
+    val tint = item.tier.color
+    val frac = if (locked) progressFraction(item.progress) else null
+
+    // Earned badges catch the light once, in turn; a tap catches it again.
+    val shine = remember { androidx.compose.animation.core.Animatable(0f) }
+    var taps by remember { mutableStateOf(0) }
+    LaunchedEffect(taps) {
+        if (locked) return@LaunchedEffect
+        shine.snapTo(0f)
+        shine.animateTo(1f, tween(900, delayMillis = if (taps == 0) 300 + index * 140 else 0, easing = FastOutSlowInEasing))
+    }
+    // Locked progress rings fill once from empty.
+    val ring = remember { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(frac) { if (frac != null) ring.animateTo(frac, tween(900, delayMillis = 250 + index * 90, easing = FastOutSlowInEasing)) }
+
     Column(
-        Modifier.width(86.dp),
+        Modifier
+            .width(82.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .pressable(haptic = if (locked) Feel.TICK else Feel.SELECT) { taps++ }
+            .padding(vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(
-            Modifier.size(62.dp).clip(RoundedCornerShape(16.dp))
-                .background(if (locked) Bg else item.tier.color.copy(alpha = 0.12f))
-                .border(1.5.dp, if (locked) Stroke else item.tier.color.copy(alpha = 0.5f), RoundedCornerShape(16.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
+        Box(Modifier.size(64.dp), contentAlignment = Alignment.Center) {
+            Canvas(Modifier.fillMaxSize()) {
+                val c = Offset(size.width / 2, size.height / 2)
+                val outer = size.minDimension / 2
+                if (locked) {
+                    // Track + how far along it is (only when the server says).
+                    val sw = 3.dp.toPx()
+                    val arcSize = androidx.compose.ui.geometry.Size(size.width - sw, size.height - sw)
+                    drawArc(Color(0xFFE8EBF0), -90f, 360f, false, Offset(sw / 2, sw / 2), arcSize, style = DrawStroke(sw))
+                    if (frac != null && ring.value > 0f) {
+                        drawArc(BlueBright, -90f, 360f * ring.value, false, Offset(sw / 2, sw / 2), arcSize, style = DrawStroke(sw, cap = StrokeCap.Round))
+                    }
+                    drawCircle(Color(0xFFF4F6F9), outer - 7.dp.toPx(), c)
+                } else {
+                    // Earned: a tinted medallion with a rim in the tier's metal.
+                    drawCircle(tint.copy(alpha = 0.14f), outer, c)
+                    drawCircle(tint.copy(alpha = 0.55f), outer - 1.dp.toPx(), c, style = DrawStroke(2.dp.toPx()))
+                    drawCircle(Color.White.copy(alpha = 0.7f), outer - 6.dp.toPx(), c, style = DrawStroke(1.dp.toPx()))
+                    // The shine: a soft band sweeping across, clipped to the disc.
+                    if (shine.value in 0.001f..0.999f) {
+                        val x = -outer + shine.value * size.width * 1.6f
+                        val clip = androidx.compose.ui.graphics.Path().apply {
+                            addOval(androidx.compose.ui.geometry.Rect(c, outer))
+                        }
+                        clipPath(clip) {
+                            drawRect(
+                                Brush.linearGradient(
+                                    listOf(Color.Transparent, Color.White.copy(alpha = 0.75f), Color.Transparent),
+                                    start = Offset(x - 18.dp.toPx(), 0f), end = Offset(x + 18.dp.toPx(), size.height),
+                                ),
+                            )
+                        }
+                    }
+                }
+            }
+            // The badge says what it is even when locked — a padlock alone said nothing.
+            Icon(
+                item.icon, null,
+                tint = if (locked) Color(0xFFB4BBC6) else tint,
+                modifier = Modifier.size(if (locked) 22.dp else 26.dp),
+            )
             if (locked) {
-                Icon(Icons.Default.Lock, null, tint = Text3, modifier = Modifier.size(20.dp))
-            } else {
-                Icon(item.icon, null, tint = item.tier.color, modifier = Modifier.size(26.dp))
+                Box(
+                    Modifier
+                        .align(Alignment.BottomEnd)
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .background(Surface)
+                        .padding(2.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFE8EBF0)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Default.Lock, null, tint = Text3, modifier = Modifier.size(10.dp))
+                }
             }
         }
-        Spacer(Modifier.height(6.dp))
-        // Locked badges with a progress hint show it (e.g. "12/50") in place of the tier label.
-        val topLabel = if (locked && item.progress != null) item.progress else item.tier.label
-        Text(topLabel, color = if (locked) Text3 else item.tier.color, fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold)
-        Text(item.label, color = if (locked) Text3 else Text2, fontSize = 10.5.sp, fontWeight = FontWeight.Medium, maxLines = 2, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(7.dp))
+        Text(
+            item.label,
+            color = if (locked) Text2 else Text1,
+            fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 2, textAlign = TextAlign.Center, lineHeight = 13.sp,
+        )
+        // Locked: how far ("0/50"); earned: the metal.
+        val sub = if (locked) item.progress ?: item.tier.label else item.tier.label
+        Text(
+            sub,
+            color = if (locked) Text3 else tint,
+            fontSize = 10.sp, fontWeight = FontWeight.Bold,
+        )
     }
 }
 
