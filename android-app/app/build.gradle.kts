@@ -22,14 +22,18 @@ android {
         applicationId = "com.haraan.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = 60
-        versionName = "1.0.59"
+        versionCode = 61
+        versionName = "1.0.60"
         // Without this, `connectedDebugAndroidTest` builds the androidTest APK and then runs
         // nothing — the androidTest deps below are inert until a runner is named.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Points at the deployed server over HTTPS (nginx TLS -> Laravel) for production.
         // For local dev in debug builds, defaults to http://127.0.0.1:8000 + adb reverse.
         buildConfigField("String", "API_BASE_URL", "\"https://haraan.app\"")
+        // Demo District/State boards for checking the UI. OFF unless built with
+        // -PdemoBoards=true: the public APK is a debug build, so BuildConfig.DEBUG alone
+        // would have shown invented players to everyone.
+        buildConfigField("boolean", "DEMO_BOARDS", (project.findProperty("demoBoards") ?: "false").toString())
         // Google Sign-In: the OAuth **Web application** client ID (serverClientId) from the
         // Google Cloud Console. The backend uses the same value as the token audience. Empty
         // until configured — the "Continue with Google" button hides itself when blank.

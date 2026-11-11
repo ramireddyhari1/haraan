@@ -3,7 +3,7 @@ package com.haraan.app.data
 import com.haraan.app.BuildConfig
 
 /**
- * DEBUG BUILDS ONLY: stand-in rows for ActionBoard's District and State tabs, so the
+ * DEV BUILDS ONLY (debug + `-PdemoBoards=true`): stand-in rows for ActionBoard's District and State tabs, so the
  * boards can be checked for layout while the real ranked ledger is still empty.
  *
  * Used only when the real API returns nothing (or the viewer has no district set).
@@ -11,7 +11,7 @@ import com.haraan.app.BuildConfig
  * the real boards' rule is "never invent a player".
  */
 object DemoLeaderboard {
-  val enabled: Boolean = BuildConfig.DEBUG
+  val enabled: Boolean = BuildConfig.DEBUG && BuildConfig.DEMO_BOARDS
 
   const val DISTRICT = "NTR"
   const val STATE = "Andhra Pradesh"
