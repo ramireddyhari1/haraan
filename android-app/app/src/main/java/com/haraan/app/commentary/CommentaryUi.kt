@@ -62,7 +62,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.haraan.app.data.membership.MembershipNav
-import com.haraan.app.data.membership.PhoneFeatureAccess
 
 private val Blue = Color(0xFF2563EB)
 private val Red = Color(0xFFDC2626)
@@ -81,7 +80,7 @@ private val Line = Color(0xFFE2E8F0)
 fun ScorerMicButton(matchId: String, matchTitle: String, background: Color, ink: Color) {
     val ctx = LocalContext.current
     val state by CommentaryBroadcaster.state.collectAsState()
-    var access by remember { mutableStateOf<PhoneFeatureAccess.State?>(null) }
+    var access by remember { mutableStateOf<LiveCommentaryAccess.State?>(null) }
     var showHero by remember { mutableStateOf(false) }
     var heroLine by remember { mutableStateOf("") }
 
@@ -101,7 +100,7 @@ fun ScorerMicButton(matchId: String, matchTitle: String, background: Color, ink:
             is CommentaryBroadcaster.State.Locked -> if (s.matchId == matchId) {
                 heroLine = s.message
                 showHero = true
-                access = PhoneFeatureAccess.State.LOCKED
+                access = LiveCommentaryAccess.State.LOCKED
                 CommentaryBroadcaster.acknowledge()
             }
             is CommentaryBroadcaster.State.Ended -> if (s.matchId == matchId) {
@@ -114,7 +113,7 @@ fun ScorerMicButton(matchId: String, matchTitle: String, background: Color, ink:
 
     val onAir = (state as? CommentaryBroadcaster.State.OnAir)?.matchId == matchId
     val starting = (state as? CommentaryBroadcaster.State.Starting)?.matchId == matchId
-    val locked = access == PhoneFeatureAccess.State.LOCKED
+    val locked = access == LiveCommentaryAccess.State.LOCKED
 
     Box(
         modifier = Modifier

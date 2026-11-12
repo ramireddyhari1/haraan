@@ -1,7 +1,10 @@
 package com.haraan.app.commentary
 
 import com.haraan.app.data.ApiConfig
-import com.haraan.app.data.membership.PhoneFeatureAccess
+import android.content.Context
+import com.haraan.app.data.TokenStore
+import com.haraan.app.data.membership.Membership
+import com.haraan.app.data.membership.MembershipRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -119,5 +122,26 @@ object CommentaryApi {
     }
 }
 
-/** Who may go on air: the member feature `matches.live_commentary` (Hero at launch), never a plan code. */
-object LiveCommentaryAccess : PhoneFeatureAccess("matches.live_commentary")
+/**
+ * Who may go on air: the member feature `matches.live_commentary` (Hero at launch), set per plan
+ * in /control, never a plan-code check. Only decides whether the mic shows a lock; the server
+ * is the real gate. The last answer is remembered so no signal at the ground doesn't lock a
+ * Hero member out of the mic.
+ */
+object LiveCommentaryAccess {
+    const val FEATURE = "matches.live_commentary"
+
+    enum class State { ALLOWED, LOCKED, SIGNED_OUT }
+
+    suspend fun check(context: Context, membership: suspend (String) -> Membership = { MembershipRepository().membership(it) }): State {
+        val token = TokenStore.getSignedInToken(context) ?: return State.SIGNED_OUT
+        val fresh = withContext(Dispatchers.IO) { runCatching { membership(token) } }.getOrNull()
+        val prefs = context.getSharedPreferences("member_features", Context.MODE_PRIVATE)
+        val allowed = if (fresh != null) {
+            fresh.entitlements.any { it.key == FEATURE && it.enabled }.also { prefs.edit().putBoolean(FEATURE, it).apply() }
+        } else {
+            prefs.getBoolean(FEATURE, false)
+        }
+        return if (allowed) State.ALLOWED else State.LOCKED
+    }
+}
