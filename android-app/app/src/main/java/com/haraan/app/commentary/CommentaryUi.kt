@@ -77,7 +77,7 @@ private val Line = Color(0xFFE2E8F0)
  * shows a small lock and opens the Hero sheet instead of asking for the mic.
  */
 @Composable
-fun ScorerMicButton(matchId: String, matchTitle: String, background: Color, ink: Color) {
+fun ScorerMicButton(matchId: String, matchTitle: String, background: Color, ink: Color, size: androidx.compose.ui.unit.Dp = 40.dp) {
     val ctx = LocalContext.current
     val state by CommentaryBroadcaster.state.collectAsState()
     var access by remember { mutableStateOf<LiveCommentaryAccess.State?>(null) }
@@ -117,7 +117,7 @@ fun ScorerMicButton(matchId: String, matchTitle: String, background: Color, ink:
 
     Box(
         modifier = Modifier
-            .size(40.dp)
+            .size(size)
             .clip(CircleShape)
             .background(if (onAir) Red else background)
             .clickable(enabled = !starting) {
@@ -223,6 +223,13 @@ private fun Perk(text: String) {
 // ───────────────────────────── Viewer side ─────────────────────────────
 
 /**
+ * The match screen provides the speaker once; each sport's own header (the shared sport top
+ * bar, football's hero) draws it where it fits. Null when there is nothing to draw. The Boolean
+ * says whether it sits on a dark background.
+ */
+val LocalCommentarySpeaker = androidx.compose.runtime.staticCompositionLocalOf<(@Composable (onDark: Boolean) -> Unit)?> { null }
+
+/**
  * The speaker in the match detail header. Shown only while someone is on air: outline speaker
  * with a red live dot = tap to listen; solid blue with waves moving with the voice = listening,
  * tap to stop. Long-press while listening to report the commentary. Never autoplays.
@@ -235,6 +242,8 @@ fun CommentarySpeakerButton(
     matchTitle: String,
     onAir: Boolean,
     by: String,
+    /** On a dark hero (football): translucent white chip instead of the light slate one. */
+    onDark: Boolean = false,
 ) {
     val ctx = LocalContext.current
     val state by CommentaryListener.state.collectAsState()
@@ -267,10 +276,11 @@ fun CommentarySpeakerButton(
 
     Box(
         modifier = Modifier
-            .size(38.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (playing) Blue else Color(0xFFF1F5FA))
-            .border(1.dp, if (playing) Blue else Color(0xFFE4EAF1), RoundedCornerShape(12.dp))
+            // On the football hero its neighbours are 34dp circles; in the light bars, 38dp tiles.
+            .size(if (onDark) 34.dp else 38.dp)
+            .clip(if (onDark) CircleShape else RoundedCornerShape(12.dp))
+            .background(if (playing) Blue else if (onDark) Color.White.copy(alpha = 0.16f) else Color(0xFFF1F5FA))
+            .then(if (onDark) Modifier else Modifier.border(1.dp, if (playing) Blue else Color(0xFFE4EAF1), RoundedCornerShape(12.dp)))
             .combinedClickable(
                 onClickLabel = label,
                 onClick = { CommentaryListener.toggle(ctx, matchId, code, matchTitle) },
@@ -285,8 +295,9 @@ fun CommentarySpeakerButton(
                 SoundWaves(shown, Color.White, Modifier.size(12.dp, 18.dp).align(Alignment.Center).offset(7.dp, 0.dp))
             }
             else -> {
-                Icon(Icons.AutoMirrored.Outlined.VolumeMute, contentDescription = label, tint = Color(0xFF334155), modifier = Modifier.size(20.dp).offset((-3).dp, 0.dp))
-                SoundWaves(0.15f, Color(0xFF334155), Modifier.size(12.dp, 18.dp).align(Alignment.Center).offset(7.dp, 0.dp))
+                val idleTint = if (onDark) Color.White else Color(0xFF334155)
+                Icon(Icons.AutoMirrored.Outlined.VolumeMute, contentDescription = label, tint = idleTint, modifier = Modifier.size(20.dp).offset((-3).dp, 0.dp))
+                SoundWaves(0.15f, idleTint, Modifier.size(12.dp, 18.dp).align(Alignment.Center).offset(7.dp, 0.dp))
                 Box(Modifier.align(Alignment.TopEnd).offset((-5).dp, 5.dp).size(7.dp).clip(CircleShape).background(Red).border(1.dp, Color.White, CircleShape))
             }
         }

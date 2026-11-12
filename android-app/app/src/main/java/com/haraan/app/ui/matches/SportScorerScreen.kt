@@ -89,6 +89,8 @@ fun SportScorerScreen(
     onFinish: (suspend () -> Boolean)? = null,
     onDone: () -> Unit,
     modifier: Modifier = Modifier,
+    /** For live commentary; blank hides the mic. */
+    matchId: String = "",
 ) {
     val scope = rememberCoroutineScope()
     val view = LocalView.current
@@ -149,6 +151,17 @@ fun SportScorerScreen(
                 Text("Scoring", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Ink)
                 Text(SportLook.displayName(sport), fontSize = 11.5.sp, color = Faint)
             }
+            // Live commentary (Hero): the scorer's voice to everyone on the match screen.
+            if (matchId.isNotBlank() && !board.decided) {
+                com.haraan.app.commentary.ScorerMicButton(
+                    matchId = matchId,
+                    matchTitle = "${state.team1} vs ${state.team2}",
+                    background = Color(0xFFEFF2F7),
+                    ink = Ink,
+                    size = 36.dp,
+                )
+                Spacer(Modifier.width(8.dp))
+            }
             if (board.feed.isNotEmpty()) {
                 Pill("Undo", enabled = !busy, icon = true) { undo(null) }
                 Spacer(Modifier.width(8.dp))
@@ -157,6 +170,7 @@ fun SportScorerScreen(
                 Pill("Finish", enabled = !busy) { confirmFinish = true }
             }
         }
+        if (matchId.isNotBlank()) com.haraan.app.commentary.OnAirStrip(matchId = matchId)
 
         ScorerBoard(state, board, theme, pending)
 

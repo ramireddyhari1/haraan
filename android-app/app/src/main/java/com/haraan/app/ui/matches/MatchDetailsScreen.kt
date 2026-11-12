@@ -175,6 +175,14 @@ fun MatchDetailsScreen(
             val d = state.data
             val b = d.board!!
             val openScorer = { sportScoring = true }
+            androidx.compose.runtime.CompositionLocalProvider(
+                com.haraan.app.commentary.LocalCommentarySpeaker provides { onDark ->
+                    com.haraan.app.commentary.CommentarySpeakerButton(
+                        matchId = matchId, code = joinCode, matchTitle = "${d.team1} vs ${d.team2}",
+                        onAir = d.commentaryOnAir, by = d.commentaryBy, onDark = onDark,
+                    )
+                },
+            ) {
             when (b.sport.lowercase()) {
                 "volleyball" -> VolleyballMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier, matchId = matchId)
                 "basketball" -> BasketballMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier, matchId = matchId)
@@ -187,12 +195,22 @@ fun MatchDetailsScreen(
                     TableTennisMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier, matchId = matchId)
                 else -> TableTennisMatchScreen(d, b, watching, onBack, openScorer, openViewers, modifier, matchId = matchId)
             }
+            }
         }
         is MatchScreenState.Success if state.data.sport.equals("football", ignoreCase = true) -> {
             // Football gets its own screen. The five tabs below are cricket's — Info,
             // Commentary, Live, Scorecard, MVP only mean anything for a ball-by-ball
             // sport, and a football match rendered through them showed a scorecard
             // with every number blank.
+            val fd = state.data
+            androidx.compose.runtime.CompositionLocalProvider(
+                com.haraan.app.commentary.LocalCommentarySpeaker provides { onDark ->
+                    com.haraan.app.commentary.CommentarySpeakerButton(
+                        matchId = matchId, code = joinCode, matchTitle = "${fd.team1} vs ${fd.team2}",
+                        onAir = fd.commentaryOnAir, by = fd.commentaryBy, onDark = onDark,
+                    )
+                },
+            ) {
             FootballMatchScreen(
                 state = state.data,
                 matchId = matchId,
@@ -202,6 +220,7 @@ fun MatchDetailsScreen(
                 onWatchers = openViewers,
                 modifier = modifier,
             )
+            }
         }
         is MatchScreenState.Success -> {
             // Where to open.
@@ -345,6 +364,7 @@ fun MatchDetailsScreen(
     if (sportScoring && boardState is MatchScreenState.Success && boardState.data.board != null) {
         val d = boardState.data
         SportScorerScreen(
+            matchId = matchId,
             state = d,
             board = d.board!!,
             onEvent = { e ->

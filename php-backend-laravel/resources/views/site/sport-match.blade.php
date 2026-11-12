@@ -15,6 +15,9 @@
     $fb = is_array($d['football'] ?? null) ? $d['football'] : null;
     $family = $board['family'] ?? ($sport === 'football' ? 'tally' : 'points');
     $isLive = (bool) ($d['isLive'] ?? false);
+    // Live commentary: the speaker shows only while someone is on air (see partials/match-commentary).
+    $commentary = is_array($d['liveCommentary'] ?? null) ? $d['liveCommentary'] : ['onAir' => false, 'by' => null];
+    $commentaryOnAir = $isLive && (bool) ($commentary['onAir'] ?? false);
     $finished = $match->isFinished();
 
     $team1 = (string) ($d['team1Full'] ?? $d['team1'] ?? '');
@@ -83,6 +86,17 @@
             <span class="smx-sport">{{ $sportLabel }}</span>
             @if($isLive)<span class="smx-live"><span class="smx-live-dot"></span>LIVE</span>@endif
         </div>
+        @if($commentaryOnAir)
+            <button type="button" data-commentary-speaker data-match="{{ $match->id }}" aria-pressed="false" aria-label="Listen to live commentary" title="{{ ($commentary['by'] ?? '') !== '' ? $commentary['by'] . ' is calling it live' : 'Live commentary' }}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor" stroke-linejoin="round"/>
+                    <path class="spk-w1" d="M15.5 9.2a4 4 0 0 1 0 5.6"/>
+                    <path class="spk-w2" d="M18.3 6.6a7.6 7.6 0 0 1 0 10.8"/>
+                </svg>
+                <span class="spk-dot" aria-hidden="true"></span>
+                <span class="spk-spin" aria-hidden="true"></span>
+            </button>
+        @endif
     </header>
 
     {{-- Scoreboard --}}
@@ -593,8 +607,16 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 </style>
 @if($isLive)
 <script>
-    // A live board refreshes itself, like the app's.
-    setTimeout(function () { location.reload(); }, 20000);
+    // A live board refreshes itself, like the app's. While someone listens to the commentary
+    // it updates in place instead, so the voice isn't cut every 20 seconds.
+    (function () {
+        var ep = window.mdxEpoch || 0;
+        setTimeout(function () {
+            if ((window.mdxEpoch || 0) !== ep) return;
+            if (window.HaraanCommentary) window.HaraanCommentary.refresh(); else location.reload();
+        }, 20000);
+    })();
 </script>
 @endif
+@include('site.partials.match-commentary', ['id' => $match->id, 'commentary' => $commentary])
 @endsection

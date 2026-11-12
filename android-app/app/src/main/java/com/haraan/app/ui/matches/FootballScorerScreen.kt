@@ -177,6 +177,8 @@ fun FootballScorerScreen(
     Column(modifier = modifier.fillMaxSize().background(Bg)) {
 
         Scoreboard(setup, home, away, clock, possession, onBack = onDone, enabled = !finishing)
+        // On air: the commentary box (drawn mic, ON AIR lamp, listeners, Mute / End).
+        com.haraan.app.commentary.OnAirStrip(matchId = setup.matchId, modifier = Modifier.background(Surface))
 
         ClockBar(
             clock = clock,
@@ -373,6 +375,15 @@ private fun Scoreboard(
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
             }
+            // Live commentary (Hero): the scorer's voice to everyone on the match screen.
+            com.haraan.app.commentary.ScorerMicButton(
+                matchId = setup.matchId,
+                matchTitle = "${setup.teamA} vs ${setup.teamB}",
+                background = Color(0xFFF1F5F9),
+                ink = Ink,
+                size = 34.dp,
+            )
+            Spacer(Modifier.width(10.dp))
             LiveDot(clock.running)
         }
 

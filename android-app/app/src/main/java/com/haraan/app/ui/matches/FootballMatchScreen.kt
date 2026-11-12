@@ -379,6 +379,11 @@ private fun CollapsingFootballHero(
                     )
                     Spacer(Modifier.width(8.dp))
                 }
+                // Live commentary speaker, in the hero's translucent palette.
+                if (state.commentaryOnAir) {
+                    com.haraan.app.commentary.LocalCommentarySpeaker.current?.invoke(true)
+                    Spacer(Modifier.width(8.dp))
+                }
                 if (canScore) {
                     Row(
                         modifier = Modifier

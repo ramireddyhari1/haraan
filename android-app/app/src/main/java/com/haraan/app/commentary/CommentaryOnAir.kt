@@ -327,12 +327,13 @@ private fun ListenerCrowd(count: Int) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         val shown = count.coerceAtMost(5)
         if (shown > 0) {
-            Box(Modifier.widthIn(min = 0.dp).height(22.dp)) {
+            // Exactly as wide as the overlapping heads, so the count sits right after them.
+            Box(Modifier.width(((shown - 1) * 14 + 22).dp).height(22.dp)) {
                 for (i in 0 until shown) {
                     key(i) { ListenerHead(i, Modifier.offset(x = (i * 14).dp)) }
                 }
             }
-            Spacer(Modifier.width((shown * 14 + 10).dp))
+            Spacer(Modifier.width(8.dp))
         }
         AnimatedContent(
             targetState = count,

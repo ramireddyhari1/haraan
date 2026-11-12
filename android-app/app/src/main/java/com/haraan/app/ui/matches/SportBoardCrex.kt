@@ -181,6 +181,11 @@ fun CrexBoardTopBar(
             CrexScoreButton(theme, onScore)
             Spacer(Modifier.width(8.dp))
         }
+        // Live commentary speaker (draws nothing while nobody is on air).
+        if (state.commentaryOnAir) {
+            com.haraan.app.commentary.LocalCommentarySpeaker.current?.invoke(false)
+            Spacer(Modifier.width(8.dp))
+        }
         CrexBarIcon(theme.icon, theme.label)
         Spacer(Modifier.width(8.dp))
         CrexBarIcon(Icons.Outlined.MoreVert, "More")

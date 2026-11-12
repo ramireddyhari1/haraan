@@ -11,8 +11,55 @@
     Listening is free and never autoplays. The voice comes from LiveKit with a listen-only pass
     from POST /api/live-matches/{id}/commentary/listen.
 
+    Used by the cricket match page and the other sports' page (sport-match). Carries its own
+    styles, so a page only has to render the speaker button.
+
     Expects: $id (match id), $commentary (['onAir' => bool, 'by' => ?string]).
 --}}
+<style>
+/* Live commentary speaker: outline + red live dot = tap to listen; solid blue with waves that
+   move with the voice (--lvl, 0..1) = listening. */
+[data-commentary-speaker] { position: relative; --lvl: 0; width: 38px; height: 38px; flex: 0 0 auto; border-radius: 12px; background: #F1F5FA; border: 1px solid #E4EAF1; display: inline-flex; align-items: center; justify-content: center; color: #334155; cursor: pointer; padding: 0; }
+[data-commentary-speaker] svg { width: 19px; height: 19px; }
+.mdx-bar [data-commentary-speaker] { margin-right: 8px; }
+[data-commentary-speaker] .spk-w1, [data-commentary-speaker] .spk-w2 { transition: opacity .1s linear; }
+[data-commentary-speaker] .spk-w1 { opacity: .55; }
+[data-commentary-speaker] .spk-w2 { opacity: .3; }
+[data-commentary-speaker] .spk-dot { position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: #DC2626; box-shadow: 0 0 0 1.5px #fff; }
+[data-commentary-speaker] .spk-spin { display: none; position: absolute; inset: 9px; border-radius: 50%; border: 2px solid rgba(37,99,235,.2); border-top-color: #2563EB; animation: spk-spin .8s linear infinite; }
+[data-commentary-speaker].is-connecting svg, [data-commentary-speaker].is-connecting .spk-dot { opacity: 0; }
+[data-commentary-speaker].is-connecting .spk-spin { display: block; }
+[data-commentary-speaker].is-playing { background: #2563EB; border-color: #2563EB; color: #fff; }
+[data-commentary-speaker].is-playing .spk-dot { display: none; }
+[data-commentary-speaker].is-playing .spk-w1 { opacity: calc(.45 + var(--lvl) * .55); }
+[data-commentary-speaker].is-playing .spk-w2 { opacity: calc(.15 + var(--lvl) * .85); }
+@keyframes spk-spin { to { transform: rotate(360deg); } }
+
+/* The player bar: fixed to the bottom, outside <main>, so in-place updates never touch it. */
+.mcx-bar { position: fixed; left: 50%; bottom: 14px; z-index: 60; width: min(560px, calc(100% - 24px)); transform: translate(-50%, 140%); transition: transform .32s cubic-bezier(.2,.8,.2,1); --lvl: 0; }
+.mcx-bar.is-on { transform: translate(-50%, 0); }
+.mcx-bar-in { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 6px; background: #fff; border: 1px solid rgba(220,38,38,.25); border-radius: 18px; box-shadow: 0 10px 30px rgba(15,23,42,.14); }
+.mcx-mic { width: 46px; height: 46px; flex: 0 0 auto; }
+.mcx-rings path { fill: none; stroke: #DC2626; stroke-width: 2.2; stroke-linecap: round; transition: opacity .1s linear; }
+.mcx-rings path:nth-child(-n+2) { opacity: calc(.22 + var(--lvl) * .78); }
+.mcx-rings path:nth-child(n+3) { opacity: calc(.06 + var(--lvl) * .94); }
+.mcx-txt { flex: 1 1 auto; min-width: 0; }
+.mcx-who { display: flex; align-items: center; gap: 7px; }
+.mcx-lamp { font-size: 9.5px; font-weight: 800; letter-spacing: 1.3px; color: #fff; background: #DC2626; border-radius: 5px; padding: 2px 6px; }
+.mcx-name { font-size: 13.5px; font-weight: 700; color: #0F172A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mcx-sub { font-size: 11.5px; color: #64748B; margin-top: 2px; }
+.mcx-btn { flex: 0 0 auto; font: inherit; font-size: 12.5px; font-weight: 600; padding: 7px 12px; border-radius: 10px; background: #fff; border: 1px solid #E2E8F0; color: #0F172A; cursor: pointer; }
+.mcx-stop { color: #DC2626; border-color: rgba(220,38,38,.3); }
+.mcx-report { color: #64748B; }
+.mcx-reasons { margin-top: 6px; background: #fff; border: 1px solid #E2E8F0; border-radius: 14px; box-shadow: 0 10px 30px rgba(15,23,42,.12); overflow: hidden; }
+.mcx-reasons-h { font-size: 12px; font-weight: 700; color: #64748B; padding: 10px 14px 6px; }
+.mcx-reasons button { display: block; width: 100%; text-align: left; font: inherit; font-size: 14px; color: #0F172A; padding: 11px 14px; background: none; border: 0; border-top: 1px solid #F1F5F9; cursor: pointer; }
+.mcx-reasons button:hover { background: #F8FAFC; }
+html.mcx-listening body { padding-bottom: 84px; }
+.mcx-toast { position: fixed; left: 50%; bottom: 96px; transform: translate(-50%, 12px); opacity: 0; z-index: 70; background: #0F172A; color: #fff; font-size: 13px; padding: 9px 14px; border-radius: 10px; transition: opacity .2s, transform .2s; pointer-events: none; max-width: calc(100% - 32px); }
+.mcx-toast.is-in { opacity: 1; transform: translate(-50%, 0); }
+@media (prefers-reduced-motion: reduce) { .mcx-bar { transition: none; } }
+</style>
 <script>
 (function () {
     var matchId = @json((string) $id);
@@ -208,6 +255,19 @@
                     })
                     .catch(function () { location.href = url; });
             }
+
+            // Any link to another page of the SAME match (a tab) stays in place while listening.
+            document.addEventListener('click', function (e) {
+                if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+                if (!(st.phase === 'playing' || st.phase === 'connecting') || !st.match) return;
+                var a = e.target.closest && e.target.closest('a[href]');
+                if (!a || a.target === '_blank' || a.origin !== location.origin) return;
+                var base = '/gamehub/actionboard/match/' + st.match;
+                if (a.pathname !== base && a.pathname.indexOf(base + '/') !== 0) return;
+                if (/\/(json|control)$/.test(a.pathname)) return;
+                e.preventDefault();
+                if (a.href !== location.href) softVisit(a.href, true);
+            });
 
             window.addEventListener('popstate', function () {
                 if (!st.softUsed) return;

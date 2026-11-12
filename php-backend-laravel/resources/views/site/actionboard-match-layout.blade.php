@@ -423,46 +423,6 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 @media (prefers-reduced-motion: reduce) { ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; } }
 .mdx-ic svg { width: 19px; height: 19px; }
 .mdx-share.is-done { background: #DCFCE7; color: #16A34A; border-color: #BBF7D0; }
-/* Live commentary speaker: outline + red live dot = tap to listen; solid blue with waves that
-   move with the voice (--lvl, 0..1) = listening. */
-.mdx-speaker { position: relative; margin-right: 8px; --lvl: 0; }
-.mdx-speaker .spk-w1, .mdx-speaker .spk-w2 { transition: opacity .1s linear; }
-.mdx-speaker .spk-w1 { opacity: .55; }
-.mdx-speaker .spk-w2 { opacity: .3; }
-.mdx-speaker .spk-dot { position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: #DC2626; box-shadow: 0 0 0 1.5px #fff; }
-.mdx-speaker .spk-spin { display: none; position: absolute; inset: 9px; border-radius: 50%; border: 2px solid rgba(37,99,235,.2); border-top-color: #2563EB; animation: spk-spin .8s linear infinite; }
-.mdx-speaker.is-connecting svg, .mdx-speaker.is-connecting .spk-dot { opacity: 0; }
-.mdx-speaker.is-connecting .spk-spin { display: block; }
-.mdx-speaker.is-playing { background: #2563EB; border-color: #2563EB; color: #fff; }
-.mdx-speaker.is-playing .spk-dot { display: none; }
-.mdx-speaker.is-playing .spk-w1 { opacity: calc(.45 + var(--lvl) * .55); }
-.mdx-speaker.is-playing .spk-w2 { opacity: calc(.15 + var(--lvl) * .85); }
-@keyframes spk-spin { to { transform: rotate(360deg); } }
-
-/* The player bar: fixed to the bottom, outside <main>, so in-place updates never touch it. */
-.mcx-bar { position: fixed; left: 50%; bottom: 14px; z-index: 60; width: min(560px, calc(100% - 24px)); transform: translate(-50%, 140%); transition: transform .32s cubic-bezier(.2,.8,.2,1); --lvl: 0; }
-.mcx-bar.is-on { transform: translate(-50%, 0); }
-.mcx-bar-in { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 6px; background: #fff; border: 1px solid rgba(220,38,38,.25); border-radius: 18px; box-shadow: 0 10px 30px rgba(15,23,42,.14); }
-.mcx-mic { width: 46px; height: 46px; flex: 0 0 auto; }
-.mcx-rings path { fill: none; stroke: #DC2626; stroke-width: 2.2; stroke-linecap: round; transition: opacity .1s linear; }
-.mcx-rings path:nth-child(-n+2) { opacity: calc(.22 + var(--lvl) * .78); }
-.mcx-rings path:nth-child(n+3) { opacity: calc(.06 + var(--lvl) * .94); }
-.mcx-txt { flex: 1 1 auto; min-width: 0; }
-.mcx-who { display: flex; align-items: center; gap: 7px; }
-.mcx-lamp { font-size: 9.5px; font-weight: 800; letter-spacing: 1.3px; color: #fff; background: #DC2626; border-radius: 5px; padding: 2px 6px; }
-.mcx-name { font-size: 13.5px; font-weight: 700; color: #0F172A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mcx-sub { font-size: 11.5px; color: #64748B; margin-top: 2px; }
-.mcx-btn { flex: 0 0 auto; font: inherit; font-size: 12.5px; font-weight: 600; padding: 7px 12px; border-radius: 10px; background: #fff; border: 1px solid #E2E8F0; color: #0F172A; cursor: pointer; }
-.mcx-stop { color: #DC2626; border-color: rgba(220,38,38,.3); }
-.mcx-report { color: #64748B; }
-.mcx-reasons { margin-top: 6px; background: #fff; border: 1px solid #E2E8F0; border-radius: 14px; box-shadow: 0 10px 30px rgba(15,23,42,.12); overflow: hidden; }
-.mcx-reasons-h { font-size: 12px; font-weight: 700; color: #64748B; padding: 10px 14px 6px; }
-.mcx-reasons button { display: block; width: 100%; text-align: left; font: inherit; font-size: 14px; color: #0F172A; padding: 11px 14px; background: none; border: 0; border-top: 1px solid #F1F5F9; cursor: pointer; }
-.mcx-reasons button:hover { background: #F8FAFC; }
-html.mcx-listening body { padding-bottom: 84px; }
-.mcx-toast { position: fixed; left: 50%; bottom: 96px; transform: translate(-50%, 12px); opacity: 0; z-index: 70; background: #0F172A; color: #fff; font-size: 13px; padding: 9px 14px; border-radius: 10px; transition: opacity .2s, transform .2s; pointer-events: none; max-width: calc(100% - 32px); }
-.mcx-toast.is-in { opacity: 1; transform: translate(-50%, 0); }
-@media (prefers-reduced-motion: reduce) { .mcx-bar { transition: none; } }
 .mdx-bar-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
 .mdx-bar-teams { font-size: 16px; font-weight: 800; letter-spacing: -.2px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mdx-vs-lite { color: var(--muted); font-weight: 600; }

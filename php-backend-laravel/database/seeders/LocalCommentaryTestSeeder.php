@@ -64,6 +64,19 @@ class LocalCommentaryTestSeeder extends Seeder
             'user_id' => $user->id,
         ])->save();
 
-        $this->command?->info("Commentator user {$user->id}, match {$match->id}. Sign in with ".self::EMAIL);
+        // One match per scorer type: football's own scorer, and the rally scorer (badminton).
+        $others = [];
+        foreach ([['football', 'FCK', 'Kadapa FC', 'MUN', 'Mic United'], ['badminton', 'RAV', 'Ravi', 'TEJ', 'Teja']] as [$sport, $h, $hf, $a, $af]) {
+            $m = LiveMatch::query()->firstOrNew(['title' => "{$hf} vs {$af}", 'user_id' => $user->id]);
+            $m->forceFill([
+                'home' => $h, 'away' => $a, 'home_full' => $hf, 'away_full' => $af,
+                'sport' => $sport, 'status' => 'live', 'visibility' => 'FEATURED', 'is_private' => false,
+                'state' => 'Andhra Pradesh', 'district' => 'YSR Kadapa', 'user_id' => $user->id,
+                'home_squad' => $squad('H', [$hf]), 'away_squad' => $squad('A', [$af]),
+            ])->save();
+            $others[] = "{$sport} {$m->id}";
+        }
+
+        $this->command?->info("Commentator user {$user->id}, cricket {$match->id}, ".implode(', ', $others).'. Sign in with '.self::EMAIL);
     }
 }
