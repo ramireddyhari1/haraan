@@ -49,6 +49,8 @@ fun MatchHeader(
     onBack: () -> Unit = {},
     /** Null unless this viewer may see who is watching. */
     onWatchersClick: (() -> Unit)? = null,
+    /** The live-commentary speaker; draws nothing while nobody is on air. */
+    speaker: (@Composable () -> Unit)? = null,
 ) {
     Column(
         modifier = modifier
@@ -114,6 +116,11 @@ fun MatchHeader(
                     }
                 })
                 Spacer(Modifier.width(8.dp))
+            }
+            if (speaker != null) {
+                // Draws nothing while nobody is on air, so no gap is left either.
+                speaker()
+                if (state.commentaryOnAir) Spacer(Modifier.width(8.dp))
             }
             var showLanguage by remember { mutableStateOf(false) }
             BarIconButton(Icons.Outlined.Translate, stringResource(R.string.language), onClick = { showLanguage = true })

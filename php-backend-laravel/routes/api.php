@@ -309,6 +309,14 @@ Route::middleware('auth.jwt.optional')->group(function (): void {
         Route::get('/live-matches/code/{code}/viewers', [LiveMatchController::class, 'viewersByCode']);
     });
 
+    // Live commentary, listener side: a listen-only pass for the speaker icon, and reporting a
+    // broadcast. Free: no plan needed to listen. Per IP, so a ground on one Wi-Fi fits.
+    Route::middleware('throttle:60,1')->group(function (): void {
+        Route::post('/live-matches/{id}/commentary/listen', [\App\Http\Controllers\Api\MatchCommentaryController::class, 'listen'])->whereNumber('id');
+        Route::post('/live-matches/code/{code}/commentary/listen', [\App\Http\Controllers\Api\MatchCommentaryController::class, 'listenByCode']);
+        Route::post('/live-matches/commentary/{session}/report', [\App\Http\Controllers\Api\MatchCommentaryController::class, 'report'])->whereNumber('session');
+    });
+
     // The web match page's ball-in-play heartbeat, polled every 3s while live. Per IP, so
     // it has to clear a whole ground on one Wi-Fi: 20/min each leaves room for ~30 phones.
     Route::get('/live-matches/{id}/pulse', [LiveMatchController::class, 'pulse'])
@@ -496,6 +504,11 @@ Route::middleware(['auth.jwt', 'actionboard.profile'])->prefix('matches')->group
     Route::post('/{id}/verify', [MatchesController::class, 'verify']);     // organizer/venue → High/Verified
     Route::post('/{id}/dispute', [MatchesController::class, 'dispute']);   // reputation penalty
     Route::post('/{id}/score-action', [MatchesController::class, 'scoreAction']);
+
+    // Live commentary, scorer side: go on air (Hero), keep the broadcast alive, stop it.
+    Route::post('/{id}/commentary', [\App\Http\Controllers\Api\MatchCommentaryController::class, 'start'])->whereNumber('id');
+    Route::post('/{id}/commentary/{session}/heartbeat', [\App\Http\Controllers\Api\MatchCommentaryController::class, 'heartbeat'])->whereNumber(['id', 'session']);
+    Route::delete('/{id}/commentary/{session}', [\App\Http\Controllers\Api\MatchCommentaryController::class, 'stop'])->whereNumber(['id', 'session']);
 
     // Multi-device match sessions: the scorer opens a pairing for a role, lists what is
     // attached, and can cut any of it loose. Creator-only — see MatchDeviceController.

@@ -237,6 +237,8 @@ dependencies {
   implementation("androidx.security:security-crypto:1.1.0")
   // WebSocket client for realtime content updates (Reverb / Pusher protocol)
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
+  // Live commentary: the scorer's voice to everyone on the match screen (WebRTC via LiveKit).
+  implementation("io.livekit:livekit-android:2.10.0")
   // Typed HTTP for new endpoints (first: campaign section themes). Rides the same OkHttp
   // as the realtime socket; kotlinx-serialization because the plugin is already applied.
   implementation(libs.retrofit)

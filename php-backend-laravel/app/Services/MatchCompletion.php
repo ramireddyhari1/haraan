@@ -69,6 +69,9 @@ final class MatchCompletion
             app(self::class)->followThrough($id, $first);
         })->afterResponse();
 
+        // The match is over, so is anyone calling it.
+        app(MatchCommentary::class)->endForMatch($match);
+
         MatchUpdated::dispatch($match->id);
 
         return $match;

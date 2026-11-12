@@ -48,6 +48,13 @@ final class MemberFeature
     /** The scorer is asked which shot each four and six was (cover drive, pull…). Follows the match creator's plan. */
     public const MATCHES_SHOT_TYPES = 'matches.shot_types';
 
+    /**
+     * Going on air from the scorer: a live voice everyone on the match detail screen can hear.
+     * Follows the SCORER's own plan. Listening is free and never gated. Enforced by
+     * MatchCommentary::start().
+     */
+    public const MATCHES_LIVE_COMMENTARY = 'matches.live_commentary';
+
     public const PROFILE_MEMBER_BADGE = 'profile.member_badge';
 
     /**
@@ -103,6 +110,7 @@ final class MemberFeature
         self::MATCHES_SEE_VIEWERS => ['type' => self::TYPE_BOOLEAN, 'label' => "See who's watching"],
         self::MATCHES_SHOT_PLOTTING => ['type' => self::TYPE_BOOLEAN, 'label' => 'Shot plotting'],
         self::MATCHES_SHOT_TYPES => ['type' => self::TYPE_BOOLEAN, 'label' => 'Shot types'],
+        self::MATCHES_LIVE_COMMENTARY => ['type' => self::TYPE_BOOLEAN, 'label' => 'Live commentary'],
         self::PROFILE_MEMBER_BADGE => ['type' => self::TYPE_BOOLEAN, 'label' => 'Member badge'],
         self::APP_ICON_PRO => ['type' => self::TYPE_BOOLEAN, 'label' => 'Pro app icon'],
         self::APP_ICON_HERO => ['type' => self::TYPE_BOOLEAN, 'label' => 'Hero app icon'],

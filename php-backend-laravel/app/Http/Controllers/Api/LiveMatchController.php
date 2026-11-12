@@ -629,6 +629,9 @@ class LiveMatchController extends Controller
             'canScore' => $canScore,
             // The wagon-wheel prompt belongs to the match, so it follows the creator's plan,
             // not whoever happens to be holding the scorer.
+            // Live commentary: is someone on air (the speaker icon). The listen pass itself is
+            // fetched on tap, never sent in this ETag'd payload.
+            'liveCommentary' => app(\App\Services\MatchCommentary::class)->publicState($match),
             'shotPlotting' => app(MemberEntitlements::class)->allows(
                 User::query()->find($match->user_id),
                 MemberFeature::MATCHES_SHOT_PLOTTING,

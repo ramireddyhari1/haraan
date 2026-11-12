@@ -985,6 +985,17 @@ private fun ScorerLoaded(
                 ScCircleIcon(Icons.Outlined.Flag, "End match") { showEndMatch = true }
                 Spacer(Modifier.width(10.dp))
             }
+            // Live commentary (Hero): the scorer's voice to everyone on the match screen.
+            // Stays while on air even after the last ball, so End is always reachable.
+            if (!matchOver || com.haraan.app.commentary.CommentaryBroadcaster.isOnAir(matchId)) {
+                com.haraan.app.commentary.ScorerMicButton(
+                    matchId = matchId,
+                    matchTitle = state.title,
+                    background = ScPanel,
+                    ink = ScInk,
+                )
+                Spacer(Modifier.width(10.dp))
+            }
             ScCircleIcon(Icons.Outlined.Add, "Add match device") { showDevices = true }
             Spacer(Modifier.width(10.dp))
             ScCircleIcon(Icons.Outlined.Share, "Share") {
@@ -1004,6 +1015,9 @@ private fun ScorerLoaded(
                 showLanguage = true
             }
         }
+
+        // On air: time, voice meter, listeners, Mute / End. Nothing when off air.
+        com.haraan.app.commentary.OnAirStrip(matchId = matchId)
 
         // Hero score.
         //

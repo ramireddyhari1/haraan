@@ -22,6 +22,12 @@ dependencyResolutionManagement {
             }
         }
         mavenCentral()
+        // Only for LiveKit's audio routing library (live commentary). Scoped to that one
+        // group so nothing else can ever resolve from JitPack.
+        maven {
+            url = uri("https://jitpack.io")
+            content { includeGroup("com.github.davidliu") }
+        }
     }
 }
 

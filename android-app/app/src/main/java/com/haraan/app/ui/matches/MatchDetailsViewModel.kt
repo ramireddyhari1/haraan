@@ -188,6 +188,8 @@ class MatchDetailsViewModel : ViewModel() {
             scoreBlocked = o.optName("scoreBlocked"),
             shotPlotting = o.optBoolean("shotPlotting", false),
             shotTypes = o.optBoolean("shotTypes", false),
+            commentaryOnAir = o.optJSONObject("liveCommentary")?.optBoolean("onAir", false) ?: false,
+            commentaryBy = o.optJSONObject("liveCommentary")?.optName("by").orEmpty(),
             innings = o.optInt("innings", 1),
             homeSquad = squad(o.optJSONArray("homeSquad")),
             awaySquad = squad(o.optJSONArray("awaySquad")),

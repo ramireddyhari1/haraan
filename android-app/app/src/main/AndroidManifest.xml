@@ -17,6 +17,15 @@
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
     <!-- Required to post notifications on Android 13+ (requested at runtime in MainActivity). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Live commentary. The mic is asked for only when a scorer taps the mic to go on air;
+         listening needs no permission. The two foreground-service types keep the mic (on air)
+         and playback (listening) running with the screen off, each under its own notification. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <!-- Package visibility for UPI payment apps (Android 11+) -->
     <queries>
@@ -187,6 +196,15 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <service
+            android:name=".commentary.CommentaryBroadcastService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+        <service
+            android:name=".commentary.CommentaryListenService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+
     </application>
 
 </manifest>

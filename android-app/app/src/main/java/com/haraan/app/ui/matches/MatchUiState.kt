@@ -173,6 +173,10 @@ data class MatchUiState(
     val shotPlotting: Boolean = false,
     /** The scorer is asked which stroke each boundary was. Follows the creator's plan. */
     val shotTypes: Boolean = false,
+    /** Someone is calling this match live right now (the header's speaker icon). */
+    val commentaryOnAir: Boolean = false,
+    /** Who is commentating, for the speaker's label and the listening notification. */
+    val commentaryBy: String = "",
     /**
      * Why scoring would be refused despite [canScore] — currently only "profile_incomplete".
      * Blank when nothing is in the way. Lets the Score button explain itself instead of

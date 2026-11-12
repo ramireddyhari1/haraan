@@ -271,6 +271,15 @@ fun MatchDetailsScreen(
                             onScoreClick = onOpenScorer,
                             onBack = onBack,
                             onWatchersClick = openViewers,
+                            speaker = {
+                                com.haraan.app.commentary.CommentarySpeakerButton(
+                                    matchId = matchId,
+                                    code = joinCode,
+                                    matchTitle = "${state.data.team1} vs ${state.data.team2}",
+                                    onAir = state.data.commentaryOnAir,
+                                    by = state.data.commentaryBy,
+                                )
+                            },
                         )
                     }
 

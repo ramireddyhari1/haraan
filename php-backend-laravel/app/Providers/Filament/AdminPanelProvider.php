@@ -124,6 +124,8 @@ class AdminPanelProvider extends PanelProvider
                 \App\Filament\Pages\AppUpdatesPage::class,
                 \App\Filament\Pages\ServerStatus::class,
                 \App\Filament\Pages\WhatsAppConnection::class,
+                // GameHub → Commentary rules: the `commentary` rules (switch, limits, reports).
+                \App\Filament\Pages\CommentaryRulesPage::class,
                 // Platform → Pulse desktop page: the `pulse_web` sections under the /gamehub grid.
                 \App\Filament\Pages\PulseWebPage::class,
                 // Workforce & HR → Today: who's in, who's off, what's waiting on a manager.

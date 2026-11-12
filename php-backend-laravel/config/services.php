@@ -246,4 +246,14 @@ return [
         'key' => env('GOOGLE_TRANSLATE_API_KEY'),
     ],
 
+    // Live commentary audio (MatchCommentary). `url` is what phones connect to (wss://…);
+    // `api_url` is where Laravel calls the server API — the same host over https, or the local
+    // port on the box (http://127.0.0.1:7880). Unset key/secret = commentary unavailable.
+    'livekit' => [
+        'url' => env('LIVEKIT_URL'),
+        'api_url' => env('LIVEKIT_API_URL'),
+        'key' => env('LIVEKIT_API_KEY'),
+        'secret' => env('LIVEKIT_API_SECRET'),
+    ],
+
 ];
