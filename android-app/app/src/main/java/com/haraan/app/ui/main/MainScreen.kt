@@ -4384,7 +4384,8 @@ private fun CrexMatchesScreen(
   // The token scopes the feed to the viewer's district (+ FEATURED); admins get all.
   var liveFeed by remember { mutableStateOf<List<com.haraan.app.data.LiveMatchRow>?>(null) }
   val locationRepo = remember { com.haraan.app.data.LocationRepository(context) }
-  val loadLiveFeed: suspend () -> Unit = remember {
+  // Returns whether a fresh feed arrived (the pull-to-refresh result line reads it).
+  val loadLiveFeed: suspend () -> Boolean = remember {
     {
       val token = com.haraan.app.data.TokenStore.getToken(context)
       // Rank by the device's cached fix — a real GPS fix or a Google-geocoded chosen
@@ -4402,7 +4403,7 @@ private fun CrexMatchesScreen(
           locality = here?.area.orEmpty(),
           district = here?.district.orEmpty(),
         )
-      }.getOrNull()?.let { liveFeed = it }
+      }.getOrNull()?.let { liveFeed = it } != null
     }
   }
   LaunchedEffect(Unit) { loadLiveFeed() }
@@ -4579,6 +4580,70 @@ private fun CrexMatchesScreen(
     }
   }
 
+  // Pull-to-refresh on the board. Re-reads what the tab on screen shows, directly (not by
+  // bumping a reload key) so the spinner stays up exactly as long as the fetch does.
+  // `boardRefreshKey` reaches the leaderboard, which loads its own rows.
+  var boardRefreshing by remember { mutableStateOf(false) }
+  var boardRefreshFailed by remember { mutableStateOf(false) }
+  var boardRefreshKey by remember { mutableStateOf(0) }
+  fun refreshBoard() {
+    if (boardRefreshing) return
+    boardRefreshing = true
+    scope.launch {
+      val started = System.currentTimeMillis()
+      val ok = runCatching {
+        when (selectedTab) {
+          0, 1 -> {
+            val fresh = loadLiveFeed()
+            if (selectedTab == 0) {
+              playerRepository.spotlight(com.haraan.app.data.TokenStore.getSignedInToken(context))
+                ?.let { spotlight = it }
+            }
+            feedHouseAds = runCatching {
+              com.haraan.app.data.ContentRepository().getAds("actionboard_feed", com.haraan.app.data.TokenStore.getToken(context))
+            }.getOrDefault(feedHouseAds)
+            fresh
+          }
+          2 -> {
+            val signed = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            val fresh = if (scheduledSubTab == 0) {
+              if (signed == null) { scheduledMatches = emptyList(); true }
+              else runCatching { matchRepository.getScheduledMatches(signed) }
+                .onSuccess { scheduledMatches = it }.isSuccess
+            } else {
+              val here = locationRepo.cached() as? com.haraan.app.data.LocationState.Resolved
+              runCatching {
+                matchRepository.getOpenMatches(
+                  token = com.haraan.app.data.TokenStore.getToken(context),
+                  latitude = here?.latitude,
+                  longitude = here?.longitude,
+                  locality = here?.area.orEmpty(),
+                  district = here?.district.orEmpty(),
+                )
+              }.onSuccess { openMatches = it }.isSuccess
+            }
+            if (signed != null) {
+              runCatching { matchRepository.getIncomingJoinRequests(signed) }.getOrNull()
+                ?.let { incomingJoinRequests = it }
+            }
+            fresh
+          }
+          else -> {
+            districtRepository.fetchSummary(com.haraan.app.data.TokenStore.getToken(context))
+              ?.let { districtSummary = it }
+            boardRefreshKey++
+            true
+          }
+        }
+      }.getOrDefault(false)
+      // Let the ball hop at least one stretch, even when the server answers instantly.
+      val elapsed = System.currentTimeMillis() - started
+      if (elapsed < 900) kotlinx.coroutines.delay(900 - elapsed)
+      boardRefreshFailed = !ok
+      boardRefreshing = false
+    }
+  }
+
   // "Play again" from the post-match screen: the same gated path as the Create button.
   LaunchedEffect(createRequested) {
     if (createRequested) {
@@ -4688,6 +4753,13 @@ private fun CrexMatchesScreen(
           }
         }
 
+      com.haraan.app.ui.components.HaraanPullRefreshBox(
+        isRefreshing = boardRefreshing,
+        onRefresh = { refreshBoard() },
+        ball = com.haraan.app.ui.components.pullBallFor(if (selectedTab >= 3) boardSport else selectedSport),
+        lastFailed = boardRefreshFailed,
+        modifier = Modifier.fillMaxSize(),
+      ) {
       LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
@@ -4908,6 +4980,7 @@ private fun CrexMatchesScreen(
               location = districtSummary?.district,
               onPlayerClick = { selectedLeaderboardPlayer = it },
               sport = boardSport,
+              refreshKey = boardRefreshKey,
             )
           }
         } else if (selectedTab == 4) {
@@ -4917,9 +4990,11 @@ private fun CrexMatchesScreen(
               location = districtSummary?.state,
               onPlayerClick = { selectedLeaderboardPlayer = it },
               sport = boardSport,
+              refreshKey = boardRefreshKey,
             )
           }
         }
+      }
       }
       }
 
@@ -6137,7 +6212,8 @@ private fun HomeFeedScreen(
   var reportPost by remember { mutableStateOf<com.haraan.app.data.FeedPost?>(null) }
   val rules = feed?.rules ?: com.haraan.app.data.HomeFeedRules()
 
-  val reload: suspend () -> Unit = {
+  /** True when a fresh feed arrived. */
+  val reload: suspend () -> Boolean = {
     loading = feed == null
     val result = repository.homeFeed(tokenProvider())
     if (result != null) {
@@ -6145,6 +6221,7 @@ private fun HomeFeedScreen(
       posts = result.posts
     }
     loading = false
+    result != null
   }
   LaunchedEffect(reloadKey) { reload() }
   // "Players to follow" row under the stories. Null = not loaded or failed; the row hides.
@@ -6153,7 +6230,28 @@ private fun HomeFeedScreen(
     spotlight = repository.spotlight(com.haraan.app.data.TokenStore.getSignedInToken(context))
   }
 
-  Box(modifier = modifier.background(Color.White)) {
+  // Pull-to-refresh: the feed and the "Players to follow" row, spinner held for the fetch.
+  var pullRefreshing by remember { mutableStateOf(false) }
+  var pullFailed by remember { mutableStateOf(false) }
+  com.haraan.app.ui.components.HaraanPullRefreshBox(
+    isRefreshing = pullRefreshing,
+    onRefresh = {
+      if (!pullRefreshing) {
+        pullRefreshing = true
+        scope.launch {
+          val started = System.currentTimeMillis()
+          val ok = runCatching { reload() }.getOrDefault(false)
+          repository.spotlight(com.haraan.app.data.TokenStore.getSignedInToken(context))?.let { spotlight = it }
+          val elapsed = System.currentTimeMillis() - started
+          if (elapsed < 900) kotlinx.coroutines.delay(900 - elapsed)
+          pullFailed = !ok
+          pullRefreshing = false
+        }
+      }
+    },
+    lastFailed = pullFailed,
+    modifier = modifier.background(Color.White),
+  ) {
     when {
       loading && feed == null -> {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -6182,8 +6280,15 @@ private fun HomeFeedScreen(
         }
       }
       posts.isEmpty() && (feed?.stories.isNullOrEmpty()) -> {
+        // Scrollable so the empty state can still be pulled to refresh; min height = the
+        // viewport so it stays centred (verticalScroll alone would pin it to the top).
+        androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        val viewportHeight = maxHeight
         Column(
-          modifier = Modifier.fillMaxSize().padding(32.dp),
+          modifier = Modifier.fillMaxWidth()
+            .verticalScroll(androidx.compose.foundation.rememberScrollState())
+            .heightIn(min = viewportHeight)
+            .padding(32.dp),
           horizontalAlignment = Alignment.CenterHorizontally,
           verticalArrangement = Arrangement.Center,
         ) {
@@ -6214,6 +6319,7 @@ private fun HomeFeedScreen(
               containerColor = HaraanColors.EventsBlue,
             )
           }
+        }
         }
       }
       else -> {
@@ -8050,6 +8156,8 @@ private fun CrexLeaderboardSection(
   onPlayerClick: (LeaderboardPlayer) -> Unit = {},
   /** Which sport the board ranks. "All" is the cross-sport board, as before. */
   sport: String = "All",
+  /** Bumped by the board's pull-to-refresh to re-fetch the ranking. */
+  refreshKey: Int = 0,
 ) {
   val categories = listOf("Batters", "Bowlers", "All-rounders")
   var selectedCategoryIndex by remember { mutableStateOf(0) }
@@ -8065,7 +8173,7 @@ private fun CrexLeaderboardSection(
   AutoRefresh(intervalMs = 0L) { boardTick++ }
   // True when the board on screen is DemoLeaderboard's (debug builds only).
   var showingDemo by remember { mutableStateOf(false) }
-  val realPlayers by produceState<List<LeaderboardPlayer>?>(null, location, isStateBoard, boardTick, sport) {
+  val realPlayers by produceState<List<LeaderboardPlayer>?>(null, location, isStateBoard, boardTick, sport, refreshKey) {
     val demo = com.haraan.app.data.DemoLeaderboard
     value = if (location.isNullOrBlank() && !demo.enabled) {
       null
