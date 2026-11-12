@@ -8,6 +8,8 @@ package com.haraan.app.ui.social
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.border
 import androidx.compose.ui.res.painterResource
 import com.haraan.app.R
@@ -133,10 +135,32 @@ fun ChatListScreen(
     // Bumped by the caller after creating or leaving a group, to force a reload so the
     // list reflects the change without the user having to leave and come back.
     reloadKey: Int = 0,
+    /** Extra work a pull-to-refresh should also do (the caller re-reads join requests). */
+    onPullRefresh: suspend () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     var result by remember {
         mutableStateOf<com.haraan.app.data.DirectMessageRepository.ThreadsResult?>(null)
+    }
+    // Pull-to-refresh. A failed pull keeps the inbox already on screen (and says so on the
+    // indicator); it only shows "Couldn't load messages" if there was nothing to keep.
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    var pullRefreshing by remember { mutableStateOf(false) }
+    var pullFailed by remember { mutableStateOf(false) }
+    fun pullRefresh() {
+        if (pullRefreshing) return
+        pullRefreshing = true
+        scope.launch {
+            val started = System.currentTimeMillis()
+            val fresh = load()
+            runCatching { onPullRefresh() }
+            val ok = fresh is com.haraan.app.data.DirectMessageRepository.ThreadsResult.Ready
+            if (ok || result !is com.haraan.app.data.DirectMessageRepository.ThreadsResult.Ready) result = fresh
+            val elapsed = System.currentTimeMillis() - started
+            if (elapsed < 900) kotlinx.coroutines.delay(900 - elapsed)
+            pullFailed = !ok
+            pullRefreshing = false
+        }
     }
     var query by remember { mutableStateOf("") }
     // false = All, true = Unread only. A two-state filter is honest to our data; a
@@ -317,13 +341,19 @@ fun ChatListScreen(
             Spacer(Modifier.height(6.dp))
         }
 
+        com.haraan.app.ui.components.HaraanPullRefreshBox(
+            isRefreshing = pullRefreshing,
+            onRefresh = { pullRefresh() },
+            lastFailed = pullFailed,
+            modifier = Modifier.fillMaxWidth().weight(1f),
+        ) {
         when (val r = result) {
             null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator(color = HaraanColors.EventsBlue)
             }
             // A failed call must never be dressed up as "you have no messages".
             is com.haraan.app.data.DirectMessageRepository.ThreadsResult.Failed ->
-                Box(Modifier.fillMaxSize().padding(horizontal = 40.dp), contentAlignment = Alignment.Center) {
+                PullableFill(Modifier.padding(horizontal = 40.dp)) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("Couldn't load messages", color = HaraanColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.height(6.dp))
@@ -340,11 +370,7 @@ fun ChatListScreen(
                 // of a blank screen, and the copy pointed only at profiles — while a New
                 // group button sat unmentioned in the corner. Now it has something to look
                 // at and names BOTH ways to start a conversation.
-                Column(
-                    Modifier.fillMaxSize().padding(horizontal = 32.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                ) {
+                PullableFill(Modifier.padding(horizontal = 32.dp)) {
                     Box(
                         Modifier.size(66.dp).clip(CircleShape).background(HaraanColors.Field),
                         contentAlignment = Alignment.Center,
@@ -388,7 +414,7 @@ fun ChatListScreen(
                             (t.lastMessage?.contains(q, ignoreCase = true) == true))
                 }
                 if (filtered.isEmpty()) {
-                    Box(Modifier.fillMaxSize().padding(horizontal = 40.dp), contentAlignment = Alignment.Center) {
+                    PullableFill(Modifier.padding(horizontal = 40.dp)) {
                         Text(
                             if (unreadOnly) "You're all caught up." else "No matches for \"$q\".",
                             color = HaraanColors.TextMuted,
@@ -414,6 +440,32 @@ fun ChatListScreen(
                 }
             }
         }
+        }
+    }
+}
+
+/**
+ * A centred, non-list state (empty inbox, failed load, no search hits) that can still be
+ * pulled to refresh: it scrolls, with a minimum height of the space it sits in so the
+ * content stays centred.
+ */
+@Composable
+private fun PullableFill(
+    modifier: Modifier = Modifier,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        val viewport = maxHeight
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .heightIn(min = viewport)
+                .then(modifier),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            content = content,
+        )
     }
 }
 

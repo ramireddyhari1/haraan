@@ -5092,6 +5092,14 @@ private fun CrexMatchesScreen(
           onClose = { showChatList = false },
           showBack = false,
           reloadKey = chatReload,
+          // A pull on the inbox also re-reads join requests (the row at its top).
+          onPullRefresh = {
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            if (token != null) {
+              runCatching { matchRepository.getIncomingJoinRequests(token) }.getOrNull()
+                ?.let { incomingJoinRequests = it }
+            }
+          },
           modifier = Modifier.fillMaxSize(),
         )
       }
