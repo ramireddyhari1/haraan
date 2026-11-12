@@ -33,6 +33,9 @@
     }
     $lastBallKind = $lastBall !== '' ? hrn_ball_kind($lastBall) : 'dot';
     $ballInPlay = $isLive && (bool) ($d['ballInPlay'] ?? false);
+    // Live commentary: the speaker shows only while someone is on air (see partials/match-commentary).
+    $commentary = is_array($d['liveCommentary'] ?? null) ? $d['liveCommentary'] : ['onAir' => false, 'by' => null];
+    $commentaryOnAir = $isLive && (bool) ($commentary['onAir'] ?? false);
     // What the pulse poll compares against: the page reloads only when this moves.
     $pulseV = '';
     if ($isLive && ($pulseMatch = \App\Models\LiveMatch::find($id)) !== null) {
@@ -130,6 +133,17 @@
                 <span class="mdx-live"><span class="mdx-live-dot"></span>LIVE</span>
             @endif
         </div>
+        @if($commentaryOnAir)
+            <button class="mdx-ic mdx-speaker" type="button" data-commentary-speaker data-match="{{ $id }}" aria-pressed="false" aria-label="Listen to live commentary" title="{{ ($commentary['by'] ?? '') !== '' ? $commentary['by'] . ' is calling it live' : 'Live commentary' }}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" fill="currentColor" stroke-linejoin="round"/>
+                    <path class="spk-w1" d="M15.5 9.2a4 4 0 0 1 0 5.6"/>
+                    <path class="spk-w2" d="M18.3 6.6a7.6 7.6 0 0 1 0 10.8"/>
+                </svg>
+                <span class="spk-dot" aria-hidden="true"></span>
+                <span class="spk-spin" aria-hidden="true"></span>
+            </button>
+        @endif
         <button class="mdx-ic mdx-share" type="button" onclick="navigator.clipboard.writeText(window.location.href); this.classList.add('is-done'); setTimeout(()=>this.classList.remove('is-done'),1200);" aria-label="Share">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.6" y1="10.5" x2="15.4" y2="6.5"></line><line x1="8.6" y1="13.5" x2="15.4" y2="17.5"></line></svg>
         </button>
@@ -298,9 +312,11 @@
             // Measured once styles apply (they load after this markup), and on any resize.
             document.addEventListener('DOMContentLoaded', stickTop);
             window.addEventListener('load', stickTop);
-            window.addEventListener('resize', stickTop);
+            var ep = window.mdxEpoch || 0;
+            window.addEventListener('resize', function () { if ((window.mdxEpoch || 0) === ep) stickTop(); });
             if ('ResizeObserver' in window) new ResizeObserver(stickTop).observe(bar);
-            function lift() { root.classList.toggle('is-scrolled', tabs.getBoundingClientRect().top <= bar.offsetHeight + 0.5 && window.scrollY > 4); }
+            stickTop();
+            function lift() { if ((window.mdxEpoch || 0) !== ep) return; root.classList.toggle('is-scrolled', tabs.getBoundingClientRect().top <= bar.offsetHeight + 0.5 && window.scrollY > 4); }
             window.addEventListener('scroll', lift, { passive: true });
             lift();
             var land = false;
@@ -321,6 +337,7 @@
                 if (!a) return;
                 if (navigator.vibrate) { try { navigator.vibrate(8); } catch (x) {} }
                 if (a.classList.contains('is-on')) { e.preventDefault(); return; }
+                if (window.HaraanCommentary && window.HaraanCommentary.go(a.href)) { e.preventDefault(); return; }
                 // Read past the hero: land the next tab at the strip too.
                 try { if (tabs.getBoundingClientRect().top <= bar.offsetHeight + 1) sessionStorage.setItem(KEY, '1'); } catch (x) {}
             });
@@ -406,6 +423,46 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 @media (prefers-reduced-motion: reduce) { ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; } }
 .mdx-ic svg { width: 19px; height: 19px; }
 .mdx-share.is-done { background: #DCFCE7; color: #16A34A; border-color: #BBF7D0; }
+/* Live commentary speaker: outline + red live dot = tap to listen; solid blue with waves that
+   move with the voice (--lvl, 0..1) = listening. */
+.mdx-speaker { position: relative; margin-right: 8px; --lvl: 0; }
+.mdx-speaker .spk-w1, .mdx-speaker .spk-w2 { transition: opacity .1s linear; }
+.mdx-speaker .spk-w1 { opacity: .55; }
+.mdx-speaker .spk-w2 { opacity: .3; }
+.mdx-speaker .spk-dot { position: absolute; top: 6px; right: 6px; width: 7px; height: 7px; border-radius: 50%; background: #DC2626; box-shadow: 0 0 0 1.5px #fff; }
+.mdx-speaker .spk-spin { display: none; position: absolute; inset: 9px; border-radius: 50%; border: 2px solid rgba(37,99,235,.2); border-top-color: #2563EB; animation: spk-spin .8s linear infinite; }
+.mdx-speaker.is-connecting svg, .mdx-speaker.is-connecting .spk-dot { opacity: 0; }
+.mdx-speaker.is-connecting .spk-spin { display: block; }
+.mdx-speaker.is-playing { background: #2563EB; border-color: #2563EB; color: #fff; }
+.mdx-speaker.is-playing .spk-dot { display: none; }
+.mdx-speaker.is-playing .spk-w1 { opacity: calc(.45 + var(--lvl) * .55); }
+.mdx-speaker.is-playing .spk-w2 { opacity: calc(.15 + var(--lvl) * .85); }
+@keyframes spk-spin { to { transform: rotate(360deg); } }
+
+/* The player bar: fixed to the bottom, outside <main>, so in-place updates never touch it. */
+.mcx-bar { position: fixed; left: 50%; bottom: 14px; z-index: 60; width: min(560px, calc(100% - 24px)); transform: translate(-50%, 140%); transition: transform .32s cubic-bezier(.2,.8,.2,1); --lvl: 0; }
+.mcx-bar.is-on { transform: translate(-50%, 0); }
+.mcx-bar-in { display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 6px; background: #fff; border: 1px solid rgba(220,38,38,.25); border-radius: 18px; box-shadow: 0 10px 30px rgba(15,23,42,.14); }
+.mcx-mic { width: 46px; height: 46px; flex: 0 0 auto; }
+.mcx-rings path { fill: none; stroke: #DC2626; stroke-width: 2.2; stroke-linecap: round; transition: opacity .1s linear; }
+.mcx-rings path:nth-child(-n+2) { opacity: calc(.22 + var(--lvl) * .78); }
+.mcx-rings path:nth-child(n+3) { opacity: calc(.06 + var(--lvl) * .94); }
+.mcx-txt { flex: 1 1 auto; min-width: 0; }
+.mcx-who { display: flex; align-items: center; gap: 7px; }
+.mcx-lamp { font-size: 9.5px; font-weight: 800; letter-spacing: 1.3px; color: #fff; background: #DC2626; border-radius: 5px; padding: 2px 6px; }
+.mcx-name { font-size: 13.5px; font-weight: 700; color: #0F172A; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mcx-sub { font-size: 11.5px; color: #64748B; margin-top: 2px; }
+.mcx-btn { flex: 0 0 auto; font: inherit; font-size: 12.5px; font-weight: 600; padding: 7px 12px; border-radius: 10px; background: #fff; border: 1px solid #E2E8F0; color: #0F172A; cursor: pointer; }
+.mcx-stop { color: #DC2626; border-color: rgba(220,38,38,.3); }
+.mcx-report { color: #64748B; }
+.mcx-reasons { margin-top: 6px; background: #fff; border: 1px solid #E2E8F0; border-radius: 14px; box-shadow: 0 10px 30px rgba(15,23,42,.12); overflow: hidden; }
+.mcx-reasons-h { font-size: 12px; font-weight: 700; color: #64748B; padding: 10px 14px 6px; }
+.mcx-reasons button { display: block; width: 100%; text-align: left; font: inherit; font-size: 14px; color: #0F172A; padding: 11px 14px; background: none; border: 0; border-top: 1px solid #F1F5F9; cursor: pointer; }
+.mcx-reasons button:hover { background: #F8FAFC; }
+html.mcx-listening body { padding-bottom: 84px; }
+.mcx-toast { position: fixed; left: 50%; bottom: 96px; transform: translate(-50%, 12px); opacity: 0; z-index: 70; background: #0F172A; color: #fff; font-size: 13px; padding: 9px 14px; border-radius: 10px; transition: opacity .2s, transform .2s; pointer-events: none; max-width: calc(100% - 32px); }
+.mcx-toast.is-in { opacity: 1; transform: translate(-50%, 0); }
+@media (prefers-reduced-motion: reduce) { .mcx-bar { transition: none; } }
 .mdx-bar-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
 .mdx-bar-teams { font-size: 16px; font-weight: 800; letter-spacing: -.2px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mdx-vs-lite { color: var(--muted); font-weight: 600; }
@@ -714,8 +771,9 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
         }
 
         layout();
-        var off = 0;
+        var off = 0, ep = window.mdxEpoch || 0;
         function tick() {
+            if ((window.mdxEpoch || 0) !== ep) return;
             off -= 0.35;
             if (off <= -segLen) off += segLen;
             tp.setAttribute('startOffset', off);
@@ -723,7 +781,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
         }
         requestAnimationFrame(tick);
         var rt;
-        window.addEventListener('resize', function () { clearTimeout(rt); rt = setTimeout(layout, 150); });
+        window.addEventListener('resize', function () { if ((window.mdxEpoch || 0) !== ep) return; clearTimeout(rt); rt = setTimeout(layout, 150); });
     })();
 </script>
 <script>
@@ -889,6 +947,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
         function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
         var reduced = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+        var umpEp = window.mdxEpoch || 0;
         // A ball he has already signalled (moving between tabs, a refetch) is not a new
         // moment: he is simply standing there with the signal, as the app keys on the ball.
         var seenKey = 'mdxUmp' + @json((string) $id), ballKey = svg.getAttribute('data-key') || '';
@@ -896,7 +955,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
         try { seen = sessionStorage.getItem(seenKey) === ballKey; sessionStorage.setItem(seenKey, ballKey); } catch (e) {}
         if (reduced || seen) {
             st.rise = 0; st.p = target.slice(); st.finger = call === 'OUT' ? 1 : 0; paint(0);
-            if (!reduced) (function idle(now) { paint(now, true); requestAnimationFrame(idle); })(performance.now());
+            if (!reduced) (function idle(now) { if ((window.mdxEpoch || 0) !== umpEp) return; paint(now, true); requestAnimationFrame(idle); })(performance.now());
             return;
         }
 
@@ -924,7 +983,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
             })
             .then(function () {
                 // Between balls he breathes, so the slot never reads as a sticker.
-                (function idle(now) { paint(now, true); if (!document.hidden) requestAnimationFrame(idle); else setTimeout(function () { requestAnimationFrame(idle); }, 500); })(performance.now());
+                (function idle(now) { if ((window.mdxEpoch || 0) !== umpEp) return; paint(now, true); if (!document.hidden) requestAnimationFrame(idle); else setTimeout(function () { requestAnimationFrame(idle); }, 500); })(performance.now());
             });
     })();
 </script>
@@ -936,8 +995,12 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
     (function () {
         var url = @json(url('/api/live-matches/' . $id . '/pulse'));
         var v = @json($pulseV);
+        var air = @json($commentaryOnAir);
         var slot = document.querySelector('.mdx-lastball');
-        var fails = 0, timer = null;
+        var fails = 0, timer = null, ep = window.mdxEpoch || 0;
+        function refresh() {
+            if (window.HaraanCommentary) window.HaraanCommentary.refresh(); else location.reload();
+        }
 
         function bowling(on) {
             if (slot) slot.classList.toggle('is-bowling', on);
@@ -945,29 +1008,37 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
         }
 
         function beat() {
+            if ((window.mdxEpoch || 0) !== ep) return;
             // A background tab doesn't need the ball; it catches up on return.
             if (document.hidden) { timer = setTimeout(beat, 3000); return; }
             fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
                 .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
                 .then(function (p) {
                     fails = 0;
-                    if (p.v !== v || !p.live) { try { sessionStorage.setItem('mdxFresh' + @json((string) $id), '1'); } catch (e) {} location.reload(); return; }
+                    if ((window.mdxEpoch || 0) !== ep) return;
+                    var airNow = !!p.commentary;
+                    if (p.v !== v || !p.live || airNow !== air) {
+                        if (p.v !== v) { try { sessionStorage.setItem('mdxFresh' + @json((string) $id), '1'); } catch (e) {} }
+                        refresh(); return;
+                    }
                     bowling(!!p.ballInPlay);
                     timer = setTimeout(beat, 3000);
                 })
                 .catch(function () {
                     // Pulse unreachable (private match, network): fall back to the old
                     // behaviour rather than freezing the score.
-                    if (++fails >= 10) { location.reload(); return; }
+                    if (++fails >= 10) { refresh(); return; }
                     timer = setTimeout(beat, 3000);
                 });
         }
 
         timer = setTimeout(beat, 3000);
         document.addEventListener('visibilitychange', function () {
+            if ((window.mdxEpoch || 0) !== ep) return;
             if (!document.hidden) { clearTimeout(timer); beat(); }
         });
     })();
 </script>
 @endif
+@include('site.partials.match-commentary', ['id' => $id, 'commentary' => $commentary])
 @endsection

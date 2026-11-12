@@ -238,6 +238,8 @@ class LiveMatchController extends Controller
             'ballInPlay' => strtolower((string) $match->status) === 'live'
                 && \App\Support\BallInPlay::since($match->id) !== null,
             'v' => self::scoreVersion($match),
+            // Someone is calling the match live: the page shows (or drops) its speaker.
+            'commentary' => app(\App\Services\MatchCommentary::class)->publicState($match)['onAir'],
         ]);
     }
 

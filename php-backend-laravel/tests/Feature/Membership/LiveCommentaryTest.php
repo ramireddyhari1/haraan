@@ -256,6 +256,22 @@ class LiveCommentaryTest extends TestCase
             ->assertStatus(503)->assertJsonPath('code', 'unavailable');
     }
 
+    public function test_the_website_match_page_shows_the_speaker_only_while_on_air(): void
+    {
+        $match = $this->match($this->player());
+        $page = "/gamehub/actionboard/match/{$match->id}";
+
+        $this->get($page)->assertOk()->assertDontSee('data-commentary-speaker data-match', false);
+        $this->getJson("/api/live-matches/{$match->id}/pulse")->assertOk()->assertJsonPath('commentary', false);
+
+        [, $live] = $this->onAir();
+        $this->get("/gamehub/actionboard/match/{$live->id}")
+            ->assertOk()
+            ->assertSee('data-commentary-speaker data-match', false)
+            ->assertSee('livekit-client@2.22.4', false);
+        $this->getJson("/api/live-matches/{$live->id}/pulse")->assertOk()->assertJsonPath('commentary', true);
+    }
+
     /** @return array{0: User, 1: LiveMatch, 2: int} */
     private function onAir(): array
     {
