@@ -657,6 +657,7 @@ fun PlayerProfileScreen(
     var state by remember { mutableStateOf<ProfileState>(ProfileState.Loading) }
     var reloadKey by remember { mutableStateOf(0) }
     var refreshing by remember { mutableStateOf(false) }
+    var refreshFailed by remember { mutableStateOf(false) }
     // Hoisted so the top-bar overflow can raise the same share sheet the profile owns.
     var showShare by remember { mutableStateOf(false) }
     var showMore by remember { mutableStateOf(false) }
@@ -670,12 +671,22 @@ fun PlayerProfileScreen(
         // profile on screen and lets the refresh indicator do the talking —
         // otherwise pulling down throws away the thing you were looking at.
         if (state !is ProfileState.Loaded) state = ProfileState.Loading
-        state = try {
+        val started = System.currentTimeMillis()
+        val next = try {
             val loaded = fetchProfile()
             onProfileLoaded?.invoke(loaded)
             ProfileState.Loaded(loaded)
         } catch (e: Exception) {
             ProfileState.Error(e.message ?: "Unable to load profile.")
+        }
+        // A failed PULL keeps the profile on screen; the indicator says it couldn't refresh.
+        val failedPull = refreshing && next is ProfileState.Error && state is ProfileState.Loaded
+        if (!failedPull) state = next
+        if (refreshing) {
+            // Let the ball hop at least one stretch, even when the server answers instantly.
+            val elapsed = System.currentTimeMillis() - started
+            if (elapsed < 900) kotlinx.coroutines.delay(900 - elapsed)
+            refreshFailed = next is ProfileState.Error
         }
         refreshing = false
     }
@@ -731,7 +742,8 @@ fun PlayerProfileScreen(
                 deriveExtras(s.profile),
                 onOpenAccounts = onOpenAccounts,
                 refreshing = refreshing,
-                onRefresh = { refreshing = true; reloadKey++ },
+                refreshFailed = refreshFailed,
+                onRefresh = { if (!refreshing) { refreshing = true; reloadKey++ } },
                 isSelf = isSelf,
                 onCreateMatch = onCreateMatch,
                 onToggleFollow = onToggleFollow,
@@ -830,6 +842,8 @@ private fun ProfileContent(
     onOpenAccounts: (() -> Unit)? = null,
     refreshing: Boolean,
     onRefresh: () -> Unit,
+    /** The last pull failed and the profile on screen is the one from before it. */
+    refreshFailed: Boolean = false,
     isSelf: Boolean = false,
     onCreateMatch: (() -> Unit)? = null,
     onToggleFollow: (suspend (Boolean) -> Boolean?)? = null,
@@ -898,12 +912,13 @@ private fun ProfileContent(
         // Open the compose screen (review + caption) instead of uploading on the spot.
         if (uris.isNotEmpty()) pendingPostUris = uris
     }
-    androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+    // The same H + ball pull as the ActionBoard; the ball is the player's main sport.
+    // (The indicator gives its own tick when the pull arms, so none here.)
+    com.haraan.app.ui.components.HaraanPullRefreshBox(
         isRefreshing = refreshing,
-        onRefresh = {
-            view.performHapticFeedback(Feel.TICK)
-            onRefresh()
-        },
+        onRefresh = onRefresh,
+        ball = com.haraan.app.ui.components.pullBallFor(p.careerBook?.primary ?: p.sportCareer?.sport),
+        lastFailed = refreshFailed,
         modifier = Modifier.fillMaxSize(),
     ) {
     val played = hasAnyHistory(p)
