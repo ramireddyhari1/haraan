@@ -98,17 +98,7 @@
 
                 @if ($openCount === 0)
                     <div class="cc-clear">
-                        {{-- Clipboard, every line ticked --}}
-                        <svg width="64" height="72" viewBox="0 0 64 72" fill="none" aria-hidden="true">
-                            <rect x="6" y="8" width="52" height="60" rx="8" fill="var(--cc-surface)" stroke="var(--cc-ink)" stroke-width="2"/>
-                            <rect x="20" y="3" width="24" height="11" rx="4" fill="var(--cc-sunk)" stroke="var(--cc-ink)" stroke-width="2"/>
-                            <path d="M16 30l3.5 3.5L26 27" stroke="var(--cc-green)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M31 30.5h17" stroke="var(--cc-line)" stroke-width="3" stroke-linecap="round"/>
-                            <path d="M16 44l3.5 3.5L26 41" stroke="var(--cc-green)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M31 44.5h12" stroke="var(--cc-line)" stroke-width="3" stroke-linecap="round"/>
-                            <path d="M16 58l3.5 3.5L26 55" stroke="var(--cc-green)" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M31 58.5h15" stroke="var(--cc-line)" stroke-width="3" stroke-linecap="round"/>
-                        </svg>
+                        <span class="cc-clear-ic" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7"/></svg></span>
                         <div>
                             <p>All clear</p>
                             <span>No unread support, payouts due, hidden venues, unsent messages or failed payments.</span>
@@ -117,14 +107,14 @@
                 @endif
 
                 <div class="cc-rows">
-                    @foreach ($radar as $item)
+                    @foreach (collect($radar)->where('count', '>', 0) as $item)
                         <a href="{{ $item['url'] }}" class="cc-row {{ $item['count'] > 0 ? 'hot' : '' }}">
                             <span class="cc-row-ic"><x-filament::icon :icon="$item['icon']" /></span>
                             <span class="cc-row-main">
                                 <span class="cc-row-t" style="display:block">{{ $item['title'] }}</span>
                                 <span class="cc-row-s" style="display:block">{{ $item['sub'] }}</span>
                             </span>
-                            <span class="cc-count cc-num {{ $item['count'] > 0 ? '' : 'zero' }}">{{ $item['count'] > 0 ? $item['count'] : '0' }}</span>
+                            <span class="cc-count cc-num">{{ $item['count'] }}</span>
                         </a>
                     @endforeach
                 </div>
@@ -145,23 +135,18 @@
                     <a class="cc-more" href="{{ $events['url'] }}">Open<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4.5 2.5 8 6l-3.5 3.5"/></svg></a>
                 </div>
 
-                <svg class="cc-figure" viewBox="0 0 300 118" aria-label="{{ number_format($events['tickets']) }} tickets sold">
-                    <defs>
-                        <clipPath id="cc-stub"><rect x="214" y="0" width="86" height="118"/></clipPath>
-                    </defs>
-                    <path d="M14 1H206a8 8 0 0 0 16 0H286a13 13 0 0 1 13 13V104a13 13 0 0 1-13 13H222a8 8 0 0 0-16 0H14A13 13 0 0 1 1 104V14A13 13 0 0 1 14 1Z"
-                          fill="var(--cc-surface)" stroke="var(--cc-ink)" stroke-width="1.5"/>
-                    <path d="M14 1H206a8 8 0 0 0 16 0H286a13 13 0 0 1 13 13V104a13 13 0 0 1-13 13H222a8 8 0 0 0-16 0H14A13 13 0 0 1 1 104V14A13 13 0 0 1 14 1Z"
-                          fill="var(--cc-blue-soft)" clip-path="url(#cc-stub)"/>
-                    <path d="M214 12V106" stroke="var(--cc-ink-3)" stroke-width="1.5" stroke-dasharray="1 5" stroke-linecap="round"/>
-                    <text x="20" y="30" style="fill: var(--cc-ink-3); font-size: 11px; font-weight: 600">TICKETS SOLD · {{ strtoupper($h['rangeLabel']) }}</text>
-                    <text x="18" y="78" class="cc-num" style="fill: var(--cc-ink); font-size: 44px; font-weight: 700; letter-spacing: -0.04em">{{ number_format($events['tickets']) }}</text>
-                    <text x="20" y="100" style="fill: var(--cc-ink-2); font-size: 12px">{{ $events['gmv'] }} from {{ number_format($events['orders']) }} {{ $events['orders'] === 1 ? 'order' : 'orders' }}</text>
-                    {{-- stub: the count of upcoming events, set like a seat number --}}
-                    <text x="257" y="36" text-anchor="middle" style="fill: var(--cc-blue); font-size: 10px; font-weight: 700; letter-spacing: .12em">UPCOMING</text>
-                    <text x="257" y="74" text-anchor="middle" class="cc-num" style="fill: var(--cc-ink); font-size: 30px; font-weight: 700">{{ $events['upcoming'] }}</text>
-                    <text x="257" y="94" text-anchor="middle" style="fill: var(--cc-ink-3); font-size: 10.5px">{{ $events['upcoming'] === 1 ? 'event' : 'events' }}</text>
-                </svg>
+                <div class="cc-pair">
+                    <div>
+                        <div class="cc-eyebrow">Tickets sold · {{ $h['rangeLabel'] }}</div>
+                        <div class="cc-big cc-num">{{ number_format($events['tickets']) }}</div>
+                        <div class="cc-pair-s">{{ $events['gmv'] }} from {{ number_format($events['orders']) }} {{ $events['orders'] === 1 ? 'order' : 'orders' }}</div>
+                    </div>
+                    <div>
+                        <div class="cc-eyebrow">Upcoming</div>
+                        <div class="cc-big cc-num">{{ $events['upcoming'] }}</div>
+                        <div class="cc-pair-s">{{ $events['upcoming'] === 1 ? 'event' : 'events' }} listed</div>
+                    </div>
+                </div>
 
                 @if ($events['next'])
                     <a class="cc-note" href="{{ $events['next']['url'] }}">
@@ -236,7 +221,7 @@
                 </div>
             </section>
 
-            {{-- Memberships — one card per paid plan, fanned, each carrying its member count --}}
+            {{-- Memberships — one row per paid plan with its active members --}}
             <section class="cc-card cc-s4 cc-line-card" aria-label="Memberships">
                 <div class="cc-card-h" style="margin-bottom: 0">
                     <h2 class="cc-card-t">
@@ -252,37 +237,21 @@
 
                 @php
                     $plans = $members['plans'];
-                    $pc = count($plans);
-                    $angles = match ($pc) { 1 => [0], 2 => [-6, 6], default => [-10, 0, 10] };
-                    $offs = match ($pc) { 1 => [0], 2 => [-48, 48], default => [-86, 0, 86] };
+                    $planMax = max(1, (int) collect($plans)->max('active'));
                 @endphp
-                <svg class="cc-figure" viewBox="0 0 300 128" aria-label="Active members by plan">
-                    @if ($pc === 0)
-                        <rect x="90" y="20" width="120" height="78" rx="10" fill="none" stroke="var(--cc-line)" stroke-width="1.5" stroke-dasharray="4 3"/>
-                        <text x="150" y="64" text-anchor="middle" style="fill: var(--cc-ink-3); font-size: 12px">No paid plans yet</text>
-                    @else
-                        @foreach ($plans as $i => $plan)
-                            @php
-                                $dark = $i === $pc - 1 && $pc > 1;   // the top plan is the dark card
-                                $cxp = 150 + $offs[$i];
-                                $fill = $dark ? '#0d1424' : ($i === $pc - 2 || $pc === 1 ? 'var(--cc-blue)' : 'var(--cc-surface)');
-                                $ink = ($dark || $fill === 'var(--cc-blue)') ? '#ffffff' : 'var(--cc-ink)';
-                                $sub = ($dark || $fill === 'var(--cc-blue)') ? 'rgba(255,255,255,.72)' : 'var(--cc-ink-3)';
-                            @endphp
-                            <g transform="rotate({{ $angles[$i] }} {{ $cxp }} 150)">
-                                <rect x="{{ $cxp - 58 }}" y="22" width="116" height="78" rx="10" fill="{{ $fill }}" stroke="{{ $fill === 'var(--cc-surface)' ? 'var(--cc-ink)' : 'none' }}" stroke-width="1.4"
-                                      style="filter: drop-shadow(0 4px 6px rgba(16,24,40,.12))"/>
-                                @if ($dark)
-                                    <rect x="{{ $cxp - 54 }}" y="26" width="108" height="70" rx="7" fill="none" stroke="var(--cc-gold)" stroke-width=".8" opacity=".8"/>
-                                @endif
-                                <rect x="{{ $cxp - 46 }}" y="34" width="14" height="10" rx="2.5" fill="none" stroke="{{ $sub }}" stroke-width="1"/>
-                                <text x="{{ $cxp + 46 }}" y="43" text-anchor="end" style="fill: {{ $sub }}; font-size: 10px; font-weight: 700; letter-spacing: .1em">{{ strtoupper(\Illuminate\Support\Str::limit($plan['name'], 10, '')) }}</text>
-                                <text x="{{ $cxp - 46 }}" y="80" class="cc-num" style="fill: {{ $ink }}; font-size: 24px; font-weight: 700">{{ number_format($plan['active']) }}</text>
-                                <text x="{{ $cxp - 46 }}" y="92" style="fill: {{ $sub }}; font-size: 9.5px">active</text>
-                            </g>
+                @if (count($plans) === 0)
+                    <div class="cc-note">No paid plans are set up.</div>
+                @else
+                    <div class="cc-plans">
+                        @foreach ($plans as $plan)
+                            <div class="cc-plan">
+                                <span class="n">{{ $plan['name'] }}</span>
+                                <span class="cc-meter" aria-hidden="true"><i style="width: {{ $plan['active'] > 0 ? max(4, round($plan['active'] / $planMax * 100)) : 0 }}%"></i></span>
+                                <b class="cc-num">{{ number_format($plan['active']) }}</b>
+                            </div>
                         @endforeach
-                    @endif
-                </svg>
+                    </div>
+                @endif
 
                 <div class="cc-kv">
                     <div><span>Paying members</span><b class="cc-num">{{ number_format($members['active']) }}</b></div>
@@ -305,8 +274,7 @@
 
                 @if (empty($feed))
                     <div class="cc-muted-empty">
-                        <x-hrn-illo name="receipt" :size="96" />
-                        <span>No bookings have been made yet. The first one lands here the moment it is paid or held.</span>
+                        <span>No bookings yet.</span>
                     </div>
                 @else
                     <div class="cc-feed">
@@ -341,8 +309,7 @@
                 </div>
                 @if (empty($audit))
                     <div class="cc-muted-empty">
-                        <x-hrn-illo name="clipboard" :size="96" />
-                        <span>Nobody has changed anything yet. Edits to prices, venues, events and payouts are written here with who made them.</span>
+                        <span>No admin changes recorded yet.</span>
                     </div>
                 @else
                     <div class="cc-tl">
@@ -373,8 +340,7 @@
                     </div>
                 @empty
                     <div class="cc-muted-empty">
-                        <x-hrn-illo name="map" :size="96" />
-                        <span>No paid bookings in this window, so no city to show yet.</span>
+                        <span>No paid bookings in this window.</span>
                     </div>
                 @endforelse
 

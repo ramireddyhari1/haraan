@@ -202,7 +202,7 @@ class EventForm
     {
         return Step::make('Basics')
             ->description('What is the event?')
-            ->icon('heroicon-o-sparkles')
+            ->icon('heroicon-o-pencil-square')
             ->schema([
                 TextInput::make('title')
                     ->label('Event title')
@@ -1346,7 +1346,7 @@ class EventForm
                     ->content(new HtmlString(
                         '<div style="display:flex;gap:10px;padding:12px 14px;border-radius:12px;'
                         . 'background:#eef4ff;border:1px solid #d3e2ff;color:#1e3a8a;font-size:.85rem;line-height:1.45;">'
-                        . '<span style="font-size:1.1rem;line-height:1;">🚀</span>'
+                        . '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex:none;margin-top:1px" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'
                         . '<span><strong>Submitted for review.</strong> Haraan checks new events before '
                         . 'they go live — once approved it appears in the app automatically. You can keep '
                         . 'editing it here anytime; your changes stay live after approval.</span></div>'

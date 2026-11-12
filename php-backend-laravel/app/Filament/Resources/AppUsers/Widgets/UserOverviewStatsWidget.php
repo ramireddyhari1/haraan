@@ -108,7 +108,7 @@ class UserOverviewStatsWidget extends StatsOverviewWidget
 
             Stat::make('Membership tier', $data['planName'])
                 ->description($data['subDescription'])
-                ->descriptionIcon('heroicon-m-sparkles')
+                ->descriptionIcon('heroicon-m-star')
                 ->color($data['hasActiveSub'] ? 'warning' : 'gray'),
 
             Stat::make('GameHub matches', number_format($data['matchesCount']))

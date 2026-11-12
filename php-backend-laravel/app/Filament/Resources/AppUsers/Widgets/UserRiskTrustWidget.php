@@ -124,7 +124,7 @@ class UserRiskTrustWidget extends StatsOverviewWidget
                 ->color($isFlaky ? 'danger' : ($lostBookings > 0 ? 'warning' : 'success')),
 
             Stat::make('Device Integrity', count($myTokens) . ' registered ' . str('device')->plural(count($myTokens)))
-                ->description($totalCollisions > 0 ? "⚠️ Identity collision with {$totalCollisions} account(s)" : 'No multi-account collisions')
+                ->description($totalCollisions > 0 ? "Identity collision with {$totalCollisions} account(s)" : 'No multi-account collisions')
                 ->descriptionIcon('heroicon-m-device-phone-mobile')
                 ->color($totalCollisions > 0 ? 'danger' : 'success'),
 

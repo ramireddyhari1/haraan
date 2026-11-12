@@ -15,7 +15,7 @@
                     ['receipt', 'Payroll', 'Monthly payslips: earnings, deductions, net.', \App\Filament\Resources\Hrms\EmployeePayrollResource::getUrl('index')],
                 ] as [$illo, $title, $sub, $url])
                     <a href="{{ $url }}" class="wf-link">
-                        <x-hrn-illo :name="$illo" :size="76" />
+                        <x-hrn-illo :name="$illo" :size="48" />
                         <span>
                             <b>{{ $title }}</b>
                             <span>{{ $sub }}</span>

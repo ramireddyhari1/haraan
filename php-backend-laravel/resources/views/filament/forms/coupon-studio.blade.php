@@ -16,7 +16,7 @@
 
         /* ---- list of created coupons ---- */
         .cp-list{display:flex;flex-direction:column;gap:12px}
-        .cp-empty{display:flex;gap:13px;align-items:flex-start;background:linear-gradient(180deg,#fff,var(--cp-blue-soft));
+        .cp-empty{display:flex;gap:13px;align-items:flex-start;background:var(--cp-blue-soft);
             border:1px dashed #c3d3ee;border-radius:var(--cp-r);padding:18px}
         .cp-empty .cp-ic{width:40px;height:40px;border-radius:11px;background:var(--cp-blue-soft);color:var(--cp-blue);
             display:flex;align-items:center;justify-content:center;font-size:19px;flex:none}
@@ -26,7 +26,7 @@
         .cp-coup{display:flex;align-items:center;gap:14px;background:var(--cp-card);border:1px solid var(--cp-line);
             border-radius:var(--cp-r);padding:14px 16px;box-shadow:0 1px 2px rgba(16,24,40,.05),0 16px 34px -26px rgba(16,24,40,.3)}
         .cp-tag{width:44px;height:44px;border-radius:12px;flex:none;display:flex;align-items:center;justify-content:center;
-            background:linear-gradient(135deg,#eff4ff,#dbe7ff);color:var(--cp-blue);font-size:19px}
+            background:#dbe7ff;color:var(--cp-blue);font-size:19px}
         .cp-coup-main{min-width:0;flex:1}
         .cp-code{font-weight:750;letter-spacing:.02em;font-size:14.5px;text-transform:uppercase}
         .cp-chips{display:flex;gap:6px;margin-top:5px;flex-wrap:wrap}
@@ -39,10 +39,10 @@
         .cp-iconbtn.del:hover{background:#fdecec;color:#e5484d;border-color:#f6cccc}
 
         .cp-add{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;
-            background:linear-gradient(180deg,#fff,#f6f9ff);border:1.5px dashed #c3d3ee;border-radius:var(--cp-r);
+            background:#f6f9ff;border:1.5px dashed #c3d3ee;border-radius:var(--cp-r);
             padding:15px;cursor:pointer;color:var(--cp-blue-d);font-weight:700;font-size:14px;transition:all .18s}
         .cp-add:hover{border-color:var(--cp-blue);background:var(--cp-blue-soft);transform:translateY(-1px);
-            box-shadow:0 14px 30px -20px rgba(37,99,235,.5)}
+            }
         .cp-add .plus{width:26px;height:26px;border-radius:8px;background:var(--cp-blue);color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;line-height:1}
 
         /* ---- wizard modal ---- */
@@ -68,7 +68,7 @@
         .cp-st{display:flex;flex-direction:column;align-items:center;gap:5px;flex:none;width:34px}
         .cp-st .dot{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;
             font-size:12.5px;font-weight:700;background:#eef2f7;color:var(--cp-faint);transition:all .2s}
-        .cp-st.on .dot{background:var(--cp-blue);color:#fff;box-shadow:0 6px 14px -6px rgba(37,99,235,.7)}
+        .cp-st.on .dot{background:var(--cp-blue);color:#fff;}
         .cp-st.done .dot{background:var(--cp-blue);color:#fff}
         .cp-st .lb{font-size:9px;font-weight:650;color:var(--cp-faint);letter-spacing:.01em;white-space:nowrap}
         .cp-st.on .lb,.cp-st.done .lb{color:var(--cp-blue-d)}
@@ -95,7 +95,7 @@
         .cp-choice{display:grid;grid-template-columns:1fr 1fr;gap:10px}
         .cp-opt{display:flex;gap:11px;align-items:flex-start;padding:14px;border-radius:12px;cursor:pointer;border:1.5px solid var(--cp-line);background:#fff;transition:all .15s}
         .cp-opt:hover{border-color:#c9d6ea}
-        .cp-opt.sel{border-color:var(--cp-blue);background:var(--cp-blue-soft);box-shadow:0 8px 20px -16px rgba(37,99,235,.7)}
+        .cp-opt.sel{border-color:var(--cp-blue);background:var(--cp-blue-soft);}
         .cp-opt .ic{width:34px;height:34px;border-radius:9px;background:#eef2f7;color:var(--cp-mut);display:flex;align-items:center;justify-content:center;font-size:16px;flex:none}
         .cp-opt.sel .ic{background:#dbe7ff;color:var(--cp-blue)}
         .cp-opt-t{font-weight:680;font-size:13.5px}
@@ -115,7 +115,7 @@
         .cp-tokrow{display:flex;gap:8px;margin-top:9px}
 
         /* review card */
-        .cp-rev{border-radius:16px;padding:18px;color:#fff;background:linear-gradient(135deg,#2f4bd8,#2036a8)}
+        .cp-rev{border-radius:16px;padding:18px;color:#fff;background:#2036a8}
         .cp-rev-code{font-size:20px;font-weight:800;letter-spacing:.03em;text-transform:uppercase}
         .cp-rev-off{opacity:.92;margin-top:2px;font-weight:600}
         .cp-rev-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:15px}
@@ -127,7 +127,7 @@
         .cp-btn{display:inline-flex;align-items:center;gap:7px;border-radius:10px;font-weight:700;font-size:13.5px;padding:11px 18px;cursor:pointer;border:1px solid var(--cp-line);background:#fff;color:var(--cp-ink2);transition:all .16s}
         .cp-btn:hover{background:#f8fafc;border-color:#dbe3ef}
         .cp-btn.ghost{border:none;background:none;color:var(--cp-mut);padding-left:6px}
-        .cp-btn.pri{background:linear-gradient(135deg,#3b82f6,#2563eb);border-color:transparent;color:#fff;box-shadow:0 12px 24px -12px rgba(37,99,235,.75)}
+        .cp-btn.pri{background:#2563eb;border-color:transparent;color:#fff;}
         .cp-btn.pri:hover{filter:brightness(1.05)}
         .cp-btn:disabled{opacity:.5;cursor:not-allowed}
     </style>
@@ -136,7 +136,7 @@
     <div class="cp-list">
         <template x-if="state.coupons.length===0">
             <div class="cp-empty">
-                <span class="cp-ic">🎟</span>
+                <span class="cp-ic"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v3a2 2 0 0 0 0 4v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a2 2 0 0 0 0-4z"/><path d="M14 6v12" stroke-dasharray="2 2"/></svg></span>
                 <div>
                     <div class="cp-ttl">No coupons yet</div>
                     <div class="cp-sub">Offer discounts to boost ticket sales and reward loyal customers. Buyers enter the code at checkout.</div>
@@ -146,7 +146,7 @@
 
         <template x-for="(c,i) in state.coupons" :key="c.key">
             <div class="cp-coup">
-                <span class="cp-tag">🏷</span>
+                <span class="cp-tag"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="7.5" r="1.3"/></svg></span>
                 <div class="cp-coup-main">
                     <div class="cp-code" x-text="c.code || 'UNNAMED'"></div>
                     <div class="cp-chips">
@@ -156,8 +156,8 @@
                         <span class="cp-chip off" x-show="!c.active">Inactive</span>
                     </div>
                 </div>
-                <button type="button" class="cp-iconbtn" @click="openEdit(i)" title="Edit">✎</button>
-                <button type="button" class="cp-iconbtn del" @click="remove(i)" title="Remove">🗑</button>
+                <button type="button" class="cp-iconbtn" @click="openEdit(i)" title="Edit" aria-label="Edit"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/></svg></button>
+                <button type="button" class="cp-iconbtn del" @click="remove(i)" title="Remove" aria-label="Remove"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button>
             </div>
         </template>
 
@@ -248,11 +248,11 @@
                         <div class="cp-hint" style="margin:-2px 0 10px">Select who is eligible to redeem this code</div>
                         <div class="cp-choice" style="grid-template-columns:1fr">
                             <div class="cp-opt full" :class="{sel:draft.eligibility==='all'}" @click="draft.eligibility='all'">
-                                <span class="ic">🌐</span><div style="flex:1"><div class="cp-opt-t">Everyone</div><div class="cp-sub">Anyone with the code</div></div>
+                                <span class="ic"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18"/></svg></span><div style="flex:1"><div class="cp-opt-t">Everyone</div><div class="cp-sub">Anyone with the code</div></div>
                                 <span class="tick" x-show="draft.eligibility==='all'">✓</span>
                             </div>
                             <div class="cp-opt full" :class="{sel:draft.eligibility==='phones'}" @click="draft.eligibility='phones'">
-                                <span class="ic">📞</span><div style="flex:1"><div class="cp-opt-t">Phone Numbers</div><div class="cp-sub">Specific phone numbers</div></div>
+                                <span class="ic"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2z"/></svg></span><div style="flex:1"><div class="cp-opt-t">Phone Numbers</div><div class="cp-sub">Specific phone numbers</div></div>
                                 <span class="tick" x-show="draft.eligibility==='phones'">✓</span>
                             </div>
                         </div>
@@ -287,7 +287,7 @@
                             </div>
                         </div>
                         <div class="cp-rrow" style="margin-top:14px">
-                            <span class="ic">🧾</span>
+                            <span class="ic"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg></span>
                             <div style="flex:1"><div class="cp-opt-t">Allow Multiple Bookings</div><div class="cp-sub">Apply to multiple events in one order</div></div>
                             <button type="button" class="cp-sw sm" :class="{on:draft.multiEvent}" @click="draft.multiEvent=!draft.multiEvent"><b></b></button>
                         </div>
@@ -298,7 +298,7 @@
                         <label class="cp-lbl">Date &amp; Time Restrictions</label>
                         <div class="cp-hint" style="margin:-2px 0 12px">Optionally limit this coupon to specific dates or timeslots</div>
                         <div class="cp-rrow">
-                            <span class="ic">📅</span>
+                            <span class="ic"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></span>
                             <div style="flex:1"><div class="cp-opt-t">Restrict to specific dates</div><div class="cp-sub">Only valid on selected dates</div></div>
                             <button type="button" class="cp-sw sm" :class="{on:draft.restrictDates}" @click="draft.restrictDates=!draft.restrictDates"><b></b></button>
                         </div>
@@ -307,7 +307,7 @@
                             <div class="cp-tokens"><template x-for="(d,di) in draft.dates" :key="di"><span class="cp-token" x-text="fmtDate(d)"><button type="button" @click="draft.dates.splice(di,1)">✕</button></span></template></div>
                         </div>
                         <div class="cp-rrow">
-                            <span class="ic">🕐</span>
+                            <span class="ic"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
                             <div style="flex:1"><div class="cp-opt-t">Restrict to specific timeslots</div><div class="cp-sub">Only valid for selected times</div></div>
                             <button type="button" class="cp-sw sm" :class="{on:draft.restrictTimes}" @click="draft.restrictTimes=!draft.restrictTimes"><b></b></button>
                         </div>

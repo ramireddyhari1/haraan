@@ -203,7 +203,7 @@ class SlotsRelationManager extends RelationManager
     {
         return Action::make('generateSlots')
             ->label('Generate slots')
-            ->icon('heroicon-m-sparkles')
+            ->icon('heroicon-m-squares-plus')
             ->color('primary')
             ->modalHeading('Generate slots')
             ->modalDescription('Creates every slot between opening and closing time. Bookings already taken are never touched.')

@@ -196,33 +196,7 @@
                 {{ \Filament\Support\Facades\FilamentView::renderHook(\Filament\View\PanelsRenderHook::SIDEBAR_LOGO_AFTER) }}
             </header>
 
-            {{-- Linear-Style Jump to / Command Bar Trigger --}}
-            @if (filament()->isGlobalSearchEnabled())
-                <div class="hrn-sb-search-row" x-show="$store.sidebar.isOpen" x-transition:enter="hrn-fade-enter">
-                    <button
-                        type="button"
-                        x-data="{}"
-                        x-on:click="
-                            const input = document.querySelector('.fi-global-search-field input');
-                            if (input) {
-                                input.focus();
-                            } else {
-                                $dispatch('open-global-search');
-                            }
-                        "
-                        class="hrn-sb-search-trigger"
-                        title="Quick search (Ctrl + K)"
-                    >
-                        <svg class="hrn-sb-search-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M17.5 17.5l-4.5-4.5m1.5-4a6 6 0 11-12 0 6 6 0 0112 0z" />
-                        </svg>
-                        <span class="hrn-sb-search-placeholder">Jump to or search...</span>
-                        <kbd class="hrn-sb-kbd">
-                            <span class="text-[10px]">⌘</span>K
-                        </kbd>
-                    </button>
-                </div>
-            @endif
+            {{-- (The sidebar "Jump to or search" trigger was removed: it only focused the top-bar search, so the page had two identical boxes.) --}}
         </div>
 
         @if (filament()->hasTenancy() && filament()->hasTenantMenu())

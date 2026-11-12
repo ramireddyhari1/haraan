@@ -133,7 +133,11 @@
         .cc-chart g.col:hover .tip { opacity: 1; }
         .cc-chart g.col:hover ~ .callout, .cc-chart:hover .callout { opacity: .0; }
         .cc-chart .callout { transition: opacity .12s; }
-        .cc-empty-chart { display: grid; place-items: center; text-align: center; gap: 6px; padding: 26px 0 8px; color: var(--cc-ink-3); font-size: 13px; }
+        /* Command Center brings its own search (ticket codes, payment ids, phones), so the
+           top-bar box would be a second identical search on this one page. */
+        body:has(.cc-search) .fi-topbar .fi-global-search { display: none; }
+        .cc-empty-chart { display: flex; align-items: flex-end; justify-content: center; min-height: 120px; padding: 0 0 14px; margin-top: 8px; color: var(--cc-ink-3); font-size: 13px;
+            background: repeating-linear-gradient(to bottom, transparent 0 39px, var(--cc-line-2) 39px 40px); border-bottom: 1px solid var(--cc-line); }
 
         /* Where it went — one bar, three honest slices */
         .cc-split { margin-top: 16px; padding-top: 14px; border-top: 1px dashed var(--cc-line); }
@@ -163,6 +167,16 @@
         .cc-clear { display: flex; align-items: center; gap: 14px; padding: 6px 0 14px; }
         .cc-clear p { margin: 0; font-size: 13.5px; font-weight: 600; }
         .cc-clear span { font-size: 12.5px; color: var(--cc-ink-3); }
+        .cc-clear-ic { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--cc-sunk); color: var(--cc-green); }
+        .cc-pair { display: grid; grid-template-columns: 1fr auto; gap: 18px; padding: 4px 0 2px; }
+        .cc-pair > div + div { padding-left: 18px; border-left: 1px solid var(--cc-line-2); }
+        .cc-big { font-size: 34px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.15; margin-top: 4px; }
+        .cc-pair-s { font-size: 12.5px; color: var(--cc-ink-2); }
+        .cc-plans { display: grid; gap: 10px; padding: 4px 0; }
+        .cc-plan { display: grid; grid-template-columns: minmax(70px, auto) 1fr auto; align-items: center; gap: 12px; font-size: 13px; }
+        .cc-plan .n { font-weight: 600; }
+        .cc-plan .cc-meter { width: auto; }
+        .cc-plan b { font-size: 14px; font-weight: 650; min-width: 2ch; text-align: right; }
 
         /* Lines of business */
         .cc-line-card { display: flex; flex-direction: column; gap: 14px; transition: box-shadow .2s, transform .2s; }

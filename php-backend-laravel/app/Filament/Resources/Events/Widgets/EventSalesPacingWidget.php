@@ -117,7 +117,7 @@ class EventSalesPacingWidget extends StatsOverviewWidget
             return 'Unlimited capacity';
         }
         if ($fillPct >= 100) {
-            return 'Sold out 🎉';
+            return 'Sold out';
         }
         if ($eventPassed) {
             return 'Closed at ' . $fillPct . '%';

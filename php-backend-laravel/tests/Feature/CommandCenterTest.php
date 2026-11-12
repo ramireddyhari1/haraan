@@ -77,7 +77,7 @@ class CommandCenterTest extends TestCase
             ->assertSee('Paid bookings')
             ->assertSee('₹0')
             ->assertSee('No paid bookings in this window.')
-            ->assertSee('No bookings have been made yet.')
+            ->assertSee('No bookings yet.')
             ->assertSee('All clear')
             // None of the old sample content may leak back in.
             ->assertDontSee('Bangalore Open Air')

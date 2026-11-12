@@ -17,7 +17,7 @@
                     ['price-tag', 'Coupons', 'Discount codes across events and venues.', \App\Filament\Resources\Coupons\CouponResource::getUrl('index')],
                 ] as [$illo, $title, $sub, $url])
                     <a href="{{ $url }}" class="fin-link">
-                        <x-hrn-illo :name="$illo" :size="76" />
+                        <x-hrn-illo :name="$illo" :size="48" />
                         <span>
                             <b>{{ $title }}</b>
                             <span>{{ $sub }}</span>

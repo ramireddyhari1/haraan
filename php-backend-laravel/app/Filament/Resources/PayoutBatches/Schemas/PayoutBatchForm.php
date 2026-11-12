@@ -168,7 +168,7 @@ class PayoutBatchForm
 
         return $account->fullLine()
             . ' · ' . ($account->account_holder ?: 'no name on file')
-            . ' · ' . ($account->isVerified() ? 'verified' : '⚠ not verified yet');
+            . ' · ' . ($account->isVerified() ? 'verified' : 'not verified yet');
     }
 
     /** One percentage input: live, clamped, and frozen once the money has gone. */

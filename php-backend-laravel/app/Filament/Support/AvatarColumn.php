@@ -39,7 +39,7 @@ final class AvatarColumn
             ->extraImgAttributes(['loading' => 'lazy']);
     }
 
-    /** A self-contained data-URI avatar: initials on a colour derived from the name. */
+    /** A self-contained data-URI avatar: dark initials on one neutral tint. */
     public static function initials(string $name): string
     {
         $name = trim($name) !== '' ? trim($name) : 'Guest';
@@ -50,15 +50,15 @@ final class AvatarColumn
         );
         $initials = $initials !== '' ? $initials : '?';
 
-        // Deterministic hue from the name so the same person keeps the same colour.
-        $hue = crc32($name) % 360;
-        $bg = "hsl({$hue} 52% 46%)";
+        // One neutral tint for everyone. A hue per name turned every list into a
+        // column of rainbow dots — the photo is what tells people apart.
+        $bg = '#e8edf5';
 
         $svg = '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64">'
             . "<rect width='64' height='64' rx='32' fill='{$bg}'/>"
             . "<text x='50%' y='50%' dy='.35em' text-anchor='middle' "
             . "font-family='Inter, Arial, sans-serif' font-size='26' font-weight='600' "
-            . "fill='#ffffff'>" . htmlspecialchars($initials, ENT_QUOTES) . '</text></svg>';
+            . "fill='#334155'>" . htmlspecialchars($initials, ENT_QUOTES) . '</text></svg>';
 
         return 'data:image/svg+xml;base64,' . base64_encode($svg);
     }

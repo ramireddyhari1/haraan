@@ -109,15 +109,15 @@ class EventSpotlightWidget extends Widget
         // The single most useful nudge for the metrics card (seats live on the poster).
         $primary = null;
         if ($today > 0 && $velPct > 0) {
-            $primary = ['ic' => '📈', 'text' => "Bookings up {$velPct}% today", 'tone' => 'up'];
+            $primary = ['ic' => 'heroicon-m-arrow-trending-up', 'text' => "Bookings up {$velPct}% today", 'tone' => 'up'];
         } elseif ($today > 0 && $velPct < 0) {
-            $primary = ['ic' => '📉', 'text' => 'Bookings down ' . abs($velPct) . '% today', 'tone' => 'warn'];
+            $primary = ['ic' => 'heroicon-m-arrow-trending-down', 'text' => 'Bookings down ' . abs($velPct) . '% today', 'tone' => 'warn'];
         } elseif ($today > 0) {
-            $primary = ['ic' => '✅', 'text' => "{$today} tickets sold today", 'tone' => 'up'];
+            $primary = ['ic' => 'heroicon-m-check-circle', 'text' => "{$today} tickets sold today", 'tone' => 'up'];
         } elseif ($isFuture && $total > 0 && $avail > 0 && $pct < 60) {
-            $primary = ['ic' => '🚀', 'text' => 'Promote to lift sales', 'tone' => 'action', 'url' => url('/events/' . $e->id)];
+            $primary = ['ic' => 'heroicon-m-megaphone', 'text' => 'Promote to lift sales', 'tone' => 'action', 'url' => url('/events/' . $e->id)];
         } elseif ($pending > 0) {
-            $primary = ['ic' => '💸', 'text' => $this->inr($pending) . ' awaiting settlement', 'tone' => 'info'];
+            $primary = ['ic' => 'heroicon-m-banknotes', 'text' => $this->inr($pending) . ' awaiting settlement', 'tone' => 'info'];
         }
 
         // Health = sell-through weighted with recent momentum; a sold-out event is

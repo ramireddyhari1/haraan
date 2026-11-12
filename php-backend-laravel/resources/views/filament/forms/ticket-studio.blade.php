@@ -39,7 +39,7 @@
             box-shadow:var(--tk-sh);transition:box-shadow .2s,border-color .2s;
         }
         .tk-cfg-card:hover{border-color:#dbe3ef}
-        .tk-cfg-card.on{border-color:#c9dbff;background:linear-gradient(180deg,#fff,var(--tk-blue-soft))}
+        .tk-cfg-card.on{border-color:#c9dbff;background:var(--tk-blue-soft)}
         .tk-ic{
             width:38px;height:38px;border-radius:10px;flex:none;display:flex;align-items:center;
             justify-content:center;background:var(--tk-blue-soft);color:var(--tk-blue);font-size:18px;
@@ -59,18 +59,18 @@
         /* buttons */
         .tk-btn{display:inline-flex;align-items:center;gap:7px;border-radius:10px;font-weight:650;font-size:13px;padding:9px 15px;cursor:pointer;border:1px solid var(--tk-line);background:#fff;color:var(--tk-ink2);transition:all .16s}
         .tk-btn:hover{background:#f8fafc;border-color:#dbe3ef}
-        .tk-btn.pri{background:linear-gradient(135deg,#3b82f6,#2563eb);border-color:transparent;color:#fff;box-shadow:0 10px 22px -12px rgba(37,99,235,.7)}
+        .tk-btn.pri{background:#2563eb;border-color:transparent;color:#fff;}
         .tk-btn.pri:hover{filter:brightness(1.05)}
 
         /* tickets-required banner */
-        .tk-req{display:flex;gap:11px;align-items:flex-start;background:linear-gradient(180deg,#fff,#fff5f5);border:1px solid #fbd5d5;border-radius:var(--tk-r);padding:14px 16px}
+        .tk-req{display:flex;gap:11px;align-items:flex-start;background:#fff5f5;border:1px solid #fbd5d5;border-radius:var(--tk-r);padding:14px 16px}
         .tk-req .tk-ic{background:#fdecec;color:#e5484d}
 
         /* mode selector */
         .tk-mode{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;background:var(--tk-bg);border:1px solid var(--tk-line);border-radius:14px;padding:8px}
         .tk-opt{display:flex;gap:11px;align-items:flex-start;padding:12px 13px;border-radius:11px;cursor:pointer;border:1.5px solid transparent;transition:all .15s}
         .tk-opt:hover{background:#fff}
-        .tk-opt.sel{background:#fff;border-color:#c9dbff;box-shadow:0 8px 20px -16px rgba(37,99,235,.6)}
+        .tk-opt.sel{background:#fff;border-color:#c9dbff;}
         .tk-opt .tk-ic{width:32px;height:32px;font-size:15px;background:#eef2f7;color:var(--tk-mut)}
         .tk-opt.sel .tk-ic{background:var(--tk-blue-soft);color:var(--tk-blue)}
         .tk-opt-t{font-weight:650;font-size:13.5px} .tk-opt.sel .tk-opt-t{color:var(--tk-blue-d)}
@@ -79,9 +79,9 @@
         .tk-card{background:var(--tk-card);border:1px solid var(--tk-line);border-radius:var(--tk-r);box-shadow:var(--tk-sh);transition:box-shadow .22s,border-color .22s,transform .22s;overflow:hidden}
         .tk-card:hover{box-shadow:var(--tk-sh-lift);border-color:#dbe3ef}
         .tk-card.dim{opacity:.62}
-        .tk-head{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--tk-line2);background:linear-gradient(180deg,#fff,#fcfdff)}
+        .tk-head{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:1px solid var(--tk-line2);background:#fcfdff}
         .tk-grip{color:#cbd2e0;cursor:grab;font-size:15px;line-height:1;letter-spacing:-2px}
-        .tk-avatar{width:38px;height:38px;border-radius:11px;flex:none;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#eff4ff,#e0ebff);color:var(--tk-blue);font-size:17px}
+        .tk-avatar{width:38px;height:38px;border-radius:11px;flex:none;display:flex;align-items:center;justify-content:center;background:#e0ebff;color:var(--tk-blue);font-size:17px}
         .tk-head-main{min-width:0;flex:1}
         .tk-name-live{font-weight:700;font-size:14.5px;letter-spacing:-.01em;color:var(--tk-ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
         .tk-name-live.ph{color:var(--tk-faint);font-weight:600}
@@ -117,8 +117,8 @@
         select.tk-in{max-width:230px;appearance:auto}
 
         /* add ticket CTA */
-        .tk-add{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;background:linear-gradient(180deg,#fff,#f7faff);border:1.5px dashed #c3d3ee;border-radius:var(--tk-r);padding:16px;cursor:pointer;color:var(--tk-blue-d);font-weight:700;font-size:14px;transition:all .18s}
-        .tk-add:hover{border-color:var(--tk-blue);background:var(--tk-blue-soft);transform:translateY(-1px);box-shadow:0 14px 30px -20px rgba(37,99,235,.5)}
+        .tk-add{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;background:#f7faff;border:1.5px dashed #c3d3ee;border-radius:var(--tk-r);padding:16px;cursor:pointer;color:var(--tk-blue-d);font-weight:700;font-size:14px;transition:all .18s}
+        .tk-add:hover{border-color:var(--tk-blue);background:var(--tk-blue-soft);transform:translateY(-1px);}
         .tk-add .plus{width:26px;height:26px;border-radius:8px;background:var(--tk-blue);color:#fff;display:flex;align-items:center;justify-content:center;font-size:16px;line-height:1}
 
         /* modal */
@@ -141,7 +141,7 @@
                 <button type="button" class="tk-sw g tk-spacer" :class="{on:state.seating}" @click="state.seating=!state.seating"><b></b></button>
             </div>
             <div class="tk-cfg-card" :class="{on:state.phases.length}">
-                <span class="tk-ic">⚡</span>
+                <span class="tk-ic"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20h5v-5h5v-5h5V5h3"/></svg></span>
                 <div style="min-width:0">
                     <div class="tk-ttl" x-text="state.phases.length ? (state.phases.length + ' release phase' + (state.phases.length>1?'s':'')) : 'Release in phases?'"></div>
                     <div class="tk-sub" x-text="state.phases.length ? 'Assign each ticket to a phase below.' : 'Sell Early Bird first, open more when it sells out.'"></div>
@@ -165,7 +165,7 @@
                     <div><div class="tk-opt-t">Same for all sessions</div><div class="tk-sub">One set of tickets everywhere.</div></div>
                 </div>
                 <div class="tk-opt" :class="{sel:state.mode==='per_slot'}" @click="state.mode='per_slot'">
-                    <span class="tk-ic">🏷</span>
+                    <span class="tk-ic"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="7.5" r="1.3"/></svg></span>
                     <div><div class="tk-opt-t">Customize per session</div><div class="tk-sub">Different tickets per session.</div></div>
                 </div>
             </div>
@@ -177,7 +177,7 @@
             <div class="tk-card" :class="{dim:!t.visible}">
                 <div class="tk-head">
                     <span class="tk-grip">⋮⋮</span>
-                    <span class="tk-avatar" x-text="t.free ? '🎟' : '🎫'"></span>
+                    <span class="tk-avatar"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v3a2 2 0 0 0 0 4v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a2 2 0 0 0 0-4z"/><path d="M14 6v12" stroke-dasharray="2 2"/></svg></span>
                     <div class="tk-head-main">
                         <div class="tk-name-live" :class="{ph:!t.name}" x-text="t.name || 'Untitled ticket'"></div>
                         <div class="tk-chips">
@@ -190,14 +190,14 @@
                         <button type="button" class="tk-sw sm" :class="{on:t.visible}" @click="t.visible=!t.visible"><b></b></button>
                         <span x-text="t.visible?'Visible':'Hidden'"></span>
                     </label>
-                    <button type="button" class="tk-del" @click="remove(i)" title="Remove">🗑</button>
+                    <button type="button" class="tk-del" @click="remove(i)" title="Remove" aria-label="Remove"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button>
                 </div>
 
                 <div class="tk-body">
                     <div>
                         <label class="tk-lbl">Ticket name<span class="req">*</span></label>
                         <input class="tk-in" type="text" x-model="t.name" placeholder="e.g. General Admission, VIP, Early Bird">
-                        <div class="tk-err" x-show="!t.name"><span>⚠</span> Give this ticket a name</div>
+                        <div class="tk-err" x-show="!t.name"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4 2.5 20h19z"/><path d="M12 10v4M12 17h.01"/></svg> Give this ticket a name</div>
                     </div>
 
                     <div>
@@ -247,7 +247,7 @@
                          earlier phase with no seat limit (or no tickets) opens this one
                          immediately — which reads to the host as "phases don't work". --}}
                     <div class="tk-err" x-show="state.phases.length>0 && phaseNote(t)" style="margin-top:0">
-                        <span>⚠</span> <span x-text="phaseNote(t)"></span>
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4 2.5 20h19z"/><path d="M12 10v4M12 17h.01"/></svg> <span x-text="phaseNote(t)"></span>
                     </div>
                 </div>
             </div>
@@ -261,16 +261,16 @@
     <div x-show="phasesOpen" class="tk-modal-bg" @click.self="phasesOpen=false" style="display:none">
         <div class="tk-modal">
             <div class="tk-row">
-                <span class="tk-ic">⚡</span>
+                <span class="tk-ic"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 20h5v-5h5v-5h5V5h3"/></svg></span>
                 <div style="flex:1"><div class="tk-ttl" style="font-size:16px">Release phases</div><div class="tk-sub">Phase 1 sells now; later phases open as each sells out.</div></div>
-                <button type="button" class="tk-del" @click="phasesOpen=false">✕</button>
+                <button type="button" class="tk-del" @click="phasesOpen=false" aria-label="Close"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
             </div>
             <template x-for="(p,i) in state.phases" :key="i">
                 <div class="tk-phase-row">
                     <span class="tk-phase-num" x-text="i+1"></span>
                     <input class="tk-in" x-model="p.name" placeholder="Phase name" style="border:none;background:transparent;padding:4px 2px;box-shadow:none">
                     <span class="tk-onsale" x-show="i===0">On sale now</span>
-                    <button type="button" class="tk-del" @click="removePhase(i)">🗑</button>
+                    <button type="button" class="tk-del" @click="removePhase(i)" aria-label="Remove phase"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6"/></svg></button>
                 </div>
             </template>
             <button type="button" class="tk-add" @click="addPhase()" style="margin-top:12px;padding:12px"><span class="plus">+</span> Add phase</button>

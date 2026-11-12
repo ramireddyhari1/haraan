@@ -34,7 +34,9 @@ class VenueReviewsTable
             ->columns([
                 TextColumn::make('rating')
                     ->label('Rating')
-                    ->state(fn (VenueReview $record): string => str_repeat('★', (int) $record->rating) . str_repeat('☆', 5 - (int) $record->rating))
+                    ->state(fn (VenueReview $record): string => (int) $record->rating . ' / 5')
+                    ->icon('heroicon-m-star')
+                    ->badge()
                     ->color(fn (VenueReview $record): string => match (true) {
                         (int) $record->rating <= 2 => 'danger',
                         (int) $record->rating === 3 => 'warning',

@@ -63,7 +63,7 @@
         .eh-prog{display:flex;flex-direction:column;gap:6px;}
         .eh-prog-track{height:6px;border-radius:999px;background:rgba(255,255,255,.16);overflow:hidden;}
         .eh-prog-fill{height:100%;border-radius:999px;
-            background:linear-gradient(90deg,#3b82f6,#22d3ee);transition:width .4s ease;}
+            background:#22d3ee;transition:width .4s ease;}
         .eh-prog-cap{display:flex;justify-content:space-between;font-size:11px;
             color:rgba(255,255,255,.72);letter-spacing:.02em;}
         .eh-title{font-size:27px;font-weight:800;letter-spacing:-.02em;line-height:1.12;margin:10px 0 0;}
@@ -150,7 +150,7 @@
         .eh-back-tx small{font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#9ca3af;}
         .eh-back:hover{color:#111827;}
         .eh-back:hover .eh-back-ic{border-color:#2563eb;color:#2563eb;transform:translateX(-2px);
-            box-shadow:0 4px 12px -6px rgba(37,99,235,.5);}
+            }
         .dark .eh-back{color:#9ca3af;}
         .dark .eh-back-ic{background:rgba(255,255,255,.05);color:#e5e7eb;border-color:rgba(255,255,255,.14);}
         .dark .eh-back:hover{color:#fff;}
@@ -164,7 +164,7 @@
         .fi-section-header-heading{position:relative;padding-left:13px !important;
             font-size:1.02rem !important;font-weight:800 !important;letter-spacing:-.012em !important;}
         .fi-section-header-heading::before{content:"";position:absolute;left:0;top:1px;bottom:1px;
-            width:4px;border-radius:999px;background:linear-gradient(180deg,#3b82f6,#1d5fa8);}
+            width:4px;border-radius:999px;background:#1d5fa8;}
         .fi-section-header-description{padding-left:13px !important;}
 
         /* Consistent Haraan identity tag on every analytics section header (top-right). */

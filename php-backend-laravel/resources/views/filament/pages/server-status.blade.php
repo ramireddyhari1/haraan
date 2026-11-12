@@ -9,10 +9,10 @@
         $anyDown = $down > 0; $anyWarn = $warn > 0;
 
         $hero = $anyDown
-            ? ['grad' => 'linear-gradient(135deg,#ef4444,#dc2626)', 'icon' => 'heroicon-o-exclamation-triangle', 'head' => 'Attention needed', 'sub' => $down.' system'.($down===1?'':'s').' down'.($anyWarn?' · '.$warn.' to watch':'')]
+            ? ['tone' => 'down', 'icon' => 'heroicon-o-exclamation-triangle', 'head' => 'Attention needed', 'sub' => $down.' system'.($down===1?'':'s').' down'.($anyWarn?' · '.$warn.' to watch':'')]
             : ($anyWarn
-                ? ['grad' => 'linear-gradient(135deg,#f59e0b,#d97706)', 'icon' => 'heroicon-o-exclamation-circle', 'head' => 'All up — '.$warn.' to watch', 'sub' => 'No outages. Some metrics are elevated.']
-                : ['grad' => 'linear-gradient(135deg,#064e3b 0%,#047857 50%,#10b981 100%)', 'icon' => 'heroicon-o-check-circle', 'head' => 'All systems operational', 'sub' => 'Every probe is green.']);
+                ? ['tone' => 'warn', 'icon' => 'heroicon-o-exclamation-circle', 'head' => 'All up — '.$warn.' to watch', 'sub' => 'No outages. Some metrics are elevated.']
+                : ['tone' => 'ok', 'icon' => 'heroicon-o-check-circle', 'head' => 'All systems operational', 'sub' => 'Every probe is green.']);
 
         $sections = [
             'data'     => ['label' => 'Data & cache',   'icon' => 'heroicon-m-circle-stack'],
@@ -48,23 +48,21 @@
             gap: 28px;
         }
 
-        .hss-hero{position:relative;overflow:hidden;border-radius:18px;padding:22px 24px;color:#fff;box-shadow:0 10px 30px -14px rgba(2,6,23,.45);}
-        .hss-hero-row{position:relative;z-index:2;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;}
-        .hss-hero-lead{display:flex;align-items:center;gap:16px;}
-        .hss-badge{width:48px;height:48px;border-radius:13px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.2);box-shadow:inset 0 0 0 1px rgba(255,255,255,.3);}
-        .hss-badge svg{width:28px;height:28px;}
-        .hss-h1{margin:0;font-size:19px;font-weight:800;letter-spacing:-.01em;line-height:1.2;}
-        .hss-hsub{margin:2px 0 0;font-size:13px;color:rgba(255,255,255,.85);}
-        .hss-tally{display:flex;gap:8px;flex-wrap:wrap;}
-        .hss-pill{display:inline-flex;align-items:center;gap:7px;background:rgba(255,255,255,.16);box-shadow:inset 0 0 0 1px rgba(255,255,255,.22);border-radius:999px;padding:5px 12px;font-size:13px;font-weight:700;}
-        .hss-pill b{width:8px;height:8px;border-radius:50%;background:#fff;display:inline-block;}
-        .hss-pill.soft b{background:rgba(255,255,255,.7);}
-        .hss-live{position:relative;z-index:2;margin-top:16px;display:flex;align-items:center;gap:8px;font-size:12px;color:rgba(255,255,255,.78);}
-        .hss-ping{position:relative;width:8px;height:8px;display:inline-block;}
-        .hss-ping i{position:absolute;inset:0;border-radius:50%;background:#fff;}
-        .hss-ping i.a{animation:hssping 1.4s cubic-bezier(0,0,.2,1) infinite;opacity:.75;}
-        @keyframes hssping{75%,100%{transform:scale(2.3);opacity:0;}}
-        .hss-wash{position:absolute;right:-30px;top:-44px;width:180px;height:180px;border-radius:50%;background:rgba(255,255,255,.12);filter:blur(32px);}
+        /* Status line: a plain surface; colour only on the badge and the left rule. */
+        .hss-hero{position:relative;border-radius:14px;padding:16px 20px;background:var(--card);border:1px solid var(--border);border-left:4px solid var(--idle-d);color:var(--ink);}
+        .hss-hero.ok{border-left-color:var(--ok-d);} .hss-hero.warn{border-left-color:var(--warn-d);} .hss-hero.down{border-left-color:var(--down-d);}
+        .hss-hero-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;}
+        .hss-hero-lead{display:flex;align-items:center;gap:14px;}
+        .hss-badge{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;}
+        .hss-hero.ok .hss-badge{background:var(--ok-bg);color:var(--ok);} .hss-hero.warn .hss-badge{background:var(--warn-bg);color:var(--warn);} .hss-hero.down .hss-badge{background:var(--down-bg);color:var(--down);}
+        .hss-badge svg{width:20px;height:20px;}
+        .hss-h1{margin:0;font-size:16px;font-weight:700;letter-spacing:-.01em;line-height:1.25;}
+        .hss-hsub{margin:2px 0 0;font-size:13px;color:var(--ink3);}
+        .hss-tally{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--ink2);}
+        .hss-pill{display:inline-flex;align-items:center;gap:6px;font-weight:600;}
+        .hss-pill b{width:7px;height:7px;border-radius:50%;background:var(--ok-d);display:inline-block;}
+        .hss-pill.soft b{background:var(--warn-d);} .hss-pill.bad b{background:var(--down-d);}
+        .hss-live{margin-top:10px;font-size:12px;color:var(--ink3);}
 
         .hss-sec-h{display:flex;align-items:center;gap:8px;margin:0 0 12px 2px;}
         .hss-sec-h svg{width:16px;height:16px;color:var(--ink3);}
@@ -131,7 +129,7 @@
 
     <div class="hss" wire:poll.10s="refresh">
         {{-- Hero --}}
-        <div class="hss-hero" style="background:{{ $hero['grad'] }}">
+        <div class="hss-hero {{ $hero['tone'] }}">
             <div class="hss-hero-row">
                 <div class="hss-hero-lead">
                     <div class="hss-badge"><x-filament::icon :icon="$hero['icon']" /></div>
@@ -143,11 +141,10 @@
                 <div class="hss-tally">
                     <span class="hss-pill"><b></b>{{ $ok }} healthy</span>
                     @if ($anyWarn)<span class="hss-pill soft"><b></b>{{ $warn }} watch</span>@endif
-                    @if ($anyDown)<span class="hss-pill"><b></b>{{ $down }} down</span>@endif
+                    @if ($anyDown)<span class="hss-pill bad"><b></b>{{ $down }} down</span>@endif
                 </div>
             </div>
-            <div class="hss-live"><span class="hss-ping"><i class="a"></i><i></i></span>Live · auto-refresh every 10s · last checked {{ $checkedAt }}</div>
-            <div class="hss-wash"></div>
+            <div class="hss-live">Checked {{ $checkedAt }} · refreshes every 10 s</div>
         </div>
 
         {{-- Grouped cards --}}

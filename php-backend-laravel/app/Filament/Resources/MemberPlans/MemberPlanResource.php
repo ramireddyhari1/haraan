@@ -25,7 +25,7 @@ class MemberPlanResource extends Resource
 {
     protected static ?string $model = MemberPlan::class;
 
-    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-sparkles';
+    protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-star';
 
     protected static ?string $cluster = \App\Filament\Clusters\Finance\FinanceCluster::class;
 

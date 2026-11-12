@@ -125,7 +125,7 @@
         }
 
         .ech-cell--hero {
-            background: linear-gradient(135deg, rgba(37, 99, 235, 0.05) 0%, var(--ech-card-subtle) 100%);
+            background: var(--ech-card-subtle);
             border-color: rgba(37, 99, 235, 0.2);
         }
 
@@ -229,7 +229,7 @@
                 </div>
                 <div class="ech-val">{{ $s['fillPct'] }}%</div>
                 <div class="ech-meter">
-                    <span style="width:{{ min(100, max(4, $s['fillPct'])) }}%; background:linear-gradient(90deg,#f59e0b,#10b981);"></span>
+                    <span style="width:{{ min(100, max(4, $s['fillPct'])) }}%; background:#10b981;"></span>
                 </div>
                 <div class="ech-sub" style="margin-top:6px;"><b>{{ number_format($s['sold']) }}</b> of {{ number_format($s['capacity']) }} slots</div>
             </div>

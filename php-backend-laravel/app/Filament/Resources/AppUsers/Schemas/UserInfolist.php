@@ -29,7 +29,7 @@ class UserInfolist
                         ->label('')
                         ->state(function (User $record): string {
                             $notes = $record->userNotes()->pinned()->with('author')->latest('created_at')->get();
-                            return $notes->map(fn ($n) => "📌 [" . strtoupper($n->category) . "] " . ($n->title ? "{$n->title}: " : '') . "{$n->content} — by " . ($n->author?->name ?? 'Staff') . " (" . $n->created_at->diffForHumans() . ")")->implode("\n\n");
+                            return $notes->map(fn ($n) => "[" . strtoupper($n->category) . "] " . ($n->title ? "{$n->title}: " : '') . "{$n->content} — by " . ($n->author?->name ?? 'Staff') . " (" . $n->created_at->diffForHumans() . ")")->implode("\n\n");
                         })
                         ->color('warning')
                         ->wrap(),

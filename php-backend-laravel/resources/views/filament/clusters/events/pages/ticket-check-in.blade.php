@@ -7,7 +7,7 @@
          - Full offline/HTTP manual fallback and high-contrast outdoor gate mode. --}}
     <style>
         .tck{--tck-accent:var(--primary-500, #10b981);--tck-ok:#10b981;--tck-warn:#f59e0b;--tck-down:#ef4444;max-width:1200px;margin:0 auto;font-family:inherit;}
-        .dark .tck{--tck-accent:#34d399;}
+        .dark .tck{--tck-accent:#60a5fa;}
 
         /* Outdoor / High-Contrast Mode */
         .tck.outdoor{
@@ -60,7 +60,7 @@
             border-radius:14px;padding:12px 14px;display:flex;flex-direction:column;justify-content:space-between;
             box-shadow:var(--hrn-shadow,0 1px 3px rgba(0,0,0,.04));}
         .tck-eh-cell--hero{border-color:color-mix(in srgb,var(--tck-accent) 30%,var(--hrn-border,#e2e8f0));
-            background:linear-gradient(135deg,color-mix(in srgb,var(--tck-accent) 6%,var(--hrn-surface,#fff)) 0%,var(--hrn-surface,#fff) 100%);}
+            background:var(--hrn-surface,#fff);}
         .tck-eh-label{font-size:11px;font-weight:750;letter-spacing:.05em;text-transform:uppercase;color:var(--hrn-ink-3,#64748b);
             display:flex;align-items:center;justify-content:space-between;}
         .tck-eh-val{font-size:24px;font-weight:850;letter-spacing:-.02em;line-height:1.1;margin:6px 0 3px;
@@ -73,7 +73,7 @@
 
         /* ── Camera Scan Stage ─────────────────────────────────────── */
         .tck-stage{position:relative;border-radius:24px;overflow:hidden;
-            background:radial-gradient(120% 100% at 50% 0%,#151d30 0%,#080c16 75%);
+            background:#0b1120;
             box-shadow:0 24px 60px -25px rgba(0,0,0,.6),inset 0 0 0 1px rgba(255,255,255,.08);}
         .tck-stage-top{position:absolute;inset:14px 16px auto 16px;z-index:10;
             display:flex;align-items:center;justify-content:space-between;pointer-events:none;}
@@ -154,9 +154,9 @@
             align-items:center;justify-content:center;}
         .tck-banner .ic svg{width:24px;height:24px;color:#fff;stroke-width:2.5;}
         .tck-banner.ok{border-color:rgba(16,185,129,.4);}
-        .tck-banner.ok .ic{background:linear-gradient(135deg,#059669,#10b981);box-shadow:0 4px 12px rgba(16,185,129,.35);}
+        .tck-banner.ok .ic{background:#059669;}
         .tck-banner.bad{border-color:rgba(239,68,68,.4);}
-        .tck-banner.bad .ic{background:linear-gradient(135deg,#dc2626,#f97316);box-shadow:0 4px 12px rgba(239,68,68,.35);}
+        .tck-banner.bad .ic{background:#dc2626;}
         .tck-banner .txt{min-width:0;flex:1;}
         .tck-banner .nm{font-size:15.5px;font-weight:750;color:#ffffff;white-space:nowrap;
             overflow:hidden;text-overflow:ellipsis;}
@@ -170,7 +170,7 @@
             border:1px solid transparent;transition:filter .15s,background .15s,transform .1s;}
         .tck-btn:active{transform:scale(.98);}
         .tck-btn svg{width:19px;height:19px;}
-        .tck-btn--go{background:linear-gradient(135deg,#2563eb,#3b82f6);color:#fff;
+        .tck-btn--go{background:#2563eb;color:#fff;
             box-shadow:0 8px 20px -6px rgba(37,99,235,.6);}
         .tck-btn--go:hover{filter:brightness(1.08);}
         .tck-btn--stop{background:rgba(255,255,255,.08);color:#e2e8f0;
@@ -217,6 +217,7 @@
             border:1px solid var(--hrn-border, #cbd5e1);background:var(--hrn-app-bg, #ffffff);
             color:var(--hrn-ink, #0f172a);font-size:14.5px;font-weight:650;letter-spacing:.04em;outline:none;
             text-transform:uppercase;transition:border-color .15s,box-shadow .15s;}
+        .tck-manual input::placeholder{text-transform:none;letter-spacing:0;font-weight:500;}
         .tck-manual input:focus{border-color:var(--tck-accent);
             box-shadow:0 0 0 3px color-mix(in srgb,var(--tck-accent) 20%,transparent);}
         .tck-clear-btn{position:absolute;right:6px;top:50%;transform:translateY(-50%);
@@ -328,9 +329,9 @@
             <div class="tck-eh-cell">
                 <div class="tck-eh-label">
                     <span>Let in by you</span>
-                    <x-filament::icon icon="heroicon-m-check-badge" style="width:14px;height:14px;color:#10b981;" />
+                    <x-filament::icon icon="heroicon-m-check-badge" style="width:14px;height:14px;color:{{ $gate['admitted'] > 0 ? '#10b981' : '#94a3b8' }};" />
                 </div>
-                <div class="tck-eh-val" style="color:#10b981;">{{ number_format($gate['admitted']) }}</div>
+                <div class="tck-eh-val">{{ number_format($gate['admitted']) }}</div>
                 <div class="tck-eh-sub">Since this page was opened</div>
             </div>
 
@@ -432,29 +433,7 @@
 
             {{-- ── Right Stage: gate panel & recent scans ───────────── --}}
             <div class="tck-side">
-                {{-- High-Visibility Gate Tally --}}
-                <div class="tck-tally">
-                    <div class="tck-stat tck-stat--ok">
-                        <div class="n">{{ $admitted }}</div>
-                        <div class="l">Admitted</div>
-                        @php
-                            $totalScans = $admitted + $repeats + $rejected;
-                            $passRate = $totalScans > 0 ? round(($admitted / $totalScans) * 100) : 100;
-                        @endphp
-                        <div class="tck-stat-sub">{{ $totalScans > 0 ? $passRate."% of scans" : "No scans yet" }}</div>
-                    </div>
-                    <div class="tck-stat tck-stat--warn">
-                        <div class="n">{{ $repeats }}</div>
-                        <div class="l">Repeats</div>
-                        <div class="tck-stat-sub">already used</div>
-                    </div>
-                    <div class="tck-stat tck-stat--bad">
-                        <div class="n">{{ $rejected }}</div>
-                        <div class="l">Rejected</div>
-                        <div class="tck-stat-sub">invalid / wrong</div>
-                    </div>
-                </div>
-
+                {{-- (The second Admitted/Repeats/Rejected tally was removed: it repeated the row above.) --}}
                 {{-- Manual Code Entry Box --}}
                 <div class="tck-card">
                     <div class="tck-card-h">

@@ -15,13 +15,13 @@
     $tone = $attempted === 0 ? 'idle' : ($rate >= 10 ? 'down' : ($rate >= 2 ? 'warn' : 'ok'));
 
     $hero = match ($tone) {
-        'down' => ['grad' => 'linear-gradient(135deg,#ef4444,#dc2626)', 'head' => 'Delivery is failing',
+        'down' => ['x' => '', 'head' => 'Delivery is failing',
                    'sub' => $totals['failed'] . ' of ' . $attempted . ' messages never reached anyone'],
-        'warn' => ['grad' => 'linear-gradient(135deg,#f59e0b,#d97706)', 'head' => 'Some messages aren\'t landing',
+        'warn' => ['x' => '', 'head' => 'Some messages aren\'t landing',
                    'sub' => $rate . '% of sends failed this period'],
-        'ok'   => ['grad' => 'linear-gradient(135deg,#064e3b 0%,#047857 50%,#10b981 100%)', 'head' => 'Delivery is healthy',
+        'ok'   => ['x' => '', 'head' => 'Delivery is healthy',
                    'sub' => number_format($totals['sent']) . ' messages delivered, ' . $rate . '% failed'],
-        default => ['grad' => 'linear-gradient(135deg,#334155,#1e293b)', 'head' => 'Nothing sent yet',
+        default => ['x' => '', 'head' => 'Nothing sent yet',
                    'sub' => 'No messages recorded for ' . $this->periodLabel()],
     };
 
@@ -46,7 +46,7 @@
         </div>
 
         {{-- ---------- Hero ---------- --}}
-        <section class="hmu-hero" style="background:{{ $hero['grad'] }}">
+        <section class="hmu-hero tone-{{ $tone }}">
             <div class="hmu-hero-in">
                 <div class="hmu-hero-top">
                     <h2 class="hmu-h1">{{ $hero['head'] }}</h2>
@@ -289,20 +289,23 @@
         /* ── Hero Telemetry ─────────────────────────────────────────── */
         .hmu-hero {
             border-radius: var(--hrn-radius-lg);
-            padding: 22px 28px;
-            color: #ffffff;
-            box-shadow: 0 16px 36px -12px rgba(5, 150, 105, 0.45), 0 1px 2px rgba(0, 0, 0, 0.1);
+            padding: 16px 20px;
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-left: 4px solid #94a3b8;
+            color: var(--ink);
         }
-        .hmu-hero-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-        .hmu-h1 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.02em; }
+        .hmu-hero.tone-ok { border-left-color: #10b981; }
+        .hmu-hero.tone-warn { border-left-color: #f59e0b; }
+        .hmu-hero.tone-down { border-left-color: #ef4444; }
+        .hmu-hero-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .hmu-h1 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.01em; }
         .hmu-beta {
-            font-size: 10px; font-weight: 800; letter-spacing: 0.1em;
-            text-transform: uppercase; color: #ffffff;
-            background: rgba(255, 255, 255, 0.22);
-            border: 1px solid rgba(255, 255, 255, 0.4);
-            padding: 3px 9px; border-radius: 999px; line-height: 1;
+            font-size: 11px; font-weight: 600; color: var(--ink3);
+            border: 1px solid var(--border);
+            padding: 2px 7px; border-radius: 6px; line-height: 1.3;
         }
-        .hmu-hsub { margin: 4px 0 0; font-size: 13.5px; color: rgba(255, 255, 255, 0.9); }
+        .hmu-hsub { margin: 3px 0 0; font-size: 13px; color: var(--ink3); }
 
         /* ── KPIs (Stripe Telemetry Aesthetic) ──────────────────────── */
         .hmu-kpis {
@@ -323,7 +326,6 @@
                         border-color var(--hrn-transition-smooth);
         }
         .hmu-kpi:hover {
-            transform: translateY(-2px);
             box-shadow: var(--hrn-shadow-hover);
             border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
         }

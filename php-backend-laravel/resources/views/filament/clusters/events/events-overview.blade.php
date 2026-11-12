@@ -160,7 +160,7 @@
                         </div>
                     </div>
                     @if (empty($categories))
-                        <div class="cc-muted-empty"><x-hrn-illo name="ticket" :size="80" /><span>No tickets sold in this window.</span></div>
+                        <div class="cc-muted-empty"><span>No tickets sold in this window.</span></div>
                     @else
                         <div class="cc-split-bar" role="img" aria-label="Takings by category">
                             @foreach ($categories as $i => $c)
@@ -189,7 +189,7 @@
                             <span class="v cc-num">{{ $c['value'] }}</span>
                         </div>
                     @empty
-                        <div class="cc-muted-empty"><x-hrn-illo name="map" :size="80" /><span>No tickets sold in this window.</span></div>
+                        <div class="cc-muted-empty"><span>No tickets sold in this window.</span></div>
                     @endforelse
                 </section>
             </div>
@@ -207,7 +207,6 @@
                 </div>
                 @if (empty($orders))
                     <div class="cc-muted-empty">
-                        <x-hrn-illo name="ticket" :size="96" />
                         <span>No ticket orders yet. They appear here the moment someone pays or holds a seat.</span>
                     </div>
                 @else
@@ -245,7 +244,7 @@
                         <span class="v cc-num">{{ $p['value'] }}</span>
                     </div>
                 @empty
-                    <div class="cc-muted-empty"><x-hrn-illo name="stadium-lights" :size="80" /><span>No tickets sold in this window.</span></div>
+                    <div class="cc-muted-empty"><span>No tickets sold in this window.</span></div>
                 @endforelse
             </section>
         </div>

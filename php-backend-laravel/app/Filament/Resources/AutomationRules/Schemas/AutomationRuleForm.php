@@ -68,7 +68,7 @@ class AutomationRuleForm
                     ->label('Public reply under the comment')
                     ->rows(2)
                     ->maxLength(300)
-                    ->placeholder('Just sent you a DM! 💬')
+                    ->placeholder('Just sent you a DM!')
                     ->visible(fn ($get): bool => $get('trigger_type') === 'comment')
                     ->helperText('Optional, and visible to everyone reading the thread — which is what '
                         . 'makes the automation look deliberate rather than silent. Leave empty to skip it.'),

@@ -20,17 +20,6 @@
 @endphp
 @if ($series['empty'])
     <div class="cc-empty-chart">
-        {{-- An empty till: drawn only when there is genuinely nothing to chart. --}}
-        <svg width="120" height="70" viewBox="0 0 120 70" fill="none" aria-hidden="true">
-            <path d="M8 62h104" stroke="var(--cc-line)" stroke-width="1.5" stroke-linecap="round"/>
-            <rect x="20" y="52" width="10" height="10" rx="2" fill="var(--cc-line-2)"/>
-            <rect x="38" y="48" width="10" height="14" rx="2" fill="var(--cc-line-2)"/>
-            <rect x="56" y="54" width="10" height="8" rx="2" fill="var(--cc-line-2)"/>
-            <rect x="74" y="50" width="10" height="12" rx="2" fill="var(--cc-line-2)"/>
-            <rect x="92" y="56" width="10" height="6" rx="2" fill="var(--cc-line-2)"/>
-            <path d="M58 10c0-3 2-5 5-5h1c3 0 5 2 5 5v1c0 3-2 4-4 5-1 1-2 2-2 4" stroke="var(--cc-ink-3)" stroke-width="2" stroke-linecap="round"/>
-            <circle cx="63" cy="28" r="1.6" fill="var(--cc-ink-3)"/>
-        </svg>
         <span>{{ $emptyText ?? 'Nothing to chart yet.' }}</span>
     </div>
 @else

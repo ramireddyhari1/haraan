@@ -50,11 +50,11 @@
             text-overflow:ellipsis;cursor:text;}
         .esl-url:focus{outline:2px solid #93c5fd;outline-offset:0;border-color:#93c5fd;}
         .esl-copy{display:inline-flex;align-items:center;gap:6px;border:0;cursor:pointer;
-            background:linear-gradient(180deg,#2f6bff,#1e50e6);color:#fff;font-size:12.5px;font-weight:700;
+            background:#1e50e6;color:#fff;font-size:12.5px;font-weight:700;
             padding:7px 12px;border-radius:9px;white-space:nowrap;transition:filter .15s,transform .05s;}
         .esl-copy:hover{filter:brightness(1.06);}
         .esl-copy:active{transform:translateY(1px);}
-        .esl-copy.is-done{background:linear-gradient(180deg,#12b473,#0f9d63);}
+        .esl-copy.is-done{background:#0f9d63;}
         .esl-copy svg{width:15px;height:15px;}
 
         .dark .esl{background:#111722;border-color:#1e2633;box-shadow:0 1px 2px rgba(0,0,0,.4);}

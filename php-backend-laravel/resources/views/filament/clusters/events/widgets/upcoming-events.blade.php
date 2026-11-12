@@ -14,7 +14,7 @@
                             @if ($e['poster'])
                                 <img src="{{ $e['poster'] }}" alt="" loading="lazy" />
                             @else
-                                <span class="ue-poster-glyph" aria-hidden="true">🎫</span>
+                                <span class="ue-poster-glyph" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v3a2 2 0 0 0 0 4v3a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-3a2 2 0 0 0 0-4z"/><path d="M14 6v12" stroke-dasharray="2 2"/></svg></span>
                             @endif
                             <span class="ue-date"><b>{{ $e['day'] }}</b>{{ $e['mon'] }}</span>
                             <span class="ue-pill tone-{{ $e['sTone'] }}">{{ $e['sLabel'] }}</span>
@@ -66,10 +66,10 @@
         @keyframes ue-in{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
 
         .ue-poster{position:relative;display:block;height:118px;overflow:hidden;text-decoration:none;
-            background:linear-gradient(150deg,#eef4ff,#dbe8ff);}
-        .ue-poster.tone-success{background:linear-gradient(150deg,#eafaf1,#d6f5e3);}
-        .ue-poster.tone-warning{background:linear-gradient(150deg,#fff5e6,#ffe9c7);}
-        .ue-poster.tone-danger{background:linear-gradient(150deg,#fdecee,#ffdfe2);}
+            background:#dbe8ff;}
+        .ue-poster.tone-success{background:#d6f5e3;}
+        .ue-poster.tone-warning{background:#ffe9c7;}
+        .ue-poster.tone-danger{background:#ffdfe2;}
         .ue-poster img{width:100%;height:100%;object-fit:cover;display:block;
             transition:transform .35s cubic-bezier(.22,.61,.36,1);}
         .ue-card:hover .ue-poster img{transform:scale(1.05);}
@@ -124,7 +124,7 @@
         .dark .ue-head{color:#eef1f6;}
         .dark .ue-card{background:#111722;border-color:#1e2633;box-shadow:0 1px 2px rgba(0,0,0,.4);}
         .dark .ue-card:hover{border-color:#2a3444;box-shadow:0 16px 34px -18px rgba(0,0,0,.6);}
-        .dark .ue-poster{background:linear-gradient(150deg,#0e1c33,#0b1626);}
+        .dark .ue-poster{background:#0b1626;}
         .dark .ue-date{background:rgba(20,27,38,.92);color:#eef1f6;}
         .dark .ue-pill{background:rgba(20,27,38,.92);color:#5ce6a4;}
         .dark .ue-pill.tone-warning{color:#f0b862;}

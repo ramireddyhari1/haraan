@@ -3082,3 +3082,29 @@
 }
 
 @keyframes hrn-shimmer { to { transform: translateX(100%); } }
+
+/* Sidebar icons without tinted tiles (2026-11-12). A square tile behind every
+   icon made the nav read as a template; bare line glyphs with the label carry
+   it. The active row keeps its card; its icon turns blue instead of sitting on
+   a solid blue square. */
+@layer components {
+    .hrn-sb-glyph-tile,
+    .hrn-sb-v2 .hrn-sb-group-standalone .hrn-sb-item-icon-wrapper {
+        background: transparent !important;
+        border-color: transparent !important;
+        box-shadow: none !important;
+    }
+    .hrn-sb-v2 .hrn-sb-group-standalone .fi-sidebar-item.fi-active .hrn-sb-item-icon-wrapper {
+        background: transparent !important;
+        box-shadow: none !important;
+    }
+    .hrn-sb-v2 .hrn-sb-group-standalone .fi-sidebar-item.fi-active .hrn-sb-item-icon { color: var(--sb2-accent) !important; }
+    .hrn-sb-v2 .hrn-sb-group-standalone .fi-sidebar-item.fi-active .hrn-glyph { --g-ink: var(--sb2-accent); --g-wash: transparent; --g-dot: var(--sb2-accent); }
+    .hrn-sb-v2 .hrn-sb-group-drawn > .hrn-sb-group-btn:hover .hrn-sb-glyph-tile .hrn-glyph { transform: none; }
+    .hrn-sb-v2 .hrn-sb-group-drawn:not(.fi-collapsed) .hrn-sb-glyph-tile .hrn-glyph {
+        --g-ink: var(--sb2-accent);
+        --g-wash: color-mix(in srgb, var(--sb2-accent) 12%, transparent);
+        --g-dot: var(--sb2-accent);
+        --g-paper: transparent;
+    }
+}

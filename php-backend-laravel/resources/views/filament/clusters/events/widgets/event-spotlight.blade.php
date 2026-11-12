@@ -6,7 +6,7 @@
 <x-filament-widgets::widget>
     @if ($s === null)
         <a href="{{ $this->createUrl() }}" class="eh-blank">
-            <div class="eh-blank-ic" aria-hidden="true">🎬</div>
+            <div class="eh-blank-ic" aria-hidden="true"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/></svg></div>
             <div class="eh-blank-t">Your event story starts here</div>
             <div class="eh-blank-d">Create your first event and this space becomes a live view of how it’s performing.</div>
             <span class="eh-blank-cta">Create an event <span aria-hidden="true">→</span></span>
@@ -75,7 +75,7 @@
             @if ($s['primary'])
                 @php $ins = $s['primary']; $tag = ! empty($ins['url']) ? 'a' : 'div'; @endphp
                 <{{ $tag }} class="em-insight tone-{{ $ins['tone'] }}" @if (! empty($ins['url'])) href="{{ $ins['url'] }}" target="_blank" rel="noopener" @endif>
-                    <span class="em-insight-ic" aria-hidden="true">{{ $ins['ic'] }}</span>
+                    <span class="em-insight-ic" aria-hidden="true">{{ svg($ins['ic'], '', ['width' => 16, 'height' => 16]) }}</span>
                     <span>{{ $ins['text'] }}</span>
                     @if (! empty($ins['url']))<span class="em-insight-go" aria-hidden="true">→</span>@endif
                 </{{ $tag }}>
@@ -92,7 +92,7 @@
         .eh-bg{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 22%;z-index:0;
             transition:transform 8s ease-out;}
         .eh-card:hover .eh-bg{transform:scale(1.05);}
-        .eh-bg-fallback{background:radial-gradient(120% 130% at 15% 0%,#4d80ff,#2f6bff 46%,#123a9e);}
+        .eh-bg-fallback{background:#1e3a8a;}
         /* Poster stays visible up top; dark only where the text sits. */
         .eh-scrim{position:absolute;inset:0;z-index:1;
             background:
@@ -151,19 +151,19 @@
             font-size:13px;font-weight:600;text-decoration:none;color:#344054;background:#f4f6fa;
             box-shadow:inset 0 0 0 1px rgba(120,120,120,.08);transition:background .13s,transform .1s;}
         a.em-insight:hover{transform:translateY(-1px);}
-        .em-insight-ic{font-size:15px;line-height:1;}
+        .em-insight-ic{display:inline-flex;flex:none;}
         .em-insight-go{margin-left:auto;font-weight:800;color:#2563eb;}
         .em-insight.tone-up{color:#067a48;background:#eafaf1;box-shadow:inset 0 0 0 1px rgba(16,140,86,.16);}
         .em-insight.tone-warn{color:#8a5a00;background:#fff6e8;box-shadow:inset 0 0 0 1px rgba(194,121,10,.18);}
         .em-insight.tone-info{color:#1e56c9;background:#eef4ff;box-shadow:inset 0 0 0 1px rgba(37,99,235,.16);}
-        .em-insight.tone-action{color:#fff;background:#2563eb;box-shadow:0 8px 18px -8px rgba(37,99,235,.5);}
+        .em-insight.tone-action{color:#fff;background:#2563eb;}
         .em-insight.tone-action .em-insight-go{color:#fff;}
         a.em-insight.tone-action:hover{background:#1d4ed8;}
 
         /* ── Empty ── */
         .eh-blank{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
             min-height:260px;padding:32px;border-radius:22px;text-decoration:none;color:#fff;
-            background:radial-gradient(120% 130% at 15% 0%,#2f6bff,#1e50e6 55%,#123a9e);
+            background:#1e3a8a;
             box-shadow:0 18px 44px -24px rgba(11,18,32,.55);}
         .eh-blank-ic{font-size:36px;margin-bottom:12px;}
         .eh-blank-t{font-size:19px;font-weight:800;letter-spacing:-.02em;}

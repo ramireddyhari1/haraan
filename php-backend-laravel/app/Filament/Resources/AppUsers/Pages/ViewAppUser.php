@@ -196,7 +196,7 @@ class ViewAppUser extends ViewRecord
 
                 Action::make('jumpSubscriptions')
                     ->label('Filter in Subscriptions')
-                    ->icon('heroicon-m-sparkles')
+                    ->icon('heroicon-m-funnel')
                     ->url(fn (): string => route('filament.control.finance.resources.member-subscriptions.index', [
                         'tableFilters' => ['user_id' => ['value' => $this->getRecord()->id]],
                     ]))

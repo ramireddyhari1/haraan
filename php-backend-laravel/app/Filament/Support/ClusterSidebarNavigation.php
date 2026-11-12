@@ -79,17 +79,24 @@ class ClusterSidebarNavigation
                     ->url($url)
                     ->sort($component::getNavigationSort() ?? $fallbackSort)
                     // Prefix match so a child page (e.g. venues/create) keeps its
-                    // parent section highlighted.
-                    ->isActiveWhen(fn (): bool => str_starts_with(
-                        rtrim(request()->url(), '/'),
-                        rtrim($url, '/'),
-                    ));
+                    // parent section highlighted — but only at a path boundary, or
+                    // /events/events would also light up on /events/events-overview.
+                    ->isActiveWhen(fn (): bool => self::isUnder(request()->url(), $url));
 
                 $fallbackSort++;
             }
         }
 
         return $items;
+    }
+
+    /** True when $current is $base itself or a page below it (next char is '/'). */
+    public static function isUnder(string $current, string $base): bool
+    {
+        $current = rtrim($current, '/');
+        $base = rtrim($base, '/');
+
+        return $current === $base || str_starts_with($current, $base.'/');
     }
 
     /** Resources and pages both expose a static getUrl(); guard anything that doesn't. */

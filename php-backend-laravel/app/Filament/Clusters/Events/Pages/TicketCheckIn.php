@@ -208,7 +208,7 @@ class TicketCheckIn extends Page
                 $this->admitted += $newlyIn;
                 $detail = "Checked in {$newlyIn} of {$updated->quantity}";
                 $this->pushResult($name, $eventTitle, $detail, true);
-                Notification::make()->title("✓ {$name} checked in")->body($detail)->success()->send();
+                Notification::make()->title("{$name} checked in")->body($detail)->success()->send();
             } else {
                 $this->repeats++;
                 $detail = "Already checked in ({$updated->checked_in_count}/{$updated->quantity})";

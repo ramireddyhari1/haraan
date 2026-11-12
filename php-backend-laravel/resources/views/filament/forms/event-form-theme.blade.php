@@ -22,18 +22,10 @@
     .fi-resource-create-record-page .fi-header,
     .fi-resource-edit-record-page .fi-header{
         position:relative; align-items:flex-start !important; overflow:hidden;
-        background:
-            radial-gradient(130% 150% at 100% -10%, rgba(37,99,235,.12), transparent 55%),
-            linear-gradient(180deg,#ffffff,#f5f9ff);
+        background:#fff;
         border:1px solid var(--hb-line); border-bottom:none;
         border-radius:24px 24px 0 0;
         padding:24px 28px 30px !important;
-    }
-    /* soft decorative orbs for depth */
-    .fi-resource-create-record-page .fi-header::after,
-    .fi-resource-edit-record-page .fi-header::after{
-        content:''; position:absolute; top:-70px; right:-40px; width:230px; height:230px; pointer-events:none;
-        background:radial-gradient(circle at 35% 35%, rgba(59,130,246,.16), transparent 68%);
     }
     .fi-resource-create-record-page .fi-header > div,
     .fi-resource-edit-record-page .fi-header > div{ position:relative; z-index:1; }
@@ -46,19 +38,12 @@
     .fi-resource-create-record-page .fi-header-heading,
     .fi-resource-edit-record-page .fi-header-heading{
         display:flex !important; align-items:center; gap:16px;
-        font-size:2rem !important; font-weight:820 !important; letter-spacing:-.035em; color:var(--hb-ink);
+        font-size:1.6rem !important; font-weight:700 !important; letter-spacing:-.035em; color:var(--hb-ink);
         margin-top:10px;
-    }
-    /* crafted branded illustration tile (gradient + spark) */
-    .fi-resource-create-record-page .fi-header-heading::before,
-    .fi-resource-edit-record-page .fi-header-heading::before{
-        content:''; flex:none; width:54px; height:54px; border-radius:16px;
-        background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1' y1='0' y2='1'%3E%3Cstop offset='0' stop-color='%233b82f6'/%3E%3Cstop offset='1' stop-color='%231d4ed8'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='48' height='48' rx='14' fill='url(%23g)'/%3E%3Cpath d='M24 11l2.8 8L35 22l-8.2 2.8L24 33l-2.8-8.2L13 22l8.2-2.8z' fill='%23fff'/%3E%3Ccircle cx='36' cy='13' r='2.4' fill='%23fff' opacity='.85'/%3E%3Ccircle cx='13' cy='34' r='1.8' fill='%23fff' opacity='.7'/%3E%3C/svg%3E");
-        background-size:cover; box-shadow:0 16px 30px -10px rgba(37,99,235,.6);
     }
     .fi-resource-create-record-page .fi-header-subheading,
     .fi-resource-edit-record-page .fi-header-subheading{
-        margin-top:10px !important; margin-left:70px; color:var(--hb-mut) !important;
+        margin-top:6px !important; color:var(--hb-mut) !important;
         font-size:.95rem !important; font-weight:450; line-height:1.5; max-width:60ch;
     }
     /* actions top-right, premium primary */
@@ -66,8 +51,7 @@
     .fi-resource-edit-record-page .fi-header-actions-ctn{ position:relative; z-index:1; padding-top:4px; }
     .fi-resource-create-record-page .fi-header .fi-btn.fi-color-primary,
     .fi-resource-edit-record-page .fi-header .fi-btn.fi-color-primary{
-        background:linear-gradient(135deg,#3b82f6,#2563eb) !important; border-color:transparent !important;
-        box-shadow:0 12px 24px -12px rgba(37,99,235,.7) !important; font-weight:700 !important;
+        background:#2563eb !important; border-color:transparent !important; font-weight:600 !important;
     }
     /* the wizard card fuses flush onto the hero */
     .fi-resource-create-record-page .fi-sc-wizard,
@@ -78,14 +62,14 @@
     /* ── The wizard as one elevated card ──────────────────────────────────── */
     .fi-sc-wizard{
         background:#fff; border:1px solid var(--hb-line); border-radius:22px;
-        box-shadow:0 1px 2px rgba(15,23,42,.04), 0 30px 60px -38px rgba(15,23,42,.22);
+        box-shadow:0 1px 2px rgba(15,23,42,.04);
         overflow:hidden;
     }
 
     /* ── Progress stepper — bespoke connected node row (no default chevrons/scrollbar) ── */
     .fi-sc-wizard-header{
         display:flex !important; align-items:flex-start !important; gap:0 !important;
-        background:linear-gradient(180deg,#fbfcff,#f3f6fc);
+        background:#fafbfd;
         border-bottom:1px solid var(--hb-line);
         padding:26px 26px 20px !important; overflow:visible !important;
         list-style:none; margin:0;
@@ -100,7 +84,7 @@
         left:calc(50% + 26px); width:calc(100% - 52px);
         height:2px; border-radius:2px; background:var(--hb-line);
     }
-    .fi-sc-wizard-header-step.fi-completed::after{ background:linear-gradient(90deg,#93c5fd,#3b82f6); }
+    .fi-sc-wizard-header-step.fi-completed::after{ background:#2563eb; }
 
     .fi-sc-wizard-header-step-btn{
         flex-direction:column !important; align-items:center !important; gap:10px !important;
@@ -112,10 +96,9 @@
         box-shadow:0 1px 2px rgba(15,23,42,.06); transition:all .22s ease;
     }
     .fi-sc-wizard-header-step.fi-active .fi-sc-wizard-header-step-icon-ctn{
-        background:linear-gradient(135deg,#3b82f6,#2563eb) !important;
+        background:#2563eb !important;
         border-color:var(--hb-blue) !important; color:#fff !important;
-        box-shadow:0 0 0 5px rgba(37,99,235,.14), 0 10px 22px -8px rgba(37,99,235,.6);
-        transform:translateY(-1px);
+        box-shadow:0 0 0 4px rgba(37,99,235,.12);
     }
     .fi-sc-wizard-header-step.fi-completed .fi-sc-wizard-header-step-icon-ctn{
         background:var(--hb-blue) !important; border-color:var(--hb-blue) !important; color:#fff !important;
@@ -196,15 +179,15 @@
         box-shadow:0 6px 16px rgba(37,99,235,.08) !important;
     }
 
-    /* ── AI Draft Action Pill (Shimmering AI Assistant) ─────────────────────── */
+    /* ── Hint actions (e.g. "Draft with AI"): a quiet text button, not a glowing pill ── */
     .fi-fo-field-wrp-hint-action,
     button[wire\:click*="draftDescription"]{
-        background:linear-gradient(135deg, rgba(37,99,235,.1), rgba(168,85,247,.15)) !important;
-        border:1px solid rgba(168,85,247,.32) !important;
-        color:#6d28d9 !important;
-        border-radius:999px !important;
-        padding:3px 11px !important;
-        font-weight:700 !important;
+        background:transparent !important;
+        border:0 !important;
+        color:#2563eb !important;
+        border-radius:6px !important;
+        padding:2px 6px !important;
+        font-weight:600 !important;
         font-size:.78rem !important;
         display:inline-flex !important;
         align-items:center !important;
@@ -213,8 +196,7 @@
     }
     .fi-fo-field-wrp-hint-action:hover,
     button[wire\:click*="draftDescription"]:hover{
-        background:linear-gradient(135deg, rgba(37,99,235,.2), rgba(168,85,247,.28)) !important;
-        transform:scale(1.03);
+        background:#eef4ff !important;
     }
     .fi-fo-field-wrp-hint-action svg,
     button[wire\:click*="draftDescription"] svg{
@@ -257,12 +239,11 @@
     /* ── Footer + prominent primary CTA ───────────────────────────────────── */
     .fi-sc-wizard-footer{
         padding:18px 26px !important; border-top:1px solid var(--hb-line);
-        background:linear-gradient(180deg,#fff,#fafbff);
+        background:#fff;
     }
     .fi-sc-wizard-footer .fi-btn{ border-radius:12px !important; min-height:44px; font-weight:700 !important; padding-inline:22px !important; }
     .fi-sc-wizard-footer .fi-btn.fi-color-primary{
-        background:linear-gradient(135deg,#3b82f6,#2563eb) !important;
-        box-shadow:0 12px 26px -12px rgba(37,99,235,.65) !important;
+        background:#2563eb !important;
     }
     .fi-sc-wizard-footer .fi-btn.fi-color-primary:hover{ filter:brightness(1.05); }
 
@@ -273,9 +254,7 @@
     }
     .dark .fi-resource-create-record-page .fi-header,
     .dark .fi-resource-edit-record-page .fi-header{
-        background:
-            radial-gradient(130% 150% at 100% -10%, rgba(37,99,235,.2), transparent 55%),
-            linear-gradient(180deg,#0f172a,#090d16) !important;
+        background:#0f172a !important;
         border-color:var(--hb-line) !important;
     }
     .dark .fi-sc-wizard{
@@ -283,7 +262,7 @@
         border-color:var(--hb-line) !important;
     }
     .dark .fi-sc-wizard-header{
-        background:linear-gradient(180deg,#0f172a,#0b1120) !important;
+        background:#0f172a !important;
         border-color:var(--hb-line) !important;
     }
     .dark .fi-sc-wizard-header-step-icon-ctn{
@@ -316,14 +295,13 @@
         border-color:#1e293b !important;
     }
     .dark .fi-sc-wizard-footer{
-        background:linear-gradient(180deg,#0f172a,#090d16) !important;
+        background:#0f172a !important;
         border-color:var(--hb-line) !important;
     }
     .dark .fi-fo-field-wrp-hint-action,
     .dark button[wire\:click*="draftDescription"]{
-        background:linear-gradient(135deg, rgba(37,99,235,.22), rgba(168,85,247,.28)) !important;
-        color:#c084fc !important;
-        border-color:rgba(168,85,247,.45) !important;
+        background:transparent !important;
+        color:#60a5fa !important;
     }
 
     @media (prefers-reduced-motion: reduce) {

@@ -28,7 +28,7 @@ class AdminPanelProvider extends PanelProvider
     {
         parent::register();
 
-        // BookMyShow-style split brand panel (blue aurora) on the left of the
+        // Light brand panel on the left of the
         // /control sign-in screen — the admin twin of the partner console's
         // PartnerLogin. Scoped to ControlLogin so the rest of the panel (and the
         // shared compiled theme) stay untouched.
@@ -63,11 +63,13 @@ class AdminPanelProvider extends PanelProvider
                     ->brandName('Haraan Control'),
             ])
             ->colors([
-                // The console's indigo primary is shared with the partner and
-                // employee panels; green remains reserved for positive states.
-                'primary' => Color::Indigo,
+                // Haraan blue (#2563EB = blue-600) — the one action colour across the
+                // apps and the site. Indigo was the stock "generated UI" purple and
+                // made every button on the console look off-brand. Green stays for
+                // positive states only.
+                'primary' => Color::Blue,
                 'gray' => Color::Zinc,
-                'info' => Color::Blue,
+                'info' => Color::Sky,
                 'success' => Color::Emerald,
                 'warning' => Color::Amber,
                 'danger' => Color::Rose,
@@ -101,6 +103,8 @@ class AdminPanelProvider extends PanelProvider
                     ->icon('heroicon-o-shield-check')
                     ->collapsed(),
             ])
+            // The top-bar search showed a "Ctrl K" hint that did nothing; bind it.
+            ->globalSearchKeyBindings(['command+k', 'ctrl+k'])
             ->sidebarCollapsibleOnDesktop()
             ->sidebarWidth('18rem')
             ->collapsedSidebarWidth('4.5rem')

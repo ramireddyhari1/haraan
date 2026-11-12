@@ -8,7 +8,7 @@
     <x-filament::section collapsible>
         <x-slot name="heading">
             <span style="display:inline-flex;align-items:center;gap:7px;">
-                <x-filament::icon icon="heroicon-m-sparkles" style="width:18px;height:18px;color:#7c3aed;" />
+                <x-filament::icon icon="heroicon-m-light-bulb" style="width:18px;height:18px;color:#2563eb;" />
                 Insights &amp; recommendations
             </span>
         </x-slot>

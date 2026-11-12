@@ -20,14 +20,23 @@ $palette = ['#2563eb', '#0f9d63', '#e8a33d', '#7c3aed', '#64748b', '#0ea5e9'];
 
     <dl class="hls-stats" style="--n: {{ max(1, count($s['stats'])) }}">
         @foreach ($s['stats'] as $stat)
-            <div class="hls-stat">
+            @php
+                // A zero is still a fact, but it shouldn't shout or carry a paragraph:
+                // dim it and move its explanation into a tooltip.
+                $isZero = in_array(trim((string) $stat['value']), ['0', '₹0', '—', '0%', '₹0.00'], true);
+            @endphp
+            <div class="hls-stat" @if ($isZero && ! empty($stat['sub'])) title="{{ $stat['sub'] }}" @endif>
                 <dt>{{ $stat['label'] }}</dt>
-                <dd @class(['is-good' => ($stat['tone'] ?? null) === 'good', 'is-warn' => ($stat['tone'] ?? null) === 'warn'])>{{ $stat['value'] }}</dd>
-                @if (! empty($stat['sub']))<p>{{ $stat['sub'] }}</p>@endif
+                <dd @class(['is-good' => ! $isZero && ($stat['tone'] ?? null) === 'good', 'is-warn' => ! $isZero && ($stat['tone'] ?? null) === 'warn', 'is-zero' => $isZero])>{{ $stat['value'] }}</dd>
+                @if (! empty($stat['sub']) && ! $isZero)<p>{{ $stat['sub'] }}</p>@endif
             </div>
         @endforeach
     </dl>
 
+    @php
+        // An empty split bar is just a heading over "nothing" — leave it out.
+        if ($split && ($split['parts'] ?? []) === []) { $split = null; }
+    @endphp
     @if ($split || $list)
         <div class="hls-lower">
             @if ($split)
@@ -57,9 +66,10 @@ $palette = ['#2563eb', '#0f9d63', '#e8a33d', '#7c3aed', '#64748b', '#0ea5e9'];
             @if ($list)
                 <div class="hls-list">
                     <div class="hls-sub-title">{{ $list['title'] }}</div>
-                    @if ($list['rows'] === [] && ! empty($list['illo']))
+                    {{-- One drawing per page at most: the first empty list gets it, later ones are a plain line. --}}
+                    @if ($list['rows'] === [] && ! empty($list['illo']) && ! \App\Support\EmptyArt::taken())
                         <div class="hls-empty-art">
-                            <x-hrn-illo :name="$list['illo']" :size="112" />
+                            <x-hrn-illo :name="$list['illo']" :size="96" />
                             <p>{{ $list['empty'] }}</p>
                         </div>
                     @elseif ($list['rows'] === [])
@@ -96,6 +106,8 @@ $palette = ['#2563eb', '#0f9d63', '#e8a33d', '#7c3aed', '#64748b', '#0ea5e9'];
     .hls-stat dd{margin:6px 0 0;font-size:22px;font-weight:740;letter-spacing:-.03em;color:#0f172a;font-variant-numeric:tabular-nums;}
     .hls-stat dd.is-good{color:#0f9d63;}
     .hls-stat dd.is-warn{color:#b45309;}
+    .hls-stat dd.is-zero{color:#94a3b8;font-weight:600;}
+    .dark .hls-stat dd.is-zero{color:#64748b !important;}
     .hls-stat p{margin:3px 0 0;font-size:12px;color:#94a3b8;}
     .hls-lower{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));border-top:1px solid #eef1f6;}
     .hls-lower > div{padding:13px 18px 16px;min-width:0;}
