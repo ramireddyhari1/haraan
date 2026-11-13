@@ -30,7 +30,7 @@ class SitemapController extends Controller
 
     public function index(): Response
     {
-        $xml = Cache::remember('sitemap.xml.v3', now()->addHour(), fn (): string => $this->build());
+        $xml = Cache::remember('sitemap.xml.v4', now()->addHour(), fn (): string => $this->build());
 
         // Anonymous, identical for everyone — let crawlers and any CDN cache it for
         // an hour (matches the app-cache TTL above).
@@ -79,6 +79,7 @@ class SitemapController extends Controller
             }
             $citySlug = SeoUrl::city($city);
             $venueCities[$citySlug] ??= ['lastmod' => null, 'sports' => []];
+            $venueCities[$citySlug]['name'] ??= $city;
             if ($v->updated_at && ($venueCities[$citySlug]['lastmod'] === null || $v->updated_at->gt($venueCities[$citySlug]['lastmod']))) {
                 $venueCities[$citySlug]['lastmod'] = $v->updated_at;
             }
@@ -106,32 +107,41 @@ class SitemapController extends Controller
                 $add(SeoUrl::venue($v), $v->updated_at, '0.5', 'monthly');
                 $city = trim((string) $v->city);
                 if ($city !== '') {
-                    $listedPerCity[SeoUrl::city($city)] = ($listedPerCity[SeoUrl::city($city)] ?? 0) + 1;
+                    $venueCities[SeoUrl::city($city)] ??= ['lastmod' => null, 'sports' => [], 'name' => $city];
                 }
             }
-            // The city page is indexable from five listed venues (PublicWebController::cityVenues).
-            foreach ($listedPerCity as $citySlug => $n) {
-                if ($n >= 5) {
-                    $venueCities[$citySlug] ??= ['lastmod' => null, 'sports' => []];
-                }
-            }
+            unset($listedPerCity);
         }
 
-        // Curated hubs are indexable with or without listings (see SeoUrl), with the
-        // sport pages the Kadapa push targeted.
+        // The state hub (/venues/andhra-pradesh) — every city with venues, linked.
+        if (($stateSlug = \App\Support\CityVenueGuide::stateSlug()) !== null) {
+            $add('/venues/'.$stateSlug, null, '0.8', 'weekly');
+        }
+
+        // City and sport pages, each only when it is indexable — the same rule the page's
+        // own robots tag uses (CityVenueGuide::MIN_TO_INDEX real venues, bookable or listed),
+        // so the sitemap never offers a page that tells Google not to index it. Curated
+        // hubs (Kadapa) keep their city page either way.
         foreach (SeoUrl::CURATED_VENUE_CITIES as $citySlug) {
-            $venueCities[$citySlug] ??= ['lastmod' => null, 'sports' => []];
-            foreach (['cricket', 'box-cricket', 'badminton', 'football'] as $sportSlug) {
-                $venueCities[$citySlug]['sports'][$sportSlug] = true;
-            }
+            $venueCities[$citySlug] ??= ['lastmod' => null, 'sports' => [], 'name' => ucfirst($citySlug)];
         }
-
-        // "Turfs in <city>" + "<sport> turfs in <city>" — only where a real venue
-        // backs the page (an empty one is noindex, so listing it would contradict it).
         foreach ($venueCities as $citySlug => $info) {
+            $name = (string) ($info['name'] ?? ucfirst($citySlug));
+            $stats = \App\Support\CityVenueGuide::stats(\App\Support\CityVenueGuide::venues($name));
+            $curated = in_array($citySlug, SeoUrl::CURATED_VENUE_CITIES, true);
+            if ($stats['total'] < \App\Support\CityVenueGuide::MIN_TO_INDEX && ! $curated) {
+                continue;
+            }
             $add('/venues/'.$citySlug, $info['lastmod'], '0.8', 'weekly');
-            foreach (array_keys($info['sports']) as $sportSlug) {
+            foreach ($stats['sports'] as $sportSlug => $n) {
+                if ($n < \App\Support\CityVenueGuide::MIN_TO_INDEX) {
+                    continue;
+                }
                 $add('/venues/'.$citySlug.'/'.$sportSlug, $info['lastmod'], '0.7', 'weekly');
+                // Box cricket is played on cricket turfs — its page counts the same venues.
+                if ($sportSlug === 'cricket') {
+                    $add('/venues/'.$citySlug.'/box-cricket', $info['lastmod'], '0.7', 'weekly');
+                }
             }
         }
 

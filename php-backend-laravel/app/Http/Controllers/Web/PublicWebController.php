@@ -25,6 +25,7 @@ use App\Services\Membership\MemberEntitlements;
 use App\Services\Membership\SportInsightsAccess;
 use App\Services\Stats\MatchPlayerStatsService;
 use App\Support\CityResolver;
+use App\Support\CityVenueGuide;
 use App\Support\EventViewRecorder;
 use App\Support\MatchGeocoder;
 use App\Support\MatchProximity;
@@ -764,7 +765,11 @@ final class PublicWebController extends Controller
         // Every city with a published venue, busiest first.
         $cities = [];
         if ($on('cities_enabled')) {
-            $cities = Venue::published()->whereNotNull('city')->where('city', '!=', '')
+            // Listed venues count too — their city pages are real directories now.
+            $cities = Venue::query()
+                ->where(fn ($q) => $q->whereIn('id', Venue::published()->select('id'))
+                    ->orWhere(fn ($l) => $l->listed()))
+                ->whereNotNull('city')->where('city', '!=', '')
                 ->selectRaw('city, count(*) as n')->groupBy('city')->orderByDesc('n')->orderBy('city')->limit(40)->get()
                 ->map(fn ($r): array => [
                     'name' => trim((string) $r->city),
@@ -1065,6 +1070,10 @@ final class PublicWebController extends Controller
     public function cityVenues(string $city, ?string $sport = null): View
     {
         $cityRaw = trim(urldecode($city));
+        // /venues/andhra-pradesh is the state hub, not a city.
+        if ($sport === null && CityVenueGuide::stateSlug() === strtolower($cityRaw)) {
+            return app(StateVenuesController::class)->show();
+        }
         $cityName = CityResolver::detect($cityRaw) ?: ucfirst($cityRaw);
         $citySlug = strtolower(preg_replace('/[^a-zA-Z0-9]+/', '-', $cityName) ?: 'kadapa');
 
@@ -1076,9 +1085,10 @@ final class PublicWebController extends Controller
         // Fetch published venues in this city
         $venuesQuery = Venue::published()
             ->where(function ($q) use ($cityName): void {
+                // Not the address: "Eluru Road" is a street in Vijayawada (CityVenueGuide).
                 $q->whereRaw('lower(city) = ?', [strtolower($cityName)])
-                    ->orWhere('location', 'like', "%{$cityName}%")
-                    ->orWhere('address', 'like', "%{$cityName}%");
+                    ->orWhere(fn ($n) => $n->where(fn ($e) => $e->whereNull('city')->orWhere('city', ''))
+                        ->where('location', 'like', "%{$cityName}%"));
             });
 
         if ($sportLabel !== null) {
@@ -1128,62 +1138,43 @@ final class PublicWebController extends Controller
             ->limit(4)
             ->get();
 
-        // High-intent SEO titles & descriptions
-        $pageTitle = $sportLabel
-            ? "Best {$sportLabel} Turfs in {$cityName} — Book Slots Online"
-            : "Turfs in {$cityName} — Book Cricket, Box Cricket & Badminton Courts";
-
-        $metaTitle = $sportLabel
-            ? "{$sportLabel} Turfs in {$cityName} | Compare Slots & Prices | Haraan"
-            : "Turfs in {$cityName} | Book Cricket, Box Cricket & Badminton | Haraan";
-
-        $metaDesc = $sportLabel
-            ? "Looking for {$sportLabel} turfs in {$cityName}? Compare currently available venues, hourly slot prices and facilities, then book online with Haraan."
-            : "Looking for turfs in {$cityName}? Compare currently available cricket turfs, box cricket venues and badminton courts, then book online with Haraan.";
+        // What is actually here, from the venues themselves (bookable + listed): the
+        // title, description, opening line and questions are built from it, so no two
+        // city pages say the same thing (see CityVenueGuide).
+        $guideSport = $sportSlug !== null && isset(CityVenueGuide::SPORTS[$sportSlug]) ? $sportSlug : null;
+        $cityAll = CityVenueGuide::venues($cityName);
+        $here = CityVenueGuide::forSport($cityAll, $guideSport);
+        $stats = CityVenueGuide::stats($here);
+        $cityStats = $guideSport === null ? $stats : CityVenueGuide::stats($cityAll);
+        $copy = CityVenueGuide::copy($cityName, $guideSport, $stats);
+        $faqs = CityVenueGuide::faqs($cityName, $guideSport, $stats);
 
         $canonicalUrl = url('/venues/' . $citySlug . ($sportSlug ? '/' . $sportSlug : ''));
 
         $breadcrumbs = [
             ['name' => 'Haraan', 'url' => url('/')],
             ['name' => 'Pulse Venues', 'url' => route('site.gamehub')],
-            ['name' => $cityName, 'url' => url('/venues/' . $citySlug)],
         ];
+        $stateSlug = CityVenueGuide::stateSlug();
+        if ($stateSlug !== null && CityVenueGuide::inState($cityName)) {
+            $breadcrumbs[] = ['name' => \App\Services\VenueDiscovery\DiscoverySettings::state(), 'url' => url('/venues/' . $stateSlug)];
+        }
+        $breadcrumbs[] = ['name' => $cityName, 'url' => url('/venues/' . $citySlug)];
         if ($sportLabel) {
             $breadcrumbs[] = ['name' => $sportLabel];
         }
 
-        // FAQs for rich snippet inclusion
-        $faqs = [
-            [
-                'question' => "Where can I find turfs in {$cityName}?",
-                'answer' => "Haraan lists currently available sports venues in {$cityName} in one place. Open a venue listing to check its location, sports, booking slots, facilities and current hourly price before you book.",
-            ],
-            [
-                'question' => "How much does a turf cost per hour in {$cityName}?",
-                'answer' => "Prices depend on the venue, sport, time and day. Haraan shows the current hourly rate on each venue listing, so you can compare options before confirming your slot.",
-            ],
-            [
-                'question' => "Can I book a box cricket turf for an evening match in {$cityName}?",
-                'answer' => "Choose a venue with a suitable available evening slot. Each listing shows its opening hours and facilities, including floodlights where the venue has provided that information.",
-            ],
-            [
-                'question' => "How can sports turf owners in {$cityName} list their grounds on Haraan?",
-                'answer' => "Venue managers and turf owners in {$cityName} can sign up via the Haraan Partner Portal to accept online slot reservations, manage schedules, and collect payments.",
-            ],
-        ];
+        // Sport links with real counts — only sports this city has, each to its own page.
+        $sportLinks = [];
+        foreach ($cityStats['sports'] as $slug => $n) {
+            $sportLinks[] = ['slug' => $slug, 'label' => CityVenueGuide::SPORTS[$slug][0], 'count' => $n];
+            if ($slug === 'cricket') {
+                $sportLinks[] = ['slug' => 'box-cricket', 'label' => 'Box Cricket', 'count' => $n];
+            }
+        }
 
-        $faqSchema = [
-            '@context' => 'https://schema.org',
-            '@type' => 'FAQPage',
-            'mainEntity' => array_map(static fn (array $f) => [
-                '@type' => 'Question',
-                'name' => $f['question'],
-                'acceptedAnswer' => [
-                    '@type' => 'Answer',
-                    'text' => $f['answer'],
-                ],
-            ], $faqs),
-        ];
+        $indexable = $stats['total'] >= CityVenueGuide::MIN_TO_INDEX
+            || ($guideSport === null && in_array($citySlug, SeoUrl::CURATED_VENUE_CITIES, true));
 
         return view('site.city-venues', [
             'cityName' => $cityName,
@@ -1195,21 +1186,22 @@ final class PublicWebController extends Controller
             'listedVenues' => $listedVenues,
             'localMatches' => $localMatches,
             'faqs' => $faqs,
-            'title' => $pageTitle,
+            'guide' => $copy + ['stats' => $stats, 'sportLinks' => $sportLinks, 'areas' => array_slice($stats['areas'], 0, 12, true)],
+            'stateLink' => $stateSlug !== null && CityVenueGuide::inState($cityName)
+                ? ['name' => \App\Services\VenueDiscovery\DiscoverySettings::state(), 'url' => url('/venues/' . $stateSlug)]
+                : null,
+            // The browser title (the layout adds "| Haraan"); the H1 stays plain.
+            'title' => preg_replace('/\s*\|\s*Haraan$/', '', $copy['title']),
             'seo' => [
-                'title' => $metaTitle,
-                'description' => $metaDesc,
+                'title' => $copy['title'],
+                'description' => $copy['description'],
                 'canonical' => $canonicalUrl,
-                // A city/sport with no venue of its own only shows the fallback rail —
-                // a thin page that shouldn't compete in search until real listings exist.
-                // Curated hubs (Kadapa: its own local guide, areas and FAQ) stay indexed
-                // either way — that copy is the page's content, not the listings.
-                // A directory of a handful of real places is content too; one or two is not.
-                'robots' => $venues->isEmpty() && $listedVenues->count() < 5 && ! in_array($citySlug, SeoUrl::CURATED_VENUE_CITIES, true)
-                    ? 'noindex,follow'
-                    : 'index,follow,max-image-preview:large',
+                // Three real venues (bookable or listed) make a page worth finding; fewer,
+                // or an unknown sport, is a thin page kept out of search. Kadapa's own
+                // local guide keeps its city page indexed either way.
+                'robots' => $indexable ? 'index,follow,max-image-preview:large' : 'noindex,follow',
                 'breadcrumbs' => $breadcrumbs,
-                'jsonld' => $faqSchema,
+                'jsonld' => CityVenueGuide::jsonLd($canonicalUrl, $copy['h1'], $here, $faqs),
             ],
         ]);
     }

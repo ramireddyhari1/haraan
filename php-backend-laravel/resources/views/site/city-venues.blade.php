@@ -188,6 +188,17 @@
     .kv-owner h2 { font-size: 20px; }
     .kv-owner p { margin: 6px 0 0; font-size: 15px; line-height: 1.6; color: var(--ink-2); max-width: 640px; }
 
+    /* Areas: a typeset index, not cards */
+    .kv-areas { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 2px solid var(--ink); }
+    .kv-areas section { padding: 14px 20px 14px 0; border-bottom: 1px solid var(--rule); }
+    .kv-areas h3 { margin: 0 0 6px; font-size: 15px; font-weight: 800; display: flex; gap: 8px; align-items: baseline; }
+    .kv-areas h3 span { font-size: 12.5px; font-weight: 700; color: var(--ink-3); }
+    .kv-areas p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
+    .kv-areas a { color: var(--blue-ink); text-decoration: none; }
+    .kv-areas a:hover { text-decoration: underline; text-underline-offset: 3px; }
+    @media (max-width: 900px) { .kv-areas { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 600px) { .kv-areas { grid-template-columns: minmax(0, 1fr); } .kv-areas section { padding-right: 0; } }
+
     /* FAQ */
     .kv-faq details { border-top: 1px solid var(--rule); }
     .kv-faq details:last-child { border-bottom: 1px solid var(--rule); }
@@ -232,6 +243,9 @@
             <nav class="kv-crumbs" aria-label="Breadcrumb">
                 <a href="{{ url('/') }}">Home</a><span aria-hidden="true">/</span>
                 <a href="{{ route('site.gamehub') }}">Pulse</a><span aria-hidden="true">/</span>
+                @if(!empty($stateLink))
+                    <a href="{{ $stateLink['url'] }}">{{ $stateLink['name'] }}</a><span aria-hidden="true">/</span>
+                @endif
                 @if($sportLabel)
                     <a href="{{ url('/venues/'.$citySlug) }}">{{ $cityName }}</a><span aria-hidden="true">/</span>
                     <span>{{ $sportLabel }}</span>
@@ -243,10 +257,12 @@
             @if($isKadapa)
                 <p class="kv-place">Kadapa · YSR district, Andhra Pradesh</p>
             @endif
-            <h1>{{ $subject }} in {{ $cityName }}</h1>
+            <h1>{{ $guide['h1'] ?? ($subject.' in '.$cityName) }}</h1>
 
             <p class="kv-status">
-                @if($venueCount > 0)
+                @if(!empty($guide['lead']))
+                    {{ $guide['lead'] }}
+                @elseif($venueCount > 0)
                     <strong>{{ $venueCount }} {{ \Illuminate\Support\Str::plural('ground', $venueCount) }}</strong> in {{ $cityName }} {{ $venueCount === 1 ? 'takes' : 'take' }} bookings on Haraan{{ $fromPrice ? ', from ₹'.number_format($fromPrice).' an hour' : '' }}.
                     Pick a ground, choose a court and an open slot, and pay online.
                 @else
@@ -260,9 +276,14 @@
             </p>
 
             <nav class="kv-chips" aria-label="Sport">
-                @foreach($chips as [$slug, $label])
-                    <a class="kv-chip" href="{{ url('/venues/'.$citySlug.($slug ? '/'.$slug : '')) }}" @if($sportSlug === $slug) aria-current="page" @endif>{{ $label }}</a>
-                @endforeach
+                <a class="kv-chip" href="{{ url('/venues/'.$citySlug) }}" @if($sportSlug === null) aria-current="page" @endif>All sports</a>
+                @forelse($guide['sportLinks'] ?? [] as $sl)
+                    <a class="kv-chip" href="{{ url('/venues/'.$citySlug.'/'.$sl['slug']) }}" @if($sportSlug === $sl['slug']) aria-current="page" @endif>{{ $sl['label'] }} <small style="color:var(--ink-3);font-weight:600">{{ $sl['count'] }}</small></a>
+                @empty
+                    @foreach(array_slice($chips, 1) as [$slug, $label])
+                        <a class="kv-chip" href="{{ url('/venues/'.$citySlug.'/'.$slug) }}" @if($sportSlug === $slug) aria-current="page" @endif>{{ $label }}</a>
+                    @endforeach
+                @endforelse
             </nav>
         </div>
 
@@ -364,6 +385,27 @@
         </div>
     @endif
 
+    {{-- ── 2c. Areas — each with the venues in it (real names, real links) ─── --}}
+    @if(count($guide['areas'] ?? []) >= 2)
+        <div class="kv-sec">
+            <div class="kv-sec__head">
+                <h2>Where to play {{ $sportLabel ? strtolower($sportLabel).' ' : '' }}in {{ $cityName }}, by area</h2>
+            </div>
+            <div class="kv-areas">
+                @foreach($guide['areas'] as $area => $rows)
+                    <section>
+                        <h3>{{ $area }} <span>{{ count($rows) }}</span></h3>
+                        <p>
+                            @foreach(array_slice($rows, 0, 6) as $r)
+                                <a href="{{ $r['url'] }}">{{ $r['name'] }}</a>@if(!$loop->last), @endif
+                            @endforeach
+                        </p>
+                    </section>
+                @endforeach
+            </div>
+        </div>
+    @endif
+
     {{-- ── 3. Matches scored in the city ─────────────────────────────────── --}}
     @if($matches->isNotEmpty())
         <div class="kv-sec">
@@ -431,8 +473,9 @@
     </div>
 
     {{-- ── 6. FAQ ──────────────────────────────────────────────────────── --}}
+    @if(!empty($faqs))
     <div class="kv-sec kv-faq">
-        <div class="kv-sec__head"><h2>Questions</h2></div>
+        <div class="kv-sec__head"><h2>Questions about {{ $sportLabel ? strtolower($sportLabel).' in ' : 'sports venues in ' }}{{ $cityName }}</h2></div>
         @foreach($faqs as $f)
             <details @if($loop->first) open @endif>
                 <summary>
@@ -443,6 +486,11 @@
             </details>
         @endforeach
     </div>
+    @endif
+
+    @if(!empty($stateLink))
+        <p class="kv-sec__lead" style="margin:28px 0 0">More cities: <a href="{{ $stateLink['url'] }}" style="color:var(--blue);font-weight:700;text-decoration:none">sports venues across {{ $stateLink['name'] }}</a></p>
+    @endif
 </div>
 <script>
     (function () {

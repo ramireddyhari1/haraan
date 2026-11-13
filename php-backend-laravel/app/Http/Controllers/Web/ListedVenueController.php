@@ -95,6 +95,7 @@ class ListedVenueController extends Controller
             'bookable' => $city === '' ? collect() : Venue::published()
                 ->whereRaw('lower(city) = ?', [mb_strtolower($city)])
                 ->orderByDesc('is_featured')->orderBy('sort_order')->limit(3)->get(),
+            'cityLinks' => $city === '' ? [] : self::cityLinks($venue, $city),
             'nearby' => $city === '' ? collect() : self::forCity($city, null, 9)->where('id', '!=', $venue->id)->take(8)->values(),
             'seo' => [
                 'title' => $venue->name . ($where !== '' ? ' in ' . $where : '') . ($sportLine !== '' ? ' — ' . $sportLine : '') . ' | Haraan',
@@ -157,6 +158,32 @@ class ListedVenueController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * "Badminton courts in Vijayawada", "All sports venues in Vijayawada" — the city and
+     * sport pages this venue belongs to, so search engines (and players) can walk up.
+     *
+     * @return list<array{label:string,url:string}>
+     */
+    private static function cityLinks(Venue $venue, string $city): array
+    {
+        $citySlug = SeoUrl::city($city);
+        $links = [];
+        foreach (\App\Support\CityVenueGuide::SPORTS as $slug => [$label, $sport]) {
+            if ($slug !== 'box-cricket' && in_array($sport, $venue->sports ? $venue->sportsList() : [], true)) {
+                $links[] = ['label' => $label . ' in ' . $city, 'url' => url('/venues/' . $citySlug . '/' . $slug)];
+                if ($slug === 'cricket') {
+                    $links[] = ['label' => 'Box cricket in ' . $city, 'url' => url('/venues/' . $citySlug . '/box-cricket')];
+                }
+            }
+        }
+        $links[] = ['label' => 'All sports venues in ' . $city, 'url' => url('/venues/' . $citySlug)];
+        if (($state = \App\Support\CityVenueGuide::stateSlug()) !== null && \App\Support\CityVenueGuide::inState($city)) {
+            $links[] = ['label' => 'Sports venues across ' . DiscoverySettings::state(), 'url' => url('/venues/' . $state)];
+        }
+
+        return $links;
     }
 
     /** A player asks to book a listed venue. One row per phone per venue; asking again updates it. */

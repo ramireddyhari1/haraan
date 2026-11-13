@@ -96,6 +96,10 @@
     .lv-row span { font-size: 13px; color: var(--ink-3); }
     .lv-row em { font-style: normal; font-size: 14px; font-weight: 700; color: var(--blue); white-space: nowrap; }
 
+    .lv-links { display: flex; flex-wrap: wrap; gap: 8px; }
+    .lv-links a { font-size: 14px; font-weight: 600; text-decoration: none; padding: 7px 12px; border-radius: 999px; background: #EEF4FF; color: #1E40AF; }
+    .lv-links a:hover { background: #DCE7FE; }
+
     @media (max-width: 900px) {
         .lv-grid { grid-template-columns: minmax(0, 1fr); gap: 28px; }
         .lv-card { position: static; }
@@ -244,6 +248,14 @@
                 @endforeach
             </div>
         </div>
+    @endif
+
+    @if(!empty($cityLinks))
+        <nav class="lv-sec lv-links" aria-label="More in {{ $city }}">
+            @foreach($cityLinks as $l)
+                <a href="{{ $l['url'] }}">{{ $l['label'] }}</a>
+            @endforeach
+        </nav>
     @endif
 
     @if($nearby->isNotEmpty())
