@@ -57,7 +57,7 @@ final class CityVenueGuide
      */
     public static function venues(string $city): Collection
     {
-        $key = 'cityguide:venues:' . Str::slug($city);
+        $key = 'cityguide:venues:v2:' . Str::slug($city);
 
         // Cached as a plain array: the cache store refuses to rebuild objects it didn't expect.
         return collect(Cache::remember($key, now()->addMinutes(10), function () use ($city): array {
@@ -148,32 +148,48 @@ final class CityVenueGuide
         $noun = $n === 1 ? $one : $many;
         $topAreas = array_slice(array_keys($s['areas']), 0, 3);
         $sportWords = self::sportWords($s['sports'], $label === null ? 3 : 0);
+        // The snippet has room for two areas next to the sports, three on a sport page.
+        $descAreas = array_slice($topAreas, 0, $label === null ? 2 : 3);
 
-        $h1 = $label ? ucfirst($many) . ' in ' . $city : 'Sports venues in ' . $city;
+        // "Turfs & courts in Vijayawada" is what people type; "sports venues" is not.
+        $h1 = $label ? ucfirst($many) . ' in ' . $city : 'Turfs & courts in ' . $city;
 
         if ($n === 0) {
             return [
-                'title' => ucfirst($many) . ' in ' . $city . ' | Haraan',
+                'title' => ucwords($many) . ' in ' . $city . ' | Haraan',
                 'description' => 'Haraan doesn’t list any ' . $many . ' in ' . $city . ' yet. Own one? List it on Haraan and take bookings online.',
                 'h1' => $h1,
                 'lead' => '',
             ];
         }
 
-        $bookPart = $s['bookable'] > 0
-            ? ($s['bookable'] === $n ? 'Book online' : $s['bookable'] . ' bookable online')
-            : 'Timings & Directions';
-        $title = $n . ' ' . ucwords($noun) . ' in ' . $city
-            . ($label === null && $sportWords !== '' ? ' — ' . $sportWords : '')
-            . ' | ' . $bookPart . ' | Haraan';
+        // The words searchers use first ("Box Cricket Turfs in Vijayawada"), then what the
+        // page answers ("12 Venues, Timings & Prices") — short enough not to be cut off.
+        // Prices only when a venue here has a real one.
+        $title = ($label ? ucwords($many) : 'Turfs & Courts') . ' in ' . $city
+            . ': ' . $n . ($n === 1 ? ' Venue' : ' Venues')
+            . ', Timings & ' . ($s['fromPrice'] ? 'Prices' : 'Photos')
+            . ' | Haraan';
 
-        $desc = $n . ' ' . $noun . ' in ' . $city
-            . ($topAreas ? ' including ' . self::listWords($topAreas) : '')
+        // The snippet leads with what a searcher can do, and names real places — never
+        // "none take bookings", which only gives a reason not to click.
+        $hours = array_filter([
+            $s['early'] ? count($s['early']) . ' open by 6 AM' : '',
+            $s['late'] ? count($s['late']) . ' open till 10 PM or later' : '',
+        ]);
+        $desc = ($s['bookable'] > 0 && $s['fromPrice']
+                ? 'Book ' . ($label ? $many : 'turfs & courts') . ' in ' . $city . ' from ₹' . number_format($s['fromPrice']) . '/hr. ' . $n . ' ' . ($n === 1 ? 'venue' : 'venues')
+                : $n . ' ' . $noun . ' in ' . $city)
             . ($label === null && $sportWords !== '' ? ' for ' . strtolower($sportWords) : '')
-            . '. See addresses, timings, photos and directions'
-            . ($s['bookable'] > 0
-                ? ($s['fromPrice'] ? ', and book from ₹' . number_format($s['fromPrice']) . ' an hour.' : ', and book online.')
-                : '. None take online bookings on Haraan yet — ask to book and we’ll tell the owner.');
+            . ($descAreas ? ', including ' . self::listWords($descAreas) : '')
+            . ' — timings, photos & directions';
+        // Hours facts only while the snippet still fits (Google cuts at ~155 characters).
+        foreach ($hours as $h) {
+            if (mb_strlen($desc . '; ' . $h . '.') <= 155) {
+                $desc .= (str_contains($desc, ';') ? ', ' : '; ') . $h;
+            }
+        }
+        $desc .= '.';
 
         $lead = 'Haraan lists ' . $n . ' ' . $noun . ' in ' . $city
             . ($topAreas ? ', in ' . self::listWords($topAreas) . (count($s['areas']) > 3 ? ' and ' . (count($s['areas']) - 3) . (count($s['areas']) - 3 === 1 ? ' more area' : ' more areas') : '') : '')
@@ -295,6 +311,172 @@ final class CityVenueGuide
         return $blocks;
     }
 
+    /** How far "near Benz Circle" reaches — a short drive or ride across town. */
+    public const NEAR_KM = 3.0;
+
+    /**
+     * "Turfs near {area}" pages for a city: one per area its venues are in, centred on the
+     * middle of that area's venue pins, listing every venue in the city within NEAR_KM by
+     * distance. Areas are Google's neighbourhood names, so most hold one or two venues —
+     * counting what is *near* is what makes the page worth having, and it is what people
+     * search ("box cricket near Benz Circle").
+     *
+     * A page is offered to search only with MIN_TO_INDEX venues and only when no larger
+     * area already lists exactly the same venues (two pages saying the same thing).
+     *
+     * @return array<string, array{name:string,slug:string,lat:float,lng:float,own:int,venues:list<array>,indexable:bool}>
+     */
+    public static function nearPages(Collection $venues): array
+    {
+        $pinned = $venues->filter(fn (array $v) => $v['lat'] !== null && $v['lng'] !== null)->values();
+
+        $pages = [];
+        foreach ($pinned->filter(fn (array $v) => $v['area'] !== '')->groupBy(fn (array $v) => mb_strtolower($v['area'])) as $group) {
+            $name = (string) $group->first()['area'];
+            $slug = Str::slug($name);
+            if ($slug === '' || isset($pages[$slug])) {
+                continue;
+            }
+            $lat = (float) $group->avg('lat');
+            $lng = (float) $group->avg('lng');
+            $pages[$slug] = [
+                'name' => $name,
+                'slug' => $slug,
+                'lat' => $lat,
+                'lng' => $lng,
+                'own' => $group->count(),
+                'venues' => self::nearest($pinned, $lat, $lng, self::NEAR_KM),
+                'indexable' => false,
+            ];
+        }
+
+        uasort($pages, fn (array $a, array $b) => [count($b['venues']), $b['own'], $a['name']] <=> [count($a['venues']), $a['own'], $b['name']]);
+
+        $seen = [];
+        foreach ($pages as $slug => $p) {
+            $ids = array_column($p['venues'], 'id');
+            sort($ids);
+            $sig = implode(',', $ids);
+            if (count($ids) >= self::MIN_TO_INDEX && ! isset($seen[$sig])) {
+                $pages[$slug]['indexable'] = true;
+                $seen[$sig] = true;
+            }
+        }
+
+        return $pages;
+    }
+
+    /**
+     * Venues within $km of a point, nearest first, each with its distance ('km').
+     *
+     * @return list<array>
+     */
+    public static function nearest(Collection $venues, float $lat, float $lng, float $km, ?int $exceptId = null): array
+    {
+        return $venues
+            ->filter(fn (array $v) => $v['lat'] !== null && $v['lng'] !== null && $v['id'] !== $exceptId)
+            ->map(fn (array $v) => $v + ['km' => self::km($lat, $lng, $v['lat'], $v['lng'])])
+            ->filter(fn (array $v) => $v['km'] <= $km)
+            ->sortBy('km')
+            ->values()
+            ->all();
+    }
+
+    /** "450 m", "1.8 km". */
+    public static function distanceLabel(float $km): string
+    {
+        return $km < 1 ? max(50, (int) (round($km * 20) * 50)) . ' m' : number_format($km, 1) . ' km';
+    }
+
+    /** Great-circle distance in km. */
+    public static function km(float $lat1, float $lng1, float $lat2, float $lng2): float
+    {
+        $dLat = deg2rad($lat2 - $lat1);
+        $dLng = deg2rad($lng2 - $lng1);
+        $a = sin($dLat / 2) ** 2 + cos(deg2rad($lat1)) * cos(deg2rad($lat2)) * sin($dLng / 2) ** 2;
+
+        return 6371 * 2 * atan2(sqrt($a), sqrt(1 - $a));
+    }
+
+    /** "6 AM–11 PM", "Open 24 hours", or '' — from a row's usual weekday hours. */
+    public static function hoursLabel(array $v): string
+    {
+        if ($v['open'] === null || $v['close'] === null) {
+            return '';
+        }
+        if ($v['open'] === $v['close']) {
+            return 'Open 24 hours';
+        }
+        $fmt = static function (int $m): string {
+            $h = intdiv($m, 60) % 24;
+            $mm = $m % 60;
+
+            return ($h % 12 ?: 12) . ($mm ? ':' . str_pad((string) $mm, 2, '0', STR_PAD_LEFT) : '') . ($h < 12 ? ' AM' : ' PM');
+        };
+
+        return $fmt($v['open']) . '–' . $fmt($v['close']);
+    }
+
+    /**
+     * Copy and questions for a "near {area}" page, from the venues on it.
+     *
+     * @return array{title:string,description:string,h1:string,lead:string,faqs:list<array{question:string,answer:string}>}
+     */
+    public static function nearCopy(string $city, array $page): array
+    {
+        $rows = collect($page['venues']);
+        $n = $rows->count();
+        $area = $page['name'];
+        $s = self::stats($rows);
+        $sportWords = self::sportWords($s['sports'], 3);
+        $names = static fn (iterable $r, int $k = 3): string => self::listWords(array_slice(array_column(is_array($r) ? $r : $r->all(), 'name'), 0, $k));
+        $closest = $rows->first();
+
+        $title = 'Turfs & Courts near ' . $area . ', ' . $city . ': ' . $n . ($n === 1 ? ' Venue' : ' Venues') . ' | Haraan';
+        $desc = $n . ' ' . ($n === 1 ? 'sports venue' : 'sports venues') . ' within ' . (int) self::NEAR_KM . ' km of ' . $area . ', ' . $city
+            . ($sportWords !== '' ? ' for ' . strtolower($sportWords) : '')
+            . ' — ' . $names($rows, 2) . ($n > 2 ? ' and more' : '')
+            . '. Distance, timings, photos & directions.';
+        $lead = $n === 0 ? '' : 'Haraan lists ' . $n . ' ' . ($n === 1 ? 'venue' : 'venues') . ' within ' . (int) self::NEAR_KM . ' km of ' . $area
+            . '. The closest is ' . $closest['name'] . ', ' . self::distanceLabel($closest['km']) . ' away'
+            . ($s['bookable'] > 0 ? '; ' . $s['bookable'] . ($s['bookable'] === 1 ? ' takes' : ' take') . ' bookings on Haraan' . ($s['fromPrice'] ? ' from ₹' . number_format($s['fromPrice']) . ' an hour' : '') : '')
+            . '.';
+
+        $faqs = [];
+        if ($n > 0) {
+            $faqs[] = [
+                'question' => 'Which is the nearest turf to ' . $area . ', ' . $city . '?',
+                'answer' => $closest['name'] . ' is the closest Haraan lists, about ' . self::distanceLabel($closest['km']) . ' from the middle of ' . $area . '.'
+                    . ($n > 1 ? ' ' . $names($rows->slice(1), 3) . ' are also within ' . (int) self::NEAR_KM . ' km.' : ''),
+            ];
+        }
+        foreach (array_slice($s['sports'], 0, 3, true) as $slug => $count) {
+            $sport = self::SPORTS[$slug][1];
+            [$one, $many] = self::NOUN[self::SPORTS[$slug][0]];
+            $here = $rows->filter(fn (array $v) => in_array($sport, $v['sports'], true));
+            $faqs[] = [
+                'question' => 'Where can I play ' . strtolower(self::SPORTS[$slug][0]) . ' near ' . $area . '?',
+                'answer' => $count . ' ' . ($count === 1 ? $one : $many) . ' near ' . $area . ': '
+                    . $here->take(4)->map(fn (array $v) => $v['name'] . ' (' . self::distanceLabel($v['km']) . ')')->implode(', ') . '.',
+            ];
+        }
+        if ($s['early'] || $s['late']) {
+            $faqs[] = [
+                'question' => 'Which venues near ' . $area . ' open early or stay open late?',
+                'answer' => trim(($s['early'] ? $names($s['early']) . ' open by 6 AM. ' : '') . ($s['late'] ? $names($s['late']) . ' stay open until 10 PM or later.' : ''))
+                    . ' Timings come from each venue’s listing — call before you go.',
+            ];
+        }
+
+        return [
+            'title' => $title,
+            'description' => $desc,
+            'h1' => 'Turfs & courts near ' . $area . ', ' . $city,
+            'lead' => $lead,
+            'faqs' => $faqs,
+        ];
+    }
+
     /** The state hub's slug ("andhra-pradesh"), or null when discovery has no state set. */
     public static function stateSlug(): ?string
     {
@@ -320,6 +502,10 @@ final class CityVenueGuide
             if (strcasecmp($area, $city) === 0) {
                 $area = '';
             }
+        }
+        // "tadepalle" and "Tadepalle" are one area; typed lower-case, it's title-cased.
+        if ($area !== '' && mb_strtolower($area) === $area) {
+            $area = mb_convert_case($area, MB_CASE_TITLE);
         }
 
         // Today's span is noise for "opens early"; take the most common weekday hours.
@@ -349,6 +535,8 @@ final class CityVenueGuide
             'open' => $open,
             'close' => $close,
             'price' => $bookable ? (int) $v->fromPrice() : 0,
+            'lat' => $v->latitude !== null && $v->latitude !== '' ? (float) $v->latitude : null,
+            'lng' => $v->longitude !== null && $v->longitude !== '' ? (float) $v->longitude : null,
         ];
     }
 

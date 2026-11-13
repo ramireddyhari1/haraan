@@ -96,6 +96,14 @@
     .lv-row span { font-size: 13px; color: var(--ink-3); }
     .lv-row em { font-style: normal; font-size: 14px; font-weight: 700; color: var(--blue); white-space: nowrap; }
 
+    .lv-faq { border-top: 2px solid var(--ink); padding-top: 0; }
+    .lv-faq h2 { margin: 16px 0 6px; }
+    .lv-faq details { border-bottom: 1px solid var(--rule); }
+    .lv-faq summary { cursor: pointer; padding: 14px 0; font-size: 15.5px; font-weight: 700; list-style: none; display: flex; justify-content: space-between; gap: 16px; }
+    .lv-faq summary::-webkit-details-marker { display: none; }
+    .lv-faq summary::after { content: '+'; color: var(--ink-3); font-weight: 600; }
+    .lv-faq details[open] summary::after { content: '–'; }
+    .lv-faq p { margin: 0 0 14px; font-size: 15px; line-height: 1.6; color: var(--ink-2); }
     .lv-links { display: flex; flex-wrap: wrap; gap: 8px; }
     .lv-links a { font-size: 14px; font-weight: 600; text-decoration: none; padding: 7px 12px; border-radius: 999px; background: #EEF4FF; color: #1E40AF; }
     .lv-links a:hover { background: #DCE7FE; }
@@ -228,6 +236,23 @@
         @endif
     </div>
 
+    @if($activity)
+        @include('site.partials.venue-activity', ['activity' => $activity, 'venueName' => $venue->name])
+    @endif
+
+    @if(!empty($faqs))
+        {{-- The same questions are the page's FAQPage markup (ListedVenueController::faqs). --}}
+        <div class="lv-sec lv-faq">
+            <h2>About {{ $venue->name }}</h2>
+            @foreach($faqs as $f)
+                <details @if($loop->first) open @endif>
+                    <summary>{{ $f['question'] }}</summary>
+                    <p>{{ $f['answer'] }}</p>
+                </details>
+            @endforeach
+        </div>
+    @endif
+
     <div class="lv-owner">
         <div>
             <h2>Is this your venue?</h2>
@@ -260,12 +285,12 @@
 
     @if($nearby->isNotEmpty())
         <div class="lv-sec">
-            <h2>More places to play in {{ $city }}</h2>
+            <h2>{{ isset($nearby->first()->km) ? 'Near '.$venue->name : 'More places to play in '.$city }}</h2>
             <div class="lv-list">
                 @foreach($nearby as $n)
                     <a class="lv-row" href="{{ $n->url }}">
                         <div><b>{{ $n->name }}</b><span>{{ implode(' · ', array_filter([$n->area, implode(', ', $n->sports)])) ?: $city }}</span></div>
-                        <em>View</em>
+                        <em>{{ $n->km ?? 'View' }}</em>
                     </a>
                 @endforeach
             </div>

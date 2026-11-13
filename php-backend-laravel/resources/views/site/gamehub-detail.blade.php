@@ -637,6 +637,10 @@
         {{-- ── 9b. FAQ — answered from this venue's own data (PublicWebController::
              venueFaqs); the same list is the page's FAQPage markup, which search
              engines only honour when the questions are visible on the page. ── --}}
+        @if(!empty($venueActivity))
+            @include('site.partials.venue-activity', ['activity' => $venueActivity, 'venueName' => $venue->title])
+        @endif
+
         @if(!empty($venueFaqs))
             <div class="mven__rule"></div>
             <h2 class="mven__h2">Questions about {{ $venue->title }}</h2>
@@ -1261,6 +1265,12 @@
                     </div>
                 </div>
             </section>
+
+            @if(!empty($venueActivity))
+                <div class="vdk-sec">
+                    @include('site.partials.venue-activity', ['activity' => $venueActivity, 'venueName' => $venue->title])
+                </div>
+            @endif
 
             @if(!empty($venueFaqs))
                 <section class="vdk-sec">

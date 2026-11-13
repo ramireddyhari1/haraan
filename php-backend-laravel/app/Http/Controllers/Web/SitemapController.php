@@ -30,7 +30,7 @@ class SitemapController extends Controller
 
     public function index(): Response
     {
-        $xml = Cache::remember('sitemap.xml.v4', now()->addHour(), fn (): string => $this->build());
+        $xml = Cache::remember('sitemap.xml.v5', now()->addHour(), fn (): string => $this->build());
 
         // Anonymous, identical for everyone — let crawlers and any CDN cache it for
         // an hour (matches the app-cache TTL above).
@@ -127,8 +127,15 @@ class SitemapController extends Controller
         }
         foreach ($venueCities as $citySlug => $info) {
             $name = (string) ($info['name'] ?? ucfirst($citySlug));
-            $stats = \App\Support\CityVenueGuide::stats(\App\Support\CityVenueGuide::venues($name));
+            $cityVenues = \App\Support\CityVenueGuide::venues($name);
+            $stats = \App\Support\CityVenueGuide::stats($cityVenues);
             $curated = in_array($citySlug, SeoUrl::CURATED_VENUE_CITIES, true);
+            // "Near {area}" pages — only the ones their own robots tag lets in.
+            foreach (\App\Support\CityVenueGuide::nearPages($cityVenues) as $near) {
+                if ($near['indexable']) {
+                    $add('/venues/'.$citySlug.'/near/'.$near['slug'], $info['lastmod'], '0.6', 'weekly');
+                }
+            }
             if ($stats['total'] < \App\Support\CityVenueGuide::MIN_TO_INDEX && ! $curated) {
                 continue;
             }

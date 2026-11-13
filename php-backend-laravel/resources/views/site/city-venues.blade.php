@@ -196,6 +196,11 @@
     .kv-areas p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--ink-2); }
     .kv-areas a { color: var(--blue-ink); text-decoration: none; }
     .kv-areas a:hover { text-decoration: underline; text-underline-offset: 3px; }
+    .kv-areas h3 a { color: inherit; }
+    .kv-near { margin: 14px 0 0; font-size: 14px; line-height: 1.8; color: var(--ink-3); }
+    .kv-near b { color: var(--ink); margin-right: 4px; }
+    .kv-near a { color: var(--blue-ink); font-weight: 600; text-decoration: none; }
+    .kv-near a:hover { text-decoration: underline; text-underline-offset: 3px; }
     @media (max-width: 900px) { .kv-areas { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
     @media (max-width: 600px) { .kv-areas { grid-template-columns: minmax(0, 1fr); } .kv-areas section { padding-right: 0; } }
 
@@ -394,7 +399,8 @@
             <div class="kv-areas">
                 @foreach($guide['areas'] as $area => $rows)
                     <section>
-                        <h3>{{ $area }} <span>{{ count($rows) }}</span></h3>
+                        @php $nearLink = ($nearLinks ?? [])[mb_strtolower($area)] ?? null; @endphp
+                        <h3>@if($nearLink)<a href="{{ $nearLink['url'] }}">{{ $area }}</a>@else{{ $area }}@endif <span>{{ count($rows) }}</span></h3>
                         <p>
                             @foreach(array_slice($rows, 0, 6) as $r)
                                 <a href="{{ $r['url'] }}">{{ $r['name'] }}</a>@if(!$loop->last), @endif
@@ -403,6 +409,14 @@
                     </section>
                 @endforeach
             </div>
+            @if(!empty($nearLinks))
+                <p class="kv-near">
+                    <b>Turfs near:</b>
+                    @foreach($nearLinks as $nl)
+                        <a href="{{ $nl['url'] }}">{{ $nl['name'] }}</a>@if(!$loop->last) · @endif
+                    @endforeach
+                </p>
+            @endif
         </div>
     @endif
 

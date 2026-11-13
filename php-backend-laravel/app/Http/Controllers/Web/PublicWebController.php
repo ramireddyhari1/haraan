@@ -933,7 +933,12 @@ final class PublicWebController extends Controller
         $hostProfile = $hostProfile && $hostProfile->isLive() ? $hostProfile : null;
 
         $decorated = $this->decorateVenueDetail($venue);
+        // Matches scored at this ground on Haraan — the part of the page no directory has.
+        $activity = \App\Support\VenueActivity::forVenue($venue);
         $faqs = $this->venueFaqs($venue, $decorated);
+        if ($activity && $activity['faq']) {
+            $faqs[] = $activity['faq'];
+        }
         $seo = $this->venueSeo($venue, $decorated, $faqs);
 
         return view('site.gamehub-detail', [
@@ -943,6 +948,7 @@ final class PublicWebController extends Controller
             'id' => (string) $venue->id,
             'venue' => $decorated,
             'venueFaqs' => $faqs,
+            'venueActivity' => $activity,
             'venueSummary' => $this->venueSummary($venue, $decorated),
             'venueLinks' => $this->venueLinks($venue),
             'seo' => $seo,
@@ -1187,6 +1193,15 @@ final class PublicWebController extends Controller
             'localMatches' => $localMatches,
             'faqs' => $faqs,
             'guide' => $copy + ['stats' => $stats, 'sportLinks' => $sportLinks, 'areas' => array_slice($stats['areas'], 0, 12, true)],
+            // "Turfs near {area}" pages worth linking (NearVenuesController), keyed by area.
+            'nearLinks' => collect(CityVenueGuide::nearPages($cityAll))
+                ->filter(fn (array $p) => $p['indexable'])
+                ->mapWithKeys(fn (array $p) => [mb_strtolower($p['name']) => [
+                    'name' => $p['name'],
+                    'url' => route('site.venues.near', ['city' => $citySlug, 'area' => $p['slug']]),
+                    'count' => count($p['venues']),
+                ]])
+                ->all(),
             'stateLink' => $stateSlug !== null && CityVenueGuide::inState($cityName)
                 ? ['name' => \App\Services\VenueDiscovery\DiscoverySettings::state(), 'url' => url('/venues/' . $stateSlug)]
                 : null,
@@ -1224,10 +1239,17 @@ final class PublicWebController extends Controller
         // Searchers type "<venue> <area>", "box cricket turf <city>", "<venue> timings" —
         // the title and snippet carry those words. The owner's tagline is a slogan, so
         // it's no longer the snippet (it stays on the page).
-        $title = $venue->name.($where !== '' ? ' - '.$where : '').' - Book Online';
-        $desc = 'Book '.$venue->name.($where !== '' ? ', '.$where : '').' online.'
-            .($sports !== '' ? ' '.$sports.($from > 0 ? ' from ₹'.number_format($from).'/hr' : '').'.' : '')
-            .' Check photos, timings, amenities and live slot availability on Haraan.';
+        // "Blasters Cricket Club, Tadepalle – Book Cricket Turf in Vijayawada": the name and
+        // area people search the venue by, then the "book <turf> in <city>" words.
+        $area = self::venueArea($venue);
+        $city = trim((string) $venue->city);
+        $title = $venue->name.($area ? ', '.$area : '')
+            .($city !== '' ? ' – Book '.ListedVenueController::kind($venue).' in '.$city : ' – Book Online');
+        $desc = Str::limit('Book '.$venue->name.($where !== '' ? ', '.$where : '').' online'
+            .($from > 0 ? ' from ₹'.number_format($from).'/hr' : '').'.'
+            .($sports !== '' ? ' '.$sports.'.' : '')
+            .(filled($d->hours) ? ' Open '.$d->hours.'.' : '')
+            .' Live slots, photos & instant confirmation on Haraan.', 158, '…');
 
         $schema = array_filter([
             '@context' => 'https://schema.org',

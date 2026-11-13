@@ -16,6 +16,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 
 /**
  * The website page of a "listed" venue — one Haraan knows about whose owner has not
@@ -76,8 +77,38 @@ class ListedVenueController extends Controller
             ] : null,
         ]);
 
+        $activity = \App\Support\VenueActivity::forVenue($venue);
+        $kind = self::kind($venue);
+        $faqs = self::faqs($venue, $kind, $area, $city, $hoursLine, $activity);
+        if ($faqs) {
+            $schema = [$schema, [
+                '@context' => 'https://schema.org',
+                '@type' => 'FAQPage',
+                'mainEntity' => array_map(static fn (array $f) => [
+                    '@type' => 'Question',
+                    'name' => $f['question'],
+                    'acceptedAnswer' => ['@type' => 'Answer', 'text' => $f['answer']],
+                ], $faqs),
+            ]];
+        }
+
+        // "Crazy Turf, Krishnalanka – Football Turf in Vijayawada": the venue's name and
+        // area (what people search for it by), then what it is and where.
+        $title = $venue->name . ($area !== '' ? ', ' . $area : '')
+            . ($city !== '' ? ' – ' . $kind . ' in ' . $city : '');
+        $description = Str::limit(trim(
+            $venue->name . ' is a ' . mb_strtolower($kind) . ($where !== '' ? ' in ' . $where : '')
+            . ($sportLine !== '' && count($sports) > 1 ? ' for ' . mb_strtolower($sportLine) : '') . '.'
+            . ($hoursLine !== '' ? ' Timings: ' . $hoursLine . '.' : '')
+            . ' Photos, phone number & directions'
+            . ($activity && $activity['matches'] > 0 ? ', and ' . $activity['matches'] . ' ' . ($activity['matches'] === 1 ? 'match' : 'matches') . ' scored here' : '')
+            . '. Ask to book on Haraan.'
+        ), 158, '…');
+
         return view('site.venue-listed', [
-            'title' => $venue->name . ($where !== '' ? ', ' . $where : ''),
+            'title' => $title,
+            'activity' => $activity,
+            'faqs' => $faqs,
             'venue' => $venue,
             'sports' => $venue->sports ? $sports : [],
             'city' => $city,
@@ -96,12 +127,10 @@ class ListedVenueController extends Controller
                 ->whereRaw('lower(city) = ?', [mb_strtolower($city)])
                 ->orderByDesc('is_featured')->orderBy('sort_order')->limit(3)->get(),
             'cityLinks' => $city === '' ? [] : self::cityLinks($venue, $city),
-            'nearby' => $city === '' ? collect() : self::forCity($city, null, 9)->where('id', '!=', $venue->id)->take(8)->values(),
+            'nearby' => $city === '' ? collect() : self::nearby($venue, $city),
             'seo' => [
-                'title' => $venue->name . ($where !== '' ? ' in ' . $where : '') . ($sportLine !== '' ? ' — ' . $sportLine : '') . ' | Haraan',
-                'description' => trim($venue->name . ($where !== '' ? ' in ' . $where : '') . '.'
-                    . ($sportLine !== '' ? ' Sports: ' . $sportLine . '.' : '')
-                    . ' Address and directions. This venue does not take bookings on Haraan yet — ask to book and we’ll tell the owner.'),
+                'title' => $title,
+                'description' => $description,
                 'canonical' => $canonical,
                 'robots' => $indexable ? 'index,follow' : 'noindex,follow',
                 'breadcrumbs' => $crumbs,
@@ -158,6 +187,84 @@ class ListedVenueController extends Controller
         }
 
         return null;
+    }
+
+    /** What a venue is called, singular: "Football Turf", "Badminton Court", "Cricket & Football Turf". */
+    public static function kind(Venue $venue): string
+    {
+        if (preg_match('/\bstadium\b/i', (string) $venue->name)) {
+            return 'Stadium';
+        }
+        $nouns = [
+            'Cricket' => ['Cricket', 'Turf'], 'Football' => ['Football', 'Turf'],
+            'Badminton' => ['Badminton', 'Court'], 'Pickleball' => ['Pickleball', 'Court'],
+            'Tennis' => ['Tennis', 'Court'], 'Basketball' => ['Basketball', 'Court'],
+            'Volleyball' => ['Volleyball', 'Court'],
+        ];
+        $known = array_values(array_filter(
+            array_map(fn (string $s) => $nouns[$s] ?? null, $venue->sports ? array_values(array_unique($venue->sportsList())) : []),
+        ));
+        if (count($known) === 1) {
+            return $known[0][0] . ' ' . $known[0][1];
+        }
+        if (count($known) === 2 && $known[0][1] === $known[1][1]) {
+            return $known[0][0] . ' & ' . $known[1][0] . ' ' . $known[0][1];
+        }
+
+        return 'Sports Venue';
+    }
+
+    /**
+     * Questions people search about a venue, answered from what is known — a question
+     * whose fact is missing is left out. Shown on the page and as FAQPage markup.
+     *
+     * @return list<array{question:string,answer:string}>
+     */
+    private static function faqs(Venue $venue, string $kind, string $area, string $city, string $hoursLine, ?array $activity): array
+    {
+        $name = $venue->name;
+        $faqs = [];
+        if ($hoursLine !== '') {
+            $faqs[] = ['question' => 'What are the timings of ' . $name . '?', 'answer' => $name . ' is open ' . $hoursLine . '. Timings come from the venue’s listing — call before you go.'];
+        }
+        if (trim((string) $venue->address) !== '') {
+            $faqs[] = ['question' => 'Where is ' . $name . ($city !== '' ? ' in ' . $city : '') . '?', 'answer' => $name . ' is at ' . trim((string) $venue->address) . '. Use “Directions” on this page to open it in Google Maps.'];
+        }
+        if ($venue->sports) {
+            $faqs[] = ['question' => 'Which sports can I play at ' . $name . '?', 'answer' => $name . ' is a ' . mb_strtolower($kind) . ($area !== '' ? ' in ' . $area : '') . ' for ' . implode(', ', $venue->sportsList()) . '.'];
+        }
+        if ($venue->contact_phone) {
+            $faqs[] = ['question' => 'How do I book ' . $name . '?', 'answer' => 'Call the venue on ' . $venue->contact_phone . ', or tap “Ask to book” on this page — Haraan passes your request to the owner and messages you when online booking opens.'];
+        }
+        if ($activity && $activity['faq']) {
+            $faqs[] = $activity['faq'];
+        }
+
+        return $faqs;
+    }
+
+    /**
+     * Other venues by real distance from this one ("1.2 km"), so the block answers "what
+     * else is near here"; alphabetical in the city when this venue has no pin.
+     */
+    private static function nearby(Venue $venue, string $city): Collection
+    {
+        if ($venue->latitude !== null && $venue->longitude !== null) {
+            $rows = \App\Support\CityVenueGuide::nearest(
+                \App\Support\CityVenueGuide::venues($city), (float) $venue->latitude, (float) $venue->longitude, 15.0, (int) $venue->id,
+            );
+            if ($rows !== []) {
+                return collect(array_slice($rows, 0, 8))->map(fn (array $r) => (object) [
+                    'name' => $r['name'],
+                    'area' => $r['area'],
+                    'sports' => $r['sports'],
+                    'url' => $r['url'],
+                    'km' => \App\Support\CityVenueGuide::distanceLabel($r['km']),
+                ]);
+            }
+        }
+
+        return self::forCity($city, null, 9)->where('id', '!=', $venue->id)->take(8)->values();
     }
 
     /**

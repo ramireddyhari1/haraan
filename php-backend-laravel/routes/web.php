@@ -97,6 +97,9 @@ Route::controller(PublicWebController::class)->group(function (): void {
     Route::post('/gamehub/{id}/interest', [\App\Http\Controllers\Web\ListedVenueController::class, 'interest'])
         ->whereNumber('id')->middleware('throttle:8,1')->name('site.gamehub.interest');
     Route::get('/venues/{city}/{sport}', 'cityVenues')->name('site.venues.city.sport');
+    // "Turfs & courts near Benz Circle, Vijayawada" — venues within 3 km of an area.
+    Route::get('/venues/{city}/near/{area}', [\App\Http\Controllers\Web\NearVenuesController::class, 'show'])
+        ->where('area', '[a-z0-9-]+')->name('site.venues.near');
     Route::get('/gamehub/actionboard', 'actionBoard')->name('site.gamehub.actionboard');
     Route::get('/gamehub/actionboard/match/{id}', 'actionBoardMatchLive')->name('site.gamehub.actionboard.match');
     Route::get('/gamehub/actionboard/match/{id}/info', 'actionBoardMatchInfo')->name('site.gamehub.actionboard.match.info');

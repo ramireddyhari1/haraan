@@ -161,21 +161,22 @@ final class SeoQuickWinsTest extends TestCase
 
         $this->get('/venues/kadapa')
             ->assertOk()
-            ->assertSee('Turfs in Kadapa — Cricket, Box Cricket &amp; Badminton Courts', false)
-            ->assertSee('Turfs in Kadapa | Book Cricket, Box Cricket &amp; Badminton | Haraan', false)
+            ->assertSee('<title>Turfs &amp; Courts in Kadapa: 1 Venue, Timings &amp; Prices | Haraan</title>', false)
+            ->assertSee('Book turfs &amp; courts in Kadapa from ₹900/hr.', false)
             ->assertSee('Kadapa Cricket Arena')
             ->assertSee('FAQPage')
             ->assertSee(url('/venues/kadapa'));
 
         $this->get('/venues/kadapa/cricket')
             ->assertOk()
-            ->assertSee('Best Cricket Turfs in Kadapa')
+            ->assertSee('<title>Cricket Grounds in Kadapa: 1 Venue, Timings &amp; Prices | Haraan</title>', false)
             ->assertSee('Kadapa Cricket Arena')
             ->assertSee(url('/venues/kadapa/cricket'));
 
+        // Kadapa's curated hub stays in the sitemap; a one-venue sport page is too thin.
         $this->get('/sitemap.xml')
             ->assertOk()
             ->assertSee(url('/venues/kadapa'))
-            ->assertSee(url('/venues/kadapa/cricket'));
+            ->assertDontSee(url('/venues/kadapa/cricket').'<', false);
     }
 }
