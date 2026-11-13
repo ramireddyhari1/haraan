@@ -38,8 +38,13 @@ class VenuesTable
                     ImageColumn::make('image')
                         ->label('')
                         ->extraImgAttributes(['style' => 'width:72px;height:72px;object-fit:cover;border-radius:14px;box-shadow:0 6px 16px -8px rgba(11,18,32,.45);'])
-                        ->getStateUsing(fn (Venue $r): string => (is_array($r->images) ? collect($r->images)->first(fn ($i) => trim((string) $i) !== '') : null)
-                            ?? self::venuePlaceholder((string) $r->category))
+                        // `images` holds public-disk paths ("venues/x.png"). Resolve them to a real
+                        // URL here (the 480w copy when one exists): a bare path would be read against
+                        // the DEFAULT disk, which on prod is the private `local` disk — every photo broke.
+                        ->getStateUsing(fn (Venue $r): string => \App\Support\VenuePhoto::url(
+                            is_array($r->images) ? collect($r->images)->first(fn ($i) => trim((string) $i) !== '') : null,
+                            480,
+                        ) ?? self::venuePlaceholder((string) $r->category))
                         ->grow(false),
 
                     Stack::make([

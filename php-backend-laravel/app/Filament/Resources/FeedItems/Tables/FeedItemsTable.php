@@ -17,6 +17,7 @@ class FeedItemsTable
         return $table
             ->columns([
                 ImageColumn::make('image')
+                    ->disk('public')
                     ->label('')
                     ->defaultImageUrl('https://placehold.co/80x48/0f172a/ffffff?text=Card')
                     ->size(48),
