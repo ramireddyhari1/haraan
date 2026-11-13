@@ -549,6 +549,8 @@ final class PublicWebController extends Controller
         $popularVenues = $filteredVenues->sortByDesc(fn ($v) => (float) $v->rating)->take(5)->values();
         $moreVenues = $filteredVenues->whereNotIn('id', $popularVenues->pluck('id'))->values();
 
+        $listedVenues = $this->pulseListedVenues($city, $userLat, $userLng, $selectedSport);
+
         $pulse = $this->pulseDesktopSections($city, $selectedSport);
         $faqLd = $pulse['faq'] === [] ? [] : [[
             '@context' => 'https://schema.org',
@@ -585,7 +587,66 @@ final class PublicWebController extends Controller
             'sportChips' => self::GAMEHUB_SPORTS,
             'popularVenues' => $popularVenues,
             'moreVenues' => $moreVenues,
+            'listedVenues' => $listedVenues,
         ]);
+    }
+
+    /**
+     * Venues Haraan lists whose owners haven't joined, for the Pulse page: shown after the
+     * bookable ones as places to play, never as something to book. Same place rule as the
+     * bookable list — nearest within 50 km when we know where the viewer is, else the chosen
+     * city — and the same sport chip. Each opens its own page (address, hours, Ask to book).
+     *
+     * @return Collection<int, object>
+     */
+    private function pulseListedVenues(?string $city, ?float $lat, ?float $lng, string $sport): Collection
+    {
+        if (! \App\Services\VenueDiscovery\DiscoverySettings::publicPages()) {
+            return collect();
+        }
+
+        $query = Venue::listed();
+        if ($sport !== 'All') {
+            $query->where(fn ($q) => $q->whereRaw('lower(category) = ?', [strtolower($sport)])
+                ->orWhere('sports', 'like', '%"' . $sport . '"%'));
+        }
+        $limit = PlatformRules::int('venue_discovery.city_limit');
+        $photos = PlatformRules::bool('venue_discovery.google_photos');
+
+        $rows = $query->get();
+        if ($lat !== null && $lng !== null) {
+            $rows = $rows->filter(fn (Venue $v) => $v->latitude !== null && $v->longitude !== null)
+                ->map(function (Venue $v) use ($lat, $lng) {
+                    $v->setAttribute('distance_km', $this->haversineKm($lat, $lng, (float) $v->latitude, (float) $v->longitude));
+
+                    return $v;
+                })
+                ->filter(fn (Venue $v) => $v->distance_km <= 50)
+                ->sortBy('distance_km');
+        } elseif ($city) {
+            $rows = $rows->filter(fn (Venue $v) => strcasecmp((string) $v->city, $city) === 0)->sortBy('name');
+        } else {
+            // Nowhere chosen: a handful, so the page still says these exist.
+            $rows = $rows->sortByDesc('id')->take(12);
+        }
+
+        return $rows->take($limit)->values()->map(function (Venue $v) use ($photos) {
+            $open = ListedVenueController::openNow($v);
+
+            return (object) [
+                'id' => $v->id,
+                'title' => $v->name,
+                'location' => strcasecmp((string) $v->location, (string) $v->city) === 0 ? (string) $v->city : trim($v->location . ', ' . $v->city, ', '),
+                'sports' => $v->sports ? $v->sportsList() : [],
+                'distance' => isset($v->distance_km) ? $this->formatKm((float) $v->distance_km) : null,
+                // The venue's Google listing photo through our proxy; a venue without one
+                // 404s and the card keeps its drawn court.
+                'photo' => $photos && $v->place_id ? route('site.gamehub.placephoto', ['id' => $v->id, 'index' => 0]) : null,
+                'open_state' => $open['text'] ?? null,
+                'open_now' => (bool) ($open['open'] ?? false),
+                'url' => SeoUrl::venue($v),
+            ];
+        });
     }
 
     /**

@@ -113,7 +113,7 @@ class ListedVenueController extends Controller
      * "Open now · closes 11 PM" / "Closed now · opens 6 AM" from the weekly hours, on the
      * venue's clock (IST). Null when the venue has no hours.
      */
-    private static function openNow(Venue $venue): ?array
+    public static function openNow(Venue $venue): ?array
     {
         if (! is_array($venue->hours_json) || $venue->hours_json === []) {
             return null;
