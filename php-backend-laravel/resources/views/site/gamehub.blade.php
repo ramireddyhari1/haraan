@@ -399,22 +399,12 @@
     .dvc:focus-visible { outline: none; box-shadow: 0 0 0 4px rgba(37, 99, 235, .25); }
     .dvc__img { position: relative; display: block; aspect-ratio: 16 / 10; border-radius: 18px; overflow: hidden; background: #E7ECF3; }
     /* Listed venues: a drawn court under the photo, shown when Google has none. */
-    .dvc--listed .dvc__img, .lvp__img {
+    .dvc--listed .dvc__img, .mhub__vcard--listed .mhub__vcard-img {
         background: #EEF3EF url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 100'%3E%3Cg fill='none' stroke='%2394A3B8' stroke-width='1.4'%3E%3Crect x='14' y='12' width='132' height='76' rx='4'/%3E%3Cpath d='M80 12v76'/%3E%3Ccircle cx='80' cy='50' r='12'/%3E%3C/g%3E%3C/svg%3E") center / 62% no-repeat;
     }
     .dhub__sechead--listed { margin-top: 36px; }
     .dvc__view { font-size: 14px; font-weight: 700; color: var(--blue); }
-    .lvp-list { display: flex; flex-direction: column; gap: 10px; padding: 0 16px 8px; }
-    .lvp { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; padding: 10px; background: #fff; border: 1px solid #E2E8F0; border-radius: 16px; text-decoration: none; color: #0F172A; }
-    .lvp__img { width: 96px; height: 80px; border-radius: 12px; overflow: hidden; }
-    .lvp__img img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .lvp__body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-    .lvp__body strong { font-size: 15px; font-weight: 750; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .lvp__meta { font-size: 12.5px; color: #64748B; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .lvp__foot { margin-top: auto; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding-top: 4px; }
-    .lvp__open { font-size: 12px; font-weight: 700; color: #B45309; }
-    .lvp__open.is-open { color: #15803D; }
-    .lvp__tag { font-size: 11.5px; font-weight: 700; color: #92400E; background: #FEF6E7; border-radius: 6px; padding: 2px 7px; }
+    .mhub__vcard-nobook { font-size: 13px; font-weight: 700; color: #92400E; }
     .dvc__img img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .5s cubic-bezier(.2, .7, .3, 1); }
     .dvc:hover .dvc__img img { transform: scale(1.04); }
     .dvc__img::after {
@@ -1004,22 +994,32 @@
         <div class="mhub__head mhub__head--tight" id="mhub-listed">
             <div>
                 <h3>More places to play</h3>
-                <p>Not on Haraan yet · no online booking</p>
+                <p>{{ $listedVenues->count() }} more · not bookable online</p>
             </div>
         </div>
-        <div class="lvp-list">
+        <div class="mhub__list">
             @foreach($listedVenues as $lv)
-                <a class="lvp" href="{{ $lv->url }}">
-                    <span class="lvp__img">
+                {{-- The normal venue card, with booking off: no price, View instead of Book Slot. --}}
+                <a class="mhub__vcard mhub__vcard--listed" href="{{ $lv->url }}">
+                    <span class="mhub__vcard-img">
                         @if($lv->photo)<img src="{{ $lv->photo }}" alt="{{ $lv->title }}" loading="lazy" decoding="async" onerror="this.remove()">@endif
+                        <span class="mhub__vcard-scrim"></span>
+                        @if($lv->sports)<span class="mhub__arena-cat">{{ $lv->sports[0] }}</span>@endif
+                        @if($lv->open_state)<span class="mhub__vcard-tag">{{ $lv->open_state }}</span>@endif
                     </span>
-                    <span class="lvp__body">
-                        <strong>{{ $lv->title }}</strong>
-                        <span class="lvp__meta">{{ implode(' · ', array_filter([$lv->location, $lv->distance])) }}</span>
-                        @if($lv->sports)<span class="lvp__meta">{{ implode(', ', array_slice($lv->sports, 0, 3)) }}</span>@endif
-                        <span class="lvp__foot">
-                            @if($lv->open_state)<span class="lvp__open {{ $lv->open_now ? 'is-open' : '' }}">{{ $lv->open_state }}</span>@endif
-                            <span class="lvp__tag">No online booking</span>
+                    <span class="mhub__vcard-body">
+                        <span class="mhub__vcard-top">
+                            <span class="mhub__vcard-id">
+                                <strong>{{ $lv->title }}</strong>
+                                <span class="mhub__vcard-loc">
+                                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                                    {{ $lv->location }}@if(!empty($lv->distance)) • {{ $lv->distance }}@endif
+                                </span>
+                            </span>
+                        </span>
+                        <span class="mhub__vcard-foot">
+                            <span class="mhub__vcard-nobook">Not bookable online</span>
+                            <span class="mhub__book">View</span>
                         </span>
                     </span>
                 </a>

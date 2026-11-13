@@ -1876,6 +1876,10 @@ private fun GameHubTabScreen(
   // No fake seed data: the old fallback showed Mumbai turfs (Andheri/Powai/…) with bogus
   // distances to every district user on first paint and on any network failure.
   var venuesData by remember { mutableStateOf<List<VenueItem>?>(null) }
+  // Listed venues (GET /api/venues/listed): places to play whose owners aren't on Haraan, so
+  // nothing to book. Shown after the bookable list; tapping one opens [ListedVenueSheet].
+  var listedData by remember { mutableStateOf<List<com.haraan.app.data.ListedVenueItem>>(emptyList()) }
+  var openListed by remember { mutableStateOf<com.haraan.app.data.ListedVenueItem?>(null) }
   // Phase 0 — server-driven home layout (GET /api/home/layout). Empty/failed fetch keeps the
   // built-in order, so the screen is unchanged offline or against an old backend.
   var remoteBlocks by remember { mutableStateOf<List<com.haraan.app.data.HomeBlock>>(emptyList()) }
@@ -1888,6 +1892,10 @@ private fun GameHubTabScreen(
   // / periodic tick). remember{} keeps one instance each; they capture the MutableState
   // setters above, which are stable across recomposition.
   val venueRepo = remember { com.haraan.app.data.VenueRepository() }
+  val listedRepo = remember { com.haraan.app.data.ListedVenueRepository() }
+  val loadListed: suspend () -> Unit = remember {
+    { listedData = runCatching { listedRepo.getListed() }.getOrDefault(emptyList()) }
+  }
   val layoutRepo = remember { com.haraan.app.data.HomeLayoutRepository() }
   val contentRepo = remember { com.haraan.app.data.ContentRepository() }
   val matchRepo = remember { com.haraan.app.data.MatchRepository() }
@@ -1924,6 +1932,7 @@ private fun GameHubTabScreen(
   }
   LaunchedEffect(Unit) {
     loadVenues()
+    loadListed()
     loadLayout()
     loadFeed()
     loadLive()
@@ -1933,7 +1942,7 @@ private fun GameHubTabScreen(
     com.haraan.app.data.RealtimeBus.updates.collect { domain ->
       when (domain) {
         "home" -> { loadLayout(); loadFeed() }
-        "venues" -> loadVenues()
+        "venues" -> { loadVenues(); loadListed() }
         // Keep the ActionBoard live score fresh when a match/score is broadcast.
         "matches", "live" -> loadLive()
       }
@@ -1945,11 +1954,30 @@ private fun GameHubTabScreen(
   AutoRefresh(intervalMs = 20_000L) {
     loadLive()
     loadVenues()
+    loadListed()
   }
 
   val isVenuesLoading = venuesData == null
-  val sportSearchVenues = venuesData.orEmpty().filter {
-    (selectedSport == "All" || it.category == selectedSport) &&
+  // Listed venues join the same list as ordinary venue items — same cards, same distance
+  // ordering, same sport chips — only marked not bookable.
+  val listedById = remember(listedData) { listedData.associateBy { it.id } }
+  val listedAsVenues = remember(listedData) {
+    listedData.map { l ->
+      VenueItem(
+        id = l.id, title = l.name, location = l.area.ifBlank { l.city }, rating = "",
+        category = l.sports.firstOrNull().orEmpty(), sports = l.sports, price = 0,
+        imageUrl = l.image.orEmpty(), images = listOfNotNull(l.image),
+        tagline = l.openState.orEmpty(), distance = "",
+        latitude = l.latitude, longitude = l.longitude, bookable = false,
+      )
+    }
+  }
+  val allVenueItems = venuesData.orEmpty() + listedAsVenues.filter { l -> venuesData.orEmpty().none { it.id == l.id } }
+  val openVenue: (VenueItem) -> Unit = { v ->
+    if (v.bookable) onVenueClick(v) else listedById[v.id]?.let { openListed = it }
+  }
+  val sportSearchVenues = allVenueItems.filter {
+    (selectedSport == "All" || it.category == selectedSport || it.sports.any { s -> s.equals(selectedSport, ignoreCase = true) }) &&
     (searchQuery.isEmpty() || it.title.contains(searchQuery, ignoreCase = true) || it.location.contains(searchQuery, ignoreCase = true))
   }
   // Location-aware ordering. Preference order:
@@ -1989,6 +2017,8 @@ private fun GameHubTabScreen(
 
     nearby + cityFirst(unpinned.map { it.first })
   }
+
+  openListed?.let { v -> ListedVenueSheet(venue = v, onDismiss = { openListed = null }) }
 
   androidx.compose.foundation.lazy.LazyColumn(
     modifier = Modifier
@@ -2090,10 +2120,10 @@ private fun GameHubTabScreen(
             GameHubSearchOverlay(
               query = searchQuery,
               onQueryChange = onSearchQueryChange,
-              venues = venuesData.orEmpty(),
+              venues = allVenueItems,
               recents = recentSearches,
               onRecentsChange = { recentSearches = it },
-              onVenueClick = { showSearch = false; onVenueClick(it) },
+              onVenueClick = { showSearch = false; openVenue(it) },
               onMatchClick = { showSearch = false; onMatchClick(it) },
               onDismiss = { showSearch = false },
               accent = sectionTheme.primary
@@ -2371,7 +2401,9 @@ private fun GameHubTabScreen(
     // count, so a new town's only ground isn't hidden), and "More venues" is strictly the rest,
     // so nothing repeats. distinctBy guards the lazy keys — a duplicated API id must not crash.
     val uniqueVenues = filteredVenues.distinctBy { it.id }
-    val popularVenues = uniqueVenues.sortedByDescending { it.rating.toFloatOrNull() ?: 0f }.take(5)
+    val popularVenues = uniqueVenues
+      .sortedWith(compareByDescending<VenueItem> { it.bookable }.thenByDescending { it.rating.toFloatOrNull() ?: 0f })
+      .take(5)
     val popularIds = popularVenues.map { it.id }.toSet()
     val allVenues = uniqueVenues.filterNot { it.id in popularIds }
     val nearPlace = (locationState as? com.haraan.app.data.LocationState.Resolved)
@@ -2424,7 +2456,7 @@ private fun GameHubTabScreen(
           items(popularVenues.size) { i ->
             PopularArenaCard(
               venue = popularVenues[i],
-              onClick = { onVenueClick(popularVenues[i]) },
+              onClick = { openVenue(popularVenues[i]) },
               index = i
             )
           }
@@ -2458,10 +2490,11 @@ private fun GameHubTabScreen(
             .overlapAbove(4.dp)
             .padding(horizontal = 16.dp)
         ) {
-          VenueListCard(venue, onClick = { onVenueClick(venue) })
+          VenueListCard(venue, onClick = { openVenue(venue) })
         }
       }
     }
+
     },
     )
 
@@ -3513,6 +3546,7 @@ private fun PopularArenaCard(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
       ) {
+        if (venue.bookable) {
         Row(verticalAlignment = Alignment.Bottom) {
           Text(
             text = "₹" + "%,d".format(venue.price),
@@ -3527,6 +3561,9 @@ private fun PopularArenaCard(
             fontSize = 11.sp,
             modifier = Modifier.padding(bottom = 2.dp)
           )
+        }
+        } else {
+          Text(text = "Not bookable online", color = Color(0xFF92400E), fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
         }
         // The key: blue like every action, with a 2dp lip under it that a press closes, and a
         // white round arrow that steps on.
@@ -3546,7 +3583,7 @@ private fun PopularArenaCard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)
           ) {
-            Text(text = "Book", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold)
+            Text(text = if (venue.bookable) "Book" else "View", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold)
             Box(
               modifier = Modifier
                 .graphicsLayer { translationX = press * 3.dp.toPx() }
@@ -3642,6 +3679,9 @@ private data class VenueItem(
   // isn't pinned yet — it then keeps the static [distance] string and dodges the radius cut.
   val latitude: Double? = null,
   val longitude: Double? = null,
+  // False for a listed venue (owner not on Haraan): same card and list, no price, no Book —
+  // tapping it opens [ListedVenueSheet] instead of the booking screen.
+  val bookable: Boolean = true,
 )
 
 /** Great-circle distance in km between two lat/lng points (haversine, Earth R = 6371 km). */
@@ -3766,6 +3806,15 @@ private fun VenueListCard(venue: VenueItem, onClick: () -> Unit = {}) {
           }
         }
 
+        if (!venue.bookable) {
+          Text(
+            text = "Not bookable online",
+            color = Color(0xFF92400E),
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(top = 2.dp),
+          )
+        }
         // Line 2 — sports played + the venue's own one-liner. Admin copy often arrives with a
         // stray leading " - " separator; trim it so the line starts on a word.
         val tagline = venue.tagline.trim().trimStart('-', '–', '·', '|').trim()
@@ -3838,7 +3887,7 @@ private fun VenueListCard(venue: VenueItem, onClick: () -> Unit = {}) {
             contentAlignment = Alignment.Center,
           ) {
             Text(
-              text = "Book Slot",
+              text = if (venue.bookable) "Book Slot" else "View",
               color = Color.White,
               fontSize = 13.sp,
               fontWeight = FontWeight.Bold

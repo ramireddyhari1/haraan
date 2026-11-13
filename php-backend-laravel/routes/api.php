@@ -170,6 +170,14 @@ Route::middleware('auth.jwt')->post('/host/{slug}/follow', [HostController::clas
 //  Content managed in the Filament "Haraan Control" admin (/control/venues).
 // -------------------------------------------------------------------------
 
+// Listed venues (owner not on Haraan yet): shown in the app's Pulse, never bookable.
+// Their own endpoint so apps already in the field never mistake one for a bookable venue.
+Route::prefix('venues/listed')->controller(\App\Http\Controllers\Api\ListedVenuesController::class)->group(function (): void {
+    Route::get('/', 'index');
+    Route::get('/{id}', 'show')->whereNumber('id');
+    Route::post('/{id}/interest', 'interest')->whereNumber('id')->middleware(['auth.jwt.optional', 'throttle:8,1']);
+});
+
 Route::prefix('venues')->controller(VenuesController::class)->group(function (): void {
     Route::get('/', 'index');
     Route::get('/{id}', 'show')->whereNumber('id');
