@@ -112,6 +112,13 @@ class VenueCommandHeroWidget extends Widget
             'setupLeft'      => count($venue->readinessErrors()),
             'mainSport'      => (string) ($venue->category ?: ($venue->sportsList()[0] ?? '')),
             'hasPhoto'       => is_array($venue->images) && array_filter($venue->images, fn ($i) => trim((string) $i) !== '') !== [],
+            'listed'         => $venue->isListed(),
+            'googlePhotos'   => $googlePhotos = (is_array($venue->images) && array_filter($venue->images, fn ($i) => trim((string) $i) !== '') !== [])
+                ? 0 : \App\Support\VenueSetupSteps::googlePhotoCount($venue),
+            // Listed venue with no photo of its own: its Google listing photo, as its page shows.
+            'cover'          => $googlePhotos > 0 ? route('site.gamehub.placephoto', ['id' => $venue->id, 'index' => 0]) : null,
+            'pageUrl'        => \App\Support\SeoUrl::venue($venue),
+            'requests'       => (int) \App\Models\VenueInterest::query()->where('venue_id', $venue->id)->count(),
             'courtsActive'   => (int) $venue->courts()->where('is_active', true)->count(),
             'courtsTotal'    => (int) $venue->courts()->count(),
             'todayBookings'  => $todayBookings,

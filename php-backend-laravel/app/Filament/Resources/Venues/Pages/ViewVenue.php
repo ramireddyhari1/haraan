@@ -82,6 +82,12 @@ class ViewVenue extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('openListedPage')
+                ->label('Open the website page')
+                ->icon('heroicon-m-arrow-top-right-on-square')
+                ->color('primary')
+                ->visible(fn (): bool => $this->getRecord()->isListed())
+                ->url(fn (): string => \App\Support\SeoUrl::venue($this->getRecord()), shouldOpenInNewTab: true),
             $this->finishSetupAction(),
             $this->publishAction(),
             $this->unpublishAction(),
@@ -134,10 +140,12 @@ class ViewVenue extends ViewRecord
             ->label(function (): string {
                 $left = count($this->getRecord()->readinessErrors());
 
-                return 'Finish setup · ' . $left . ' ' . str('step')->plural($left) . ' left';
+                // A listed venue is finished as a page; these steps are only for taking bookings.
+                return ($this->getRecord()->isListed() ? 'Set up bookings · ' : 'Finish setup · ')
+                    . $left . ' ' . str('step')->plural($left) . ' left';
             })
             ->icon('heroicon-m-wrench-screwdriver')
-            ->color('primary')
+            ->color(fn (): string => $this->getRecord()->isListed() ? 'gray' : 'primary')
             ->visible(fn (): bool => ! $this->getRecord()->isReadyForPublish() && VenueResource::canEdit($this->getRecord()))
             ->url(fn (): string => VenueResource::getUrl('edit', ['record' => $this->getRecord()]));
     }
@@ -216,7 +224,7 @@ class ViewVenue extends ViewRecord
             ->modalHeading('Rebuild the slot grid?')
             ->modalDescription('Every existing slot for this venue is deleted and regenerated from the operating hours, stepped by the slot length. Per-slot prices, capacities and sport restrictions set by hand will be lost. Bookings already taken are not affected.')
             ->modalSubmitActionLabel('Rebuild slots')
-            ->visible(fn (): bool => auth()->user()?->hasPartnerPermission('pricing') ?? false)
+            ->visible(fn (): bool => ! $this->getRecord()->isListed() && (auth()->user()?->hasPartnerPermission('pricing') ?? false))
             ->disabled(fn (): bool => ! is_array($this->getRecord()->hours_json) || $this->getRecord()->hours_json === [])
             ->action(function (): void {
                 /** @var Venue $record */
@@ -307,11 +315,24 @@ class ViewVenue extends ViewRecord
     private function dangerZone(): ActionGroup
     {
         return ActionGroup::make([
+            // A listed venue has nothing to sell: its one switch is whether the page is up.
+            Action::make('hideListed')
+                ->label('Take the page off the website')
+                ->icon('heroicon-m-eye-slash')
+                ->color('danger')
+                ->visible(fn (): bool => $this->getRecord()->isListed() && VenueResource::canEdit($this->getRecord()))
+                ->requiresConfirmation()
+                ->modalDescription('The venue page and its line on the city page disappear, and it becomes a draft. Requests players already left are kept. To bring it back, set Status to Listed in Edit.')
+                ->action(function (): void {
+                    $this->getRecord()->unpublish();
+                    Notification::make()->title('Page taken off the website')->success()->send();
+                }),
+
             Action::make('toggleBookable')
                 ->label(fn (): string => $this->getRecord()->is_bookable ? 'Stop taking bookings' : 'Resume taking bookings')
                 ->icon(fn (): string => $this->getRecord()->is_bookable ? 'heroicon-m-pause-circle' : 'heroicon-m-play-circle')
                 ->color(fn (): string => $this->getRecord()->is_bookable ? 'danger' : 'success')
-                ->visible(fn (): bool => VenueResource::canEdit($this->getRecord()))
+                ->visible(fn (): bool => ! $this->getRecord()->isListed() && VenueResource::canEdit($this->getRecord()))
                 ->requiresConfirmation()
                 ->modalHeading(fn (): string => $this->getRecord()->is_bookable ? 'Stop taking bookings?' : 'Resume taking bookings?')
                 ->modalDescription(fn (): string => $this->getRecord()->is_bookable
@@ -323,7 +344,7 @@ class ViewVenue extends ViewRecord
                 ->label(fn (): string => $this->getRecord()->isPublished() ? 'Unpublish listing' : 'Publish listing')
                 ->icon(fn (): string => $this->getRecord()->isPublished() ? 'heroicon-m-eye-slash' : 'heroicon-m-globe-alt')
                 ->color(fn (): string => $this->getRecord()->isPublished() ? 'danger' : 'success')
-                ->visible(fn (): bool => VenueResource::canEdit($this->getRecord()))
+                ->visible(fn (): bool => ! $this->getRecord()->isListed() && VenueResource::canEdit($this->getRecord()))
                 ->requiresConfirmation()
                 ->modalHeading(fn (): string => $this->getRecord()->isPublished() ? 'Unpublish this listing?' : 'Publish this listing?')
                 ->modalDescription(fn (): string => $this->getRecord()->isPublished()

@@ -44,7 +44,9 @@ class VenuesTable
                         ->getStateUsing(fn (Venue $r): string => \App\Support\VenuePhoto::url(
                             is_array($r->images) ? collect($r->images)->first(fn ($i) => trim((string) $i) !== '') : null,
                             480,
-                        ) ?? self::venuePlaceholder((string) $r->category))
+                        ) ?? ($r->isListed() && \App\Support\VenueSetupSteps::googlePhotoCount($r) > 0
+                            ? route('site.gamehub.placephoto', ['id' => $r->id, 'index' => 0])
+                            : self::venuePlaceholder((string) $r->category)))
                         ->grow(false),
 
                     Stack::make([
@@ -76,8 +78,9 @@ class VenuesTable
                                 ->label('')
                                 ->badge()
                                 ->getStateUsing(fn (Venue $r): string => self::stateLabel($r))
-                                ->icon(fn (Venue $r): string => $r->isOnSale() ? 'heroicon-m-check-circle' : ($r->isReadyForPublish() ? 'heroicon-m-rocket-launch' : 'heroicon-m-wrench-screwdriver'))
+                                ->icon(fn (Venue $r): string => $r->isListed() ? 'heroicon-m-globe-alt' : ($r->isOnSale() ? 'heroicon-m-check-circle' : ($r->isReadyForPublish() ? 'heroicon-m-rocket-launch' : 'heroicon-m-wrench-screwdriver')))
                                 ->color(fn (Venue $r): string => match (true) {
+                                    $r->isListed() => 'info',
                                     $r->isOnSale() => 'success',
                                     $r->isReadyForPublish() => 'info',
                                     default => 'warning',
@@ -94,7 +97,9 @@ class VenuesTable
                         // Price + rating, the two numbers an owner watches.
                         Split::make([
                             TextColumn::make('price')
-                                ->money('INR')
+                                ->formatStateUsing(fn ($state, Venue $r): string => $r->isListed() && (float) $state <= 0
+                                    ? 'No booking yet'
+                                    : '₹' . number_format((float) $state, 2))
                                 ->weight('bold')
                                 ->color('primary')
                                 ->sortable(),
@@ -157,8 +162,14 @@ class VenuesTable
                     ->label('Finish setup')
                     ->icon('heroicon-m-wrench-screwdriver')
                     ->color('primary')
-                    ->visible(fn (Venue $r): bool => ! $r->isReadyForPublish() && VenueResource::canEdit($r))
+                    ->visible(fn (Venue $r): bool => ! $r->isListed() && ! $r->isReadyForPublish() && VenueResource::canEdit($r))
                     ->url(fn (Venue $r): string => VenueResource::getUrl('edit', ['record' => $r])),
+                Action::make('openPage')
+                    ->label('Website page')
+                    ->icon('heroicon-m-arrow-top-right-on-square')
+                    ->color('gray')
+                    ->visible(fn (Venue $r): bool => $r->isListed())
+                    ->url(fn (Venue $r): string => \App\Support\SeoUrl::venue($r), shouldOpenInNewTab: true),
                 Action::make('publish')
                     ->label('Publish')
                     ->icon('heroicon-m-globe-alt')

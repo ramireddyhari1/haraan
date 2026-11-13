@@ -80,7 +80,12 @@
         <div class="vn360">
             <div class="vn360-id">
                 <div class="vn360-art">
-                    @include('filament.venue.court-pitch', ['sport' => $t['mainSport'], 'kind' => null])
+                    @if (! empty($t['cover']))
+                        {{-- Listed venue: its Google listing photo, as on its website page. --}}
+                        <img src="{{ $t['cover'] }}" alt="" style="width:100%;aspect-ratio:4/3;object-fit:cover;border-radius:12px;display:block">
+                    @else
+                        @include('filament.venue.court-pitch', ['sport' => $t['mainSport'], 'kind' => null])
+                    @endif
                 </div>
                 <div style="min-width: 0">
                     <div class="vn360-name">
@@ -88,6 +93,15 @@
                         <span class="vn360-pill {{ $t['onSale'] ? 'on' : 'off' }}"><i></i>{{ $t['statusLabel'] }}</span>
                     </div>
                     <p class="vn360-sub">
+                        @if (! empty($t['listed']))
+                            @if ($t['city']){{ $t['city'] }} · @endif
+                            @if ($t['hoursToday'])
+                                open {{ $t['hoursToday']['open'] }}–{{ $t['hoursToday']['close'] }} today ·
+                            @endif
+                            on the website, booking off ·
+                            <strong>{{ $t['requests'] }} {{ \Illuminate\Support\Str::plural('player', $t['requests']) }} asked to book</strong>
+                            · <a href="{{ $t['pageUrl'] }}" target="_blank" rel="noopener" style="color:var(--v-blue);font-weight:650">Open the page</a>
+                        @else
                         @if ($t['city']){{ $t['city'] }} · @endif
                         {{ $t['courtsActive'] }} of {{ $t['courtsTotal'] }} {{ \Illuminate\Support\Str::plural('court', $t['courtsTotal']) }} active
                         @if ($t['hoursToday'])
@@ -97,6 +111,7 @@
                         @endif
                         @if ($t['setupLeft'] > 0)
                             · <strong>{{ $t['setupLeft'] }} setup {{ \Illuminate\Support\Str::plural('step', $t['setupLeft']) }} left</strong>
+                        @endif
                         @endif
                     </p>
                     @if ($t['sports'] !== [])
@@ -109,7 +124,7 @@
                 </div>
             </div>
 
-            @unless ($t['hasPhoto'])
+            @unless ($t['hasPhoto'] || ! empty($t['googlePhotos']))
                 <div class="vn360-nophoto">
                     <x-hrn-illo name="photo" :size="78" />
                     <div>

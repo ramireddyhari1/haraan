@@ -117,6 +117,7 @@ class VenueInfolist
                 TextEntry::make('sports')
                     ->label('Sports offered')
                     ->state(fn (Venue $record): array => $record->sportsList())
+                    ->placeholder('Not set — add them in Edit → Basics')
                     ->badge()
                     ->color('info')
                     ->columnSpan(['default' => 1, 'md' => 2]),
@@ -258,13 +259,17 @@ class VenueInfolist
                     ->label('Photos')
                     ->state(function (Venue $record): string {
                         $count = is_array($record->images) ? count($record->images) : 0;
+                        $google = $count === 0 ? \App\Support\VenueSetupSteps::googlePhotoCount($record) : 0;
 
-                        return $count === 0
-                            ? 'No photos — listings without photos convert poorly'
-                            : $count . ' ' . str('photo')->plural($count);
+                        return match (true) {
+                            $count > 0 => $count . ' ' . str('photo')->plural($count),
+                            $google > 0 => $google . ' from Google Maps, shown on the website page',
+                            default => 'No photos — listings without photos convert poorly',
+                        };
                     })
                     ->badge()
-                    ->color(fn (Venue $record): string => (is_array($record->images) && count($record->images) >= 3) ? 'success' : 'warning'),
+                    ->color(fn (Venue $record): string => (is_array($record->images) && count($record->images) >= 3)
+                        || \App\Support\VenueSetupSteps::googlePhotoCount($record) >= 3 ? 'success' : 'warning'),
 
                 TextEntry::make('rules')
                     ->label('House rules')
