@@ -5,7 +5,7 @@
     $turf = 'var(--cc-blue-soft)';
     $line = 'var(--cc-surface)';
 @endphp
-<svg class="cb-pitch" viewBox="0 0 120 80" fill="none" role="img" aria-label="{{ $sport ?: ucfirst($kind) }} court">
+<svg class="cb-pitch" viewBox="0 0 120 80" fill="none" role="img" aria-label="{{ trim(($sport ?: ucfirst((string) $kind)).' court') }}">
     @switch($k)
         @case('cricket')
             <ellipse cx="60" cy="40" rx="56" ry="36" fill="{{ $turf }}" stroke="{{ $ink }}" stroke-width="1.4"/>

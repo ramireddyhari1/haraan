@@ -39,6 +39,32 @@ final class VenuePhotoController extends Controller
         $photoName = PlacePhotos::photoName($event, $index);
         abort_if($photoName === null, 404);
 
+        return $this->serve($photoName);
+    }
+
+    /**
+     * The same proxy for a listed venue (one Haraan lists whose owner hasn't joined and
+     * so has uploaded nothing): addressed by venue and slot, so only venues we list can
+     * be billed, and switched off with the rest of their pages in /control.
+     */
+    public function listed(int $id, int $index): SymfonyResponse
+    {
+        abort_unless($index >= 0 && $index < PlacePhotos::maxPhotos(), 404);
+        abort_unless(
+            \App\Services\VenueDiscovery\DiscoverySettings::publicPages()
+                && \App\Support\PlatformRules::bool('venue_discovery.google_photos'),
+            404
+        );
+
+        $venue = \App\Models\Venue::listed()->findOrFail($id);
+        $photoName = PlacePhotos::photoNameForPlace((string) $venue->place_id, $index);
+        abort_if($photoName === null, 404);
+
+        return $this->serve($photoName);
+    }
+
+    private function serve(string $photoName): SymfonyResponse
+    {
         // No extension: the format varies per photo (Google serves PNG as often
         // as JPEG here) and is read back off the bytes when serving.
         $path = 'placephotos/' . sha1($photoName) . '.img';

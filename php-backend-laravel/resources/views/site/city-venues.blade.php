@@ -153,6 +153,9 @@
         transition: background .12s;
     }
     .kv-row:first-child { border-top: 0; }
+    .kv-row--listed { grid-template-columns: minmax(0, 1fr) auto; }
+    .kv-row--listed.kv-row--photo { grid-template-columns: 72px minmax(0, 1fr) auto; }
+    .kv-row__thumb { width: 72px; height: 54px; object-fit: cover; border-radius: 8px; background: #E9EEF4; display: block; }
     .kv-row:hover { background: var(--wash); }
     .kv-row__date { text-align: center; line-height: 1.1; }
     .kv-row__date b { display: block; font-size: 19px; font-weight: 800; }
@@ -213,6 +216,10 @@
         .kv-btn { width: 100%; }
         .kv-row { grid-template-columns: 44px minmax(0, 1fr); padding: 12px 14px; }
         .kv-row .kv-state { grid-column: 2; margin-top: -6px; }
+        .kv-row--listed { grid-template-columns: minmax(0, 1fr); }
+        .kv-row--listed .kv-state { grid-column: 1; margin-top: 0; }
+        .kv-row--listed.kv-row--photo { grid-template-columns: 72px minmax(0, 1fr); }
+        .kv-row--listed.kv-row--photo .kv-state { grid-column: 2; margin-top: -6px; }
         .kv-guide li { grid-template-columns: 96px 1fr; }
         .kv-faq p { padding-right: 0; }
     }
@@ -244,7 +251,11 @@
                     Pick a ground, choose a court and an open slot, and pay online.
                 @else
                     <strong>No ground in {{ $cityName }} takes online bookings on Haraan yet.</strong>
-                    Grounds are being added. Until then, this page covers what to check before you book, and owners can list their ground below.
+                    @if($listedVenues->isNotEmpty())
+                        {{ $listedVenues->count() }} {{ \Illuminate\Support\Str::plural('venue', $listedVenues->count()) }} in {{ $cityName }} {{ $listedVenues->count() === 1 ? 'is' : 'are' }} listed below with address and directions. Ask to book at any of them and we tell the owner.
+                    @else
+                        Grounds are being added. Until then, this page covers what to check before you book, and owners can list their ground below.
+                    @endif
                 @endif
             </p>
 
@@ -288,7 +299,8 @@
                     </a>
                 @endforeach
             </div>
-        @else
+        @elseif($listedVenues->isEmpty())
+            {{-- With listed venues below, the heading already says none is bookable — skip the box. --}}
             <div class="kv-none">
                 <div>
                     <h2>{{ $sportLabel ? 'No '.strtolower($sportLabel).' ground' : 'No ground' }} in {{ $cityName }} on Haraan yet</h2>
@@ -326,6 +338,31 @@
             @endif
         @endif
     </div>
+
+    {{-- ── 2b. Venues we list whose owners haven't joined — a plain directory ── --}}
+    @if($listedVenues->isNotEmpty())
+        <div class="kv-sec">
+            <div class="kv-sec__head">
+                <h2>{{ $venueCount > 0 ? 'More places' : 'Places' }} to play {{ $sportLabel ? strtolower($sportLabel).' ' : '' }}in {{ $cityName }}</h2>
+            </div>
+            <p class="kv-sec__lead">These {{ $listedVenues->count() }} {{ \Illuminate\Support\Str::plural('venue', $listedVenues->count()) }} don’t take bookings on Haraan yet. Open one for its address and directions, and ask to book — we tell the owner.</p>
+            <div class="kv-sheet">
+                @foreach($listedVenues as $lv)
+                    <a class="kv-row kv-row--listed @if($lv->photo) kv-row--photo @endif" href="{{ $lv->url }}">
+                        @if($lv->photo)
+                            <img class="kv-row__thumb" src="{{ $lv->photo }}" alt="{{ $lv->name }}, {{ $cityName }}" loading="lazy" width="72" height="54"
+                                 onerror="this.parentNode.classList.remove('kv-row--photo'); this.remove()">
+                        @endif
+                        <div>
+                            <div class="kv-row__teams">{{ $lv->name }}</div>
+                            <div class="kv-row__meta">{{ implode(' · ', array_filter([$lv->area ?: $cityName, implode(', ', $lv->sports)])) }}</div>
+                        </div>
+                        <span class="kv-state">Not on Haraan yet</span>
+                    </a>
+                @endforeach
+            </div>
+        </div>
+    @endif
 
     {{-- ── 3. Matches scored in the city ─────────────────────────────────── --}}
     @if($matches->isNotEmpty())

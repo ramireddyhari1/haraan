@@ -136,6 +136,7 @@ class VenueInfolist
                         match (true) {
                             $record->isOnSale() => 'Live · Bookable',
                             $record->visibilityState() === Venue::STATE_PAUSED => 'Visible · Bookings paused',
+                            $record->visibilityState() === Venue::STATE_LISTED => 'Listed · No booking',
                             $record->visibilityState() === Venue::STATE_LIVE => 'Set live · Hidden until setup is finished',
                             default => 'Draft · Hidden',
                         },

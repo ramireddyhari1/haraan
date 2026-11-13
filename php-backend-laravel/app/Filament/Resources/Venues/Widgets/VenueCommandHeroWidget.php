@@ -159,6 +159,7 @@ class VenueCommandHeroWidget extends Widget
 
         return match ($venue->visibilityState()) {
             Venue::STATE_PAUSED => 'Visible, bookings paused',
+            Venue::STATE_LISTED => 'Listed — website page, no booking',
             Venue::STATE_LIVE   => 'Set live — hidden until setup is finished',
             default             => 'Draft — hidden from customers',
         };

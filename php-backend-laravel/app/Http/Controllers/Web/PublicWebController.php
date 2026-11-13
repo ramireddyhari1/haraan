@@ -834,7 +834,23 @@ final class PublicWebController extends Controller
                 // would fall back to a different court than the one the player picked.
                 'courts' => fn ($q) => $q->where('is_active', true),
             ])
-            ->findOrFail(SeoUrl::id($id));
+            ->find(SeoUrl::id($id));
+
+        // Not bookable — but it may be a venue we list whose owner hasn't joined yet. Same
+        // URL, a different page: what we know about it, and a way to ask to book.
+        if ($venue === null) {
+            $listed = \App\Services\VenueDiscovery\DiscoverySettings::publicPages()
+                ? Venue::listed()->find(SeoUrl::id($id))
+                : null;
+            abort_if($listed === null, 404);
+
+            $canonicalSegment = SeoUrl::segment($listed, 'name');
+            if ($id !== $canonicalSegment) {
+                return redirect()->to(url('/gamehub/'.$canonicalSegment), 301);
+            }
+
+            return app(ListedVenueController::class)->render($request, $listed);
+        }
 
         // Same single-URL rule as events: /gamehub/5 → /gamehub/5-venue-name.
         $canonicalSegment = SeoUrl::segment($venue, 'name');
@@ -1016,9 +1032,17 @@ final class PublicWebController extends Controller
             ->get()
             ->map(fn (Venue $v) => $this->decorateVenueCard($v));
 
+        // Venues we list whose owners haven't joined: shown under the bookable ones, as a
+        // plain directory. They make a city page useful before its first booking partner.
+        $listedVenues = ListedVenueController::forCity(
+            $cityName,
+            $sportLabel !== null ? ($sportLabel === 'Box Cricket' ? 'cricket' : strtolower($sportLabel)) : null,
+            PlatformRules::int('venue_discovery.city_limit'),
+        );
+
         // Featured / nearby venues fallback if city has few listings yet
         $featuredVenues = collect();
-        if ($venues->count() < 3) {
+        if ($venues->count() < 3 && $listedVenues->isEmpty()) {
             $featuredVenues = Venue::published()
                 ->with(['courts', 'slots'])
                 ->orderByDesc('is_featured')
@@ -1105,6 +1129,7 @@ final class PublicWebController extends Controller
             'sportSlug' => $sportSlug,
             'venues' => $venues,
             'featuredVenues' => $featuredVenues,
+            'listedVenues' => $listedVenues,
             'localMatches' => $localMatches,
             'faqs' => $faqs,
             'title' => $pageTitle,
@@ -1116,7 +1141,8 @@ final class PublicWebController extends Controller
                 // a thin page that shouldn't compete in search until real listings exist.
                 // Curated hubs (Kadapa: its own local guide, areas and FAQ) stay indexed
                 // either way — that copy is the page's content, not the listings.
-                'robots' => $venues->isEmpty() && ! in_array($citySlug, SeoUrl::CURATED_VENUE_CITIES, true)
+                // A directory of a handful of real places is content too; one or two is not.
+                'robots' => $venues->isEmpty() && $listedVenues->count() < 5 && ! in_array($citySlug, SeoUrl::CURATED_VENUE_CITIES, true)
                     ? 'noindex,follow'
                     : 'index,follow,max-image-preview:large',
                 'breadcrumbs' => $breadcrumbs,

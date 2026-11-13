@@ -43,7 +43,7 @@ final class Venue extends Model
         'price', 'convenience_fee_type', 'convenience_fee_value', 'fees', 'commission_percent',
         'price_chart', 'price_note', 'rating', 'ratings_count', 'reviews_count', 'tagline', 'hours',
         'about', 'rules', 'images', 'amenities', 'status', 'published_at', 'is_bookable', 'booking_window_days', 'is_active', 'is_featured',
-        'sort_order', 'partner_id', 'organization_id',
+        'sort_order', 'partner_id', 'organization_id', 'contact_phone', 'listing_source',
         'hours_json', 'slot_minutes', 'cancel_free_hours', 'cancel_refund_percent',
     ];
 
@@ -908,6 +908,10 @@ final class Venue extends Model
         $blockers = [];
 
         $state = $this->visibilityState();
+        if ($state === self::STATE_LISTED) {
+            // Not a broken venue: there are no courts or prices to be missing yet.
+            return ['Listed only — a page with no booking. The owner has not joined Haraan yet.'];
+        }
         if ($state === self::STATE_DRAFT) {
             $blockers[] = 'It is a draft — hidden from the app, the site and search. Set Status to Live in Go live.';
         } elseif ($state === self::STATE_PAUSED) {
@@ -968,20 +972,57 @@ final class Venue extends Model
     public const STATE_DRAFT = 'draft';
     public const STATE_LIVE = 'live';
     public const STATE_PAUSED = 'paused';
+    public const STATE_LISTED = 'listed';
+
+    /** `status` column value behind {@see STATE_LISTED}. */
+    public const STATUS_LISTED = 'listed';
 
     /** The one status the venue form shows, in place of the status / is_active / is_bookable trio. */
     public const STATES = [
         self::STATE_DRAFT  => 'Draft — hidden from customers',
+        self::STATE_LISTED => 'Listed — a page on the website, no booking (owner not on Haraan yet)',
         self::STATE_LIVE   => 'Live — visible and taking bookings',
         self::STATE_PAUSED => 'Live — visible, bookings paused',
     ];
 
     /**
-     * Which of the three states the columns describe. Anything not published-and-active is a
-     * draft: the customer side shows neither, so calling it anything else would mislead.
+     * A venue Haraan knows about whose owner has not joined: it has a page on the website
+     * (name, sports, area, map) where players ask to book, and nothing to sell. Kept apart
+     * from {@see scopePublished()} — `is_active` and `is_bookable` stay off, so the app, the
+     * slot board, checkout and the WhatsApp bot never see it.
+     */
+    public function isListed(): bool
+    {
+        return strtolower((string) $this->status) === self::STATUS_LISTED;
+    }
+
+    /**
+     * Whether a listed venue's page says enough to be offered to Google: where it is (an
+     * address and a pin) and what is played there. A bare name is a thin page.
+     */
+    public function isIndexableListing(): bool
+    {
+        return $this->isListed()
+            && trim((string) $this->address) !== ''
+            && $this->latitude !== null && $this->longitude !== null
+            && ! empty($this->sports);
+    }
+
+    public function scopeListed(Builder $query): Builder
+    {
+        return $query->where('status', self::STATUS_LISTED);
+    }
+
+    /**
+     * Which state the columns describe. Anything not listed and not published-and-active is
+     * a draft: the customer side shows neither, so calling it anything else would mislead.
      */
     public function visibilityState(): string
     {
+        if ($this->isListed()) {
+            return self::STATE_LISTED;
+        }
+
         if (strtolower((string) ($this->status ?? 'draft')) !== 'published' || ! $this->is_active) {
             return self::STATE_DRAFT;
         }
@@ -1000,6 +1041,16 @@ final class Venue extends Model
     {
         if ($state === self::STATE_DRAFT) {
             $this->unpublish();
+
+            return [];
+        }
+
+        if ($state === self::STATE_LISTED) {
+            $this->update([
+                'status'      => self::STATUS_LISTED,
+                'is_active'   => false,
+                'is_bookable' => false,
+            ]);
 
             return [];
         }
@@ -1026,6 +1077,10 @@ final class Venue extends Model
     /** Admin lifecycle status key: 'published' | 'ready' | 'incomplete'. */
     public function lifecycleStatus(): string
     {
+        if ($this->isListed()) {
+            return 'listed';
+        }
+
         if (strtolower((string) ($this->status ?? 'draft')) === 'published' && (bool) $this->is_active) {
             return $this->isReadyForPublish() ? 'published' : 'incomplete';
         }
@@ -1038,6 +1093,7 @@ final class Venue extends Model
     {
         return match ($this->lifecycleStatus()) {
             'published'  => 'Live / Published',
+            'listed'     => 'Listed · No booking',
             'ready'      => 'Ready to Publish',
             'incomplete' => 'Setup Incomplete',
             default      => 'Draft',

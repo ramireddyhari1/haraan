@@ -154,7 +154,7 @@ class GameHubOverview extends Page
         // Venues someone meant to sell (set live, or a draft that has courts or slots)
         // but customers can't book — with the first thing stopping each one.
         $stuck = $venues()->get()
-            ->reject(fn (Venue $v): bool => $v->isOnSale())
+            ->reject(fn (Venue $v): bool => $v->isOnSale() || $v->isListed())
             ->filter(fn (Venue $v): bool => $v->visibilityState() !== Venue::STATE_DRAFT
                 || $v->courts()->exists() || $v->slots()->exists())
             ->map(fn (Venue $v): array => ['venue' => $v, 'why' => $v->sellBlockers()])

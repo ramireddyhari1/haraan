@@ -107,6 +107,43 @@ final class PlacePhotos
     }
 
     /**
+     * Photos for a Google listing we already hold the id of — a listed venue found by
+     * venue discovery. Same rules as {@see forEvent()}: credited, capped, and gone the
+     * moment an admin hides that listing's photos.
+     *
+     * @return list<array{index:int, credit:string, credit_uri:string}>
+     */
+    public static function forPlace(string $placeId): array
+    {
+        $placeId = trim($placeId);
+        if ($placeId === '' || ! self::configured() || self::blocked($placeId)) {
+            return [];
+        }
+
+        $out = [];
+        foreach (array_slice(self::catalog($placeId), 0, self::MAX_PHOTOS) as $i => $photo) {
+            $out[] = [
+                'index'      => $i,
+                'credit'     => (string) ($photo['credit'] ?? ''),
+                'credit_uri' => (string) ($photo['credit_uri'] ?? ''),
+            ];
+        }
+
+        return $out;
+    }
+
+    /** The photo reference behind one slot of {@see forPlace()}, for the proxy. */
+    public static function photoNameForPlace(string $placeId, int $index): ?string
+    {
+        $placeId = trim($placeId);
+        if ($placeId === '' || ! self::configured() || $index < 0 || $index >= self::MAX_PHOTOS || self::blocked($placeId)) {
+            return null;
+        }
+
+        return self::catalog($placeId)[$index]['name'] ?? null;
+    }
+
+    /**
      * The Google photo reference behind one slot of the strip, for the proxy to
      * fetch. Null when the index is past the end or the catalogue has expired.
      */

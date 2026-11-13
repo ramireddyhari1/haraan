@@ -511,7 +511,7 @@ class VenueForm
                             ->required()
                             ->dehydrated(false)
                             ->formatStateUsing(fn (?Venue $record): string => $record?->visibilityState() ?? Venue::STATE_DRAFT)
-                            ->helperText('Live needs at least one active court, a time slot, a price and a photo — if anything is missing, the venue stays as it was and you’re told what to add. “Bookings paused” keeps the venue visible but stops new bookings (existing ones stand).')
+                            ->helperText('Live needs at least one active court, a time slot, a price and a photo — if anything is missing, the venue stays as it was and you’re told what to add. “Bookings paused” keeps the venue visible but stops new bookings (existing ones stand). “Listed” is for a venue whose owner has not joined: it gets a website page where players ask to book, and nothing is sold.')
                             ->columnSpanFull(),
                         TextInput::make('booking_window_days')
                             ->label('Booking window (days ahead)')

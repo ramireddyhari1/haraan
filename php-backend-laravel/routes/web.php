@@ -91,6 +91,11 @@ Route::controller(PublicWebController::class)->group(function (): void {
     Route::get('/gamehub', 'gamehub')->name('site.gamehub');
     Route::get('/gamehub/{id}', 'gamehubDetail')->where('id', \App\Support\SeoUrl::SEGMENT);
     Route::get('/venues/{city}', 'cityVenues')->name('site.venues.city');
+    // A listed venue's page (one Haraan lists but can't sell yet): its Google photos, and "Ask to book".
+    Route::get('/gamehub/{id}/place-photo/{index}.jpg', [\App\Http\Controllers\Web\VenuePhotoController::class, 'listed'])
+        ->whereNumber('id')->whereNumber('index')->middleware('throttle:240,1')->name('site.gamehub.placephoto');
+    Route::post('/gamehub/{id}/interest', [\App\Http\Controllers\Web\ListedVenueController::class, 'interest'])
+        ->whereNumber('id')->middleware('throttle:8,1')->name('site.gamehub.interest');
     Route::get('/venues/{city}/{sport}', 'cityVenues')->name('site.venues.city.sport');
     Route::get('/gamehub/actionboard', 'actionBoard')->name('site.gamehub.actionboard');
     Route::get('/gamehub/actionboard/match/{id}', 'actionBoardMatchLive')->name('site.gamehub.actionboard.match');

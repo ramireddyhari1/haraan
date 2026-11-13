@@ -95,6 +95,28 @@ class SitemapController extends Controller
             }
         }
 
+        // Listed venues (owner not on Haraan yet): only the pages that say where the place
+        // is and what is played there — the rest are noindex, so they stay out of here too.
+        if (\App\Services\VenueDiscovery\DiscoverySettings::publicPages() && \App\Support\PlatformRules::bool('venue_discovery.index_pages')) {
+            $listedPerCity = [];
+            foreach (Venue::listed()->orderByDesc('id')->limit(10000)->get() as $v) {
+                if (! $v->isIndexableListing()) {
+                    continue;
+                }
+                $add(SeoUrl::venue($v), $v->updated_at, '0.5', 'monthly');
+                $city = trim((string) $v->city);
+                if ($city !== '') {
+                    $listedPerCity[SeoUrl::city($city)] = ($listedPerCity[SeoUrl::city($city)] ?? 0) + 1;
+                }
+            }
+            // The city page is indexable from five listed venues (PublicWebController::cityVenues).
+            foreach ($listedPerCity as $citySlug => $n) {
+                if ($n >= 5) {
+                    $venueCities[$citySlug] ??= ['lastmod' => null, 'sports' => []];
+                }
+            }
+        }
+
         // Curated hubs are indexable with or without listings (see SeoUrl), with the
         // sport pages the Kadapa push targeted.
         foreach (SeoUrl::CURATED_VENUE_CITIES as $citySlug) {

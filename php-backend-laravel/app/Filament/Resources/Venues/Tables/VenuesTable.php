@@ -226,6 +226,9 @@ class VenuesTable
         if ($r->isOnSale()) {
             return 'Live';
         }
+        if ($r->isListed()) {
+            return 'Listed · No booking';
+        }
         if ($r->isReadyForPublish()) {
             return $r->visibilityState() === Venue::STATE_PAUSED ? 'Bookings paused' : 'Ready to publish';
         }
