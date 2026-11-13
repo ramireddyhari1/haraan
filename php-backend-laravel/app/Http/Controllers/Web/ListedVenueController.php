@@ -52,7 +52,10 @@ class ListedVenueController extends Controller
 
         $indexable = PlatformRules::bool('venue_discovery.index_pages') && $venue->isIndexableListing();
 
-        // Facts only — no rating (there are no Haraan reviews), no price, no photo.
+        $hoursLine = $venue->publicHours();
+        $openNow = self::openNow($venue);
+
+        // Facts only — no rating (there are no Haraan reviews), no price.
         $schema = array_filter([
             '@context' => 'https://schema.org',
             '@type' => 'SportsActivityLocation',
@@ -65,6 +68,7 @@ class ListedVenueController extends Controller
                 'addressLocality' => $city ?: null,
                 'addressCountry' => 'IN',
             ]),
+            'openingHoursSpecification' => $venue->hours_json ? ($venue->openingHoursSchema() ?: null) : null,
             'geo' => $venue->latitude && $venue->longitude ? [
                 '@type' => 'GeoCoordinates',
                 'latitude' => (float) $venue->latitude,
@@ -82,6 +86,8 @@ class ListedVenueController extends Controller
             'photos' => PlatformRules::bool('venue_discovery.google_photos')
                 ? \App\Support\PlacePhotos::forPlace((string) $venue->place_id)
                 : [],
+            'hoursLine' => $hoursLine,
+            'openNow' => $openNow,
             'requests' => $requests,
             'requestsOpen' => PlatformRules::bool('venue_discovery.requests_enabled'),
             'times' => self::TIMES,
@@ -101,6 +107,56 @@ class ListedVenueController extends Controller
                 'jsonld' => $schema,
             ],
         ]);
+    }
+
+    /**
+     * "Open now · closes 11 PM" / "Closed now · opens 6 AM" from the weekly hours, on the
+     * venue's clock (IST). Null when the venue has no hours.
+     */
+    private static function openNow(Venue $venue): ?array
+    {
+        if (! is_array($venue->hours_json) || $venue->hours_json === []) {
+            return null;
+        }
+
+        $now = \App\Support\BusinessClock::now();
+        $label = static function (string $hm): string {
+            [$h, $m] = array_map('intval', explode(':', $hm));
+
+            return \Illuminate\Support\Carbon::createFromTime($h % 24, $m)->format($m === 0 ? 'g A' : 'g:i A');
+        };
+        $minutes = static function (string $hm): int {
+            [$h, $m] = array_map('intval', explode(':', $hm));
+
+            return $h * 60 + $m;
+        };
+
+        $today = $venue->hoursForWeekday($now->format('D'));
+        $nowM = $now->hour * 60 + $now->minute;
+        if ($today !== null) {
+            $o = $minutes($today['open']);
+            $c = $minutes($today['close']);
+            if ($o === $c) {
+                return ['open' => true, 'text' => 'Open 24 hours'];
+            }
+            $closesAfterMidnight = $c < $o;
+            if ($nowM >= $o && ($closesAfterMidnight || $nowM < $c)) {
+                return ['open' => true, 'text' => 'Open now · closes ' . $label($today['close'])];
+            }
+            if ($nowM < $o) {
+                return ['open' => false, 'text' => 'Closed now · opens ' . $label($today['open'])];
+            }
+        }
+
+        for ($i = 1; $i <= 7; $i++) {
+            $day = $now->copy()->addDays($i);
+            $h = $venue->hoursForWeekday($day->format('D'));
+            if ($h !== null) {
+                return ['open' => false, 'text' => 'Closed now · opens ' . ($i === 1 ? 'tomorrow' : $day->format('l')) . ' ' . $label($h['open'])];
+            }
+        }
+
+        return null;
     }
 
     /** A player asks to book a listed venue. One row per phone per venue; asking again updates it. */

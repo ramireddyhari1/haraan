@@ -8,6 +8,9 @@
     $paused = \App\Support\VenueSetupSteps::isPaused($venue);
     if ($paused && $ready) { [$pillClass, $pillText] = ['ready', 'Live — bookings paused']; }
     $next = collect($steps)->first(fn ($s) => $s['required'] && ! $s['done']);
+    // Listed: already on the website for players, just not bookable — not a broken draft.
+    $listed = \App\Support\VenueSetupSteps::isListed($venue);
+    if ($listed) { [$pillClass, $pillText] = ['ready', 'Listed — on the website, no booking']; }
 @endphp
 
 @include('filament.venue.vf-styles')
@@ -16,7 +19,9 @@
     <div class="vf-j-top">
         <div>
             <div class="vf-j-title">
-                @if ($live)
+                @if ($listed)
+                    Players can see this venue — booking is off
+                @elseif ($live)
                     This venue is live
                 @elseif ($ready)
                     Everything is set — one switch left
@@ -26,7 +31,11 @@
                 @endif
             </div>
             <div class="vf-j-sub">
-                @if ($next)
+                @if ($listed)
+                    Its page shows {{ $venue->sports ? 'its sports, ' : '' }}address, directions{{ $venue->hours_json ? ', hours' : '' }} and photos, and lets players ask to book.
+                    <a href="{{ \App\Support\SeoUrl::venue($venue) }}" target="_blank" rel="noopener" style="color:#2563EB;font-weight:600">Open the page</a>.
+                    When the owner joins, finish the steps below and set Status to Live to take bookings.
+                @elseif ($next)
                     Next: {{ $next['hint'] }}. Tap a step to jump to it.
                 @elseif (! $live && ! $paused)
                     {{ \App\Support\VenueSetupSteps::goLiveHint() }} in step 8, then save.

@@ -37,18 +37,21 @@ final class VenueSetupSteps
         $slots = $v ? $v->slots()->count() : 0;
         $courtPriced = $v ? $v->courts()->where('is_active', true)->where('price', '>', 0)->exists() : false;
         $amenities = $v && is_array($v->amenities) ? array_filter($v->amenities) : [];
+        // A listed venue (owner not on Haraan) shows its Google listing photos until its own
+        // are uploaded — those count for the page players see, not for selling.
+        $googlePhotos = $images === [] ? self::googlePhotoCount($v) : 0;
         $rules = $v && is_array($v->rules ?? null) ? array_filter($v->rules) : [];
 
         $state = [
             'basics' => [$v && trim((string) $v->name) !== '', 'Add the venue name'],
             'location' => [$v && trim((string) $v->location) !== '' && trim((string) $v->city) !== '', 'Add the area and city'],
-            'hours' => [$slots > 0, $hours === [] ? 'Add opening hours' : 'Save to create slots'],
+            'hours' => [$slots > 0 || (self::isListed($v) && $hours !== []), $hours === [] ? 'Add opening hours' : 'Save to create slots'],
             'courts' => [$activeCourts > 0, 'Add a court in the tab below'],
             'pricing' => [($v && (int) $v->price > 0) || $courtPriced, 'Set a price above ₹0'],
-            'photos' => [$images !== [], 'Upload at least one photo'],
+            'photos' => [$images !== [] || $googlePhotos > 0, 'Upload at least one photo'],
             'extras' => [$amenities !== [] || $rules !== [], 'Optional — helps players choose'],
         ];
-        $ready = $state['basics'][0] && $state['location'][0] && $state['hours'][0] && $state['courts'][0] && $state['pricing'][0] && $state['photos'][0];
+        $ready = $state['basics'][0] && $state['location'][0] && $state['hours'][0] && $state['courts'][0] && $state['pricing'][0] && $images !== [] && $slots > 0;
         // Live only counts once setup is finished too: a venue set to Live but missing a photo is
         // hidden by the customer side (Venue::scopePublished), so the journey mustn't say "live".
         $state['live'] = [$ready && self::isLive($v), $ready ? self::goLiveHint() : 'Finish the steps above first'];
@@ -64,7 +67,7 @@ final class VenueSetupSteps
                 'anchor' => $anchor,
                 'required' => $required,
                 'done' => (bool) $done,
-                'hint' => $done ? self::doneNote($key, $v, $activeCourts, $slots, count($images)) : $hint,
+                'hint' => $done ? self::doneNote($key, $v, $activeCourts, $slots, count($images), $googlePhotos) : $hint,
             ];
         }
 
@@ -87,6 +90,22 @@ final class VenueSetupSteps
         return (bool) $v->is_active && (bool) $v->is_bookable;
     }
 
+    /** On the website with booking off — owner not on Haraan yet ({@see Venue::STATE_LISTED}). */
+    public static function isListed(?Venue $v): bool
+    {
+        return $v !== null && method_exists($v, 'isListed') && $v->isListed();
+    }
+
+    /** How many Google listing photos a listed venue's page shows (0 when off or none). */
+    public static function googlePhotoCount(?Venue $v): int
+    {
+        if (! self::isListed($v) || ! PlatformRules::bool('venue_discovery.google_photos')) {
+            return 0;
+        }
+
+        return count(PlacePhotos::forPlace((string) $v->place_id));
+    }
+
     /** Visible but not taking new bookings. */
     public static function isPaused(?Venue $v): bool
     {
@@ -106,14 +125,14 @@ final class VenueSetupSteps
         return method_exists(Venue::class, 'visibilityState') ? 'Set Status to Live' : 'Turn on Active and Open for booking';
     }
 
-    private static function doneNote(string $key, ?Venue $v, int $courts, int $slots, int $photos): string
+    private static function doneNote(string $key, ?Venue $v, int $courts, int $slots, int $photos, int $googlePhotos = 0): string
     {
         return match ($key) {
             'location' => (string) $v?->city,
-            'hours' => $slots.' '.($slots === 1 ? 'slot' : 'slots'),
+            'hours' => $slots > 0 ? $slots.' '.($slots === 1 ? 'slot' : 'slots') : 'From Google',
+            'photos' => $photos > 0 ? $photos.' '.($photos === 1 ? 'photo' : 'photos') : $googlePhotos.' from Google',
             'courts' => $courts.' active',
             'pricing' => (int) $v?->price > 0 ? 'from ₹'.number_format((int) $v->price).'/hr' : 'court rates',
-            'photos' => $photos.' '.($photos === 1 ? 'photo' : 'photos'),
             'live' => 'Taking bookings',
             default => 'Done',
         };

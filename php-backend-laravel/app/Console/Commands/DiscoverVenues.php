@@ -23,12 +23,24 @@ class DiscoverVenues extends Command
         {--city=* : City to search (repeatable)}
         {--all : Every city in the discovery settings}
         {--check-only : Skip Google; only re-run the Playo check}
-        {--no-check : Skip the Playo check}';
+        {--no-check : Skip the Playo check}
+        {--fill-hours : Only fill opening hours from Google for listed venues that have none}';
 
     protected $description = 'Find sports venues on Google, cross-check them with Playo, and queue them for review';
 
     public function handle(VenueDiscovery $discovery): int
     {
+        if ($this->option('fill-hours')) {
+            $filled = 0;
+            $venues = \App\Models\Venue::listed()->whereNull('hours_json')->get();
+            foreach ($venues as $venue) {
+                $filled += $discovery->fillHours($venue) ? 1 : 0;
+            }
+            $this->info("Opening hours filled for {$filled} of {$venues->count()} listed venues (the rest have none on Google).");
+
+            return self::SUCCESS;
+        }
+
         $cities = $this->option('all') ? DiscoverySettings::cities() : array_filter(array_map('trim', (array) $this->option('city')));
         if ($cities === []) {
             $this->error('Name a city with --city=… or pass --all.');

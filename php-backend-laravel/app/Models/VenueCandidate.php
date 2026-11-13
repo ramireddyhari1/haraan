@@ -57,6 +57,20 @@ class VenueCandidate extends Model
      */
     public function approve(?int $adminId = null): Venue
     {
+        $venue = $this->approveRow($adminId);
+
+        // Outside the transaction: a slow Google call must not hold the database.
+        try {
+            app(\App\Services\VenueDiscovery\VenueDiscovery::class)->fillHours($venue);
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('Listed venue hours not filled: ' . $e->getMessage());
+        }
+
+        return $venue;
+    }
+
+    private function approveRow(?int $adminId): Venue
+    {
         return DB::transaction(function () use ($adminId): Venue {
             $existing = $this->venue_id ? Venue::find($this->venue_id) : null;
             $existing ??= Venue::query()->where('place_id', $this->place_id)->first();

@@ -48,6 +48,9 @@
     .lv-facts dd { margin: 0; font-size: 15.5px; line-height: 1.55; color: var(--ink); }
     .lv-facts dd a { color: var(--blue); font-weight: 700; text-decoration: none; }
     .lv-facts dd a:hover { text-decoration: underline; text-underline-offset: 3px; }
+    .lv-open { display: block; margin-bottom: 4px; font-weight: 700; color: #B45309; }
+    .lv-open.is-open { color: #15803D; }
+    .lv-week { color: var(--ink-2); }
     .lv-note { margin: 14px 0 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-3); }
 
     .lv-card { background: var(--paper); border: 1px solid var(--rule); border-radius: 14px; padding: 22px; position: sticky; top: 88px; }
@@ -124,6 +127,9 @@
         <p class="lv-sub">{{ implode(' · ', array_filter([implode(', ', $sports), $where])) }}</p>
     @endif
     <p class="lv-state">Not on Haraan yet — no online booking</p>
+    @if($openNow)
+        <p class="lv-sub" style="margin-top:10px;font-size:15px"><span class="lv-open {{ $openNow['open'] ? 'is-open' : '' }}" style="display:inline">{{ $openNow['text'] }}</span></p>
+    @endif
 
     @if($photos)
         {{-- From the venue's own Google Maps listing, proxied (VenuePhotoController::listed).
@@ -159,8 +165,11 @@
                 @if($venue->contact_phone)
                     <div><dt>Phone</dt><dd><a href="tel:{{ preg_replace('/[^\d+]/', '', $venue->contact_phone) }}">{{ $venue->contact_phone }}</a></dd></div>
                 @endif
-                @if($venue->hours)
-                    <div><dt>Hours</dt><dd>{{ $venue->hours }}</dd></div>
+                @if($hoursLine)
+                    <div><dt>Hours</dt><dd>
+                        @if($openNow)<span class="lv-open {{ $openNow['open'] ? 'is-open' : '' }}">{{ $openNow['text'] }}</span>@endif
+                        <span class="lv-week">{!! implode('<br>', array_map('e', explode(' · ', $hoursLine))) !!}</span>
+                    </dd></div>
                 @endif
                 <div><dt>Booking</dt><dd>Not available on Haraan. Call the venue to book, or ask us and we’ll tell the owner you want to play here.</dd></div>
             </dl>

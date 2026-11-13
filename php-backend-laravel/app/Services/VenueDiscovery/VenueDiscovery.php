@@ -326,6 +326,97 @@ final class VenueDiscovery
         return $changed;
     }
 
+    /**
+     * Fill a listed venue's opening hours from its Google listing, when it has none of its
+     * own. Hours are a fact players need before they go ("is it open at 6 am?"), and the
+     * venue form's Hours step reads the same map. Nothing else is taken — no rating, no
+     * reviews. Never overwrites hours someone set in /control.
+     *
+     * @return bool whether hours were written
+     */
+    public function fillHours(Venue $venue): bool
+    {
+        if (! $venue->isListed() || ! empty($venue->hours_json) || trim((string) $venue->place_id) === '' || ! PlacePhotos::configured()) {
+            return false;
+        }
+
+        try {
+            $res = Http::timeout(15)->withHeaders([
+                'X-Goog-Api-Key' => PlacePhotos::key(),
+                'X-Goog-FieldMask' => 'regularOpeningHours',
+            ])->get('https://places.googleapis.com/v1/places/' . $venue->place_id);
+        } catch (Throwable $e) {
+            Log::warning('Venue hours lookup errored: ' . $e->getMessage());
+
+            return false;
+        }
+        if (! $res->successful()) {
+            Log::warning('Venue hours lookup failed', ['venue' => $venue->id, 'status' => $res->status()]);
+
+            return false;
+        }
+
+        $week = self::weekFromPeriods((array) $res->json('regularOpeningHours.periods'));
+        if ($week === []) {
+            return false;
+        }
+
+        $venue->forceFill(['hours_json' => $week])->saveQuietly();
+
+        return true;
+    }
+
+    /**
+     * Google's opening periods → the venue's `hours_json` map (Mon…Sun => open/close "HH:MM",
+     * closed days left out). A day with a lunch break becomes first open → last close, which
+     * is what the one-line hours on the page can say. A period with no close is open around
+     * the clock, stored as open == close (the model reads that as "Open 24 hours").
+     *
+     * @param  list<array<string, mixed>>  $periods
+     * @return array<string, array{open:string, close:string}>
+     */
+    public static function weekFromPeriods(array $periods): array
+    {
+        $names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        $hm = static fn (array $p): string => sprintf('%02d:%02d', (int) ($p['hour'] ?? 0), (int) ($p['minute'] ?? 0));
+
+        if (count($periods) === 1 && ! isset($periods[0]['close'])) {
+            return array_fill_keys(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], ['open' => '00:00', 'close' => '00:00']);
+        }
+
+        $days = [];
+        foreach ($periods as $p) {
+            $open = $p['open'] ?? null;
+            if (! is_array($open) || ! isset($open['day'])) {
+                continue;
+            }
+            $key = $names[((int) $open['day']) % 7];
+            $start = $hm($open);
+            // Closing past midnight ends "at" the next day's time — still this day's close.
+            $end = isset($p['close']) && is_array($p['close']) ? $hm($p['close']) : '00:00';
+            if (isset($p['close']['day']) && (int) $p['close']['day'] !== (int) $open['day'] && $end !== '00:00') {
+                $end = '23:59';
+            }
+            if (! isset($days[$key])) {
+                $days[$key] = ['open' => $start, 'close' => $end];
+
+                continue;
+            }
+            $days[$key]['open'] = min($days[$key]['open'], $start);
+            $days[$key]['close'] = $days[$key]['close'] === '00:00' || $end === '00:00' ? '00:00' : max($days[$key]['close'], $end);
+        }
+
+        // Back in Mon…Sun order.
+        $ordered = [];
+        foreach (['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as $k) {
+            if (isset($days[$k])) {
+                $ordered[$k] = $days[$k];
+            }
+        }
+
+        return $ordered;
+    }
+
     public static function crossCheckEnabled(): bool
     {
         return PlatformRules::bool('venue_discovery.crosscheck_playo');

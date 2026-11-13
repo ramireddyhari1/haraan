@@ -411,6 +411,14 @@ class VenueForm
                     ->extraAttributes(fn (?Venue $record): array => self::stepAttributes('photos', $record))
                     ->description('The first image is the hero; users swipe through the rest.')
                     ->schema([
+                        // A listed venue's page shows its Google listing photos until its own
+                        // are uploaded. Shown here so the admin sees what players see.
+                        Placeholder::make('google_photos')
+                            ->label('Showing now on the website — from Google Maps')
+                            ->visible(fn (?Venue $record): bool => VenueSetupSteps::googlePhotoCount($record) > 0)
+                            ->content(fn (?Venue $record): HtmlString => self::googlePhotoStrip($record))
+                            ->helperText('These come from the venue’s Google listing and are credited to their photographers. Upload the venue’s own photos below and they replace these.')
+                            ->columnSpanFull(),
                         FileUpload::make('images')
                             ->label('Upload photos')
                             ->image()
@@ -856,5 +864,24 @@ class VenueForm
         }
 
         return null;
+    }
+
+    /** The listed venue's Google photos as a row of thumbnails, served by the same proxy as the page. */
+    private static function googlePhotoStrip(?Venue $record): HtmlString
+    {
+        if ($record === null) {
+            return new HtmlString('');
+        }
+
+        $tiles = '';
+        foreach (\App\Support\PlacePhotos::forPlace((string) $record->place_id) as $p) {
+            $src = route('site.gamehub.placephoto', ['id' => $record->id, 'index' => $p['index']]);
+            $tiles .= '<figure style="margin:0;flex:0 0 160px">'
+                .'<img src="'.e($src).'" alt="" loading="lazy" style="width:160px;height:120px;object-fit:cover;border-radius:10px;display:block;background:#E9EEF4">'
+                .($p['credit'] !== '' ? '<figcaption style="font-size:11px;color:#64748B;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'.e($p['credit']).'</figcaption>' : '')
+                .'</figure>';
+        }
+
+        return new HtmlString('<div style="display:flex;gap:10px;overflow-x:auto;padding-bottom:4px">'.$tiles.'</div>');
     }
 }
