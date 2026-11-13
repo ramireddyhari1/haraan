@@ -622,7 +622,8 @@ final class PublicWebController extends Controller
                     return $v;
                 })
                 ->filter(fn (Venue $v) => $v->distance_km <= 50)
-                ->sortBy('distance_km');
+                // The chosen city's own venues first, then the towns around it, each by distance.
+                ->sortBy(fn (Venue $v) => [$city && strcasecmp((string) $v->city, $city) === 0 ? 0 : 1, $v->distance_km]);
         } elseif ($city) {
             $rows = $rows->filter(fn (Venue $v) => strcasecmp((string) $v->city, $city) === 0)->sortBy('name');
         } else {
@@ -645,6 +646,7 @@ final class PublicWebController extends Controller
                 'open_state' => $open['text'] ?? null,
                 'open_now' => (bool) ($open['open'] ?? false),
                 'url' => SeoUrl::venue($v),
+                'city' => (string) $v->city,
             ];
         });
     }

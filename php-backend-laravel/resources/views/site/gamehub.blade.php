@@ -1289,7 +1289,8 @@
             @if(($listedVenues ?? collect())->count())
                 <div class="dhub__sechead dhub__sechead--listed">
                     <div>
-                        <h2>More places to play{{ $dWhere ? ' in ' . $dWhere : '' }}</h2>
+                        @php $lvAround = $dWhere && $listedVenues->contains(fn ($v) => strcasecmp($v->city, $dWhere) !== 0); @endphp
+                        <h2>More places to play{{ $dWhere ? ($lvAround ? ' in and around ' : ' in ') . $dWhere : ' near you' }}</h2>
                         <p>{{ $listedVenues->count() }} {{ \Illuminate\Support\Str::plural('venue', $listedVenues->count()) }} not on Haraan yet. You can’t book them here — open one for its address, hours and directions, or ask to book and we’ll tell the owner.</p>
                     </div>
                 </div>
