@@ -38,6 +38,22 @@ class AppServiceProvider extends ServiceProvider
     {
         Gate::policy(Event::class, EventPolicy::class);
 
+        // ADMIN and COADMIN run the business from /control and must be able to do
+        // everything there. The Shield-generated policies check named permissions
+        // ("Update:Ad", "Delete:Payout", …) that only the spatie `super_admin` role
+        // carries, so an account whose access comes from the `role` column alone saw
+        // Ads, Bookings, Coupons, Payouts, Home blocks, Live matches… in the menu but
+        // with every add/edit/delete button hidden. Grant those named permissions to
+        // every active super-admin. Only "Verb:Model" abilities are covered: policies
+        // with real rules (HR leave/regularisation approvals) still decide for themselves.
+        Gate::before(function ($user, string $ability): ?bool {
+            if (! str_contains($ability, ':') || ! $user instanceof \App\Models\User) {
+                return null;
+            }
+
+            return $user->isSuperAdmin() && $user->isAccountActive() ? true : null;
+        });
+
         $this->showSystemTimestampsInBusinessTime();
 
         // Signing out of the partner web app unhooks that browser from booking alerts,
