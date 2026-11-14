@@ -433,7 +433,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 
 /* ── Hero ── */
 .mdx-hero-wrap { padding: 8px 12px; background: var(--bg); }
-.mdx-hero-band { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 24px; padding: 13px; overflow: hidden; }
+.mdx-hero-band { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 22px; padding: 10px; overflow: hidden; }
 .mdx-ribbon { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .mdx-ribbon text { fill: var(--rib, rgba(100,116,139,.53)); font-family: 'Plus Jakarta Sans', sans-serif; font-size: 10px; font-weight: 800; letter-spacing: 1.4px; dominant-baseline: central; transition: fill .3s; }
 .mdx-ribbon .rib-h { font-family: 'Archivo Black', sans-serif; font-size: 11px; letter-spacing: 0; }
@@ -444,7 +444,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
     border-radius: 12px;
     background: linear-gradient(135deg, #F3F7FF 0%, #E2ECFE 100%);
     border: 1px solid #CFDDF6;
-    padding: 13px 16px 14px;
+    padding: 9px 14px;
     color: var(--hink);
 }
 /* A 4, 6 or wicket: the card blinks twice in that colour, then fades (1s), like the app. */
@@ -457,22 +457,22 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-hero-top { display: flex; align-items: center; gap: 10px; }
 .mdx-hero-fmt { flex: 0 0 auto; max-width: 60%; font-size: 10.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: rgba(15,42,92,.72); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mdx-hero-toss { font-size: 11.5px; font-weight: 500; color: rgba(15,42,92,.72); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; text-align: right; }
-.mdx-hero-main { display: flex; align-items: center; margin-top: 8px; }
+.mdx-hero-main { display: flex; align-items: center; margin-top: 4px; }
 .mdx-bat { flex: 1; min-width: 0; }
 .mdx-bat-who { display: flex; align-items: center; gap: 8px; }
-.mdx-bat-who b { font-size: 17px; font-weight: 700; letter-spacing: .4px; }
+.mdx-bat-who b { font-size: 16px; font-weight: 700; letter-spacing: .4px; }
 .mdx-bat-tag { font-size: 12.5px; font-weight: 500; color: rgba(15,42,92,.6); white-space: nowrap; }
-.mdx-crest { width: 30px; height: 30px; border-radius: 50%; background: #fff; border: 1.5px solid #CBD5E1; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex: 0 0 auto; }
-.mdx-crest.sm { width: 24px; height: 24px; border-width: 1px; }
+.mdx-crest { width: 26px; height: 26px; border-radius: 50%; background: #fff; border: 1.5px solid #CBD5E1; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex: 0 0 auto; }
+.mdx-crest.sm { width: 20px; height: 20px; border-width: 1px; }
 .mdx-crest img { width: 100%; height: 100%; object-fit: cover; }
 .mdx-crest span { color: #fff; font-size: 9px; font-weight: 800; }
-.mdx-bat-score { display: flex; align-items: flex-end; margin-top: 4px; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.mdx-runs { font-family: 'Archivo Black', 'Plus Jakarta Sans', sans-serif; font-size: 54px; letter-spacing: -1.8px; color: var(--hink); }
-.mdx-wkts { font-family: 'Archivo Black', 'Plus Jakarta Sans', sans-serif; font-size: 28px; color: rgba(15,42,92,.55); padding-bottom: 5px; }
+.mdx-bat-score { display: flex; align-items: flex-end; margin-top: 2px; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.mdx-runs { font-family: 'Archivo Black', 'Plus Jakarta Sans', sans-serif; font-size: 50px; letter-spacing: -1.6px; color: var(--hink); }
+.mdx-wkts { font-family: 'Archivo Black', 'Plus Jakarta Sans', sans-serif; font-size: 26px; color: rgba(15,42,92,.55); padding-bottom: 4px; }
 .mdx-ovs { font-size: 16px; font-weight: 600; color: rgba(15,42,92,.75); padding: 0 0 8px 8px; }
-.mdx-bat-stats { display: flex; gap: 14px; margin-top: 5px; font-size: 12.5px; font-weight: 700; }
+.mdx-bat-stats { display: flex; gap: 14px; margin-top: 3px; font-size: 12.5px; font-weight: 700; }
 .mdx-bat-stats em { font-style: normal; font-weight: 600; letter-spacing: .6px; color: rgba(15,42,92,.62); margin-right: 4px; }
-.mdx-hero-rule { height: 1px; background: rgba(15,42,92,.16); margin: 10px 0; }
+.mdx-hero-rule { height: 1px; background: rgba(15,42,92,.16); margin: 7px 0; }
 .mdx-field { display: flex; align-items: center; gap: 8px; }
 .mdx-field b { font-size: 14.5px; font-weight: 600; letter-spacing: .4px; color: rgba(15,42,92,.82); }
 .mdx-field-score { margin-left: auto; font-size: 14.5px; font-weight: 600; color: rgba(15,42,92,.85); font-variant-numeric: tabular-nums; }
@@ -491,13 +491,13 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-lastball { display: flex; flex-direction: column; align-items: center; padding: 0 0 0 6px; flex: 0 0 auto; }
 .mdx-lastball-lbl { color: var(--hink); font-size: 9px; font-weight: 700; letter-spacing: 1.5px; }
 .mdx-ump-slot { display: flex; flex-direction: column; align-items: center; }
-.mdx-ump { width: 86px; height: 101px; display: block; overflow: hidden; }
-.mdx-ump-cap { margin-top: -2px; font-size: 14px; font-weight: 800; letter-spacing: 1.4px; color: var(--hink); white-space: nowrap; position: relative; }
+.mdx-ump { width: 68px; height: 80px; display: block; overflow: hidden; }
+.mdx-ump-cap { margin-top: -1px; font-size: 13px; font-weight: 800; letter-spacing: 1.2px; color: var(--hink); white-space: nowrap; position: relative; }
 .mdx-lastball .lb-bowl, .mdx-delivery, .mdx-lastball-lbl { display: none; }
 .mdx-lastball.is-bowling .mdx-ump-slot { display: none; }
 .mdx-lastball.is-bowling .mdx-lastball-lbl, .mdx-lastball.is-bowling .lb-bowl { display: inline; color: var(--hink); }
-.mdx-lastball.is-bowling .mdx-delivery { display: block; width: 84px; height: 66px; margin: 8px 0 6px; }
-@media (max-width: 340px) { .mdx-runs { font-size: 46px; } .mdx-wkts { font-size: 24px; } .mdx-ump { width: 76px; height: 90px; } .mdx-ump-cap { font-size: 12.5px; letter-spacing: 1px; } .mdx-thisover { gap: 8px; } .mdx-thisover-balls { gap: 4px; } .mdx-thisover .ob { width: 23px; height: 23px; font-size: 10.5px; } }
+.mdx-lastball.is-bowling .mdx-delivery { display: block; width: 76px; height: 60px; margin: 6px 0 4px; }
+@media (max-width: 340px) { .mdx-runs { font-size: 46px; } .mdx-wkts { font-size: 24px; } .mdx-ump { width: 62px; height: 73px; } .mdx-ump-cap { font-size: 12px; letter-spacing: 1px; } .mdx-thisover { gap: 8px; } .mdx-thisover-balls { gap: 4px; } .mdx-thisover .ob { width: 23px; height: 23px; font-size: 10.5px; } }
 /* One delivery per 1.3s loop: release, dip to pitch at ~50%, carry to the stumps, gone for the
    last 20% (the run-up). Ball and shadow move together so the bounce reads as a bounce. */
 .mdx-delivery .dl-ball { animation: mdxDeliver 1.3s linear infinite; }
@@ -672,6 +672,9 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 
 .mdx-empty { text-align: center; color: var(--muted); font-size: 13px; padding: 28px 12px; }
 
+/* Phones: the card stops at the fielding line. The over's balls are the first thing under the
+   tabs on Commentary and Live, so repeating them here only pushed the feed down. */
+@media (max-width: 720px) { .mdx-thisover { display: none; } }
 @media (min-width: 721px) {
     .mdx-bar, .mdx-hero-wrap, .mdx-tabs { max-width: 720px; margin-left: auto; margin-right: auto; }
     .mdx-tabs { top: 58px; }
@@ -715,7 +718,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
             var w = Math.round(band.clientWidth), h = Math.round(band.clientHeight);
             if (!w || !h) return;
             svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
-            var i = 6.5, r = 18, x0 = i, y0 = i, x1 = w - i, y1 = h - i;
+            var i = 5, r = 17, x0 = i, y0 = i, x1 = w - i, y1 = h - i;
             path.setAttribute('d',
                 'M ' + (x0 + r) + ' ' + y0 +
                 ' H ' + (x1 - r) + ' A ' + r + ' ' + r + ' 0 0 1 ' + x1 + ' ' + (y0 + r) +
