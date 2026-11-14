@@ -622,8 +622,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const data = await resp.json();
         if (data && data.success === false) return false;
         const candidates = [data.city, data.region, data.country];
-        const coords = (data.latitude && data.longitude) ? { latitude: data.latitude, longitude: data.longitude } : null;
-        return applyDetectedCity(candidates, data.city, data.country, coords);
+        // City only. An IP lookup lands on the network's exchange (often Hyderabad or
+        // Mumbai for mobile data), not where the viewer stands — saving its point as a
+        // "device fix" would sort every list around the wrong place for a year. With no
+        // point, the server measures from the city itself (/control Cities point, else
+        // Google's geocode of the name).
+        return applyDetectedCity(candidates, data.city, data.country, null);
     }
 
     useCurrentBtn?.addEventListener('click', () => {
