@@ -45,6 +45,41 @@ class Cities extends Page implements HasForms
         $this->form->fill(['cities_json' => $json]);
     }
 
+    /**
+     * Every city that has venues on Haraan (bookable or listed), busiest first, with a
+     * centre point: Google's geocode of the city (cached 30 days), else the middle of its
+     * venues' pins. The page offers the ones missing from the picker as one-click adds,
+     * and fills in coordinates for picker cities that have none — a picked city with a
+     * point sorts every "near you" list by real distance.
+     *
+     * @return list<array{name: string, venues: int, lat: ?float, lng: ?float}>
+     */
+    public function venueCities(): array
+    {
+        $rows = \App\Models\Venue::query()
+            ->where(fn ($q) => $q->published()->orWhere(fn ($l) => $l->listed()))
+            ->whereNotNull('city')->where('city', '!=', '')
+            ->get(['city', 'latitude', 'longitude']);
+
+        $geo = new \App\Support\MatchGeocoder;
+
+        return $rows
+            ->groupBy(fn ($v) => mb_convert_case(trim((string) $v->city), MB_CASE_TITLE))
+            ->map(function ($group, string $name) use ($geo): array {
+                [$lat, $lng] = $geo->geocode($name . ', India');
+                if ($lat === null) {
+                    $pinned = $group->filter(fn ($v) => $v->latitude !== null && $v->longitude !== null);
+                    $lat = $pinned->isNotEmpty() ? round((float) $pinned->avg('latitude'), 5) : null;
+                    $lng = $pinned->isNotEmpty() ? round((float) $pinned->avg('longitude'), 5) : null;
+                }
+
+                return ['name' => $name, 'venues' => $group->count(), 'lat' => $lat, 'lng' => $lng];
+            })
+            ->sortByDesc('venues')
+            ->values()
+            ->all();
+    }
+
     public function form(Schema $schema): Schema
     {
         return $schema

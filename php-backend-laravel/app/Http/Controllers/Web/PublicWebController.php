@@ -462,6 +462,11 @@ final class PublicWebController extends Controller
         return back();
     }
 
+    /** Pulse's "near you" radius, and how far it widens when that radius is empty. */
+    private const PULSE_NEAR_KM = 30;
+
+    private const PULSE_WIDE_KM = 50;
+
     public function gamehub(): View
     {
         $city = CityResolver::selected();
@@ -473,53 +478,56 @@ final class PublicWebController extends Controller
             ->orderBy('sort_order')
             ->get();
 
+        // The nearest bookable venue outside the radius, for the empty state ("nearest is
+        // Kadapa, 216 km") — never listed as if it were local.
+        $nearestElsewhere = null;
+
         if ($userLat !== null && $userLng !== null) {
-            // Compute real distance to each venue
+            // Real distance to each venue: its pin, else its address on Google Maps.
             $venuesWithDistance = $allVenues->map(function (Venue $v) use ($userLat, $userLng) {
-                $km = ($v->latitude !== null && $v->longitude !== null)
-                    ? $this->haversineKm($userLat, $userLng, (float) $v->latitude, (float) $v->longitude)
-                    : null;
+                [$vLat, $vLng] = $v->mapPoint();
                 $card = $this->decorateVenueCard($v);
-                if ($km !== null) {
+                if ($vLat !== null && $vLng !== null) {
+                    $km = $this->haversineKm($userLat, $userLng, $vLat, $vLng);
                     $card->distance = $this->formatKm($km);
                     $card->distance_km = $km;
                 }
+
                 return $card;
             });
 
-            // 1. Pinned venues within radius (30 km, expanding up to 50 km if none within 30 km)
+            // 1. Venues within 30 km, widening to 50 km when 30 has none. Nothing beyond 50:
+            //    a ground 200 km away is not "near" anyone, whatever else is missing.
             $pinned = $venuesWithDistance->filter(fn ($v) => isset($v->distance_km));
-            $within30 = $pinned->filter(fn ($v) => $v->distance_km <= 30)->sortBy('distance_km')->values();
+            $within30 = $pinned->filter(fn ($v) => $v->distance_km <= self::PULSE_NEAR_KM)->sortBy('distance_km')->values();
+            $nearby = $within30->isNotEmpty()
+                ? $within30
+                : $pinned->filter(fn ($v) => $v->distance_km <= self::PULSE_WIDE_KM)->sortBy('distance_km')->values();
 
-            if ($within30->isNotEmpty()) {
-                $nearby = $within30;
-            } else {
-                $within50 = $pinned->filter(fn ($v) => $v->distance_km <= 50)->sortBy('distance_km')->values();
-                $nearby = $within50->isNotEmpty() ? $within50 : $pinned->sortBy('distance_km')->take(10)->values();
+            if ($nearby->isEmpty() && $pinned->isNotEmpty()) {
+                $n = $pinned->sortBy('distance_km')->first();
+                $nearestElsewhere = (object) [
+                    'title' => $n->title,
+                    'where' => trim((string) ($n->city ?: $n->location)),
+                    'distance' => $n->distance,
+                    'url' => SeoUrl::venue($n),
+                ];
             }
 
-            // 2. Unpinned venues matching chosen city (if any)
-            $unpinned = $venuesWithDistance->filter(fn ($v) => !isset($v->distance_km));
-            if ($city) {
-                $unpinned = $unpinned->filter(fn ($v) =>
-                    strcasecmp((string) $v->city, $city) === 0 ||
-                    stripos((string) $v->location, $city) !== false ||
-                    stripos((string) $v->title, $city) !== false
-                );
-            }
+            // 2. Venues with no point at all (no pin, no address Google can find): the
+            //    chosen city's own, by the shared city rule.
+            $unplaced = $venuesWithDistance->filter(fn ($v) => ! isset($v->distance_km));
+            $unplaced = $city
+                ? $unplaced->filter(fn ($v) => $allVenues->firstWhere('id', $v->id)?->isInCity($city))
+                : $unplaced;
 
-            $venues = $nearby->concat($unpinned)->values();
+            $venues = $nearby->concat($unplaced)->values();
         } else {
-            // No coordinates available: filter by chosen city (if any), matching city or location
-            if ($city) {
-                $venues = $allVenues->filter(function (Venue $v) use ($city) {
-                    return strcasecmp((string) $v->city, $city) === 0 ||
-                           stripos((string) $v->location, $city) !== false ||
-                           stripos((string) $v->address, $city) !== false;
-                })->map(fn (Venue $v) => $this->decorateVenueCard($v))->values();
-            } else {
-                $venues = $allVenues->map(fn (Venue $v) => $this->decorateVenueCard($v))->values();
-            }
+            // No coordinates available: the chosen city's venues (if any), same city rule.
+            $venues = $allVenues
+                ->when($city, fn ($c) => $c->filter(fn (Venue $v) => $v->isInCity($city)))
+                ->map(fn (Venue $v) => $this->decorateVenueCard($v))
+                ->values();
         }
 
         // Real per-sport venue counts for the "Explore by Sport" tiles.
@@ -592,6 +600,7 @@ final class PublicWebController extends Controller
             'popularVenues' => $popularVenues,
             'moreVenues' => $moreVenues,
             'listedVenues' => $listedVenues,
+            'nearestElsewhere' => $nearestElsewhere,
         ]);
     }
 
@@ -625,7 +634,7 @@ final class PublicWebController extends Controller
 
                     return $v;
                 })
-                ->filter(fn (Venue $v) => $v->distance_km <= 50)
+                ->filter(fn (Venue $v) => $v->distance_km <= self::PULSE_WIDE_KM)
                 // The chosen city's own venues first, then the towns around it, each by distance.
                 ->sortBy(fn (Venue $v) => [$city && strcasecmp((string) $v->city, $city) === 0 ? 0 : 1, $v->distance_km]);
         } elseif ($city) {

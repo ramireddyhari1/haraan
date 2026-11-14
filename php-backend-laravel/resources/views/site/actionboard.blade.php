@@ -1124,19 +1124,22 @@ main.container {
 })();
 
 // Location-wise sorting: grab one precise device fix so "Matches near you" ranks by
-// real distance. Ask once (never nag), store a rounded lat/lng cookie, then reload so
-// the server re-sorts. If denied/unavailable, the server falls back to the chosen
-// city (geocoded via Google Maps) or district/state names.
+// real distance. Ask once (never nag). A city the viewer chose in the header wins —
+// we never move them somewhere else behind their back. With no city chosen, the fix
+// sets the header city and its coordinates together (site.js, Google reverse-geocode)
+// so the pill, Pulse and this board all describe the same place.
 (function () {
     try {
         if (document.cookie.indexOf('hb_geo=') !== -1) return;
+        if (/(?:^|;\s*)haraan_city=[^;]+/.test(document.cookie)) return;
         if (localStorage.getItem('hb_geo_asked') === '1') return;
         if (!navigator.geolocation) return;
         navigator.geolocation.getCurrentPosition(function (pos) {
             localStorage.setItem('hb_geo_asked', '1');
-            var lat = pos.coords.latitude.toFixed(3), lng = pos.coords.longitude.toFixed(3);
-            document.cookie = 'hb_geo=' + lat + ',' + lng + ';path=/;max-age=86400;SameSite=Lax';
-            location.reload();
+            if (typeof window.HaraanApplyDeviceFix === 'function') {
+                // Sets city + coordinates, then reloads.
+                window.HaraanApplyDeviceFix(pos.coords.latitude, pos.coords.longitude);
+            }
         }, function () {
             localStorage.setItem('hb_geo_asked', '1');
         }, { enableHighAccuracy: false, timeout: 8000, maximumAge: 600000 });

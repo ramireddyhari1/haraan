@@ -1911,7 +1911,7 @@ private fun GameHubTabScreen(
           imageUrl = c.image.orEmpty(),
           images = c.images.ifEmpty { if (c.image.isNullOrBlank()) emptyList() else listOf(c.image) },
           tagline = c.tagline, distance = c.distance,
-          latitude = c.latitude, longitude = c.longitude,
+          latitude = c.latitude, longitude = c.longitude, city = c.city,
         )
       } ?: emptyList()
     }
@@ -1968,7 +1968,7 @@ private fun GameHubTabScreen(
         category = l.sports.firstOrNull().orEmpty(), sports = l.sports, price = 0,
         imageUrl = l.image.orEmpty(), images = listOfNotNull(l.image),
         tagline = l.openState.orEmpty(), distance = "",
-        latitude = l.latitude, longitude = l.longitude, bookable = false,
+        latitude = l.latitude, longitude = l.longitude, bookable = false, city = l.city,
       )
     }
   }
@@ -1993,7 +1993,7 @@ private fun GameHubTabScreen(
 
   fun cityFirst(list: List<VenueItem>): List<VenueItem> =
     if (selectedCity.isNullOrBlank()) list
-    else list.partition { it.location.contains(selectedCity, ignoreCase = true) }.let { it.first + it.second }
+    else list.partition { it.isInCity(selectedCity) }.let { it.first + it.second }
 
   val filteredVenues = if (userLat == null || userLng == null) {
     cityFirst(sportSearchVenues)
@@ -3682,7 +3682,13 @@ private data class VenueItem(
   // False for a listed venue (owner not on Haraan): same card and list, no price, no Book —
   // tapping it opens [ListedVenueSheet] instead of the booking screen.
   val bookable: Boolean = true,
-)
+  // The city it is filed under (blank on older servers).
+  val city: String = "",
+) {
+  /** Same rule as the website (Venue::isInCity): its city, or its area naming the city. */
+  fun isInCity(name: String): Boolean =
+    name.isNotBlank() && (city.trim().equals(name.trim(), ignoreCase = true) || location.contains(name.trim(), ignoreCase = true))
+}
 
 /** Great-circle distance in km between two lat/lng points (haversine, Earth R = 6371 km). */
 private fun haversineKm(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {

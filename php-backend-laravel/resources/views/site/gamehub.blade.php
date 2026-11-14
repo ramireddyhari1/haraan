@@ -242,6 +242,7 @@
         .mhub__none-map { display: block; width: 100%; height: auto; border-radius: 14px; }
         .mhub__none strong { display: block; text-wrap: balance; margin-top: 14px; font-size: 15.5px; font-weight: 800; letter-spacing: -.01em; color: #0F172A; }
         .mhub__none p { text-wrap: balance; margin: 4px auto 0; max-width: 270px; font-size: 13px; line-height: 1.45; color: #64748B; }
+        .mhub__none-nearest { display: inline-block; margin-top: 10px; font-size: 13px; font-weight: 700; color: #2563EB; text-decoration: none; }
         .mhub__none-ring { transform-origin: 160px 74px; }
         @media (prefers-reduced-motion: no-preference) {
             .mhub__none-ring { animation: mhub-sweep 2.8s cubic-bezier(.2, .6, .3, 1) infinite; }
@@ -459,6 +460,8 @@
     .dhub__none { display: flex; flex-direction: column; align-items: center; text-align: center; padding: 44px 24px 50px; border-radius: 24px; background: #fff; box-shadow: 0 1px 2px rgba(15, 23, 42, .06); }
     .dhub__none strong { margin-top: 16px; font-size: 18px; font-weight: 800; letter-spacing: -.015em; }
     .dhub__none p { margin: 6px 0 0; font-size: 14px; color: var(--muted); }
+    .dhub__none p.dhub__none-nearest { margin-top: 10px; color: var(--ink, #0F172A); }
+    .dhub__none-nearest a { color: var(--blue); font-weight: 700; text-decoration: none; }
     .dhub__none-links { display: flex; gap: 18px; margin-top: 16px; }
     .dhub__none-links a { font-size: 14px; font-weight: 700; color: var(--blue); text-decoration: none; }
     .dhub__none-links a:hover { text-decoration: underline; }
@@ -944,6 +947,9 @@
                 {{ $selectedSport === 'All' ? 'No venues' : 'No ' . strtolower($selectedSport) . ' venues' }}{{ $noneWhere ? ' near ' . $noneWhere : ' near you' }} yet
             </strong>
             <p>Grounds will show up here as soon as one opens nearby.</p>
+            @if(!empty($nearestElsewhere))
+                <a class="mhub__none-nearest" href="{{ $nearestElsewhere->url }}">Nearest on Haraan: {{ $nearestElsewhere->title }}{{ $nearestElsewhere->where ? ', ' . $nearestElsewhere->where : '' }} · {{ $nearestElsewhere->distance }}</a>
+            @endif
         </div>
     @endif
 
@@ -1277,6 +1283,9 @@
                     </svg>
                     <strong>{{ $dSportWord ? 'No ' . $dSportWord . ' venues' : 'No venues' }} {{ $dWhere ? 'in ' . $dWhere : 'near you' }} yet</strong>
                     <p>Grounds show up here as soon as an owner lists one.</p>
+                    @if(!empty($nearestElsewhere))
+                        <p class="dhub__none-nearest">Nearest on Haraan: <a href="{{ $nearestElsewhere->url }}">{{ $nearestElsewhere->title }}</a>{{ $nearestElsewhere->where ? ', ' . $nearestElsewhere->where : '' }} · {{ $nearestElsewhere->distance }}</p>
+                    @endif
                     <div class="dhub__none-links">
                         @if($selectedSport !== 'All')<a href="/gamehub">See every sport</a>@endif
                         <a href="/become-a-partner">List your ground</a>

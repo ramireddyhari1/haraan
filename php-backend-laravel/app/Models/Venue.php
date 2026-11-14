@@ -71,6 +71,48 @@ final class Venue extends Model
     ];
 
     /**
+     * Whether this venue belongs to a city, by one rule every list shares: its `city` field,
+     * or its area text naming the city. Never the street address — "Guntur Road" is a street
+     * in Vijayawada, not a venue in Guntur.
+     */
+    public function isInCity(?string $city): bool
+    {
+        $city = trim((string) $city);
+        if ($city === '') {
+            return false;
+        }
+
+        return strcasecmp(trim((string) $this->city), $city) === 0
+            || mb_stripos((string) $this->location, $city) !== false;
+    }
+
+    /**
+     * Where to measure distance from: the venue's own pin, else its address looked up on
+     * Google Maps (cached 30 days, never saved to the row). A venue nobody pinned still
+     * shows to the people near it instead of dropping out of every location list.
+     *
+     * @return array{0: ?float, 1: ?float, 2: bool} lat, lng, and whether it is an estimate
+     */
+    public function mapPoint(): array
+    {
+        if ($this->latitude !== null && $this->longitude !== null
+            && ((float) $this->latitude !== 0.0 || (float) $this->longitude !== 0.0)) {
+            return [(float) $this->latitude, (float) $this->longitude, false];
+        }
+
+        $place = implode(', ', array_filter(array_map(
+            fn ($s) => trim((string) $s),
+            [$this->address ?: $this->location, $this->city],
+        )));
+        if ($place === '') {
+            return [null, null, false];
+        }
+        [$lat, $lng] = (new \App\Support\MatchGeocoder)->geocode($place . ', India');
+
+        return [$lat, $lng, $lat !== null];
+    }
+
+    /**
      * Sports this venue offers, always non-empty: the explicit `sports` list when set, else the
      * primary category. The category is guaranteed first so the card's leading icon matches the
      * badge. De-duplicated and trimmed.

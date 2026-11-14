@@ -6,7 +6,7 @@
          Preserves 100% of Livewire save() contract and raw JSON fallback. --}}
     <div
         wire:ignore
-        x-data="citiesManager(@js($this->data['cities_json'] ?? '[]'), @js($mapsKey))"
+        x-data="citiesManager(@js($this->data['cities_json'] ?? '[]'), @js($mapsKey), @js($this->venueCities()))"
         x-init="init()"
         class="space-y-6"
     >
@@ -36,6 +36,39 @@
                 </div>
             </div>
         </div>
+
+        <!-- Venue cities the picker doesn't offer, and picker cities with no point. -->
+        <template x-if="missingVenueCities().length || unplacedCities().length">
+            <div class="rounded-xl border border-blue-200 bg-blue-50/60 p-5 space-y-3 dark:bg-blue-500/10 dark:border-blue-400/20">
+                <template x-if="missingVenueCities().length">
+                    <div>
+                        <h3 class="text-sm font-bold text-[var(--hrn-ink,#0b1220)] dark:text-white">Cities with venues that people can't pick</h3>
+                        <p class="text-xs text-[var(--hrn-ink-2,#64748b)] dark:text-gray-400 mt-0.5">These have venues on Haraan but aren't in the location picker, so players there have to type them in. Add one, then Save.</p>
+                        <div class="flex flex-wrap gap-2 mt-3">
+                            <template x-for="vc in missingVenueCities()" :key="vc.name">
+                                <button type="button" x-on:click="addVenueCity(vc)"
+                                    class="inline-flex items-center gap-1.5 rounded-lg bg-white border border-blue-200 px-3 py-1.5 text-xs font-semibold text-blue-700 hover:bg-blue-600 hover:text-white transition dark:bg-white/5 dark:text-blue-300 dark:border-blue-400/30">
+                                    <span aria-hidden="true">+</span>
+                                    <span x-text="vc.name"></span>
+                                    <span class="font-normal opacity-70" x-text="'· ' + vc.venues + (vc.venues === 1 ? ' venue' : ' venues')"></span>
+                                </button>
+                            </template>
+                        </div>
+                    </div>
+                </template>
+                <template x-if="unplacedCities().length">
+                    <div class="flex flex-wrap items-center justify-between gap-3 pt-1">
+                        <p class="text-xs text-[var(--hrn-ink-2,#64748b)] dark:text-gray-400">
+                            <span class="font-bold text-[var(--hrn-ink,#0b1220)] dark:text-white" x-text="unplacedCities().length"></span>
+                            picker <span x-text="unplacedCities().length === 1 ? 'city has' : 'cities have'"></span> no map point, so picking it can't sort venues by distance:
+                            <span x-text="unplacedCities().map(c => c.name).join(', ')"></span>
+                        </p>
+                        <button type="button" x-on:click="fillPoints()" x-show="unplacedCities().some(c => pointFor(c.name))"
+                            class="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 rounded-lg">Fill from Google Maps</button>
+                    </div>
+                </template>
+            </div>
+        </template>
 
         <!-- 2. Dual-Add Action & Search Console -->
         <div class="rounded-xl border border-[var(--hrn-border,#e2e8f0)] bg-[var(--hrn-surface,#ffffff)] p-5 shadow-sm space-y-4 dark:bg-gray-900 dark:border-white/10">
@@ -396,9 +429,37 @@
     </div>
 
     <script>
-        function citiesManager(initialJson, key) {
+        function citiesManager(initialJson, key, venueCities) {
             return {
                 key: key,
+                venueCities: Array.isArray(venueCities) ? venueCities : [],
+
+                inPicker(name) {
+                    const n = String(name || '').toLowerCase().trim();
+                    return this.cities.some((c) => String(c.name || '').toLowerCase().trim() === n);
+                },
+                missingVenueCities() {
+                    return this.venueCities.filter((vc) => !this.inPicker(vc.name));
+                },
+                unplacedCities() {
+                    return this.cities.filter((c) => !(Number(c.lat ?? c.latitude) && Number(c.lng ?? c.longitude)));
+                },
+                pointFor(name) {
+                    const n = String(name || '').toLowerCase().trim();
+                    const vc = this.venueCities.find((v) => v.name.toLowerCase() === n && v.lat != null && v.lng != null);
+                    return vc ? { lat: vc.lat, lng: vc.lng } : null;
+                },
+                addVenueCity(vc) {
+                    this.add({ id: this.slug(vc.name), name: vc.name, country: 'India', popular: false, lat: vc.lat, lng: vc.lng });
+                },
+                fillPoints() {
+                    let n = 0;
+                    this.unplacedCities().forEach((c) => {
+                        const p = this.pointFor(c.name);
+                        if (p) { c.lat = p.lat; c.lng = p.lng; n++; }
+                    });
+                    if (n) { this.sync(); this.notify('Added map points to ' + n + (n === 1 ? ' city' : ' cities') + '. Save to publish.', 'success'); }
+                },
                 cities: [],
                 filterQuery: '',
                 activeFilter: 'all',

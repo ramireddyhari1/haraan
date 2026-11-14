@@ -32,6 +32,8 @@ data class VenueApiItem(
     // static [distance] string and are never radius-filtered out.
     val latitude: Double? = null,
     val longitude: Double? = null,
+    /** The city the venue is filed under (blank on older servers). */
+    val city: String = "",
 )
 
 /** One bookable slot template for a venue (GET /api/venues/{id} → slots). */
@@ -226,6 +228,7 @@ class VenueRepository {
                 isBookable = o.optBoolean("is_bookable", false),
                 latitude = if (o.isNull("latitude")) null else o.optDouble("latitude").takeIf { !it.isNaN() },
                 longitude = if (o.isNull("longitude")) null else o.optDouble("longitude").takeIf { !it.isNaN() },
+                city = o.optString("city").takeIf { it != "null" }.orEmpty(),
             )
         }
     }

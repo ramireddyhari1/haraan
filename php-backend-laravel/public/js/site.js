@@ -439,8 +439,11 @@ document.addEventListener('DOMContentLoaded', () => {
             document.cookie = 'haraan_city=' + encodeURIComponent(city.name) +
                 '; path=/; max-age=' + maxAge + '; SameSite=Lax';
 
-            const lat = (coords && coords.latitude != null) ? coords.latitude : (city && city.latitude);
-            const lng = (coords && coords.longitude != null) ? coords.longitude : (city && city.longitude);
+            // /control → Cities stores a city's centre as `lat`/`lng`; older entries used
+            // `latitude`/`longitude`. Read both, or a picked city never gets its point.
+            const pick = (a, b) => (a != null && a !== '' && !isNaN(Number(a))) ? Number(a) : ((b != null && b !== '' && !isNaN(Number(b))) ? Number(b) : null);
+            const lat = (coords && coords.latitude != null) ? coords.latitude : (city ? pick(city.lat, city.latitude) : null);
+            const lng = (coords && coords.longitude != null) ? coords.longitude : (city ? pick(city.lng, city.longitude) : null);
 
             if (lat != null && lng != null) {
                 document.cookie = 'haraan_lat=' + encodeURIComponent(lat) +
@@ -602,6 +605,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         return false;
     }
+    // One way to turn a device fix into a place: sets the header city AND the
+    // coordinates together, so the pill and every "near you" list always agree.
+    // ActionBoard's one-time location prompt uses this too.
+    window.HaraanApplyDeviceFix = resolveCityByCoords;
 
     /**
      * Resolve a city from the viewer's IP address — the fallback when browser

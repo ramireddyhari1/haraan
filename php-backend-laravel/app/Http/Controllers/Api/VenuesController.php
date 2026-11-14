@@ -226,18 +226,26 @@ final class VenuesController extends Controller
     /** Compact card shape shared by list + detail. */
     private function card(Venue $v): array
     {
+        // The venue's pin, else its address on Google Maps — so a venue nobody pinned
+        // still reaches the players near it ({@see Venue::mapPoint()}).
+        [$lat, $lng, $approx] = $v->mapPoint();
+
         return [
             'id' => $v->id,
             'name' => $v->name,
             'category' => $v->category,
             'sports' => $v->sportsList(),
             'location' => $v->location,
+            // The city the venue is filed under, so the app's "your city first" uses the
+            // same rule as the website ({@see Venue::isInCity()}). Additive.
+            'city' => $v->city,
             'distance' => $v->distance,
             // Coordinates travel with the card so the client can compute real GPS
             // distance and radius-filter the list (the static `distance` string above
             // is admin copy, identical for every viewer).
-            'latitude' => $v->latitude,
-            'longitude' => $v->longitude,
+            'latitude' => $lat,
+            'longitude' => $lng,
+            'location_estimated' => $approx,
             'price' => $v->price,
             'rating' => ($v->ratings_count > 0 && $v->rating) ? $v->rating : null,
             'ratings_count' => $v->ratings_count,
