@@ -527,11 +527,11 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 }
 /* ── Tabs (MatchTabs.kt): six equal slots, glyph over an 11px label, red underline ── */
 .mdx-tabs { display: flex; background: var(--bg); position: sticky; top: 58px; z-index: 20; border-bottom: 1px solid var(--border); }
-.mdx-tab { flex: 1 0 auto; min-width: 0; padding: 10px 2px 9px; white-space: nowrap; font-size: 12px; font-weight: 500; color: var(--ink2); text-decoration: none; position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.mdx-tab { flex: 1 0 auto; min-width: 0; padding: 7px 2px 6px; white-space: nowrap; font-size: 11.5px; font-weight: 500; color: var(--ink2); text-decoration: none; position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; }
 .mdx-tab span { letter-spacing: -.1px; }
 .mdx-tab.is-on { color: var(--ink); font-weight: 600; }
 .mdx-tab.is-on::after { content: ""; position: absolute; bottom: -1px; left: 50%; transform: translateX(-50%); width: 22px; height: 2px; border-radius: 2px; background: var(--red); }
-.mdx-tab-ic { width: 21px; height: 21px; display: block; overflow: visible;
+.mdx-tab-ic { width: 19px; height: 19px; display: block; overflow: visible;
     --gi: var(--muted); --gb: transparent; --gs: var(--muted); }
 .mdx-tab.is-on .mdx-tab-ic { --gi: var(--ink); --gb: rgba(37,99,235,.12); --gs: var(--red); }
 .mdx-tab.is-live .mdx-tab-ic { --gs: var(--red); animation: mdxPulse .9s ease-in-out infinite alternate; }
@@ -557,8 +557,8 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-tab.is-on .mdx-tab-ic .g-head { fill: var(--gs); fill-opacity: .9; }
 
 /* ── Content shell ── */
-.mdx-content { padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; max-width: 720px; margin: 0 auto; }
-.mdx-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 10px 24px rgba(15,23,42,.05); }
+.mdx-content { padding: 10px 16px; display: flex; flex-direction: column; gap: 10px; max-width: 720px; margin: 0 auto; }
+.mdx-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 13px; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 10px 24px rgba(15,23,42,.05); }
 .mdx-card--flush { padding: 0; overflow: hidden; }
 .mdx-eyebrow { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
 .mdx-divider { height: 1px; background: var(--border); margin: 14px 0; }
@@ -575,7 +575,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-chip.wicket { background: var(--red); color: #fff; }
 .mdx-chip.dot, .mdx-chip.run { background: #E2E8F0; color: var(--muted); }
 .mdx-chip.extra { background: #FEF3C7; color: #92400E; }
-.mdx-chip.sm { width: 22px; height: 22px; font-size: 10px; }
+.mdx-chip.sm { width: 20px; height: 20px; font-size: 10px; }
 .mdx-chip.lg { width: 28px; height: 28px; }
 
 /* ── Live tab ── */
@@ -640,17 +640,17 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 
 /* ── Commentary tab ── */
 /* The over strip runs to the screen edges and snaps over by over, like the app's row. */
-.mdx-overchips { display: flex; gap: 10px; overflow-x: auto; margin: 0 -16px; padding: 2px 16px 4px; scroll-padding: 0 16px;
+.mdx-overchips { display: flex; gap: 8px; overflow-x: auto; margin: 0 -16px; padding: 2px 16px 4px; scroll-padding: 0 16px;
     scroll-snap-type: x proximity; scrollbar-width: none; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
 .mdx-overchips::-webkit-scrollbar { display: none; }
 .mdx-overchips > * { scroll-snap-align: start; }
-.mdx-overchip { display: flex; align-items: center; gap: 9px; border: 1px solid var(--border); background: #fff; border-radius: 12px; padding: 7px 10px; flex: 0 0 auto; }
+.mdx-overchip { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); background: #fff; border-radius: 11px; padding: 5px 9px; flex: 0 0 auto; }
 .mdx-overchip.current { background: rgba(37,99,235,.06); border-color: rgba(37,99,235,.4); }
 .mdx-overchip .ol { text-align: center; min-width: 26px; }
 .mdx-overchip .ol em { display: block; color: var(--muted); font-size: 7px; font-weight: 700; font-style: normal; letter-spacing: .5px; }
 .mdx-overchip .ol b { font-size: 13px; font-weight: 900; }
 .mdx-overchip .odiv { width: 1px; align-self: stretch; background: var(--border); }
-.mdx-overchip .oballs { display: flex; gap: 5px; }
+.mdx-overchip .oballs { display: flex; gap: 4px; }
 .mdx-overchip .osum { font-size: 13px; font-weight: 900; }
 .mdx-comm-row { display: flex; align-items: center; gap: 12px; background: #fff; border-bottom: 1px solid var(--border); padding: 12px 16px; }
 .mdx-comm-row .cov { width: 34px; color: var(--muted); font-size: 11px; font-weight: 700; flex: 0 0 auto; }
