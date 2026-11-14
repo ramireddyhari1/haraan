@@ -112,7 +112,7 @@
                 {{-- Fall of wickets --}}
                 @if(count($fow) > 0)
                     <div>
-                        <div class="mdx-sec-title" style="margin-bottom:10px;">FALL OF WICKETS</div>
+                        <div class="mdx-sec-title" style="margin-bottom:7px;">FALL OF WICKETS</div>
                         <div class="mdx-fow">
                             @foreach($fow as $f)
                                 <div class="mdx-fow-chip">
@@ -132,7 +132,7 @@
         @if(count($sq) > 0)
             <div class="mdx-card">
                 <div class="mdx-sec-title">{{ strtoupper($tn) }}</div>
-                <div style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
+                <div style="margin-top:8px;display:flex;flex-direction:column;gap:7px;">
                     @foreach($sq as $m)
                         <div class="mdx-row"><span style="font-size:14px;font-weight:600;">{{ $m['name'] }}</span>@if($m['guest'])<span class="mdx-guest">GUEST</span>@endif</div>
                     @endforeach

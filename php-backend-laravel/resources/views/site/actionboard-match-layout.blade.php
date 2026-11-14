@@ -561,7 +561,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 13px; box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 10px 24px rgba(15,23,42,.05); }
 .mdx-card--flush { padding: 0; overflow: hidden; }
 .mdx-eyebrow { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
-.mdx-divider { height: 1px; background: var(--border); margin: 14px 0; }
+.mdx-divider { height: 1px; background: var(--border); margin: 10px 0; }
 
 /* ── Generic rows ── */
 .mdx-row { display: flex; align-items: center; justify-content: space-between; }
@@ -583,22 +583,22 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-bat-head .h-name, .mdx-bat-line .b-name { flex: 1; min-width: 0; }
 .mdx-col-rb { width: 64px; } .mdx-col-sr { width: 44px; text-align: right; }
 .mdx-bat-head span { color: var(--muted); font-size: 10px; font-weight: 700; }
-.mdx-avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--bg); border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--ink2); flex: 0 0 auto; }
+.mdx-avatar { width: 26px; height: 26px; border-radius: 50%; background: var(--bg); border: 1px solid var(--border); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--ink2); flex: 0 0 auto; }
 .mdx-bat-line .b-name { display: flex; align-items: center; gap: 10px; }
 .mdx-bat-name { font-size: 14px; font-weight: 600; color: var(--ink); }
 .mdx-bat-name.striker { color: var(--blue); font-weight: 700; }
 .mdx-bat-rb { width: 64px; font-size: 13px; font-weight: 600; }
 .mdx-bat-sr { width: 44px; text-align: right; font-size: 13px; color: var(--ink2); }
-.mdx-overbox-row { display: flex; gap: 10px; }
-.mdx-overbox { flex: 1; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); padding: 12px 0; text-align: center; }
-.mdx-overbox b { font-size: 18px; font-weight: 800; display: block; }
+.mdx-overbox-row { display: flex; gap: 8px; }
+.mdx-overbox { flex: 1; border: 1px solid var(--border); border-radius: 11px; background: var(--bg); padding: 7px 0; text-align: center; }
+.mdx-overbox b { font-size: 16px; font-weight: 800; display: block; }
 .mdx-overbox i { display: block; width: 20px; height: 2px; background: var(--red); border-radius: 1px; margin: 3px auto; }
 .mdx-overbox span { font-size: 10px; color: var(--muted); }
-.mdx-chase-stats { display: flex; justify-content: space-between; margin-top: 12px; }
+.mdx-chase-stats { display: flex; justify-content: space-between; margin-top: 9px; }
 .mdx-chase-stat { text-align: center; }
 .mdx-chase-stat b { font-size: 16px; font-weight: 900; display: block; }
 .mdx-chase-stat span { font-size: 9px; color: var(--muted); font-weight: 700; letter-spacing: .5px; }
-.mdx-winbar { height: 8px; border-radius: 4px; background: #CBD5E1; overflow: hidden; margin-top: 12px; }
+.mdx-winbar { height: 8px; border-radius: 4px; background: #CBD5E1; overflow: hidden; margin-top: 9px; }
 .mdx-winbar i { display: block; height: 100%; border-radius: 4px; background: linear-gradient(90deg, var(--blue), #1D4ED8); }
 
 /* ── Info tab ── */
@@ -613,28 +613,28 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-guest { background: var(--border); color: var(--ink2); font-size: 8px; font-weight: 700; padding: 1px 5px; border-radius: 5px; }
 
 /* ── Scorecard tab ── */
-.mdx-inn-head { display: flex; align-items: center; gap: 10px; background: rgba(37,99,235,.06); padding: 12px 16px; cursor: pointer; }
-.mdx-inn-body { padding: 16px; display: flex; flex-direction: column; gap: 18px; }
+.mdx-inn-head { display: flex; align-items: center; gap: 10px; background: rgba(37,99,235,.06); padding: 9px 13px; cursor: pointer; }
+.mdx-inn-body { padding: 11px 12px 12px; display: flex; flex-direction: column; gap: 12px; }
 .mdx-chevron { transition: transform .2s; color: var(--muted); }
 .mdx-inn.collapsed .mdx-inn-body { display: none; }
 .mdx-inn.collapsed .mdx-chevron { transform: rotate(0); }
 .mdx-inn .mdx-chevron { transform: rotate(180deg); }
-.mdx-table-head { display: flex; background: var(--bg); border-radius: 8px; padding: 7px 10px; }
+.mdx-table-head { display: flex; background: var(--bg); border-radius: 8px; padding: 5px 9px; }
 .mdx-table-head .th-name { flex: 1; }
 .mdx-table-head span { color: var(--muted); font-size: 10px; font-weight: 700; text-align: right; }
 .mdx-tc { width: 30px; text-align: right; } .mdx-tc-sr { width: 48px; text-align: right; } .mdx-tc-er { width: 46px; text-align: right; }
-.mdx-sc-row { display: flex; align-items: center; padding: 10px; border-bottom: 1px solid rgba(226,232,240,.5); }
+.mdx-sc-row { display: flex; align-items: center; padding: 6px 9px; border-bottom: 1px solid rgba(226,232,240,.5); }
 .mdx-sc-row:last-child { border-bottom: 0; }
 .mdx-sc-name { flex: 1; min-width: 0; }
-.mdx-sc-name b { font-size: 14px; font-weight: 600; display: block; }
+.mdx-sc-name b { font-size: 13.5px; font-weight: 600; display: block; line-height: 1.25; }
 .mdx-sc-name span { font-size: 11px; color: var(--muted); }
 .mdx-sc-name span.notout { color: var(--green); font-weight: 600; }
 .mdx-sc-row .num { font-size: 13px; color: var(--ink2); }
 .mdx-sc-row .num.runs { color: var(--ink); font-weight: 800; }
-.mdx-sc-extras, .mdx-sc-total { display: flex; justify-content: space-between; align-items: center; padding: 10px; }
+.mdx-sc-extras, .mdx-sc-total { display: flex; justify-content: space-between; align-items: center; padding: 7px 9px; }
 .mdx-sc-total { border-top: 1px solid var(--border); }
-.mdx-fow { display: flex; flex-wrap: wrap; gap: 8px; }
-.mdx-fow-chip { background: rgba(239,68,68,.06); border: 1px solid rgba(239,68,68,.25); border-radius: 10px; padding: 6px 10px; text-align: center; }
+.mdx-fow { display: flex; flex-wrap: wrap; gap: 6px; }
+.mdx-fow-chip { background: rgba(239,68,68,.06); border: 1px solid rgba(239,68,68,.25); border-radius: 9px; padding: 4px 9px; text-align: center; }
 .mdx-fow-chip b { color: var(--red); font-size: 13px; font-weight: 800; display: block; }
 .mdx-fow-chip span { color: var(--muted); font-size: 10px; }
 

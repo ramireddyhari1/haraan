@@ -135,19 +135,19 @@
 
 <style>
 /* Info tab, as InfoTab.kt draws it: three plain cards, rows not tiles. */
-.info-card { padding: 18px; }
-.info-eyebrow { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 1px; margin-bottom: 14px; }
+.info-card { padding: 13px; }
+.info-eyebrow { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 1px; margin-bottom: 9px; }
 .info-matchup { display: flex; align-items: center; }
 .info-side { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; }
 .info-side.is-r { justify-content: flex-end; text-align: right; }
 .info-side b { font-size: 12px; font-weight: 700; color: var(--ink); line-height: 1.3; min-width: 0; overflow-wrap: anywhere; }
-.info-crest { width: 34px; height: 34px; border-radius: 50%; flex: 0 0 auto; display: grid; place-items: center; overflow: hidden;
+.info-crest { width: 30px; height: 30px; border-radius: 50%; flex: 0 0 auto; display: grid; place-items: center; overflow: hidden;
     background: #fff; border: 1px solid #CBD5E1; color: #fff; font-size: 11px; font-weight: 800; }
 .info-crest img { width: 100%; height: 100%; object-fit: cover; }
 .info-vs { flex: 0 0 auto; padding: 0 8px; color: var(--muted); font-size: 12px; }
-.info-rule { height: 1px; background: var(--border); margin: 16px 0; }
+.info-rule { height: 1px; background: var(--border); margin: 10px 0; }
 .info-fact { display: flex; align-items: flex-start; font-size: 13px; }
-.info-fact + .info-fact { margin-top: 12px; }
+.info-fact + .info-fact { margin-top: 7px; }
 .info-fact span { width: 88px; flex: 0 0 auto; color: var(--muted); }
 .info-fact b { flex: 1; min-width: 0; font-weight: 600; color: var(--ink); }
 
@@ -156,18 +156,18 @@
 .info-inn-eyebrow { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: 1px; }
 .info-inn-id b { font-size: 15px; font-weight: 700; color: var(--ink); }
 .info-inn-score { text-align: right; flex: 0 0 auto; }
-.info-inn-score b { display: block; font-family: 'Archivo Black', sans-serif; font-weight: 400; font-size: 22px; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1.15; }
+.info-inn-score b { display: block; font-family: 'Archivo Black', sans-serif; font-weight: 400; font-size: 20px; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1.15; }
 .info-inn-score span { font-size: 11px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
-.info-hl { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 12px; }
-.info-hl + .info-hl { margin-top: 8px; }
+.info-hl { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 8px; }
+.info-hl + .info-hl { margin-top: 5px; }
 .info-hl span { font-size: 12px; color: var(--muted); flex: 0 0 auto; }
 .info-hl b { font-size: 13px; font-weight: 600; color: var(--ink); text-align: right; font-variant-numeric: tabular-nums; }
 
-.info-squad-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 12px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 1px; }
+.info-squad-head { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 9px; color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 1px; }
 .info-squad-head span:last-child { letter-spacing: 0; font-weight: 600; flex: 0 0 auto; }
-.info-players { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 10px; }
+.info-players { display: grid; grid-template-columns: 1fr 1fr; gap: 7px 10px; }
 .info-player { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.info-player-av { width: 26px; height: 26px; border-radius: 50%; flex: 0 0 auto; display: grid; place-items: center; object-fit: cover;
+.info-player-av { width: 24px; height: 24px; border-radius: 50%; flex: 0 0 auto; display: grid; place-items: center; object-fit: cover;
     background: var(--bg); border: 1px solid var(--border); color: var(--ink2); font-size: 11px; font-weight: 700; }
 .info-player-name { font-size: 13px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .info-guest { flex: 0 0 auto; font-style: normal; background: var(--border); color: var(--ink2); font-size: 8px; font-weight: 700; padding: 1px 5px; border-radius: 5px; }

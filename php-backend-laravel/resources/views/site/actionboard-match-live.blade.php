@@ -59,7 +59,7 @@
     </div>
 
     @if($striker !== '')
-        <div class="mdx-bat-line" style="margin-top:10px;">
+        <div class="mdx-bat-line" style="margin-top:7px;">
             <div class="b-name">
                 <span class="mdx-avatar">{{ hrn_initial($striker) }}</span>
                 <span class="mdx-bat-name striker">{{ $striker }}*</span>
@@ -69,7 +69,7 @@
         </div>
     @endif
     @if($nonStriker !== '')
-        <div class="mdx-bat-line" style="margin-top:10px;">
+        <div class="mdx-bat-line" style="margin-top:7px;">
             <div class="b-name">
                 <span class="mdx-avatar">{{ hrn_initial($nonStriker) }}</span>
                 <span class="mdx-bat-name">{{ $nonStriker }}</span>
@@ -80,7 +80,7 @@
     @endif
 
     @if($partnership && ((int)($partnership['runs']??0) > 0 || (int)($partnership['balls']??0) > 0))
-        <div class="mdx-row" style="margin-top:10px;">
+        <div class="mdx-row" style="margin-top:7px;">
             <span class="mdx-muted" style="font-size:11px;font-weight:600;">Partnership</span>
             <span style="font-size:13px;font-weight:700;">{{ (int)$partnership['runs'] }} ({{ (int)$partnership['balls'] }})</span>
         </div>
@@ -108,8 +108,8 @@
     @endif
 
     @if(count($last3) > 0)
-        <div style="margin-top:16px;" class="mdx-sec-title">LAST 3 OVERS</div>
-        <div class="mdx-overbox-row" style="margin-top:8px;">
+        <div style="margin-top:11px;" class="mdx-sec-title">LAST 3 OVERS</div>
+        <div class="mdx-overbox-row" style="margin-top:6px;">
             @foreach($last3 as $ov)
                 <div class="mdx-overbox">
                     <b>{{ (int) ($ov['runs'] ?? 0) }}</b>
