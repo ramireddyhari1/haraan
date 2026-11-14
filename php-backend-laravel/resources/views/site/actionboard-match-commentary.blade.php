@@ -263,14 +263,14 @@
 /* Commentary tab, as CommentaryTab.kt draws it. */
 .cm-status { text-align: center; margin-top: -4px; }
 .cm-status span { display: inline-block; background: rgba(245,158,11,.12); color: #B45309; font-size: 11px; font-weight: 600; padding: 5px 14px; border-radius: 999px; }
-.cm-ball { width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 500; color: var(--ink2); background: var(--bg); border: 1px solid var(--border); flex: 0 0 auto; }
+.cm-ball { width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 500; color: var(--ink2); background: var(--bg); border: 1px solid var(--border); flex: 0 0 auto; }
 .cm-ball.six { color: #16A34A; background: rgba(22,163,74,.15); border: 1.5px solid #16A34A; font-weight: 700; }
 .cm-ball.four { color: #2563EB; background: rgba(37,99,235,.15); border: 1.5px solid #2563EB; font-weight: 700; }
 .cm-ball.wicket { color: #fff; background: var(--red); border-color: var(--red); font-weight: 700; }
 
 .cm-mini { margin: 2px -4px 0; background: #fff; border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
 .cm-head, .cm-prow { display: flex; align-items: center; padding: 6px 16px; border-bottom: 1px solid var(--border); }
-.cm-head span { color: var(--muted); font-size: 10px; font-weight: 500; text-align: center; }
+.cm-head span { color: var(--muted); font-size: 11px; font-weight: 500; text-align: center; }
 .cm-head .cm-h-name { flex: 1; text-align: left; letter-spacing: 1px; }
 .cm-mini i:empty { width: 8px; flex: 0 0 auto; }
 .c30 { width: 30px; } .c34 { width: 34px; } .c36 { width: 36px; } .c38 { width: 38px; } .c48 { width: 48px; }
@@ -282,15 +282,15 @@
 .cm-who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding-right: 6px; }
 .cm-who b { font-size: 14px; font-weight: 500; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 4px; }
 .cm-who > span { display: flex; align-items: center; flex-wrap: wrap; gap: 3px 6px; }
-.cm-who em { white-space: nowrap; font-style: normal; font-size: 10px; letter-spacing: 1px; color: var(--ink2); }
-.cm-xp { font-style: normal; font-size: 9px; font-weight: 700; color: #2563EB; background: rgba(37,99,235,.12); padding: 1px 6px; border-radius: 6px; white-space: nowrap; }
+.cm-who em { white-space: nowrap; font-style: normal; font-size: 11px; letter-spacing: 1px; color: var(--ink2); }
+.cm-xp { font-style: normal; font-size: 10px; font-weight: 700; color: #2563EB; background: rgba(37,99,235,.12); padding: 1px 6px; border-radius: 6px; white-space: nowrap; }
 .cm-tick { width: 14px; height: 14px; flex: 0 0 auto; }
-.cm-pship { display: flex; justify-content: space-between; gap: 10px; background: var(--bg); padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 10px; font-weight: 500; color: var(--ink2); }
+.cm-pship { display: flex; justify-content: space-between; gap: 10px; background: var(--bg); padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 11.5px; font-weight: 500; color: var(--ink2); }
 .cm-mini > :last-child { border-bottom: 0; }
 
 /* The feed runs edge to edge: white rows on hairlines, no gaps between them. */
 .cm-feed { margin: 0 -16px; }
-.cm-title { color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: 1px; padding: 2px 16px 4px; }
+.cm-title { color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: 1px; padding: 2px 16px 4px; }
 .cm-divider { display: flex; align-items: center; gap: 10px; padding: 14px 16px 8px; }
 .cm-divider span { color: var(--ink2); font-size: 10px; font-weight: 800; letter-spacing: 1.2px; }
 .cm-divider i { flex: 1; height: 1px; background: var(--border); }

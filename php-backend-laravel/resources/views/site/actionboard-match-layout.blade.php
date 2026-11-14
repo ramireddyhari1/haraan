@@ -110,11 +110,11 @@
     // The word crawling round the band: the last ball's moment, else a calm "HARAAN LIVE".
     $ribbonWord = match ($lbU) { '6' => 'six', '4' => 'four', 'W' => 'wicket', default => 'calm' };
 
-    $active = $activeTab ?? 'live';
+    $active = $activeTab ?? 'commentary';
     $tabs = [
         ['key' => 'info',       'label' => 'Info',       'route' => route('site.gamehub.actionboard.match.info', $id)],
-        ['key' => 'commentary', 'label' => 'Commentary', 'route' => route('site.gamehub.actionboard.match.commentary', $id)],
-        ['key' => 'live',       'label' => 'Live',       'route' => route('site.gamehub.actionboard.match', $id)],
+        ['key' => 'commentary', 'label' => 'Commentary', 'route' => route('site.gamehub.actionboard.match', $id)],
+        ['key' => 'live',       'label' => 'Live',       'route' => route('site.gamehub.actionboard.match.live', $id)],
         ['key' => 'scorecard',  'label' => 'Scorecard',  'route' => route('site.gamehub.actionboard.match.scorecard', $id)],
         ['key' => 'mvp',        'label' => 'MVP',        'route' => route('site.gamehub.actionboard.match.mvp', $id)],
         ['key' => 'insights',   'label' => 'Insights',   'route' => route('site.gamehub.actionboard.match.insights', $id)],
@@ -424,19 +424,19 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-ic svg { width: 19px; height: 19px; }
 .mdx-share.is-done { background: #DCFCE7; color: #16A34A; border-color: #BBF7D0; }
 .mdx-bar-title { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; }
-.mdx-bar-teams { font-size: 16px; font-weight: 800; letter-spacing: -.2px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mdx-bar-teams { font-size: 17px; font-weight: 800; letter-spacing: -.2px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mdx-vs-lite { color: var(--muted); font-weight: 600; }
-.mdx-live { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; background: #FCE6E6; color: var(--red); font-size: 10px; font-weight: 800; letter-spacing: .5px; padding: 4px 7px; border-radius: 7px; }
+.mdx-live { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; background: #FCE6E6; color: var(--red); font-size: 10.5px; font-weight: 800; letter-spacing: .5px; padding: 4px 7px; border-radius: 7px; }
 .mdx-live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--red); animation: mdxPulse .85s ease-in-out infinite alternate; }
 @keyframes mdxPulse { from { opacity: 1; } to { opacity: .35; } }
 .mdx-hairline { height: 1px; background: #EAEEF3; }
 
 /* ── Hero ── */
-.mdx-hero-wrap { padding: 8px 14px; background: var(--bg); }
-.mdx-hero-band { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 26px; padding: 15px; overflow: hidden; }
+.mdx-hero-wrap { padding: 8px 12px; background: var(--bg); }
+.mdx-hero-band { position: relative; background: #fff; border: 1px solid var(--border); border-radius: 24px; padding: 13px; overflow: hidden; }
 .mdx-ribbon { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.mdx-ribbon text { fill: var(--rib, rgba(100,116,139,.53)); font-family: 'Plus Jakarta Sans', sans-serif; font-size: 11px; font-weight: 800; letter-spacing: 1.4px; dominant-baseline: central; transition: fill .3s; }
-.mdx-ribbon .rib-h { font-family: 'Archivo Black', sans-serif; font-size: 12px; letter-spacing: 0; }
+.mdx-ribbon text { fill: var(--rib, rgba(100,116,139,.53)); font-family: 'Plus Jakarta Sans', sans-serif; font-size: 10px; font-weight: 800; letter-spacing: 1.4px; dominant-baseline: central; transition: fill .3s; }
+.mdx-ribbon .rib-h { font-family: 'Archivo Black', sans-serif; font-size: 11px; letter-spacing: 0; }
 /* Brand blue thinned with white: a soft wash that still reads as Haraan (CrexUI hero). */
 .mdx-hero-card {
     --hink: #0F2A5C;
@@ -444,7 +444,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
     border-radius: 12px;
     background: linear-gradient(135deg, #F3F7FF 0%, #E2ECFE 100%);
     border: 1px solid #CFDDF6;
-    padding: 14px 18px;
+    padding: 13px 16px 14px;
     color: var(--hink);
 }
 /* A 4, 6 or wicket: the card blinks twice in that colour, then fades (1s), like the app. */
@@ -455,33 +455,33 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-hero-card.is-fresh::after { animation: mdxFlash 1s ease-out 1; }
 @keyframes mdxFlash { 0% { opacity: 0; } 8% { opacity: 1; } 25% { opacity: .3; } 35% { opacity: 1; } 100% { opacity: 0; } }
 .mdx-hero-top { display: flex; align-items: center; gap: 10px; }
-.mdx-hero-fmt { flex: 1; min-width: 0; font-size: 9.5px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; color: rgba(15,42,92,.72); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mdx-hero-toss { font-size: 10.5px; font-weight: 500; color: rgba(15,42,92,.72); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 62%; }
-.mdx-hero-main { display: flex; align-items: center; margin-top: 10px; }
+.mdx-hero-fmt { flex: 0 0 auto; max-width: 60%; font-size: 10.5px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: rgba(15,42,92,.72); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mdx-hero-toss { font-size: 11.5px; font-weight: 500; color: rgba(15,42,92,.72); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; text-align: right; }
+.mdx-hero-main { display: flex; align-items: center; margin-top: 8px; }
 .mdx-bat { flex: 1; min-width: 0; }
 .mdx-bat-who { display: flex; align-items: center; gap: 8px; }
-.mdx-bat-who b { font-size: 15px; font-weight: 700; letter-spacing: .4px; }
-.mdx-bat-tag { font-size: 11.5px; font-weight: 500; color: rgba(15,42,92,.6); white-space: nowrap; }
-.mdx-crest { width: 26px; height: 26px; border-radius: 50%; background: #fff; border: 1.5px solid #CBD5E1; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex: 0 0 auto; }
-.mdx-crest.sm { width: 20px; height: 20px; border-width: 1px; }
+.mdx-bat-who b { font-size: 17px; font-weight: 700; letter-spacing: .4px; }
+.mdx-bat-tag { font-size: 12.5px; font-weight: 500; color: rgba(15,42,92,.6); white-space: nowrap; }
+.mdx-crest { width: 30px; height: 30px; border-radius: 50%; background: #fff; border: 1.5px solid #CBD5E1; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex: 0 0 auto; }
+.mdx-crest.sm { width: 24px; height: 24px; border-width: 1px; }
 .mdx-crest img { width: 100%; height: 100%; object-fit: cover; }
-.mdx-crest span { color: #fff; font-size: 8px; font-weight: 800; }
+.mdx-crest span { color: #fff; font-size: 9px; font-weight: 800; }
 .mdx-bat-score { display: flex; align-items: flex-end; margin-top: 4px; line-height: 1; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.mdx-runs { font-family: 'Archivo Black', 'Plus Jakarta Sans', sans-serif; font-size: 46px; letter-spacing: -1.5px; color: var(--hink); }
-.mdx-wkts { font-family: 'Archivo Black', 'Plus Jakarta Sans', sans-serif; font-size: 24px; color: rgba(15,42,92,.55); padding-bottom: 4px; }
-.mdx-ovs { font-size: 15px; font-weight: 600; color: rgba(15,42,92,.75); padding: 0 0 7px 8px; }
-.mdx-bat-stats { display: flex; gap: 14px; margin-top: 4px; font-size: 10.5px; font-weight: 700; }
+.mdx-runs { font-family: 'Archivo Black', 'Plus Jakarta Sans', sans-serif; font-size: 54px; letter-spacing: -1.8px; color: var(--hink); }
+.mdx-wkts { font-family: 'Archivo Black', 'Plus Jakarta Sans', sans-serif; font-size: 28px; color: rgba(15,42,92,.55); padding-bottom: 5px; }
+.mdx-ovs { font-size: 16px; font-weight: 600; color: rgba(15,42,92,.75); padding: 0 0 8px 8px; }
+.mdx-bat-stats { display: flex; gap: 14px; margin-top: 5px; font-size: 12.5px; font-weight: 700; }
 .mdx-bat-stats em { font-style: normal; font-weight: 600; letter-spacing: .6px; color: rgba(15,42,92,.62); margin-right: 4px; }
-.mdx-hero-rule { height: 1px; background: rgba(15,42,92,.16); margin: 12px 0 10px; }
+.mdx-hero-rule { height: 1px; background: rgba(15,42,92,.16); margin: 10px 0; }
 .mdx-field { display: flex; align-items: center; gap: 8px; }
-.mdx-field b { font-size: 13px; font-weight: 600; letter-spacing: .4px; color: rgba(15,42,92,.82); }
-.mdx-field-score { margin-left: auto; font-size: 13px; font-weight: 600; color: rgba(15,42,92,.85); font-variant-numeric: tabular-nums; }
+.mdx-field b { font-size: 14.5px; font-weight: 600; letter-spacing: .4px; color: rgba(15,42,92,.82); }
+.mdx-field-score { margin-left: auto; font-size: 14.5px; font-weight: 600; color: rgba(15,42,92,.85); font-variant-numeric: tabular-nums; }
 .mdx-field-score.is-yet { color: rgba(15,42,92,.6); }
 .mdx-thisover { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-.mdx-thisover-lbl { font-size: 9px; font-weight: 700; letter-spacing: 1.2px; color: rgba(15,42,92,.6); }
-.mdx-thisover-balls { display: flex; gap: 5px; }
-.mdx-thisover .ob { width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-style: normal; font-size: 9.5px; font-weight: 700; background: #fff; border: 1px solid #CFDDF6; color: #0F172A; }
-.mdx-thisover .ob.is-long { font-size: 7.5px; }
+.mdx-thisover-lbl { white-space: nowrap; font-size: 10px; font-weight: 700; letter-spacing: 1.2px; color: rgba(15,42,92,.6); }
+.mdx-thisover-balls { display: flex; gap: 6px; }
+.mdx-thisover .ob { width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-style: normal; font-size: 11.5px; font-weight: 700; background: #fff; border: 1px solid #CFDDF6; color: #0F172A; }
+.mdx-thisover .ob.is-long { font-size: 9px; }
 .mdx-thisover .ob.is-empty { background: transparent; border-color: rgba(15,42,92,.28); }
 .mdx-thisover .ob-four { color: var(--blue); border: 1.5px solid var(--blue); }
 .mdx-thisover .ob-six { color: #15803D; border: 1.5px solid #15803D; }
@@ -491,13 +491,13 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 .mdx-lastball { display: flex; flex-direction: column; align-items: center; padding: 0 0 0 6px; flex: 0 0 auto; }
 .mdx-lastball-lbl { color: var(--hink); font-size: 9px; font-weight: 700; letter-spacing: 1.5px; }
 .mdx-ump-slot { display: flex; flex-direction: column; align-items: center; }
-.mdx-ump { width: 100px; height: 118px; display: block; overflow: hidden; }
-.mdx-ump-cap { margin-top: -2px; font-size: 15px; font-weight: 800; letter-spacing: 1.6px; color: var(--hink); white-space: nowrap; position: relative; }
+.mdx-ump { width: 86px; height: 101px; display: block; overflow: hidden; }
+.mdx-ump-cap { margin-top: -2px; font-size: 14px; font-weight: 800; letter-spacing: 1.4px; color: var(--hink); white-space: nowrap; position: relative; }
 .mdx-lastball .lb-bowl, .mdx-delivery, .mdx-lastball-lbl { display: none; }
 .mdx-lastball.is-bowling .mdx-ump-slot { display: none; }
 .mdx-lastball.is-bowling .mdx-lastball-lbl, .mdx-lastball.is-bowling .lb-bowl { display: inline; color: var(--hink); }
 .mdx-lastball.is-bowling .mdx-delivery { display: block; width: 84px; height: 66px; margin: 8px 0 6px; }
-@media (max-width: 360px) { .mdx-runs { font-size: 40px; } .mdx-ump { width: 84px; height: 99px; } }
+@media (max-width: 340px) { .mdx-runs { font-size: 46px; } .mdx-wkts { font-size: 24px; } .mdx-ump { width: 76px; height: 90px; } .mdx-ump-cap { font-size: 12.5px; letter-spacing: 1px; } .mdx-thisover { gap: 8px; } .mdx-thisover-balls { gap: 4px; } .mdx-thisover .ob { width: 23px; height: 23px; font-size: 10.5px; } }
 /* One delivery per 1.3s loop: release, dip to pitch at ~50%, carry to the stumps, gone for the
    last 20% (the run-up). Ball and shadow move together so the bounce reads as a bounce. */
 .mdx-delivery .dl-ball { animation: mdxDeliver 1.3s linear infinite; }
@@ -527,11 +527,11 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
 }
 /* ── Tabs (MatchTabs.kt): six equal slots, glyph over an 11px label, red underline ── */
 .mdx-tabs { display: flex; background: var(--bg); position: sticky; top: 58px; z-index: 20; border-bottom: 1px solid var(--border); }
-.mdx-tab { flex: 1 1 0; min-width: 0; padding: 9px 0 8px; white-space: nowrap; font-size: 11px; font-weight: 500; color: var(--ink2); text-decoration: none; position: relative; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.mdx-tab { flex: 1 0 auto; min-width: 0; padding: 10px 2px 9px; white-space: nowrap; font-size: 12px; font-weight: 500; color: var(--ink2); text-decoration: none; position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .mdx-tab span { letter-spacing: -.1px; }
 .mdx-tab.is-on { color: var(--ink); font-weight: 600; }
 .mdx-tab.is-on::after { content: ""; position: absolute; bottom: -1px; left: 50%; transform: translateX(-50%); width: 22px; height: 2px; border-radius: 2px; background: var(--red); }
-.mdx-tab-ic { width: 18px; height: 18px; display: block; overflow: visible;
+.mdx-tab-ic { width: 21px; height: 21px; display: block; overflow: visible;
     --gi: var(--muted); --gb: transparent; --gs: var(--muted); }
 .mdx-tab.is-on .mdx-tab-ic { --gi: var(--ink); --gb: rgba(37,99,235,.12); --gs: var(--red); }
 .mdx-tab.is-live .mdx-tab-ic { --gs: var(--red); animation: mdxPulse .9s ease-in-out infinite alternate; }
@@ -715,7 +715,7 @@ main.container { max-width: 100% !important; width: 100% !important; padding: 0 
             var w = Math.round(band.clientWidth), h = Math.round(band.clientHeight);
             if (!w || !h) return;
             svg.setAttribute('viewBox', '0 0 ' + w + ' ' + h);
-            var i = 8, r = 18, x0 = i, y0 = i, x1 = w - i, y1 = h - i;
+            var i = 6.5, r = 18, x0 = i, y0 = i, x1 = w - i, y1 = h - i;
             path.setAttribute('d',
                 'M ' + (x0 + r) + ' ' + y0 +
                 ' H ' + (x1 - r) + ' A ' + r + ' ' + r + ' 0 0 1 ' + x1 + ' ' + (y0 + r) +

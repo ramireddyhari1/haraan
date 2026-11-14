@@ -101,7 +101,8 @@ Route::controller(PublicWebController::class)->group(function (): void {
     Route::get('/venues/{city}/near/{area}', [\App\Http\Controllers\Web\NearVenuesController::class, 'show'])
         ->where('area', '[a-z0-9-]+')->name('site.venues.near');
     Route::get('/gamehub/actionboard', 'actionBoard')->name('site.gamehub.actionboard');
-    Route::get('/gamehub/actionboard/match/{id}', 'actionBoardMatchLive')->name('site.gamehub.actionboard.match');
+    Route::get('/gamehub/actionboard/match/{id}', 'actionBoardMatch')->name('site.gamehub.actionboard.match');
+    Route::get('/gamehub/actionboard/match/{id}/live', 'actionBoardMatchLive')->name('site.gamehub.actionboard.match.live');
     Route::get('/gamehub/actionboard/match/{id}/info', 'actionBoardMatchInfo')->name('site.gamehub.actionboard.match.info');
     Route::get('/gamehub/actionboard/match/{id}/commentary', 'actionBoardMatchCommentary')->name('site.gamehub.actionboard.match.commentary');
     Route::get('/gamehub/actionboard/match/{id}/scorecard', 'actionBoardMatchScorecard')->name('site.gamehub.actionboard.match.scorecard');

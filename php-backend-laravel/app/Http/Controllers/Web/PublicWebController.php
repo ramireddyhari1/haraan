@@ -1888,11 +1888,34 @@ final class PublicWebController extends Controller
         return $this->usableAd('match_live');
     }
 
-    public function actionBoardMatchLive(Request $request, string $id): View
+    /**
+     * The match page. Cricket opens on Commentary (the ball-by-ball feed is what people come
+     * for); every other sport has its own page.
+     */
+    public function actionBoardMatch(Request $request, string $id): View
     {
         $match = $this->visibleMatch($id);
         if (! $this->isCricket($match)) {
             return $this->sportMatchView($match, (string) $request->query('tab', 'summary'));
+        }
+
+        $detail = $this->matchDetailFor($id);
+        $seo = $this->matchSeo($match, $detail, 'Live Score & Commentary');
+
+        return view('site.actionboard-match-commentary', [
+            'title' => $seo['title'],
+            'detail' => $detail,
+            'id' => $id,
+            'activeTab' => 'commentary',
+            'seo' => $seo,
+        ]);
+    }
+
+    public function actionBoardMatchLive(string $id): View|RedirectResponse
+    {
+        $match = $this->visibleMatch($id);
+        if (! $this->isCricket($match)) {
+            return redirect()->route('site.gamehub.actionboard.match', ['id' => $id, 'tab' => 'summary']);
         }
 
         $detail = $this->matchDetailFor($id);
@@ -1926,23 +1949,14 @@ final class PublicWebController extends Controller
         ]);
     }
 
-    public function actionBoardMatchCommentary(string $id): View|RedirectResponse
+    /** Commentary is the match page itself now; its old address forwards there. */
+    public function actionBoardMatchCommentary(string $id): RedirectResponse
     {
         $match = $this->visibleMatch($id);
-        if (! $this->isCricket($match)) {
-            return redirect()->route('site.gamehub.actionboard.match', ['id' => $id, 'tab' => 'timeline']);
-        }
 
-        $detail = $this->matchDetailFor($id);
-        $seo = $this->matchSeo($match, $detail, 'Commentary');
-
-        return view('site.actionboard-match-commentary', [
-            'title' => $seo['title'],
-            'detail' => $detail,
-            'id' => $id,
-            'activeTab' => 'commentary',
-            'seo' => $seo,
-        ]);
+        return redirect()->route('site.gamehub.actionboard.match', $this->isCricket($match)
+            ? ['id' => $id]
+            : ['id' => $id, 'tab' => 'timeline'], 301);
     }
 
     /**
