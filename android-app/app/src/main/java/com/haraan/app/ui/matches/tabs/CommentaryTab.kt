@@ -182,7 +182,9 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(CrexColors.Background)
-                        .padding(bottom = 6.dp)
+                        // Breathing room under the tab row — the pill used to sit flush on
+                        // the tab underline and read as part of the tab bar.
+                        .padding(top = 14.dp, bottom = 4.dp)
                 ) {
                     // A status is a statement, not a zone — so it's a centred pill, not
                     // another full-bleed tinted band competing with the feed.
@@ -190,12 +192,12 @@ fun CommentaryTab(state: MatchUiState, modifier: Modifier = Modifier) {
                         Text(
                             text = state.status,
                             color = ExtraAmber,
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(999.dp))
                                 .background(CrexColors.AccentYellow.copy(alpha = 0.12f))
-                                .padding(horizontal = 14.dp, vertical = 5.dp)
+                                .padding(horizontal = 16.dp, vertical = 6.dp)
                         )
                     }
                 }

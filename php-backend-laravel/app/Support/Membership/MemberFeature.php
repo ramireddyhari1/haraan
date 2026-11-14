@@ -72,6 +72,14 @@ final class MemberFeature
      */
     public const TRACKING_CLIP_UPLOAD = 'tracking.clip_upload';
 
+    /**
+     * Bowling sessions: a named practice session filmed with the LBW camera, no match needed,
+     * each ball's tracked video kept on that phone under the session's name. Runs on the phone,
+     * so the app reads this from the member's own entitlements (BowlingSessionAccess); nothing
+     * on the server to guard.
+     */
+    public const TRACKING_BOWLING_SESSIONS = 'tracking.bowling_sessions';
+
     public const SUPPORT_PRIORITY = 'support.priority';
 
     /**
@@ -115,6 +123,7 @@ final class MemberFeature
         self::APP_ICON_PRO => ['type' => self::TYPE_BOOLEAN, 'label' => 'Pro app icon'],
         self::APP_ICON_HERO => ['type' => self::TYPE_BOOLEAN, 'label' => 'Hero app icon'],
         self::TRACKING_CLIP_UPLOAD => ['type' => self::TYPE_BOOLEAN, 'label' => 'Track a clip'],
+        self::TRACKING_BOWLING_SESSIONS => ['type' => self::TYPE_BOOLEAN, 'label' => 'Bowling sessions'],
         self::SUPPORT_PRIORITY => ['type' => self::TYPE_BOOLEAN, 'label' => 'Priority support'],
         self::INSIGHTS_ADVANCED_SPORTS => ['type' => self::TYPE_LIMIT, 'label' => 'Advanced insights'],
         self::EVENTS_EARLY_ACCESS => ['type' => self::TYPE_LIMIT, 'label' => 'Early ticket access'],

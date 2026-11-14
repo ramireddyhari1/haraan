@@ -45,10 +45,16 @@ class CameraDeviceActivity : ComponentActivity() {
         // Debug builds: `?quality=highest` (or 1080p30 …) for the field-test session.
         val testQuality = if (com.haraan.app.BuildConfig.DEBUG) intent?.data?.getQueryParameter("quality") else null
 
+        // A Hero bowling session, started from the Sessions screen inside the app. An extra,
+        // not part of the link, and checked again against the member's plan by the screen.
+        val practiceSessionId = intent?.getStringExtra(EXTRA_BOWLING_SESSION)
+        bowlingSessionId = practiceSessionId
+
         setContent {
             ThannaTheme {
                 CameraDeviceScreen(
-                    initialCode = code,
+                    initialCode = if (practiceSessionId != null) null else code,
+                    practiceSessionId = practiceSessionId,
                     hasCameraPermission = {
                         ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) ==
                             PackageManager.PERMISSION_GRANTED
@@ -60,6 +66,14 @@ class CameraDeviceActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    private var bowlingSessionId: String? = null
+
+    override fun onDestroy() {
+        // Closed with Back or swiped away: the session is over, so it moves to History.
+        if (isFinishing) bowlingSessionId?.let { BowlingSessionStore.end(applicationContext, it) }
+        super.onDestroy()
     }
 
     // ── Camera permission, asked at the moment it is needed and not before ──
@@ -76,6 +90,17 @@ class CameraDeviceActivity : ComponentActivity() {
     private fun askForCamera() = cameraPermission.launch(Manifest.permission.CAMERA)
 
     companion object {
+        const val EXTRA_BOWLING_SESSION = "com.haraan.app.extra.BOWLING_SESSION"
+
+        /** Films the bowling session [sessionId] on this phone, with no match behind it. */
+        fun openBowlingSession(context: android.content.Context, sessionId: String) {
+            context.startActivity(
+                android.content.Intent(context, CameraDeviceActivity::class.java)
+                    .putExtra(EXTRA_BOWLING_SESSION, sessionId)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+
         /**
          * The code out of either link shape: `haraan://camera/H7XH4ZH4WJ` or
          * `https://haraan.app/join/camera/H7XH4ZH4WJ`. Returns null for anything else

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -12,7 +13,15 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class PostComment extends Model
 {
+    public const STATUS_VISIBLE = 'visible';
+
+    public const STATUS_HIDDEN = 'hidden';
+
     protected $guarded = [];
+
+    protected $casts = [
+        'moderated_at' => 'datetime',
+    ];
 
     public function post(): BelongsTo
     {
@@ -22,5 +31,15 @@ class PostComment extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function moderator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'moderated_by');
+    }
+
+    public function scopeVisible(Builder $q): Builder
+    {
+        return $q->where('status', self::STATUS_VISIBLE);
     }
 }

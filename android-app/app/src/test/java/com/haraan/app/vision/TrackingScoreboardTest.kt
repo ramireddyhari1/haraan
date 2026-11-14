@@ -280,6 +280,16 @@ class TrackingScoreboardTest {
         try {
             // Warm-up as the clip screen does: thirty a second, stumps only, until the corridor can be built.
             val warmStep = maxOf(1, (frames.size / ((frames.last().second - frames.first().second) / 1000.0) / 30.0).roundToInt())
+            System.getenv("BENCH_PREWARM_S")?.toDouble()?.let { s ->
+                val before = File(raw.path + ".idx").readLines().mapIndexedNotNull { line, l ->
+                    val p = l.trim().split(Regex("\\s+"))
+                    if (p.size < 2) null else Frame(p[0].toInt(), p[1].toDouble(), line)
+                }.filter { it.first < frames.first().first && it.second >= frames.first().second - s * 1000 }
+                for (k in before.indices step warmStep) {
+                    read(before[k].line)
+                    chain.warm(y, u, before[k].second.toLong())
+                }
+            }
             for (k in 0 until minOf(frames.size, WARM_UP_MAX_FRAMES * warmStep) step warmStep) {
                 read(frames[k].line)
                 chain.warm(y, u, frames[k].second.toLong())

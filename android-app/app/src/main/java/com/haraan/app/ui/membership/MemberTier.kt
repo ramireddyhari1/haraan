@@ -68,7 +68,8 @@ enum class MemberArea(val title: String) {
             "tournaments.active_hosted",
             "matches.camera_angles",
             "insights.advanced_sports",
-            "tracking.clip_upload" -> ACTIONBOARD
+            "tracking.clip_upload",
+            "tracking.bowling_sessions" -> ACTIONBOARD
             "profile.member_badge",
             "support.priority" -> ACCOUNT
             else -> when (key.substringBefore('.')) {

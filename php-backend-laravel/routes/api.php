@@ -373,6 +373,8 @@ Route::middleware('auth.jwt')->prefix('players')->group(function (): void {
     // Comments + saves (bookmarks) on a post.
     Route::post('/posts/{id}/comments', [PlayersController::class, 'addComment'])->whereNumber('id');
     Route::post('/posts/{id}/save', [PlayersController::class, 'savePost'])->whereNumber('id');
+    // Report a post (or one comment under it, with comment_id) → /control → ActionBoard Home.
+    Route::post('/posts/{id}/report', [PlayersController::class, 'reportPost'])->whereNumber('id')->middleware('throttle:30,60');
     Route::delete('/posts/{id}/save', [PlayersController::class, 'unsavePost'])->whereNumber('id');
     // POST twin for unsave — HttpURLConnection has no dependable DELETE path.
     Route::post('/posts/{id}/unsave', [PlayersController::class, 'unsavePost'])->whereNumber('id');

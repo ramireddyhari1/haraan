@@ -77,6 +77,19 @@ Route::get('/sitemap.xml', [SitemapController::class, 'index'])
         PreventRequestForgery::class,
     ]);
 
+// ads.txt / app-ads.txt for AdSense and AdMob, written from /control → Marketing → Ad networks.
+foreach (['/ads.txt' => 'web', '/app-ads.txt' => 'app'] as $adsTxtPath => $adsTxtMethod) {
+    Route::get($adsTxtPath, [\App\Http\Controllers\Web\AdsTxtController::class, $adsTxtMethod])
+        ->name('site.'.str_replace(['/', '.'], ['', '_'], $adsTxtPath))
+        ->withoutMiddleware([
+            StartSession::class,
+            ShareErrorsFromSession::class,
+            AddQueuedCookiesToResponse::class,
+            EncryptCookies::class,
+            PreventRequestForgery::class,
+        ]);
+}
+
 Route::controller(PublicWebController::class)->group(function (): void {
     Route::get('/', 'events');
     Route::get('/home', 'home');
@@ -263,6 +276,7 @@ Route::controller(SocialFeedController::class)->group(function (): void {
     Route::middleware('auth')->group(function (): void {
         Route::post('/feed/posts/{id}/like', 'toggleLike')->whereNumber('id')->name('site.feed.like');
         Route::post('/feed/posts/{id}/comments', 'addComment')->whereNumber('id')->name('site.feed.comment');
+        Route::post('/feed/posts/{id}/report', 'report')->whereNumber('id')->middleware('throttle:30,60')->name('site.feed.report');
     });
 });
 

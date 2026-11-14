@@ -158,9 +158,12 @@ fun CameraDeviceScreen(
     videoFeed: String? = null,
     /** Debug builds: the field-test session's recording quality, as /control would set it. */
     testQuality: String? = null,
+    /** A Hero bowling session ([BowlingSessionStore]) to film instead of joining a match. */
+    practiceSessionId: String? = null,
 ) {
     val repo = remember { CameraDeviceRepository() }
     val scope = rememberCoroutineScope()
+    val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
 
     var preview by remember { mutableStateOf<PairingPreview?>(null) }
     var session by remember { mutableStateOf<CameraSession?>(null) }
@@ -170,6 +173,28 @@ fun CameraDeviceScreen(
     var attempt by remember { androidx.compose.runtime.mutableIntStateOf(0) }
 
     LaunchedEffect(initialCode, attempt) {
+        if (practiceSessionId != null) {
+            val ctx = appContext
+            val access = com.haraan.app.data.membership.BowlingSessionAccess.check(ctx)
+            val practice = BowlingSessionStore.get(ctx, practiceSessionId)
+            when {
+                access != com.haraan.app.data.membership.PhoneFeatureAccess.State.ALLOWED -> problem = JoinProblem(
+                    "Bowling sessions come with Hero",
+                    "Your plan doesn't include bowling sessions. See the plans in Haraan to add it.",
+                    canRetry = false,
+                )
+                practice == null -> problem = JoinProblem(
+                    "This session is gone",
+                    "It was removed from this phone. Start a new one from Bowling sessions.",
+                    canRetry = false,
+                )
+                else -> {
+                    BowlingSessionStore.touch(ctx, practice.id)
+                    session = practiceCameraSession(practice)
+                }
+            }
+            return@LaunchedEffect
+        }
         val code = initialCode
         if (code == "TEST" || code == "DEBUG" || (com.haraan.app.BuildConfig.DEBUG && code == null)) {
             session = com.haraan.app.data.CameraSession(
@@ -216,7 +241,11 @@ fun CameraDeviceScreen(
                         canRetry = false,
                     )
                 },
-                onExit = onExit,
+                onExit = {
+                    // Leaving a bowling session ends it: it moves from Live to History.
+                    practiceSessionIdOf(joined)?.let { BowlingSessionStore.end(appContext, it) }
+                    onExit()
+                },
             )
 
             else -> JoinPanel(
@@ -240,6 +269,26 @@ fun CameraDeviceScreen(
         }
     }
 }
+
+/** Session tokens of a bowling session start with this: nothing about them reaches the server. */
+internal const val PRACTICE_TOKEN_PREFIX = "practice:"
+
+internal fun practiceSessionIdOf(session: CameraSession): String? =
+    session.sessionToken.takeIf { it.startsWith(PRACTICE_TOKEN_PREFIX) }?.removePrefix(PRACTICE_TOKEN_PREFIX)
+
+private fun practiceCameraSession(p: BowlingSessionStore.Session) = CameraSession(
+    sessionToken = PRACTICE_TOKEN_PREFIX + p.id,
+    role = if (p.camera == BowlingSessionStore.Camera.SIDE_ON) {
+        com.haraan.app.data.MatchDeviceRole.BOWLER_ANALYSIS
+    } else {
+        com.haraan.app.data.MatchDeviceRole.LBW_REVIEW
+    },
+    roleLabel = p.camera.label,
+    matchId = "practice",
+    matchTitle = p.name,
+    venue = "Bowling session",
+    saveTrackingVideos = true,
+)
 
 /** Why this phone is not filming yet, in words written for the person holding it. */
 private data class JoinProblem(val title: String, val body: String, val canRetry: Boolean)
@@ -671,6 +720,8 @@ private fun CameraMode(
     onExit: () -> Unit,
 ) {
     val ctx = LocalContext.current
+    /** Set when this camera films a Hero bowling session rather than a match. */
+    val practiceId = remember(session.sessionToken) { practiceSessionIdOf(session) }
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     /*
@@ -1707,7 +1758,8 @@ private fun CameraMode(
      * the backup when the two phones lose each other.
      */
     LaunchedEffect(session.sessionToken) {
-        if (session.sessionToken == "debug_token") return@LaunchedEffect
+        // No scorer behind a bowling session: the shutter and Auto film it.
+        if (session.sessionToken == "debug_token" || practiceId != null) return@LaunchedEffect
         while (true) {
             val cue = repo.cue(session.sessionToken)
             if (cue != null) {
@@ -1808,10 +1860,12 @@ private fun CameraMode(
          * that the scorer sees it before wondering why no clips are arriving. The screen
          * shows "reconnecting" in between rather than pretending nothing is wrong.
          */
-        if (session.sessionToken == "debug_token") {
+        if (session.sessionToken == "debug_token" || practiceId != null) {
             live = true
             while (true) {
-                delay(30_000)
+                // Keeps a bowling session LIVE on the Sessions screen while this camera is open.
+                practiceId?.let { BowlingSessionStore.touch(ctx, it) }
+                delay(20_000)
             }
         }
         var missed = 0
@@ -3274,7 +3328,12 @@ private fun CameraMode(
                         } else {
                             null
                         }
-                        val label = overs.takeIf { it.isNotBlank() }?.let { "Over $it" } ?: ballSeq?.let { "Ball $it" }.orEmpty()
+                        val label = if (practiceId != null) {
+                            "Ball ${(BowlingSessionStore.get(ctx, practiceId)?.balls ?: 0) + 1}"
+                        } else {
+                            overs.takeIf { it.isNotBlank() }?.let { "Over $it" } ?: ballSeq?.let { "Ball $it" }.orEmpty()
+                        }
+                        val practiceAlbum = practiceId?.let { BowlingSessionStore.get(ctx, it)?.album }
                         scope.launch {
                             val deadline = android.os.SystemClock.uptimeMillis() + SAVE_WAIT_MS
                             while (android.os.SystemClock.uptimeMillis() < deadline &&
@@ -3299,6 +3358,8 @@ private fun CameraMode(
                                     path = result.path,
                                     flight = result.flight,
                                     label = label,
+                                    sessionAlbum = practiceAlbum,
+                                    onSaved = practiceId?.let { id -> { BowlingSessionStore.addBall(ctx.applicationContext, id) } },
                                 ),
                             )
                             // Old balls' results are not needed again.
@@ -3360,6 +3421,11 @@ private fun CameraMode(
                      * waiting on cellular latency. Backlog drains in background with
                      * exponential backoff, deleting only upon confirmed 2xx landing.
                      */
+                    // A bowling session sends nothing anywhere: its video is the Gallery copy above.
+                    if (practiceId != null) {
+                        runCatching { file.delete() }
+                        return@startClip
+                    }
                     uploadQueue.enqueue(
                         file = file,
                         sessionToken = session.sessionToken,

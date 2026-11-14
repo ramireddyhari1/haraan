@@ -2,4 +2,6 @@
 <paths>
     <!-- Generated share images live in cacheDir/shared/. -->
     <cache-path name="shared" path="shared/" />
+    <!-- Bowling-session videos on Android 9 and older, kept in the app's own Movies folder. -->
+    <external-files-path name="session_movies" path="Movies/Haraan Sessions/" />
 </paths>

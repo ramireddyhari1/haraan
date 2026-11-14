@@ -17,9 +17,11 @@ use App\Models\PlayerReport;
 use App\Models\PlayerSportCareer;
 use App\Models\PostComment;
 use App\Models\PostLike;
+use App\Models\PostReport;
 use App\Models\PostSave;
 use App\Models\User;
 use App\Services\CareerBattingService;
+use App\Services\HomeFeed;
 use App\Services\Membership\MemberEntitlements;
 use App\Services\PlayerCareerAnalysis;
 use App\Services\PlayerFormService;
@@ -1627,8 +1629,13 @@ final class PlayersController extends Controller
         $me = $request->attributes->get('auth_user');
         $mine = $me instanceof User && $me->id === $target->id;
 
+        // Moderated posts: a hidden one stays on its author's own grid (marked, so they know it
+        // left the feed); a removed one is gone for everybody.
         $posts = PlayerPost::query()
             ->where('user_id', $target->id)
+            ->when($mine,
+                fn ($q) => $q->where('status', '!=', PlayerPost::STATUS_REMOVED),
+                fn ($q) => $q->visible())
             ->orderByDesc('id')
             ->limit(120)
             ->get();
@@ -1640,6 +1647,7 @@ final class PlayersController extends Controller
                 'caption' => $p->caption,
                 'created_at' => $p->created_at?->toIso8601String(),
                 'mine' => $mine,
+                'status' => $p->status ?? PlayerPost::STATUS_VISIBLE,
             ])->values(),
         ]);
     }
@@ -1676,12 +1684,19 @@ final class PlayersController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
+        if ($blocked = HomeFeed::postingBlockedReason($user)) {
+            return response()->json(['error' => $blocked], 403);
+        }
+
         $request->validate([
-            'images' => ['sometimes', 'array', 'max:10'],
+            'images' => ['sometimes', 'array', 'max:'.\App\Support\PlatformRules::int('home_feed.max_images')],
             'images.*' => ['image', 'mimes:jpg,jpeg,png,webp', 'max:8192'], // 8 MB each
             'image' => ['sometimes', 'image', 'mimes:jpg,jpeg,png,webp', 'max:8192'],
             'caption' => ['nullable', 'string', 'max:300'],
         ]);
+        if (HomeFeed::blockedWordIn($request->input('caption')) !== null) {
+            return response()->json(['error' => 'Your caption has words that aren’t allowed on Haraan.'], 422);
+        }
 
         // Normalize to an ordered list of uploaded files.
         $files = $request->file('images');
@@ -1728,7 +1743,8 @@ final class PlayersController extends Controller
         }
 
         $post = PlayerPost::query()->find($id);
-        if ($post === null) {
+        // A removed post is evidence for a moderation decision — its author can't edit or erase it.
+        if ($post === null || $post->status === PlayerPost::STATUS_REMOVED) {
             return response()->json(['error' => 'Not found'], 404);
         }
         if ((int) $post->user_id !== (int) $user->id) {
@@ -1739,6 +1755,9 @@ final class PlayersController extends Controller
             'caption' => ['nullable', 'string', 'max:300'],
         ]);
         $caption = isset($validated['caption']) ? trim((string) $validated['caption']) : null;
+        if (HomeFeed::blockedWordIn($caption) !== null) {
+            return response()->json(['error' => 'Your caption has words that aren’t allowed on Haraan.'], 422);
+        }
         $post->update(['caption' => ($caption === '' ? null : $caption)]);
 
         return response()->json([
@@ -1756,7 +1775,8 @@ final class PlayersController extends Controller
         }
 
         $post = PlayerPost::query()->find($id);
-        if ($post === null) {
+        // A removed post is evidence for a moderation decision — its author can't edit or erase it.
+        if ($post === null || $post->status === PlayerPost::STATUS_REMOVED) {
             return response()->json(['error' => 'Not found'], 404);
         }
         if ((int) $post->user_id !== (int) $user->id) {
@@ -1792,21 +1812,9 @@ final class PlayersController extends Controller
         $me = $request->attributes->get('auth_user');
         $meId = $me instanceof User ? (int) $me->id : null;
 
-        $posts = PlayerPost::query()
-            ->with(['user', 'images'])
-            ->withCount(['likes', 'comments'])
-            ->whereHas('user', function ($q): void {
-                $q->where('is_guest', false)
-                    // Null = pre-privacy accounts, treated as public (same rule the
-                    // player search uses for privacy_discoverable).
-                    ->where(function ($sub): void {
-                        $sub->whereNull('privacy_public_profile')
-                            ->orWhere('privacy_public_profile', true);
-                    });
-            })
-            ->orderByDesc('id')
-            ->limit(100)
-            ->get();
+        // What to show — moderation, pins, ordering and every /control rule — is decided in
+        // one place, shared with the website's /feed.
+        $posts = HomeFeed::posts();
 
         $likedIds = [];
         $savedIds = [];
@@ -1829,15 +1837,10 @@ final class PlayersController extends Controller
         $items = $posts->map(function (PlayerPost $p) use ($likedIds, $savedIds, $meId): array {
             $author = $p->user;
 
-            $images = $p->images->pluck('image_path')->values()->all();
-            if (empty($images)) {
-                $images = [$p->image_path];
-            }
-
             return [
                 'id' => (int) $p->id,
                 'image' => $p->image_path,
-                'images' => $images,
+                'images' => $p->imagePaths(),
                 'caption' => $p->caption,
                 'created_at' => $p->created_at?->toIso8601String(),
                 'like_count' => (int) $p->likes_count,
@@ -1845,35 +1848,75 @@ final class PlayersController extends Controller
                 'comment_count' => (int) $p->comments_count,
                 'saved' => isset($savedIds[$p->id]),
                 'mine' => $meId !== null && (int) $p->user_id === $meId,
+                'pinned' => $p->isPinned(),
+                'featured' => (bool) $p->featured,
                 'author' => [
                     'player_id' => $author?->player_id,
                     'username' => $author?->username,
                     'name' => $author?->name,
                     'avatar' => $author?->avatar,
+                    'verified' => (bool) ($author?->is_verified ?? false),
                 ],
             ];
         })->values();
 
-        // One story bubble per recent public poster (their newest post), newest first.
-        $stories = $posts
-            ->unique('user_id')
-            ->take(20)
-            ->map(function (PlayerPost $p): array {
-                $author = $p->user;
+        $stories = HomeFeed::storyPosts($posts)->map(function (PlayerPost $p): array {
+            $author = $p->user;
 
-                return [
-                    'player_id' => $author?->player_id,
-                    'username' => $author?->username,
-                    'name' => $author?->name,
-                    'avatar' => $author?->avatar,
-                    'image' => $p->image_path,
-                ];
-            })->values();
+            return [
+                'player_id' => $author?->player_id,
+                'username' => $author?->username,
+                'name' => $author?->name,
+                'avatar' => $author?->avatar,
+                'image' => $p->image_path,
+            ];
+        })->values();
 
         return response()->json([
             'stories' => $stories,
             'posts' => $items,
+            // The feed's chrome: older apps ignore it and keep drawing what they always did.
+            'rules' => HomeFeed::clientRules(),
         ]);
+    }
+
+    /**
+     * POST /api/players/posts/{id}/report — report a post (or, with `comment_id`, one comment
+     * under it). Lands in /control → ActionBoard Home → Reported posts.
+     */
+    public function reportPost(Request $request, int $id): JsonResponse
+    {
+        $user = $request->attributes->get('auth_user');
+        if (! $user instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+
+        $validated = $request->validate([
+            'reason' => ['required', 'string', 'in:'.implode(',', array_keys(PostReport::REASONS))],
+            'details' => ['nullable', 'string', 'max:500'],
+            'comment_id' => ['nullable', 'integer'],
+        ]);
+
+        $post = PlayerPost::query()->find($id);
+        if ($post === null || ! HomeFeed::viewable($post, $user)) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+        if ((int) $post->user_id === (int) $user->id && empty($validated['comment_id'])) {
+            return response()->json(['error' => 'You can’t report your own post'], 422);
+        }
+
+        $comment = null;
+        if (! empty($validated['comment_id'])) {
+            $comment = PostComment::query()->where('post_id', $post->id)->find((int) $validated['comment_id']);
+            if ($comment === null) {
+                return response()->json(['error' => 'Comment not found'], 404);
+            }
+        }
+
+        $details = isset($validated['details']) ? trim((string) $validated['details']) : null;
+        $hidden = HomeFeed::report($user, $post, $comment, $validated['reason'], $details === '' ? null : $details);
+
+        return response()->json(['reported' => true, 'hidden' => $hidden], 201);
     }
 
     /** POST /api/players/posts/{id}/like — like a post. Idempotent. */
@@ -1885,7 +1928,7 @@ final class PlayersController extends Controller
         }
 
         $post = PlayerPost::query()->find($id);
-        if ($post === null) {
+        if ($post === null || ! HomeFeed::viewable($post, $user)) {
             return response()->json(['error' => 'Not found'], 404);
         }
 
@@ -1909,7 +1952,7 @@ final class PlayersController extends Controller
         }
 
         $post = PlayerPost::query()->find($id);
-        if ($post === null) {
+        if ($post === null || ! HomeFeed::viewable($post, $user)) {
             return response()->json(['error' => 'Not found'], 404);
         }
 
@@ -1927,14 +1970,16 @@ final class PlayersController extends Controller
     /** GET /api/posts/{id}/comments — the comment thread, oldest first. Optional auth. */
     public function comments(Request $request, int $id): JsonResponse
     {
+        $me = $request->attributes->get('auth_user');
         $post = PlayerPost::query()->find($id);
-        if ($post === null) {
+        if ($post === null || ! HomeFeed::viewable($post, $me instanceof User ? $me : null)) {
             return response()->json(['error' => 'Not found'], 404);
         }
 
         $rows = PostComment::query()
             ->with('user')
             ->where('post_id', $post->id)
+            ->visible()
             ->orderBy('id')
             ->limit(300)
             ->get();
@@ -1962,6 +2007,10 @@ final class PlayersController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
+        if ($blocked = HomeFeed::commentingBlockedReason($user)) {
+            return response()->json(['error' => $blocked], 403);
+        }
+
         $validated = $request->validate([
             'body' => ['required', 'string', 'max:500'],
         ]);
@@ -1969,9 +2018,12 @@ final class PlayersController extends Controller
         if ($body === '') {
             return response()->json(['error' => 'Empty comment'], 422);
         }
+        if (HomeFeed::blockedWordIn($body) !== null) {
+            return response()->json(['error' => 'Your comment has words that aren’t allowed on Haraan.'], 422);
+        }
 
         $post = PlayerPost::query()->find($id);
-        if ($post === null) {
+        if ($post === null || ! HomeFeed::viewable($post, $user)) {
             return response()->json(['error' => 'Not found'], 404);
         }
 
@@ -1985,7 +2037,7 @@ final class PlayersController extends Controller
             'id' => (int) $comment->id,
             'body' => $comment->body,
             'created_at' => $comment->created_at?->toIso8601String(),
-            'comment_count' => (int) $post->comments()->count(),
+            'comment_count' => (int) $post->visibleComments()->count(),
             'author' => [
                 'player_id' => $user->player_id,
                 'username' => $user->username,
@@ -2004,7 +2056,7 @@ final class PlayersController extends Controller
         }
 
         $post = PlayerPost::query()->find($id);
-        if ($post === null) {
+        if ($post === null || ! HomeFeed::viewable($post, $user)) {
             return response()->json(['error' => 'Not found'], 404);
         }
 
@@ -2025,7 +2077,7 @@ final class PlayersController extends Controller
         }
 
         $post = PlayerPost::query()->find($id);
-        if ($post === null) {
+        if ($post === null || ! HomeFeed::viewable($post, $user)) {
             return response()->json(['error' => 'Not found'], 404);
         }
 

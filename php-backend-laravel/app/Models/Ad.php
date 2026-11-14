@@ -22,6 +22,7 @@ final class Ad extends Model
      */
     public const PLACEMENTS = [
         'match_live' => 'Match detail — live board (all sports)',
+        'actionboard_feed' => 'ActionBoard — match lists (app + web)',
         'events' => 'Events feed (app + web)',
         'login_poster' => 'Login poster carousel',
     ];

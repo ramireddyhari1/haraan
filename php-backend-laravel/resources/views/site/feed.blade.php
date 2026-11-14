@@ -86,9 +86,20 @@
                         @if ($p['authorUsername'] !== '')<span>{{ '@' . $p['authorUsername'] }}</span>@endif
                     </span>
                 </a>
+                @if ($p['pinned'] ?? false)
+                    <span class="hpost__tag">Pinned</span>
+                @elseif ($p['featured'] ?? false)
+                    <span class="hpost__tag">Featured</span>
+                @endif
                 <time class="hpost__ago" datetime="{{ optional($p['createdAt'])->toIso8601String() }}">
                     {{ optional($p['createdAt'])->diffForHumans(null, true) }}
                 </time>
+                @unless ($p['mine'])
+                    <button class="hpost__menu" type="button" aria-label="Report post"
+                            data-report="{{ $p['id'] }}" @guest data-login-open @endguest>
+                        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>
+                    </button>
+                @endunless
             </div>
 
             @if (count($p['images']) > 1)
@@ -151,25 +162,58 @@
                  of forty posts does not load forty threads nobody asked for. --}}
             <div class="hpost__thread" data-thread="{{ $p['id'] }}" hidden>
                 <div class="hpost__clist" data-clist="{{ $p['id'] }}"></div>
-                @auth
+                @if (! ($feedRules['comments_enabled'] ?? true))
+                    <div class="hpost__cempty">Comments are paused for now.</div>
+                @elseauth
                     <form class="hpost__cform" data-cform="{{ $p['id'] }}">
                         <input type="text" name="body" maxlength="500" placeholder="Add a comment…" autocomplete="off" required>
                         <button type="submit">Post</button>
                     </form>
                 @else
                     <button class="hpost__csignin" type="button" data-login-open>Sign in to comment</button>
-                @endauth
+                @endif
             </div>
         </article>
     @empty
+        @if (! ($feedRules['enabled'] ?? true))
+            <div class="hfeed__empty">
+                <b>Home is taking a break</b>
+                <p>{{ $feedRules['message'] ?? '' }}</p>
+            </div>
+        @else
         <div class="hfeed__empty">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M12 20.4S3.6 15 3.6 9.3A4.7 4.7 0 0 1 12 6.5a4.7 4.7 0 0 1 8.4 2.8c0 5.7-8.4 11.1-8.4 11.1Z"/></svg>
             <b>No posts yet</b>
             <p>Photos from public players show up here. Post the first one from the Haraan app.</p>
             <a class="hfeed__cta" href="https://play.google.com/store/apps/details?id=com.haraan.app" target="_blank" rel="noopener">Get the app</a>
         </div>
+        @endif
     @endforelse
 </div>
+
+{{-- Report sheet: one for the page, filled with whichever post opened it. --}}
+@auth
+    <dialog class="hreport" data-report-sheet>
+        <form method="dialog" class="hreport__form" data-report-form>
+            <b class="hreport__title">Report this post</b>
+            <p class="hreport__sub">Haraan’s team reviews every report. The player isn’t told who reported them.</p>
+            <div class="hreport__reasons">
+                @foreach ($reportReasons as $key => $label)
+                    <label class="hreport__reason">
+                        <input type="radio" name="reason" value="{{ $key }}" required>
+                        <span>{{ $label }}</span>
+                    </label>
+                @endforeach
+            </div>
+            <textarea name="details" maxlength="500" rows="2" placeholder="Anything else? (optional)"></textarea>
+            <div class="hreport__acts">
+                <button type="button" class="hreport__cancel" data-report-cancel>Cancel</button>
+                <button type="submit" class="hreport__send" value="send">Report</button>
+            </div>
+            <p class="hreport__done" data-report-done hidden>Thanks — we’ll take a look.</p>
+        </form>
+    </dialog>
+@endauth
 
 @include('site.partials.mab-bottombar', ['active' => 'Home'])
 
@@ -255,6 +299,43 @@
 .hpost__names b { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hpost__names span { font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hpost__ago { flex: 0 0 auto; font-size: 11.5px; color: var(--muted); }
+.hpost__tag {
+    flex: 0 0 auto; font-size: 10.5px; font-weight: 700; color: var(--blue);
+    background: #EFF4FF; border-radius: 6px; padding: 2px 7px;
+}
+.hpost__menu {
+    flex: 0 0 auto; background: none; border: 0; padding: 6px; margin-right: -6px; border-radius: 50%;
+    color: var(--ink2); cursor: pointer; display: inline-flex;
+}
+.hpost__menu svg { width: 20px; height: 20px; }
+
+/* ── Report sheet ────────────────────────────────────────────────────────── */
+.hreport {
+    border: 0; padding: 0; width: min(520px, 100%); max-width: 100%; margin: auto auto 0;
+    border-radius: 18px 18px 0 0; background: #fff; color: #0F172A;
+}
+.hreport::backdrop { background: rgba(15, 23, 42, .45); }
+.hreport__form { padding: 18px 16px 20px; display: flex; flex-direction: column; gap: 10px; }
+.hreport__title { font-size: 16px; }
+.hreport__sub { margin: 0; font-size: 12.5px; color: #475569; line-height: 1.45; }
+.hreport__reasons { display: flex; flex-direction: column; }
+.hreport__reason {
+    display: flex; align-items: center; gap: 10px; padding: 10px 2px; font-size: 14px;
+    border-bottom: 1px solid #E7ECF3; cursor: pointer;
+}
+.hreport__reason input { accent-color: #2563EB; width: 18px; height: 18px; }
+.hreport textarea {
+    border: 1px solid #E7ECF3; border-radius: 12px; padding: 10px 12px; font: inherit; font-size: 13px;
+    resize: vertical; background: #F8FAFC;
+}
+.hreport__acts { display: flex; justify-content: flex-end; gap: 8px; }
+.hreport__cancel, .hreport__send {
+    border: 0; border-radius: 20px; padding: 10px 18px; font: inherit; font-size: 13.5px; font-weight: 700; cursor: pointer;
+}
+.hreport__cancel { background: #F1F5F9; color: #0F172A; }
+.hreport__send { background: #2563EB; color: #fff; }
+.hreport__send[disabled] { opacity: .6; cursor: default; }
+.hreport__done { margin: 0; font-size: 13px; color: #047857; font-weight: 600; }
 
 .hpost__img { display: block; width: 100%; aspect-ratio: 1 / 1; object-fit: cover; background: #F1F5F9; }
 /* Multi-image posts scroll horizontally and SNAP, so a half-shown photo can't happen. */
@@ -466,6 +547,47 @@
 
     // ── Share. The native sheet where there is one, the clipboard otherwise; the
     // button never pretends to have done something it didn't.
+    // ── Report. One sheet; the post id rides on it while it's open.
+    var sheet = document.querySelector('[data-report-sheet]');
+    if (sheet) {
+        var rform = sheet.querySelector('[data-report-form]');
+        var done = sheet.querySelector('[data-report-done]');
+        var send = rform.querySelector('.hreport__send');
+        document.querySelectorAll('[data-report]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                if (!SIGNED_IN) return;
+                rform.reset();
+                done.hidden = true;
+                send.disabled = false;
+                sheet.dataset.post = btn.getAttribute('data-report');
+                sheet.showModal();
+            });
+        });
+        sheet.querySelector('[data-report-cancel]').addEventListener('click', function () { sheet.close(); });
+        rform.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var picked = rform.querySelector('input[name="reason"]:checked');
+            if (!picked) return;
+            send.disabled = true;
+            post('/feed/posts/' + sheet.dataset.post + '/report', {
+                reason: picked.value,
+                details: rform.querySelector('textarea').value
+            }).then(function (j) {
+                done.hidden = false;
+                // Reports that took the post down: it leaves this page too.
+                if (j && j.hidden) {
+                    var card = document.querySelector('[data-post="' + sheet.dataset.post + '"]');
+                    if (card) card.remove();
+                }
+                setTimeout(function () { sheet.close(); }, 900);
+            }).catch(function () {
+                send.disabled = false;
+                done.textContent = "Couldn't send — try again";
+                done.hidden = false;
+            });
+        });
+    }
+
     document.querySelectorAll('[data-share]').forEach(function (btn) {
         btn.addEventListener('click', function () {
             var url = location.origin + '/feed#post-' + btn.dataset.share;

@@ -363,6 +363,9 @@
                 'results' => $abFinishedRows->isNotEmpty(),
                 'hidden' => $abLiveRows->isNotEmpty(),
             ])
+            @if ($abLiveRows->isNotEmpty())
+                @include('site.partials.actionboard-sponsor', ['house' => $abFeedAd ?? null, 'adsense' => $abFeedAdsense ?? null])
+            @endif
         </div>
 
         {{-- ── TAB 1: FINISHED — results, from the SAME feed the Live tab reads ── --}}
@@ -381,6 +384,9 @@
                 'tpl' => 'No finished {sport} matches yet',
                 'hidden' => $abFinishedRows->isNotEmpty(),
             ])
+            @if ($abFinishedRows->isNotEmpty())
+                @include('site.partials.actionboard-sponsor', ['house' => $abFeedAd ?? null, 'adsense' => $abFeedAdsense ?? null])
+            @endif
         </div>
 
         @include('site.partials.actionboard-scheduled', ['mine' => $abScheduledMine ?? [], 'open' => $abScheduledOpen ?? []])

@@ -82,6 +82,11 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -197,7 +202,21 @@ private val GapS = 8.dp
 private val GapM = 16.dp
 private val GapL = 24.dp
 
-@OptIn(ExperimentalFoundationApi::class)
+// ── Fitting every phone ───────────────────────────────────────────────────────
+// The screen is laid out in dp/sp, which is right, but three things differ between
+// handsets and each one used to break it: how TALL the screen is in dp (640 on a small
+// phone, 915 on a large one, and less again when "Display size" is turned up), the
+// user's FONT SIZE setting (several Realme/Xiaomi builds ship above 1.0), and how much
+// of the height the keyboard takes. So: short screens get a tighter rhythm, text growth
+// is capped where it would break fixed controls, and the card scrolls rather than
+// pushing its button under the keyboard.
+
+/** Below this the card uses the tighter spacing — 360x640-class phones and enlarged display sizes. */
+private val CompactHeight = 700.dp
+
+/** Text may grow with the system setting up to here; past it the OTP cells and CTAs stop fitting. */
+private const val MaxLoginFontScale = 1.2f
+
 @Composable
 fun LoginScreen(
     uiState: LoginUiState,
@@ -217,6 +236,52 @@ fun LoginScreen(
     onVerifyPhoneCode: () -> Unit = {},
     onResetPhone: () -> Unit = {},
     modifier: Modifier = Modifier
+) {
+    val base = LocalDensity.current
+    val capped = remember(base) { Density(base.density, minOf(base.fontScale, MaxLoginFontScale)) }
+    CompositionLocalProvider(LocalDensity provides capped) {
+        LoginScreenBody(
+            uiState = uiState,
+            onEmailChange = onEmailChange,
+            onPasswordChange = onPasswordChange,
+            onNameChange = onNameChange,
+            onSignUpToggle = onSignUpToggle,
+            onSubmitClick = onSubmitClick,
+            onExitForm = onExitForm,
+            onForgotPasswordClick = onForgotPasswordClick,
+            onSkipClick = onSkipClick,
+            googleEnabled = googleEnabled,
+            onGoogleClick = onGoogleClick,
+            onPhoneChange = onPhoneChange,
+            onOtpChange = onOtpChange,
+            onSendPhoneCode = onSendPhoneCode,
+            onVerifyPhoneCode = onVerifyPhoneCode,
+            onResetPhone = onResetPhone,
+            modifier = modifier
+        )
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun LoginScreenBody(
+    uiState: LoginUiState,
+    onEmailChange: (String) -> Unit,
+    onPasswordChange: (String) -> Unit,
+    onNameChange: (String) -> Unit,
+    onSignUpToggle: (Boolean) -> Unit,
+    onSubmitClick: () -> Unit,
+    onExitForm: () -> Unit,
+    onForgotPasswordClick: () -> Unit,
+    onSkipClick: () -> Unit,
+    googleEnabled: Boolean,
+    onGoogleClick: () -> Unit,
+    onPhoneChange: (String) -> Unit,
+    onOtpChange: (String) -> Unit,
+    onSendPhoneCode: () -> Unit,
+    onVerifyPhoneCode: () -> Unit,
+    onResetPhone: () -> Unit,
+    modifier: Modifier
 ) {
     var isDetailsInputVisible by remember { mutableStateOf(false) }
     // Parallel to email: the landing card expands into the phone-number / code flow.
@@ -309,11 +374,16 @@ fun LoginScreen(
     val hasRemote = remotePosters.isNotEmpty()
     val posterCount = if (hasRemote) remotePosters.size else localPosters.size
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(Ink)
     ) {
+        // Height class for this handset, read from the space the screen actually has.
+        val compact = maxHeight < CompactHeight
+        val sectionGap = if (compact) GapM else GapL
+        val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+
         // 1. Full-bleed poster pager (static image, auto-advancing carousel).
         val pageCount = Int.MAX_VALUE
         val pagerState = rememberPagerState(
@@ -396,8 +466,7 @@ fun LoginScreen(
         // Bound the phone/OTP step ONLY while the keyboard is up. With it down there is
         // no surplus to distribute, and filling then swallowed the hero entirely — the
         // landing must keep its short sheet over the image.
-        val stepIsBounded = isPhoneInputVisible &&
-            WindowInsets.ime.getBottom(LocalDensity.current) > 0
+        val stepIsBounded = isPhoneInputVisible && imeVisible
 
         Column(
             modifier = Modifier
@@ -408,7 +477,10 @@ fun LoginScreen(
                 // dead area just slid content toward the keyboard (see the note on the
                 // card's insets). Filling here, plus weight() on the card, gives the step
                 // a real height for its layout to work inside.
-                .then(if (stepIsBounded) Modifier.fillMaxHeight() else Modifier),
+                // Wrapping, the card may still want more than the screen has (the sign-up
+                // form over a keyboard on a short phone). Stopping it at the status bar
+                // gives it a ceiling, and its content scrolls inside that.
+                .then(if (stepIsBounded) Modifier.fillMaxHeight() else Modifier.statusBarsPadding()),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             // Dots only in the collapsed hero — hidden once the keyboard appears so the
@@ -471,7 +543,12 @@ fun LoginScreen(
                         // lay it out — header / content / action pinned to the bottom —
                         // rather than to keep tuning insets.
                         .windowInsetsPadding(WindowInsets.ime.union(WindowInsets.navigationBars))
-                        .padding(start = GapL, end = GapL, top = GapM, bottom = GapL),
+                        // Scrolls only when the content is taller than the room above the
+                        // keyboard. Placed AFTER the insets so the viewport ends at the
+                        // keyboard, and it keeps the bounded step's minimum height, so the
+                        // centring below still works when the content is short.
+                        .verticalScroll(rememberScrollState())
+                        .padding(start = GapL, end = GapL, top = GapM, bottom = sectionGap),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     // Centred only where the height is bounded. Anywhere else this is a
                     // no-op, and Top keeps the landing sheet exactly as it was.
@@ -489,8 +566,12 @@ fun LoginScreen(
                     val showBranding = uiState.stage == LoginStage.EnterCredentials &&
                         !isDetailsInputVisible && !isPhoneInputVisible
 
+                    // A short screen with the keyboard up has room for the form and nothing
+                    // else, so the handle and wordmark step aside there; the headline stays.
+                    val tightForm = compact && imeVisible
+
                     // Grab handle.
-                    Box(
+                    if (!tightForm) Box(
                         modifier = Modifier
                             .padding(bottom = GapM)
                             .size(width = 36.dp, height = 4.dp)
@@ -505,14 +586,22 @@ fun LoginScreen(
                     // The decorative festival/sports line-art is gone for the same reason:
                     // it duplicated what the hero image already communicates, and sitting
                     // behind the wordmark it cost contrast for nothing.
-                    Image(
-                        painter = painterResource(id = R.drawable.haraan_wordmark),
-                        contentDescription = com.haraan.app.ui.theme.Brand.name,
-                        modifier = Modifier.height(if (showBranding) 40.dp else 32.dp),
-                        contentScale = ContentScale.Fit
-                    )
+                    if (!tightForm) {
+                        Image(
+                            painter = painterResource(id = R.drawable.haraan_wordmark),
+                            contentDescription = com.haraan.app.ui.theme.Brand.name,
+                            modifier = Modifier.height(
+                                when {
+                                    !showBranding -> if (compact) 28.dp else 32.dp
+                                    compact -> 32.dp
+                                    else -> 40.dp
+                                }
+                            ),
+                            contentScale = ContentScale.Fit
+                        )
 
-                    Spacer(Modifier.height(GapS))
+                        Spacer(Modifier.height(GapS))
+                    }
 
                     // One line of copy, sized as the screen's single headline. It states
                     // what this screen is for — the tagline said what the brand is for,
@@ -528,14 +617,22 @@ fun LoginScreen(
                             uiState.isSignUp -> "Create your account"
                             else -> "Sign in to continue"
                         },
-                        fontSize = if (showBranding) TitleSize else BodySize,
+                        fontSize = when {
+                            !showBranding -> BodySize
+                            compact -> 20.sp
+                            else -> TitleSize
+                        },
                         fontWeight = FontWeight.Bold,
                         color = Text1,
                         textAlign = TextAlign.Center,
-                        lineHeight = if (showBranding) 30.sp else 22.sp
+                        lineHeight = when {
+                            !showBranding -> 22.sp
+                            compact -> 26.sp
+                            else -> 30.sp
+                        }
                     )
 
-                    Spacer(Modifier.height(GapL))
+                    Spacer(Modifier.height(sectionGap))
 
                     val fieldColors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Accent,
@@ -572,7 +669,7 @@ fun LoginScreen(
                                         Text(uiState.errorMessage, color = Danger, fontSize = CaptionSize, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
                                     }
 
-                                    Spacer(Modifier.height(GapL))
+                                    Spacer(Modifier.height(sectionGap))
                                     val si = remember { MutableInteractionSource() }
                                     Button(
                                         onClick = {
@@ -580,7 +677,7 @@ fun LoginScreen(
                                             onSendPhoneCode()
                                         },
                                         interactionSource = si,
-                                        modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(si),
+                                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).pressScale(si),
                                         shape = RoundedCornerShape(16.dp),
                                         colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Stroke),
                                         enabled = uiState.isPhoneValid && !uiState.isLoading
@@ -606,7 +703,7 @@ fun LoginScreen(
                                         fontSize = CaptionSize, color = Text2, textAlign = TextAlign.Center,
                                         modifier = Modifier.fillMaxWidth()
                                     )
-                                    Spacer(Modifier.height(GapL))
+                                    Spacer(Modifier.height(sectionGap))
                                     // Six cells, not one labelled box. A single "Verification
                                     // code" field is the stock Material default and reads as
                                     // unfinished; every app people already use for OTP shows
@@ -636,7 +733,7 @@ fun LoginScreen(
                                         Text(uiState.errorMessage, color = Danger, fontSize = CaptionSize, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth(), textAlign = TextAlign.Center)
                                     }
 
-                                    Spacer(Modifier.height(GapL))
+                                    Spacer(Modifier.height(sectionGap))
                                     val vi = remember { MutableInteractionSource() }
                                     Button(
                                         onClick = {
@@ -644,7 +741,7 @@ fun LoginScreen(
                                             onVerifyPhoneCode()
                                         },
                                         interactionSource = vi,
-                                        modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(vi),
+                                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).pressScale(vi),
                                         shape = RoundedCornerShape(16.dp),
                                         colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Stroke),
                                         enabled = uiState.isOtpValid && !uiState.isLoading
@@ -691,7 +788,7 @@ fun LoginScreen(
                                             onGoogleClick()
                                         },
                                         interactionSource = gi,
-                                        modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(gi),
+                                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).pressScale(gi),
                                         shape = RoundedCornerShape(16.dp),
                                         colors = ButtonDefaults.buttonColors(containerColor = Accent),
                                         enabled = !uiState.isLoading
@@ -727,40 +824,17 @@ fun LoginScreen(
                                     // Secondary ways in — phone then email, matching the
                                     // website's order (Google → Phone → email).
                                     Spacer(Modifier.height(GapM))
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.Center,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Text(
-                                            text = "Continue with phone",
-                                            fontSize = CaptionSize,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = Accent,
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable {
-                                                    view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                                                    onExitForm()
-                                                    isPhoneInputVisible = true
-                                                }
-                                                .padding(horizontal = GapM, vertical = GapS)
-                                        )
-                                        Box(Modifier.size(width = 1.dp, height = 14.dp).background(Stroke))
-                                        Text(
-                                            text = "Continue with email",
-                                            fontSize = CaptionSize,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = Accent,
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .clickable {
-                                                    view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
-                                                    isDetailsInputVisible = true
-                                                }
-                                                .padding(horizontal = GapM, vertical = GapS)
-                                        )
-                                    }
+                                    SecondaryWaysIn(
+                                        onPhone = {
+                                            view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                                            onExitForm()
+                                            isPhoneInputVisible = true
+                                        },
+                                        onEmail = {
+                                            view.performHapticFeedback(android.view.HapticFeedbackConstants.KEYBOARD_TAP)
+                                            isDetailsInputVisible = true
+                                        }
+                                    )
                                 } else {
                                     // No Google client configured — email is the primary CTA.
                                     val ci = remember { MutableInteractionSource() }
@@ -770,7 +844,7 @@ fun LoginScreen(
                                             isDetailsInputVisible = true
                                         },
                                         interactionSource = ci,
-                                        modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(ci),
+                                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).pressScale(ci),
                                         shape = RoundedCornerShape(16.dp),
                                         colors = ButtonDefaults.buttonColors(containerColor = Accent)
                                     ) {
@@ -903,7 +977,7 @@ fun LoginScreen(
                                     Text(uiState.errorMessage, color = Danger, fontSize = CaptionSize, fontWeight = FontWeight.Medium, modifier = Modifier.fillMaxWidth())
                                 }
 
-                                Spacer(Modifier.height(GapL))
+                                Spacer(Modifier.height(sectionGap))
 
                                 val pi = remember { MutableInteractionSource() }
                                 Button(
@@ -912,7 +986,7 @@ fun LoginScreen(
                                         onSubmitClick()
                                     },
                                     interactionSource = pi,
-                                    modifier = Modifier.fillMaxWidth().height(56.dp).pressScale(pi),
+                                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp).pressScale(pi),
                                     shape = RoundedCornerShape(16.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = Accent, disabledContainerColor = Stroke),
                                     enabled = uiState.canSubmit
@@ -984,6 +1058,66 @@ fun LoginScreen(
             }
         }
     }
+}
+
+/**
+ * "Continue with phone | Continue with email" under the Google button.
+ *
+ * Side by side these two labels need about 315dp, and a 360dp phone has 312dp inside the
+ * card — so on the most common screen width they wrapped mid-label, and any font size
+ * above default made it worse. The labels are measured against the real width instead:
+ * full padding if it fits, tighter padding if that fits, otherwise one above the other.
+ */
+@Composable
+private fun SecondaryWaysIn(onPhone: () -> Unit, onEmail: () -> Unit) {
+    val phoneLabel = "Continue with phone"
+    val emailLabel = "Continue with email"
+    val measurer = rememberTextMeasurer()
+    val style = LocalTextStyle.current.copy(fontSize = CaptionSize, fontWeight = FontWeight.SemiBold)
+    val density = LocalDensity.current
+    val labelsWidth = remember(style, density) {
+        with(density) {
+            (measurer.measure(phoneLabel, style).size.width +
+                measurer.measure(emailLabel, style).size.width).toDp()
+        }
+    }
+
+    BoxWithConstraints(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        // Two links, each padded on both sides, plus the 1dp divider between them.
+        val sidePadding = when {
+            labelsWidth + GapM * 4 + 1.dp <= maxWidth -> GapM
+            labelsWidth + GapS * 4 + 1.dp <= maxWidth -> GapS
+            else -> null
+        }
+        if (sidePadding != null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                WayInLink(phoneLabel, sidePadding, onPhone)
+                Box(Modifier.size(width = 1.dp, height = 14.dp).background(Stroke))
+                WayInLink(emailLabel, sidePadding, onEmail)
+            }
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                WayInLink(phoneLabel, GapM, onPhone)
+                WayInLink(emailLabel, GapM, onEmail)
+            }
+        }
+    }
+}
+
+@Composable
+private fun WayInLink(label: String, sidePadding: Dp, onClick: () -> Unit) {
+    Text(
+        text = label,
+        fontSize = CaptionSize,
+        fontWeight = FontWeight.SemiBold,
+        color = Accent,
+        maxLines = 1,
+        softWrap = false,
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = sidePadding, vertical = GapS)
+    )
 }
 
 // The splash's entrance curve, reused so the two brand moments move the same way.
@@ -1340,7 +1474,7 @@ private fun PhoneNumberField(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(58.dp)
+            .heightIn(min = 58.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(Color(0xFFF8FAFC))
             .border(
@@ -1490,7 +1624,7 @@ private fun OtpCells(
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(56.dp)
+                        .heightIn(min = 56.dp)
                         .graphicsLayer {
                             // The sweep lifts each cell a touch as it passes. Tiny on
                             // purpose: this is a "working on it" cue, not a bounce.

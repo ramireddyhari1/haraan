@@ -8,8 +8,10 @@ use App\Http\Controllers\Controller;
 use App\Models\PlayerPost;
 use App\Models\PostComment;
 use App\Models\PostLike;
+use App\Models\PostReport;
 use App\Models\PostSave;
 use App\Models\User;
+use App\Services\HomeFeed;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -26,31 +28,14 @@ use Illuminate\View\View;
  */
 final class SocialFeedController extends Controller
 {
-    /** How many posts one page of the feed carries. Matches the app's request. */
-    private const FEED_LIMIT = 100;
-
     /** GET /feed — stories strip + photo posts, newest first. Guests may read. */
     public function index(): View
     {
         $me = auth()->user();
         $meId = $me instanceof User ? (int) $me->id : null;
 
-        $posts = PlayerPost::query()
-            ->with(['user', 'images'])
-            ->withCount(['likes', 'comments'])
-            // Public accounts only. `null` is a pre-privacy account and counts as public,
-            // the same rule the API and the player search apply — a stricter reading here
-            // would silently empty the feed of everyone who signed up before the toggle.
-            ->whereHas('user', function ($q): void {
-                $q->where('is_guest', false)
-                    ->where(function ($sub): void {
-                        $sub->whereNull('privacy_public_profile')
-                            ->orWhere('privacy_public_profile', true);
-                    });
-            })
-            ->orderByDesc('id')
-            ->limit(self::FEED_LIMIT)
-            ->get();
+        // Moderation, pins, ordering and every /control feed rule — shared with the app's API.
+        $posts = HomeFeed::posts();
 
         // Which of these the viewer has already liked / saved, in one query each rather
         // than a lookup per card.
@@ -63,10 +48,7 @@ final class SocialFeedController extends Controller
         }
 
         $items = $posts->map(function (PlayerPost $p) use ($liked, $saved, $meId): array {
-            $images = $p->images->pluck('image_path')->values()->all();
-            if (empty($images)) {
-                $images = array_filter([$p->image_path]);
-            }
+            $images = $p->imagePaths();
             $author = $p->user;
 
             return [
@@ -79,6 +61,8 @@ final class SocialFeedController extends Controller
                 'liked' => isset($liked[$p->id]),
                 'saved' => isset($saved[$p->id]),
                 'mine' => $meId !== null && (int) $p->user_id === $meId,
+                'pinned' => $p->isPinned(),
+                'featured' => (bool) $p->featured,
                 'authorId' => (string) ($author?->player_id ?? ''),
                 'authorName' => (string) ($author?->name ?? 'Player'),
                 'authorUsername' => (string) ($author?->username ?? ''),
@@ -88,7 +72,7 @@ final class SocialFeedController extends Controller
 
         // One story bubble per recent poster (their newest post), newest first — same
         // derivation as the app, so both surfaces show the same ring of people.
-        $stories = $posts->unique('user_id')->take(20)->map(fn (PlayerPost $p): array => [
+        $stories = HomeFeed::storyPosts($posts)->map(fn (PlayerPost $p): array => [
             'playerId' => (string) ($p->user?->player_id ?? ''),
             'name' => (string) ($p->user?->name ?? 'Player'),
             'username' => (string) ($p->user?->username ?? ''),
@@ -99,6 +83,8 @@ final class SocialFeedController extends Controller
             'title' => 'Home',
             'feedPosts' => $items,
             'feedStories' => $stories,
+            'feedRules' => HomeFeed::clientRules(),
+            'reportReasons' => PostReport::REASONS,
         ]);
     }
 
@@ -107,7 +93,7 @@ final class SocialFeedController extends Controller
     {
         $user = $request->user();
         $post = PlayerPost::query()->find($id);
-        if ($post === null) {
+        if ($post === null || ! HomeFeed::viewable($post, $user)) {
             return response()->json(['error' => 'Not found'], 404);
         }
 
@@ -136,13 +122,15 @@ final class SocialFeedController extends Controller
     public function comments(int $id): JsonResponse
     {
         $post = PlayerPost::query()->find($id);
-        if ($post === null) {
+        $viewer = auth()->user();
+        if ($post === null || ! HomeFeed::viewable($post, $viewer instanceof User ? $viewer : null)) {
             return response()->json(['error' => 'Not found'], 404);
         }
 
         $rows = PostComment::query()
             ->with('user')
             ->where('post_id', $post->id)
+            ->visible()
             ->orderBy('id')
             ->limit(300)
             ->get();
@@ -163,14 +151,20 @@ final class SocialFeedController extends Controller
     public function addComment(Request $request, int $id): JsonResponse
     {
         $user = $request->user();
+        if ($blocked = HomeFeed::commentingBlockedReason($user)) {
+            return response()->json(['error' => $blocked], 403);
+        }
         $data = $request->validate(['body' => ['required', 'string', 'max:500']]);
         $body = trim($data['body']);
         if ($body === '') {
             return response()->json(['error' => 'Empty comment'], 422);
         }
+        if (HomeFeed::blockedWordIn($body) !== null) {
+            return response()->json(['error' => 'Your comment has words that aren’t allowed on Haraan.'], 422);
+        }
 
         $post = PlayerPost::query()->find($id);
-        if ($post === null) {
+        if ($post === null || ! HomeFeed::viewable($post, $user)) {
             return response()->json(['error' => 'Not found'], 404);
         }
 
@@ -187,8 +181,40 @@ final class SocialFeedController extends Controller
             'name' => (string) $user->name,
             'username' => (string) ($user->username ?? ''),
             'avatar' => $this->mediaUrl($user->avatar),
-            'comment_count' => (int) $post->comments()->count(),
+            'comment_count' => (int) $post->visibleComments()->count(),
         ], 201);
+    }
+
+    /** POST /feed/posts/{id}/report — report a post, or with comment_id one comment under it. */
+    public function report(Request $request, int $id): JsonResponse
+    {
+        $user = $request->user();
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'in:'.implode(',', array_keys(PostReport::REASONS))],
+            'details' => ['nullable', 'string', 'max:500'],
+            'comment_id' => ['nullable', 'integer'],
+        ]);
+
+        $post = PlayerPost::query()->find($id);
+        if ($post === null || ! HomeFeed::viewable($post, $user)) {
+            return response()->json(['error' => 'Not found'], 404);
+        }
+        if ((int) $post->user_id === (int) $user->id && empty($data['comment_id'])) {
+            return response()->json(['error' => 'You can’t report your own post'], 422);
+        }
+
+        $comment = null;
+        if (! empty($data['comment_id'])) {
+            $comment = PostComment::query()->where('post_id', $post->id)->find((int) $data['comment_id']);
+            if ($comment === null) {
+                return response()->json(['error' => 'Comment not found'], 404);
+            }
+        }
+
+        $details = trim((string) ($data['details'] ?? ''));
+        $hidden = HomeFeed::report($user, $post, $comment, $data['reason'], $details === '' ? null : $details);
+
+        return response()->json(['reported' => true, 'hidden' => $hidden], 201);
     }
 
     /**

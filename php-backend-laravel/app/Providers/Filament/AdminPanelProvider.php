@@ -82,6 +82,8 @@ class AdminPanelProvider extends PanelProvider
                     ->icon('heroicon-o-ticket'),
                 NavigationGroup::make('GameHub')
                     ->icon('heroicon-o-building-storefront'),
+                NavigationGroup::make('ActionBoard Home')
+                    ->icon('heroicon-o-photo'),
                 NavigationGroup::make('Finance')
                     ->icon('heroicon-o-banknotes'),
                 NavigationGroup::make('Marketing')
@@ -128,6 +130,8 @@ class AdminPanelProvider extends PanelProvider
                 \App\Filament\Pages\AppUpdatesPage::class,
                 \App\Filament\Pages\ServerStatus::class,
                 \App\Filament\Pages\WhatsAppConnection::class,
+                // ActionBoard Home → Feed rules: the `home_feed` rules beside the posts they govern.
+                \App\Filament\Pages\HomeFeedRulesPage::class,
                 // GameHub → Commentary rules: the `commentary` rules (switch, limits, reports).
                 \App\Filament\Pages\CommentaryRulesPage::class,
                 // Platform → Pulse desktop page: the `pulse_web` sections under the /gamehub grid.

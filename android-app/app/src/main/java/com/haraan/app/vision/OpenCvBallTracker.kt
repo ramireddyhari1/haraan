@@ -620,6 +620,10 @@ class OpenCvBallTracker(
                 else -> MIN_AREA_PX * detail
             }
             if (rawArea < rawFloor || (area > MAX_AREA_PX && !nearBall)) {
+                if (System.getenv("BENCH_SMALL") != null && rawArea >= 3.0) {
+                    val m = Imgproc.moments(contour)
+                    if (m.m00 > 0) debug?.invoke("t=$timestampMs SMALL (%.3f,%.3f raw=%.0f floor=%.1f)".format(m.m10 / m.m00 / cur.cols(), m.m01 / m.m00 / cur.rows(), rawArea, rawFloor))
+                }
                 rejectedSize++
                 contour.release()
                 continue

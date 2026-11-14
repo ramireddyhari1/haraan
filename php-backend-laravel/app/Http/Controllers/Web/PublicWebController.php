@@ -12,12 +12,15 @@ use App\Models\Ad;
 use App\Models\Event;
 use App\Models\HostProfile;
 use App\Models\LiveMatch;
+use App\Models\PlayerPost;
 use App\Models\User;
 use App\Models\Venue;
 use App\Services\AdTracker;
+use App\Support\NetworkAds;
 use App\Services\BookingService;
 use App\Services\DistrictService;
 use App\Services\EventService;
+use App\Services\HomeFeed;
 use App\Services\Insights\SportInsights;
 use App\Services\LeaderboardService;
 use App\Services\Membership\EntitlementDenied;
@@ -734,8 +737,32 @@ final class PublicWebController extends Controller
             }
         }
 
-        // Players' photos need the Home feed service, which ships separately.
+        // Players' photos from the Home feed: its own moderation and ordering, featured lifted.
         $photos = [];
+        if ($on('photos_enabled')) {
+            $posts = HomeFeed::posts()
+                ->sortByDesc(fn (PlayerPost $p): int => $p->featured ? 1 : 0)
+                ->values();
+            foreach ($posts as $p) {
+                $img = MediaUrl::resolve($p->imagePaths()[0] ?? null);
+                if (! $img) {
+                    continue;
+                }
+                $photos[] = [
+                    'image' => $img,
+                    'caption' => Str::limit(trim((string) ($p->caption ?? '')), 80),
+                    'name' => (string) ($p->user?->name ?? 'Player'),
+                    'avatar' => MediaUrl::resolve($p->user?->avatar),
+                    'likes' => (int) ($p->likes_count ?? 0),
+                ];
+                if (count($photos) >= PlatformRules::int('pulse_web.photos_limit')) {
+                    break;
+                }
+            }
+            if (count($photos) < PlatformRules::int('pulse_web.photos_min')) {
+                $photos = [];
+            }
+        }
 
         // This month's ranked board: the chosen city, else all of India.
         $players = [];
@@ -797,7 +824,7 @@ final class PublicWebController extends Controller
             'matches' => $matches,
             'matchesTitle' => PlatformRules::string('pulse_web.matches_title'),
             'photos' => $photos,
-            'photosTitle' => '',
+            'photosTitle' => PlatformRules::string('pulse_web.photos_title'),
             'players' => $players,
             'playersTitle' => PlatformRules::string('pulse_web.players_title'),
             'playersWhere' => $playersWhere,
@@ -1716,6 +1743,10 @@ final class PublicWebController extends Controller
             'abDistrictSummary' => $districtSummary,
             'abDistrictBoard' => $districtBoard,
             'abStateBoard' => $stateBoard,
+            // Sponsor spot under the Live and Finished lists: a Haraan sponsor booked into
+            // `actionboard_feed` first, else AdSense from /control → Marketing → Ad networks.
+            'abFeedAd' => $this->usableAd('actionboard_feed'),
+            'abFeedAdsense' => NetworkAds::webSlot('feed', $viewer instanceof User ? $viewer : null),
             'seo' => [
                 'title' => 'ActionBoard — Live Cricket Scores & Grassroots Matches',
                 'description' => 'Follow live gully cricket scores, ball-by-ball commentary, local match scorecards, and district leaderboards on Haraan ActionBoard.',
@@ -1865,7 +1896,7 @@ final class PublicWebController extends Controller
                 ? app(SportInsights::class)->for($match)
                 : null,
             'insightsLock' => $insightsLock,
-            'matchAd' => $this->matchAd($match),
+            ...$this->matchSponsor(),
             'tab' => $tab,
             'tabs' => $tabs,
             'seo' => [
@@ -1882,10 +1913,22 @@ final class PublicWebController extends Controller
         ]);
     }
 
-    /** The live-board sponsor slot on the web, counted as an impression when shown. */
-    private function matchAd(LiveMatch $match): ?Ad
+    /**
+     * The sponsor spot under a match page: the Haraan sponsor booked into `match_live` (counted
+     * as an impression when shown), or — only when there is none — the AdSense unit from
+     * /control → Marketing → Ad networks.
+     *
+     * @return array{matchAd: ?Ad, matchAdsense: array{client: string, slot: string}|null}
+     */
+    private function matchSponsor(): array
     {
-        return $this->usableAd('match_live');
+        $ad = $this->usableAd('match_live');
+        $viewer = auth()->user();
+
+        return [
+            'matchAd' => $ad,
+            'matchAdsense' => $ad === null ? NetworkAds::webSlot('match', $viewer instanceof User ? $viewer : null) : null,
+        ];
     }
 
     /**
@@ -1907,6 +1950,7 @@ final class PublicWebController extends Controller
             'detail' => $detail,
             'id' => $id,
             'activeTab' => 'commentary',
+            ...$this->matchSponsor(),
             'seo' => $seo,
         ]);
     }
@@ -1926,6 +1970,7 @@ final class PublicWebController extends Controller
             'detail' => $detail,
             'id' => $id,
             'activeTab' => 'live',
+            ...$this->matchSponsor(),
             'seo' => $seo,
         ]);
     }
@@ -1945,6 +1990,7 @@ final class PublicWebController extends Controller
             'detail' => $detail,
             'id' => $id,
             'activeTab' => 'info',
+            ...$this->matchSponsor(),
             'seo' => $seo,
         ]);
     }
@@ -2012,6 +2058,7 @@ final class PublicWebController extends Controller
             'detail' => $detail,
             'id' => $id,
             'activeTab' => 'mvp',
+            ...$this->matchSponsor(),
             'seo' => $seo,
         ]);
     }
@@ -2060,6 +2107,7 @@ final class PublicWebController extends Controller
             'detail' => $detail,
             'id' => $id,
             'activeTab' => 'insights',
+            ...$this->matchSponsor(),
             'insights' => $facts,
             'insightsLock' => $lock,
             'seo' => $seo,
@@ -2081,6 +2129,7 @@ final class PublicWebController extends Controller
             'detail' => $detail,
             'id' => $id,
             'activeTab' => 'scorecard',
+            ...$this->matchSponsor(),
             'seo' => $seo,
         ]);
     }

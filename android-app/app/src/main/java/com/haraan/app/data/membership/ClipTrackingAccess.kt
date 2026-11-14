@@ -13,8 +13,20 @@ import kotlinx.coroutines.withContext
  * is remembered: a Hero member at the nets with no signal is not locked out by a failed read,
  * and one whose plan has lapsed loses it the next time the phone can ask.
  */
-object ClipTrackingAccess {
-    const val FEATURE = "tracking.clip_upload"
+object ClipTrackingAccess : PhoneFeatureAccess("tracking.clip_upload")
+
+/**
+ * Bowling sessions: a named practice session on the LBW camera, its videos kept on this phone.
+ * The member feature `tracking.bowling_sessions`, set per plan in /control (Hero at launch).
+ */
+object BowlingSessionAccess : PhoneFeatureAccess("tracking.bowling_sessions")
+
+/**
+ * A member feature that runs on the phone, gated by the member's own entitlements and never by
+ * a plan-code check. The last answer is remembered per feature, so no signal at the nets does
+ * not lock a member out.
+ */
+open class PhoneFeatureAccess(val FEATURE: String) {
 
     enum class State { ALLOWED, LOCKED, SIGNED_OUT }
 
@@ -32,19 +44,20 @@ object ClipTrackingAccess {
     }
 
     private fun log(line: String) {
-        runCatching { android.util.Log.i("ClipTrackingAccess", line) }
+        runCatching { android.util.Log.i("PhoneFeatureAccess", "$FEATURE: $line") }
     }
 
     /** Only an entitlement the server marked enabled counts; a missing row locks it. */
     fun allowedBy(entitlements: List<PlanFeature>): Boolean = entitlements.any { it.key == FEATURE && it.enabled }
 
     private fun remember(context: Context, allowed: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY, allowed).apply()
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(FEATURE, allowed).apply()
     }
 
     private fun remembered(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY, false)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(FEATURE, false)
 
-    private const val PREFS = "member_features"
-    private const val KEY = "tracking.clip_upload"
+    private companion object {
+        const val PREFS = "member_features"
+    }
 }

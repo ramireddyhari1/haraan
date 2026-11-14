@@ -155,7 +155,7 @@ private fun ClipTrackScreen(initial: Uri?, onExit: () -> Unit) {
         val uri = clip ?: run { stage = Stage.Failed("No clip was picked."); return@LaunchedEffect }
         // The Join sheet only opens this for a member whose plan includes it; asked again here
         // because a screen can be reached other ways.
-        if (com.haraan.app.data.membership.ClipTrackingAccess.check(context) != com.haraan.app.data.membership.ClipTrackingAccess.State.ALLOWED) {
+        if (com.haraan.app.data.membership.ClipTrackingAccess.check(context) != com.haraan.app.data.membership.PhoneFeatureAccess.State.ALLOWED) {
             stage = Stage.Locked
             return@LaunchedEffect
         }

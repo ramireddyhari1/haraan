@@ -191,12 +191,12 @@ internal fun JoinMatchSheet(
   }
   // Track a clip is a Hero feature (tracking.clip_upload): asked as the sheet opens, so the card
   // already says whether it opens the gallery or the plans.
-  var clipAccess by remember { mutableStateOf<com.haraan.app.data.membership.ClipTrackingAccess.State?>(null) }
+  var clipAccess by remember { mutableStateOf<com.haraan.app.data.membership.PhoneFeatureAccess.State?>(null) }
   LaunchedEffect(Unit) { clipAccess = com.haraan.app.data.membership.ClipTrackingAccess.check(context) }
   fun openClipTracking() {
     scope.launch {
       val state = clipAccess ?: com.haraan.app.data.membership.ClipTrackingAccess.check(context).also { clipAccess = it }
-      if (state == com.haraan.app.data.membership.ClipTrackingAccess.State.ALLOWED) {
+      if (state == com.haraan.app.data.membership.PhoneFeatureAccess.State.ALLOWED) {
         pickClip.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.VideoOnly))
       } else {
         // Not on a plan that includes it: the plans, where Hero says what it adds.
@@ -204,6 +204,21 @@ internal fun JoinMatchSheet(
         com.haraan.app.data.membership.MembershipNav.open()
         onDismiss()
       }
+    }
+  }
+  // Bowling sessions (tracking.bowling_sessions, Hero at launch): their own screen.
+  var sessionAccess by remember { mutableStateOf<com.haraan.app.data.membership.PhoneFeatureAccess.State?>(null) }
+  LaunchedEffect(Unit) { sessionAccess = com.haraan.app.data.membership.BowlingSessionAccess.check(context) }
+  fun openBowlingSessions() {
+    scope.launch {
+      val state = sessionAccess ?: com.haraan.app.data.membership.BowlingSessionAccess.check(context).also { sessionAccess = it }
+      view.tick()
+      if (state == com.haraan.app.data.membership.PhoneFeatureAccess.State.ALLOWED) {
+        com.haraan.app.ui.sessions.BowlingSessionsActivity.open(context)
+      } else {
+        com.haraan.app.data.membership.MembershipNav.open()
+      }
+      onDismiss()
     }
   }
   val shake = remember { Animatable(0f) }
@@ -476,8 +491,13 @@ internal fun JoinMatchSheet(
 
       Spacer(Modifier.height(18.dp))
       TrackClipCard(
-        locked = clipAccess != null && clipAccess != com.haraan.app.data.membership.ClipTrackingAccess.State.ALLOWED,
+        locked = clipAccess != null && clipAccess != com.haraan.app.data.membership.PhoneFeatureAccess.State.ALLOWED,
         onClick = { openClipTracking() },
+      )
+      Spacer(Modifier.height(10.dp))
+      BowlingSessionsCard(
+        locked = sessionAccess != null && sessionAccess != com.haraan.app.data.membership.PhoneFeatureAccess.State.ALLOWED,
+        onClick = { openBowlingSessions() },
       )
       }
      }
@@ -912,6 +932,90 @@ private fun TrackClipCard(locked: Boolean, onClick: () -> Unit) {
       Spacer(Modifier.height(8.dp))
       Text(
         if (locked) "Included with Hero  →" else "Choose a video  →",
+        color = Accent,
+        fontSize = 13.5.sp,
+        fontWeight = FontWeight.Bold,
+      )
+    }
+  }
+}
+
+/**
+ * Bowling sessions: a named practice spell on the LBW camera, then live and past sessions with
+ * the videos this phone kept for each. Opens its own screen.
+ */
+@Composable
+private fun BowlingSessionsCard(locked: Boolean, onClick: () -> Unit) {
+  val live = remember { androidx.compose.runtime.mutableIntStateOf(0) }
+  val context = LocalContext.current
+  LaunchedEffect(Unit) {
+    live.intValue = com.haraan.app.camera.BowlingSessionStore.all(context).count { it.isLive() }
+  }
+  Row(
+    Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(22.dp))
+      .background(Color.White)
+      .border(1.dp, Hairline, RoundedCornerShape(22.dp))
+      .clickable(role = Role.Button, onClick = onClick)
+      .padding(horizontal = 14.dp, vertical = 12.dp),
+    verticalAlignment = Alignment.CenterVertically,
+  ) {
+    Box(
+      Modifier.size(44.dp).clip(RoundedCornerShape(13.dp)).background(Accent.copy(alpha = 0.08f)),
+      contentAlignment = Alignment.Center,
+    ) {
+      androidx.compose.foundation.Canvas(Modifier.size(22.dp)) {
+        val w = size.width
+        val h = size.height
+        val sw = w * 0.1f
+        listOf(0.3f, 0.5f, 0.7f).forEach { x ->
+          drawLine(Accent, androidx.compose.ui.geometry.Offset(w * x, h * 0.22f), androidx.compose.ui.geometry.Offset(w * x, h * 0.92f), sw, androidx.compose.ui.graphics.StrokeCap.Round)
+        }
+        drawLine(Accent, androidx.compose.ui.geometry.Offset(w * 0.24f, h * 0.12f), androidx.compose.ui.geometry.Offset(w * 0.76f, h * 0.12f), sw * 0.8f, androidx.compose.ui.graphics.StrokeCap.Round)
+      }
+    }
+    Spacer(Modifier.width(12.dp))
+    Column(Modifier.weight(1f)) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Bowling sessions", color = Ink, fontSize = 15.5.sp, fontWeight = FontWeight.ExtraBold)
+        Spacer(Modifier.width(8.dp))
+        Text(
+          "HERO",
+          color = HeroGold,
+          fontSize = 9.5.sp,
+          fontWeight = FontWeight.ExtraBold,
+          letterSpacing = 1.2.sp,
+          modifier = Modifier
+            .clip(RoundedCornerShape(999.dp))
+            .background(HeroOnyx)
+            .padding(horizontal = 7.dp, vertical = 2.dp),
+        )
+        if (live.intValue > 0 && !locked) {
+          Spacer(Modifier.width(6.dp))
+          Text(
+            "${live.intValue} LIVE",
+            color = Color.White,
+            fontSize = 9.5.sp,
+            fontWeight = FontWeight.ExtraBold,
+            letterSpacing = 1.sp,
+            modifier = Modifier
+              .clip(RoundedCornerShape(999.dp))
+              .background(Danger)
+              .padding(horizontal = 7.dp, vertical = 2.dp),
+          )
+        }
+      }
+      Spacer(Modifier.height(2.dp))
+      Text(
+        "Name a practice spell, film it with the LBW camera, keep every ball's video by session.",
+        color = Muted,
+        fontSize = 12.5.sp,
+        lineHeight = 17.sp,
+      )
+      Spacer(Modifier.height(6.dp))
+      Text(
+        if (locked) "Included with Hero  →" else "Create or open a session  →",
         color = Accent,
         fontSize = 13.5.sp,
         fontWeight = FontWeight.Bold,

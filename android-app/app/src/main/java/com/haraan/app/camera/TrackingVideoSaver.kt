@@ -63,6 +63,13 @@ internal class TrackingVideoSaver private constructor(private val context: Conte
         /** Shown in the corner and the file name: the over and ball, or empty. */
         val label: String,
         val takenAtMs: Long = System.currentTimeMillis(),
+        /**
+         * A bowling session's folder (under Movies/[BowlingSessionStore.ROOT_ALBUM]), or null for
+         * the match camera's own album.
+         */
+        val sessionAlbum: String? = null,
+        /** Called on the saver's thread once the video is in the Gallery. */
+        val onSaved: (() -> Unit)? = null,
     )
 
     /**
@@ -99,6 +106,7 @@ internal class TrackingVideoSaver private constructor(private val context: Conte
                 val frames = render(job, out)
                 val name = publish(out, job)
                 Log.i(TAG, "saved $name: $frames frames in ${(System.nanoTime() - began) / 1_000_000} ms")
+                runCatching { job.onSaved?.invoke() }
             } catch (t: Throwable) {
                 Log.w(TAG, "ball not saved: ${t.message}", t)
             } finally {
@@ -376,12 +384,13 @@ internal class TrackingVideoSaver private constructor(private val context: Conte
         val stamp = SimpleDateFormat("yyyy-MM-dd HH-mm-ss", Locale.US).format(Date(job.takenAtMs))
         val ball = job.label.replace(Regex("[^A-Za-z0-9. ]"), "").trim()
         val name = if (ball.isNotEmpty()) "Haraan $ball $stamp.mp4" else "Haraan ball $stamp.mp4"
+        val folder = job.sessionAlbum?.let { "${BowlingSessionStore.ROOT_ALBUM}/$it" } ?: ALBUM
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val resolver = context.contentResolver
             val values = ContentValues().apply {
                 put(MediaStore.Video.Media.DISPLAY_NAME, name)
                 put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/$ALBUM")
+                put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/$folder/")
                 put(MediaStore.Video.Media.DATE_TAKEN, job.takenAtMs)
                 put(MediaStore.Video.Media.IS_PENDING, 1)
             }
@@ -398,7 +407,7 @@ internal class TrackingVideoSaver private constructor(private val context: Conte
         } else {
             // Before Android 10 the shared Movies folder needs a storage permission this app
             // does not ask for: kept in the app's own Movies folder instead.
-            val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_MOVIES), ALBUM).apply { mkdirs() }
+            val dir = File(context.getExternalFilesDir(Environment.DIRECTORY_MOVIES), folder).apply { mkdirs() }
             file.copyTo(File(dir, name), overwrite = true)
         }
         return name

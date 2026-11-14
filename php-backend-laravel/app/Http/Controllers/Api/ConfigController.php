@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\Membership\MemberEntitlements;
 use App\Services\Rewards\RewardEngine;
 use App\Support\Membership\MemberFeature;
+use App\Support\NetworkAds;
 use App\Support\Operations;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -53,6 +54,9 @@ final class ConfigController extends Controller
                     && RewardEngine::rewardedAdsAvailable()
                     && ! app(MemberEntitlements::class)->allows($user, MemberFeature::ADS_HIDDEN),
             ],
+            // /control → Marketing → Ad networks: the AdMob units for the ActionBoard. A spot is
+            // null when it must stay empty (switched off, no unit, or the member's plan has no ads).
+            'ads' => NetworkAds::appConfig($user),
             'server_time' => now()->toIso8601String(),
         ]);
     }

@@ -56,6 +56,14 @@
             android:launchMode="singleTop"
             android:exported="true" />
 
+        <!-- Bowling sessions (Hero): named LBW-camera practice sessions, live and history. -->
+        <activity
+            android:name=".ui.sessions.BowlingSessionsActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@style/Theme.Thanna" />
+
         <!-- Track a clip: a picked video through the match camera's ball tracking. -->
         <activity
             android:name=".ui.track.ClipTrackActivity"

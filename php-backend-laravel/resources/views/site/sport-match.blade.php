@@ -258,6 +258,9 @@
                 </span>
                 @if($matchAd->cta_text)<span class="smx-ad-cta">{{ $matchAd->cta_text }}</span>@endif
             </a>
+        @elseif($matchAdsense ?? null)
+            {{-- No Haraan sponsor booked: Google fills the spot (Marketing → Ad networks). --}}
+            @include('site.partials.actionboard-sponsor', ['adsense' => $matchAdsense])
         @endif
 
         @if(!$board && !$fb)
