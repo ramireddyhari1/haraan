@@ -3311,6 +3311,37 @@ private fun ActionboardLiveTeamRow(
 
 
 
+/** Pill slide for the Events/Pulse switch: quick ease-out, no overshoot to wobble at the swap. */
+private val TabPillSlideSpec = tween<androidx.compose.ui.unit.Dp>(durationMillis = 240, easing = FastOutSlowInEasing)
+
+/**
+ * Events and Pulse each render their own copy of the switch, so calling onTabSelected straight
+ * away replaces the screen before the pill has moved, and the pill appears to teleport. This
+ * slides the pill to [index] first and only hands the selection up once the slide has landed.
+ * Returns the index the pill should show and the tap handler.
+ */
+@Composable
+private fun rememberSlideThenSelect(
+  selectedIndex: Int,
+  keys: List<String>,
+  onTabSelected: (String) -> Unit,
+): Pair<Int, (Int) -> Unit> {
+  var pending by remember { mutableStateOf<Int?>(null) }
+  val scope = rememberCoroutineScope()
+  val currentOnSelected by androidx.compose.runtime.rememberUpdatedState(onTabSelected)
+  val select: (Int) -> Unit = { index ->
+    if (index != selectedIndex && pending == null) {
+      pending = index
+      scope.launch {
+        delay(250)
+        currentOnSelected(keys[index])
+        pending = null
+      }
+    }
+  }
+  return (pending ?: selectedIndex) to select
+}
+
 @Composable
 private fun GameHubSegmentedSwitch(
   selectedTab: String,
@@ -3334,10 +3365,11 @@ private fun GameHubSegmentedSwitch(
     val containerWidth = maxWidth
     val tabWidth = containerWidth / tabs.size
     val selectedIndex = tabs.indexOfFirst { it.first == selectedTab }.coerceAtLeast(0)
-    
+    val (shownIndex, select) = rememberSlideThenSelect(selectedIndex, tabs.map { it.first }, onTabSelected)
+
     val indicatorOffset by animateDpAsState(
-      targetValue = tabWidth * selectedIndex,
-      animationSpec = spring(dampingRatio = 0.82f, stiffness = 400f),
+      targetValue = tabWidth * shownIndex,
+      animationSpec = TabPillSlideSpec,
       label = "SwitchSliderOffset"
     )
     
@@ -3355,8 +3387,8 @@ private fun GameHubSegmentedSwitch(
       )
       
       Row(modifier = Modifier.fillMaxSize()) {
-        tabs.forEach { (key, label) ->
-          val isSelected = selectedTab == key
+        tabs.forEachIndexed { index, (_, label) ->
+          val isSelected = index == shownIndex
           Box(
             modifier = Modifier
               .weight(1f)
@@ -3364,12 +3396,11 @@ private fun GameHubSegmentedSwitch(
               .clickable(
                 interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
                 indication = null
-              ) { onTabSelected(key) },
+              ) { select(index) },
             contentAlignment = Alignment.Center
           ) {
-            Text(
-              text = label,
-              color = when {
+            val labelColor by animateColorAsState(
+              targetValue = when {
                 // Lane deep accent (#1E3A8A by default); ink if a campaign's is too light for the white pill.
                 isSelected -> LocalSectionTheme.current.deep
                   .takeIf { SectionTheme.contrastRatio(it, Color.White) >= SectionTheme.MIN_TEXT_CONTRAST }
@@ -3377,6 +3408,12 @@ private fun GameHubSegmentedSwitch(
                 onLight -> HaraanColors.TextSecondary
                 else -> Color.White.copy(alpha = 0.75f)
               },
+              animationSpec = tween(durationMillis = 180),
+              label = "SwitchLabelColor"
+            )
+            Text(
+              text = label,
+              color = labelColor,
               fontSize = 13.sp,
               fontWeight = FontWeight.Bold
             )
@@ -12572,14 +12609,13 @@ fun PremiumSegmentedSwitch(
         val containerWidth = maxWidth
         val tabWidth = containerWidth / tabs.size
         val selectedIndex = tabs.indexOfFirst { it.first == selectedTab }.coerceAtLeast(0)
+        // Events and Pulse each draw their OWN switch, so selecting a tab swaps the whole
+        // screen and this switch leaves composition. Slide the pill first, then hand off.
+        val (shownIndex, select) = rememberSlideThenSelect(selectedIndex, tabs.map { it.first }, onTabSelected)
 
-        // Fluid spring physics animation makes the pill slide organically
         val indicatorOffset by animateDpAsState(
-            targetValue = tabWidth * selectedIndex,
-            animationSpec = spring(
-                dampingRatio = 0.82f, // Adds a premium, high-end microscopic bounce
-                stiffness = 400f      // Snappy response time
-            ),
+            targetValue = tabWidth * shownIndex,
+            animationSpec = TabPillSlideSpec,
             label = "PillSliderOffset"
         )
 
@@ -12603,8 +12639,8 @@ fun PremiumSegmentedSwitch(
 
             // --- INTERACTIVE LABELS LAYER ---
             Row(modifier = Modifier.fillMaxSize()) {
-                tabs.forEach { (key, title) ->
-                    val isSelected = selectedTab == key
+                tabs.forEachIndexed { index, (key, title) ->
+                    val isSelected = index == shownIndex
 
                     // Seamlessly crossfade the text colors
                     val textColor by animateColorAsState(
@@ -12622,14 +12658,15 @@ fun PremiumSegmentedSwitch(
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null
-                            ) { onTabSelected(key) },
+                            ) { select(index) },
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = title,
                             color = textColor,
                             fontSize = 15.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            // Fixed weight: flipping Bold/Medium mid-slide made the label jump.
+                            fontWeight = FontWeight.Bold,
                             letterSpacing = 0.1.sp
                         )
                     }
