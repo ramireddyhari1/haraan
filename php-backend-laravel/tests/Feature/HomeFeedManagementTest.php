@@ -361,4 +361,27 @@ class HomeFeedManagementTest extends TestCase
             ->post('/api/players/posts', ['image' => UploadedFile::fake()->create('a.jpg', 20, 'image/jpeg')], ['Accept' => 'application/json'])
             ->assertForbidden();
     }
+
+    public function test_a_venue_partner_cannot_moderate_the_feed_from_the_partner_console(): void
+    {
+        // A venue partner is lane-locked to 'gamehub' — the same workspace these pages use —
+        // and the partner panel discovers the same classes. Only /control may serve them.
+        $partner = User::factory()->create(['role' => 'PARTNER', 'partner_type' => 'venue']);
+        $this->assertTrue($partner->canManage('gamehub'));
+
+        Filament::setCurrentPanel(Filament::getPanel('partner'));
+        $this->actingAs($partner);
+        $this->assertFalse(\App\Filament\Resources\HomeFeedPosts\HomeFeedPostResource::canAccess());
+        $this->assertFalse(\App\Filament\Resources\PostReports\PostReportResource::canAccess());
+        $this->assertFalse(\App\Filament\Resources\FeedRestrictions\FeedRestrictionResource::canAccess());
+        $this->assertFalse(\App\Filament\Resources\HomeFeedComments\HomeFeedCommentResource::canAccess());
+        $this->assertFalse(\App\Filament\Pages\HomeFeedRulesPage::canAccess());
+        $this->assertFalse(\App\Filament\Clusters\Marketing\Pages\AdNetworksPage::canAccess());
+        $this->get('/partner/home-feed/posts')->assertForbidden();
+
+        Filament::setCurrentPanel(Filament::getPanel('control'));
+        $this->actingAs($this->admin());
+        $this->assertTrue(\App\Filament\Resources\HomeFeedPosts\HomeFeedPostResource::canAccess());
+        $this->assertTrue(\App\Filament\Pages\HomeFeedRulesPage::canAccess());
+    }
 }

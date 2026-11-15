@@ -44,7 +44,11 @@ class HomeFeedRulesPage extends Page implements HasForms
 
     public static function canAccess(): bool
     {
-        return self::canManageSection('home_feed');
+        // /control only. Venue partners are lane-locked to 'gamehub' and the partner panel
+        // discovers these same classes, so the workspace check alone would let a venue owner
+        // moderate everyone's Home feed from /partner.
+        return \Filament\Facades\Filament::getCurrentPanel()?->getId() === 'control'
+            && (self::canManageSection('home_feed'));
     }
 
     protected function ruleSections(): array

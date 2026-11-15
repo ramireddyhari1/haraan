@@ -46,7 +46,11 @@ class FeedRestrictionResource extends Resource
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->canManage('gamehub') ?? false;
+        // /control only. Venue partners are lane-locked to 'gamehub' and the partner panel
+        // discovers these same classes, so the workspace check alone would let a venue owner
+        // moderate everyone's Home feed from /partner.
+        return \Filament\Facades\Filament::getCurrentPanel()?->getId() === 'control'
+            && (auth()->user()?->canManage('gamehub') ?? false);
     }
 
     /** History is the point — a restriction is lifted, never deleted. */
