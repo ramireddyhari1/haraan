@@ -53,7 +53,7 @@ class ListedVenueController extends Controller
 
         $indexable = PlatformRules::bool('venue_discovery.index_pages') && $venue->isIndexableListing();
 
-        $hoursLine = $venue->publicHours();
+        $hoursLine = self::readableHours($venue->publicHours());
         $openNow = self::openNow($venue);
 
         // Facts only — no rating (there are no Haraan reviews), no price.
@@ -118,6 +118,7 @@ class ListedVenueController extends Controller
                 ? \App\Support\PlacePhotos::forPlace((string) $venue->place_id)
                 : [],
             'hoursLine' => $hoursLine,
+            'map' => self::map($venue),
             'openNow' => $openNow,
             'requests' => $requests,
             'requestsOpen' => PlatformRules::bool('venue_discovery.requests_enabled'),
@@ -189,6 +190,49 @@ class ListedVenueController extends Controller
         return null;
     }
 
+    /**
+     * "Mon–Sun Open 24 hours" → "Open 24 hours, every day"; "Mon–Sun 6 AM–11 PM" →
+     * "Every day, 6 AM–11 PM". Mixed weeks keep their day runs, minus the doubled "Open".
+     */
+    public static function readableHours(string $line): string
+    {
+        $line = trim($line);
+        if ($line === 'Mon–Sun Open 24 hours') {
+            return 'Open 24 hours, every day';
+        }
+        if (str_starts_with($line, 'Mon–Sun ') && ! str_contains($line, ' · ')) {
+            return 'Every day, ' . mb_substr($line, 8);
+        }
+
+        return str_replace(' Open 24 hours', ' 24 hours', $line);
+    }
+
+    /**
+     * Where the venue is, for the page: a directions link (admin map link, else the pin,
+     * else a name + address search) and a live Google embed only when there is a real
+     * pin and a key — the same rule as the bookable venue page. Never a drawn map.
+     *
+     * @return array{directions:string,embed:?string}|null
+     */
+    private static function map(Venue $venue): ?array
+    {
+        $hasPin = $venue->latitude !== null && $venue->longitude !== null;
+        $query = $hasPin
+            ? $venue->latitude . ',' . $venue->longitude
+            : trim($venue->name . ' ' . ($venue->address ?: $venue->location));
+        if (! $hasPin && ! $venue->map_link && trim((string) $venue->address) === '') {
+            return null;
+        }
+        $key = (string) config('services.google_maps.key');
+
+        return [
+            'directions' => $venue->map_link ?: 'https://www.google.com/maps/search/?api=1&query=' . urlencode($query),
+            'embed' => $key !== '' && $hasPin
+                ? 'https://www.google.com/maps/embed/v1/place?' . http_build_query(['key' => $key, 'q' => $query, 'zoom' => '16'])
+                : null,
+        ];
+    }
+
     /** What a venue is called, singular: "Football Turf", "Badminton Court", "Cricket & Football Turf". */
     public static function kind(Venue $venue): string
     {
@@ -225,7 +269,7 @@ class ListedVenueController extends Controller
         $name = $venue->name;
         $faqs = [];
         if ($hoursLine !== '') {
-            $faqs[] = ['question' => 'What are the timings of ' . $name . '?', 'answer' => $name . ' is open ' . $hoursLine . '. Timings come from the venue’s listing — call before you go.'];
+            $faqs[] = ['question' => 'What are the timings of ' . $name . '?', 'answer' => 'Timings at ' . $name . ': ' . $hoursLine . '. They come from the venue’s listing — call before you go.'];
         }
         if (trim((string) $venue->address) !== '') {
             $faqs[] = ['question' => 'Where is ' . $name . ($city !== '' ? ' in ' . $city : '') . '?', 'answer' => $name . ' is at ' . trim((string) $venue->address) . '. Use “Directions” on this page to open it in Google Maps.'];

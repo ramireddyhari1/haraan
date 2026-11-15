@@ -9,6 +9,9 @@
 --}}
 <style>
     .lv-page main.container, .lv-page .container { max-width: none; }
+    /* The site's phone rule pads main by 88px (!important) for pages without a footer;
+       this page ends in .mfoot, so that padding was a blank slate band above it. */
+    .lv-page main.container { padding-bottom: 0 !important; }
     .lv {
         --ink: #0F172A; --ink-2: #334155; --ink-3: #64748B; --rule: #E3E8EF; --paper: #FFFFFF;
         --wash: #F6F8FB; --blue: #2563EB; --blue-tint: #EEF4FF; --amber: #92400E; --amber-tint: #FEF6E7;
@@ -21,11 +24,29 @@
     .lv-crumbs a:hover { color: var(--blue); }
     .lv h1 { margin: 0; font-size: 38px; line-height: 1.1; font-weight: 800; letter-spacing: -0.025em; text-wrap: balance; }
     .lv-sub { margin: 10px 0 0; font-size: 16.5px; color: var(--ink-2); }
+    .lv-status { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 16px 0 0; }
     .lv-state {
-        display: inline-flex; align-items: center; gap: 8px; margin-top: 16px; padding: 7px 12px; border-radius: 8px;
-        background: var(--amber-tint); color: var(--amber); font-size: 13.5px; font-weight: 700;
+        display: inline-flex; align-items: center; gap: 8px; padding: 6px 11px; border-radius: 8px;
+        background: var(--amber-tint); color: var(--amber); font-size: 13px; font-weight: 700;
     }
     .lv-state::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: #D97706; }
+    .lv-status .lv-open { display: inline-flex; align-items: center; gap: 7px; margin: 0; font-size: 14px; }
+    .lv-status .lv-open::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+    /* What you can do here, from what is known: call, directions, ask, share. */
+    .lv-acts { display: flex; gap: 8px; margin-top: 20px; overflow-x: auto; scrollbar-width: none; }
+    .lv-acts::-webkit-scrollbar { display: none; }
+    .lv-act {
+        flex: 0 0 auto; display: inline-flex; align-items: center; gap: 8px; height: 42px; padding: 0 16px;
+        border: 1px solid #CFD8E3; border-radius: 999px; background: var(--paper); color: var(--ink) !important;
+        font: inherit; font-size: 14.5px; font-weight: 700; text-decoration: none; cursor: pointer; white-space: nowrap;
+        transition: border-color .12s, background .12s;
+    }
+    .lv-act svg { width: 18px; height: 18px; flex: none; color: var(--blue); }
+    .lv-act:hover { border-color: var(--blue); background: var(--blue-tint); }
+    .lv-act--main { background: var(--blue); border-color: var(--blue); color: #fff !important; }
+    .lv-act--main svg { color: #fff; }
+    .lv-act--main:hover { background: #1F5BE0; border-color: #1F5BE0; }
 
     .lv-photos { display: flex; gap: 10px; margin-top: 26px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: thin; border-radius: 14px; }
     .lv-photos figure { position: relative; flex: 0 0 calc((100% - 20px) / 3); margin: 0; aspect-ratio: 4 / 3; border-radius: 14px; overflow: hidden; background: #E9EEF4; scroll-snap-align: start; }
@@ -51,6 +72,11 @@
     .lv-open { display: block; margin-bottom: 4px; font-weight: 700; color: #B45309; }
     .lv-open.is-open { color: #15803D; }
     .lv-week { color: var(--ink-2); }
+    .lv-about { margin: 18px 0 0; font-size: 15.5px; line-height: 1.65; color: var(--ink-2); }
+    .lv-map { margin-top: 22px; }
+    .lv-map iframe { display: block; width: 100%; height: 240px; border: 0; border-radius: 14px; background: #E9EEF4; }
+    .lv-map a { display: inline-block; margin-top: 10px; font-size: 14px; font-weight: 700; color: var(--blue); text-decoration: none; }
+    .lv-map a:hover { text-decoration: underline; text-underline-offset: 3px; }
     .lv-note { margin: 14px 0 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-3); }
 
     .lv-card { background: var(--paper); border: 1px solid var(--rule); border-radius: 14px; padding: 22px; position: sticky; top: 88px; }
@@ -83,9 +109,10 @@
     .lv-sec { margin-top: 44px; }
     .lv-owner {
         display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px; align-items: center;
-        margin-top: 44px; padding: 24px 0; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
+        margin-top: 44px; padding: 22px 24px; border-radius: 14px; background: var(--paper); border: 1px solid var(--rule);
+        border-left: 3px solid var(--blue);
     }
-    .lv-owner h2 { margin-bottom: 6px; }
+    .lv-owner h2 { margin-bottom: 6px; font-size: 18px; }
     .lv-owner p { margin: 0; font-size: 15px; line-height: 1.6; color: var(--ink-2); max-width: 600px; }
 
     .lv-list { background: var(--paper); border: 1px solid var(--rule); border-radius: 14px; overflow: hidden; }
@@ -94,6 +121,8 @@
     .lv-row:hover { background: var(--wash); }
     .lv-row b { display: block; font-size: 15.5px; font-weight: 700; }
     .lv-row span { font-size: 13px; color: var(--ink-3); }
+    .lv-row--pic { grid-template-columns: 56px minmax(0, 1fr) auto; }
+    .lv-row__pic { width: 56px; height: 56px; border-radius: 10px; object-fit: cover; background: #E9EEF4; display: block; }
     .lv-row em { font-style: normal; font-size: 14px; font-weight: 700; color: var(--blue); white-space: nowrap; }
 
     .lv-faq { border-top: 2px solid var(--ink); padding-top: 0; }
@@ -104,7 +133,8 @@
     .lv-faq summary::after { content: '+'; color: var(--ink-3); font-weight: 600; }
     .lv-faq details[open] summary::after { content: '–'; }
     .lv-faq p { margin: 0 0 14px; font-size: 15px; line-height: 1.6; color: var(--ink-2); }
-    .lv-links { display: flex; flex-wrap: wrap; gap: 8px; }
+    .lv-links h2 { margin-bottom: 12px; }
+    .lv-links div { display: flex; flex-wrap: wrap; gap: 8px; }
     .lv-links a { font-size: 14px; font-weight: 600; text-decoration: none; padding: 7px 12px; border-radius: 999px; background: #EEF4FF; color: #1E40AF; }
     .lv-links a:hover { background: #DCE7FE; }
 
@@ -113,14 +143,26 @@
         .lv-card { position: static; }
     }
     @media (max-width: 600px) {
-        .lv { padding: 0 16px 56px; }
-        .lv h1 { font-size: 29px; }
+        .lv { padding: 0 16px 40px; }
+        .lv-crumbs { padding: 16px 0 12px; font-size: 12.5px; }
+        .lv-crumbs > :nth-child(-n+2) { display: none; }   /* "Home /" — the header logo is home */
+        .lv h1 { font-size: 28px; }
+        .lv-sub { font-size: 15px; margin-top: 8px; }
+        .lv-acts { margin: 18px -16px 0; padding: 0 16px; }
+        .lv-photos { margin-top: 20px; }
+        .lv-map iframe { height: 200px; }
+        .lv-sec, .lv-owner { margin-top: 36px; }
+        .lv-links div { flex-wrap: nowrap; overflow-x: auto; margin: 0 -16px; padding: 0 16px; scrollbar-width: none; }
+        .lv-links div::-webkit-scrollbar { display: none; }
+        .lv-links a { flex: none; white-space: nowrap; }
+        .lv-row { padding: 13px 14px; }
         .lv-facts div { grid-template-columns: 96px minmax(0, 1fr); gap: 12px; }
         .lv-photos { margin-right: -16px; padding-right: 16px; border-radius: 0; }
         .lv-photos figure, .lv-photos--2 figure { flex-basis: 82%; }
         .lv-photos--1 figure { flex-basis: 100%; aspect-ratio: 4 / 3; }
-        .lv-owner { grid-template-columns: 1fr; gap: 16px; }
-        .lv-btn--auto { width: 100%; }
+        .lv-owner { grid-template-columns: 1fr; gap: 14px; padding: 18px; }
+        .lv-owner p { font-size: 14.5px; }
+        .lv-owner .lv-btn { height: 44px; justify-self: start; }
     }
 </style>
 
@@ -138,10 +180,26 @@
     @if($sports || $where)
         <p class="lv-sub">{{ implode(' · ', array_filter([implode(', ', $sports), $where])) }}</p>
     @endif
-    <p class="lv-state">Not on Haraan yet — no online booking</p>
-    @if($openNow)
-        <p class="lv-sub" style="margin-top:10px;font-size:15px"><span class="lv-open {{ $openNow['open'] ? 'is-open' : '' }}" style="display:inline">{{ $openNow['text'] }}</span></p>
-    @endif
+    <div class="lv-status">
+        <span class="lv-state">No online booking yet</span>
+        @if($openNow)
+            <span class="lv-open {{ $openNow['open'] ? 'is-open' : '' }}">{{ $openNow['text'] }}</span>
+        @endif
+    </div>
+
+    @php($lvTel = $venue->contact_phone ? preg_replace('/[^\d+]/', '', $venue->contact_phone) : null)
+    <div class="lv-acts">
+        @if($lvTel)
+            <a class="lv-act lv-act--main" href="tel:{{ $lvTel }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/></svg> Call venue</a>
+        @endif
+        @if($map)
+            <a class="lv-act" href="{{ $map['directions'] }}" target="_blank" rel="noopener nofollow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="3 11 22 2 13 21 11 13 3 11"/></svg> Directions</a>
+        @endif
+        @if($requestsOpen)
+            <a class="lv-act {{ $lvTel ? '' : 'lv-act--main' }}" href="#lv-ask"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M9 16l2 2 4-4"/></svg> Ask to book</a>
+        @endif
+        <button class="lv-act" type="button" id="lv-share"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg> <span>Share</span></button>
+    </div>
 
     @if($photos)
         {{-- From the venue's own Google Maps listing, proxied (VenuePhotoController::listed).
@@ -171,22 +229,24 @@
                 @if($venue->address)
                     <div><dt>Address</dt><dd>{{ $venue->address }}</dd></div>
                 @endif
-                @if($venue->map_link)
-                    <div><dt>Directions</dt><dd><a href="{{ $venue->map_link }}" target="_blank" rel="noopener nofollow">Open in Google Maps</a></dd></div>
-                @endif
-                @if($venue->contact_phone)
-                    <div><dt>Phone</dt><dd><a href="tel:{{ preg_replace('/[^\d+]/', '', $venue->contact_phone) }}">{{ $venue->contact_phone }}</a></dd></div>
+                @if($lvTel)
+                    <div><dt>Phone</dt><dd><a href="tel:{{ $lvTel }}">{{ $venue->contact_phone }}</a></dd></div>
                 @endif
                 @if($hoursLine)
-                    <div><dt>Hours</dt><dd>
-                        @if($openNow)<span class="lv-open {{ $openNow['open'] ? 'is-open' : '' }}">{{ $openNow['text'] }}</span>@endif
-                        <span class="lv-week">{!! implode('<br>', array_map('e', explode(' · ', $hoursLine))) !!}</span>
-                    </dd></div>
+                    <div><dt>Hours</dt><dd><span class="lv-week">{!! implode('<br>', array_map('e', explode(' · ', $hoursLine))) !!}</span></dd></div>
                 @endif
-                <div><dt>Booking</dt><dd>Not available on Haraan. Call the venue to book, or ask us and we’ll tell the owner you want to play here.</dd></div>
+                <div><dt>Booking</dt><dd>{{ $lvTel ? 'Call the venue to book.' : 'Not open for online booking yet.' }}@if($requestsOpen) Or ask on Haraan and we’ll tell the owner you want to play here.@endif</dd></div>
             </dl>
             @if($venue->about)
-                <p class="lv-note" style="font-size:15px;color:var(--ink-2)">{{ $venue->about }}</p>
+                <p class="lv-about">{{ $venue->about }}</p>
+            @endif
+            @if($map)
+                <div class="lv-map">
+                    @if($map['embed'])
+                        <iframe src="{{ $map['embed'] }}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" title="Map of {{ $venue->name }}"></iframe>
+                    @endif
+                    <a href="{{ $map['directions'] }}" target="_blank" rel="noopener nofollow">Open in Google Maps →</a>
+                </div>
             @endif
             <p class="lv-note">Haraan has not visited or verified this venue. Details come from public listings and may be out of date — call before you go.</p>
         </div>
@@ -243,7 +303,7 @@
     @if(!empty($faqs))
         {{-- The same questions are the page's FAQPage markup (ListedVenueController::faqs). --}}
         <div class="lv-sec lv-faq">
-            <h2>About {{ $venue->name }}</h2>
+            <h2>Questions players ask</h2>
             @foreach($faqs as $f)
                 <details @if($loop->first) open @endif>
                     <summary>{{ $f['question'] }}</summary>
@@ -255,8 +315,8 @@
 
     <div class="lv-owner">
         <div>
-            <h2>Is this your venue?</h2>
-            <p>Claim it to take bookings online, set your own prices and hours, and keep walk-ins in the same calendar. A person from Haraan sets it up with you.</p>
+            <h2>Own {{ $venue->name }}?</h2>
+            <p>Take bookings online, set your own prices and hours, and keep walk-ins in the same calendar.@if($requests > 0) {{ $requests }} {{ $requests === 1 ? 'player has' : 'players have' }} asked to book here.@endif A person from Haraan sets it up with you.</p>
         </div>
         <a class="lv-btn lv-btn--auto" href="{{ route('site.partner.apply') }}">Claim this venue</a>
     </div>
@@ -266,7 +326,8 @@
             <h2>Book today in {{ $city }}</h2>
             <div class="lv-list">
                 @foreach($bookable as $b)
-                    <a class="lv-row" href="{{ \App\Support\SeoUrl::venue($b) }}">
+                    <a class="lv-row {{ $b->image ? 'lv-row--pic' : '' }}" href="{{ \App\Support\SeoUrl::venue($b) }}">
+                        @if($b->image)<img class="lv-row__pic" src="{{ $b->image }}" alt="" loading="lazy" onerror="this.parentNode.classList.remove('lv-row--pic');this.remove()">@endif
                         <div><b>{{ $b->name }}</b><span>{{ implode(' · ', array_filter([$b->location, implode(', ', array_slice($b->sportsList(), 0, 3))])) }}</span></div>
                         <em>See slots →</em>
                     </a>
@@ -277,9 +338,12 @@
 
     @if(!empty($cityLinks))
         <nav class="lv-sec lv-links" aria-label="More in {{ $city }}">
-            @foreach($cityLinks as $l)
-                <a href="{{ $l['url'] }}">{{ $l['label'] }}</a>
-            @endforeach
+            <h2>Explore {{ $city }}</h2>
+            <div>
+                @foreach($cityLinks as $l)
+                    <a href="{{ $l['url'] }}">{{ $l['label'] }}</a>
+                @endforeach
+            </div>
         </nav>
     @endif
 
@@ -298,6 +362,22 @@
     @endif
 </div>
 
+<script>
+(function () {
+    var b = document.getElementById('lv-share');
+    if (!b) return;
+    var label = b.querySelector('span');
+    b.addEventListener('click', function () {
+        var data = { title: document.title, url: location.href.split('#')[0] };
+        if (navigator.share) { navigator.share(data).catch(function () {}); return; }
+        if (!navigator.clipboard) return;
+        navigator.clipboard.writeText(data.url).then(function () {
+            label.textContent = 'Link copied';
+            setTimeout(function () { label.textContent = 'Share'; }, 1800);
+        }, function () {});
+    });
+})();
+</script>
 @if($requestsOpen)
 <script>
 (function () {
