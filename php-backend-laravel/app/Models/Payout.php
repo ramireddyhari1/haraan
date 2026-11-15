@@ -12,7 +12,11 @@ final class Payout extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['booking_id','amount','status','processed_at'];
+    protected $fillable = ['booking_id', 'amount', 'status', 'method', 'reference', 'note', 'processed_at'];
+
+    public const STATUSES = ['pending' => 'Pending', 'processed' => 'Processed', 'failed' => 'Failed'];
+
+    public const METHODS = ['upi' => 'UPI', 'bank' => 'Bank transfer', 'cash' => 'Cash'];
 
     protected $casts = [
         'amount' => 'float',

@@ -29,6 +29,28 @@ class PayoutResource extends Resource
         return auth()->user()?->canManage('finance') ?? false;
     }
 
+    /**
+     * Status is stored lower-case (older rows say PENDING; every reader compares
+     * lower()). A payout that isn't processed has no paid-on date, so switching
+     * one back to pending/failed clears it.
+     */
+    public static function normalise(array $data): array
+    {
+        if (array_key_exists('status', $data)) {
+            $data['status'] = strtolower((string) $data['status']);
+            if ($data['status'] !== 'processed') {
+                $data['processed_at'] = null;
+            }
+        }
+        foreach (['reference', 'note'] as $k) {
+            if (array_key_exists($k, $data)) {
+                $data[$k] = filled($data[$k]) ? trim((string) $data[$k]) : null;
+            }
+        }
+
+        return $data;
+    }
+
     public static function form(Schema $schema): Schema
     {
         return PayoutForm::configure($schema);
