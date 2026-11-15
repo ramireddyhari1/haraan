@@ -78,6 +78,9 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Grass
+import androidx.compose.material.icons.filled.SportsSoccer
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.filled.Bookmark
@@ -211,6 +214,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.IconButton
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
@@ -2122,6 +2126,7 @@ private fun GameHubTabScreen(
               query = searchQuery,
               onQueryChange = onSearchQueryChange,
               venues = allVenueItems,
+              nearbyVenues = filteredVenues.distinctBy { it.id },
               recents = recentSearches,
               onRecentsChange = { recentSearches = it },
               onVenueClick = { showSearch = false; openVenue(it) },
@@ -12706,6 +12711,8 @@ private fun GameHubSearchOverlay(
   query: String,
   onQueryChange: (String) -> Unit,
   venues: List<VenueItem>,
+  // Location-ordered (nearest first, radius applied) — what the idle rail shows.
+  nearbyVenues: List<VenueItem>,
   recents: List<String>,
   onRecentsChange: (List<String>) -> Unit,
   onVenueClick: (VenueItem) -> Unit,
@@ -12753,117 +12760,198 @@ private fun GameHubSearchOverlay(
     val t = term.trim()
     if (t.isNotEmpty()) onRecentsChange((listOf(t) + recents.filter { !it.equals(t, true) }).take(8))
   }
+  val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+  var fieldFocused by remember { mutableStateOf(false) }
+  val fieldBorder by animateColorAsState(
+    if (fieldFocused) accent.copy(alpha = 0.55f) else HaraanColors.BorderLight,
+    animationSpec = tween(180), label = "searchBorder"
+  )
+  // Content rises in once when the sheet opens, then stays put while typing.
+  val enter = remember { Animatable(0f) }
+  LaunchedEffect(Unit) { enter.animateTo(1f, tween(260, easing = FastOutSlowInEasing)) }
+  val liveNow = matches.filter { it.isLive }.take(3)
 
   Surface(modifier = Modifier.fillMaxSize(), color = HaraanColors.Background) {
-    Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+    Column(
+      modifier = Modifier.fillMaxSize()
+        // A faint wash of the section colour behind the search bar, fading into the page.
+        .background(Brush.verticalGradient(0f to accent.copy(alpha = 0.09f), 0.22f to HaraanColors.Background))
+        .statusBarsPadding()
+    ) {
       // ── Search header ──
       Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
+        modifier = Modifier.fillMaxWidth().padding(start = 6.dp, end = 14.dp, top = 8.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
       ) {
         Icon(
           imageVector = Icons.Default.ArrowBack,
           contentDescription = "Back",
           tint = HaraanColors.TextPrimary,
-          modifier = Modifier.size(40.dp).clip(CircleShape).clickable { onDismiss() }.padding(8.dp)
+          modifier = Modifier.size(44.dp).clip(CircleShape).clickable { onDismiss() }.padding(10.dp)
         )
         Row(
-          modifier = Modifier.weight(1f).height(48.dp)
-            .clip(RoundedCornerShape(HaraanRadius.Large))
+          modifier = Modifier.weight(1f).height(50.dp)
+            .shadow(if (fieldFocused) 6.dp else 0.dp, RoundedCornerShape(50), ambientColor = accent.copy(alpha = 0.18f), spotColor = accent.copy(alpha = 0.18f))
+            .clip(RoundedCornerShape(50))
             .background(HaraanColors.Surface)
-            .border(BorderStroke(1.5.dp, accent), RoundedCornerShape(HaraanRadius.Large))
-            .padding(horizontal = 14.dp),
+            .border(BorderStroke(1.dp, fieldBorder), RoundedCornerShape(50))
+            .padding(start = 16.dp, end = 8.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Icon(Icons.Default.Search, null, tint = HaraanColors.TextSecondary, modifier = Modifier.size(20.dp))
+          Icon(Icons.Default.Search, null, tint = if (fieldFocused) accent else HaraanColors.TextMuted, modifier = Modifier.size(20.dp))
           Spacer(Modifier.width(10.dp))
           androidx.compose.foundation.text.BasicTextField(
             value = query,
             onValueChange = onQueryChange,
-            modifier = Modifier.weight(1f).focusRequester(focus),
+            modifier = Modifier.weight(1f).focusRequester(focus).onFocusChanged { fieldFocused = it.isFocused },
             singleLine = true,
-            textStyle = HaraanTypography.BodyLarge.copy(color = HaraanColors.TextPrimary, fontSize = 15.sp),
+            textStyle = HaraanTypography.BodyLarge.copy(color = HaraanColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium),
             cursorBrush = androidx.compose.ui.graphics.SolidColor(accent),
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { addRecent(q); keyboard?.hide() }),
             decorationBox = { inner ->
               Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
                 if (query.isEmpty()) {
-                  Text("Search grounds, matches, players", color = HaraanColors.TextMuted, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                  Text("Grounds, matches, players", color = HaraanColors.TextMuted, fontSize = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 inner()
               }
             }
           )
           if (query.isNotEmpty()) {
-            Icon(
-              Icons.Default.Close, "Clear",
-              tint = HaraanColors.TextSecondary,
-              modifier = Modifier.size(30.dp).clip(CircleShape).clickable { onQueryChange("") }.padding(5.dp)
-            )
+            Box(
+              Modifier.size(32.dp).clip(CircleShape).clickable { onQueryChange("") },
+              contentAlignment = Alignment.Center
+            ) {
+              Box(Modifier.size(20.dp).clip(CircleShape).background(HaraanColors.TextMuted.copy(alpha = 0.22f)), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.Close, "Clear", tint = HaraanColors.TextSecondary, modifier = Modifier.size(13.dp))
+              }
+            }
           }
         }
       }
+      val contentMod = Modifier.fillMaxSize().graphicsLayer {
+        alpha = enter.value
+        translationY = (1f - enter.value) * 24.dp.toPx()
+      }
 
       if (q.isBlank()) {
-        // ── Idle: recents + trending ──
+        // ── Idle: recents, suggestions, then real things to open ──
         LazyColumn(
-          modifier = Modifier.fillMaxSize(),
-          contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-          verticalArrangement = Arrangement.spacedBy(8.dp)
+          modifier = contentMod,
+          contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 32.dp),
         ) {
           if (recents.isNotEmpty()) {
             item {
-              Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Text("Recent searches", color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                Text(
-                  "Clear all", color = accent, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
-                  modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onRecentsChange(emptyList()) }.padding(horizontal = 6.dp, vertical = 2.dp)
-                )
-              }
+              SearchSectionHeader("Recent", action = "Clear", accent = accent) { onRecentsChange(emptyList()) }
             }
             item {
-              LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(recents) { term ->
-                  SearchChip(text = term, accent = accent, removable = true, onClick = { onQueryChange(term) }, onRemove = { onRecentsChange(recents.filter { it != term }) })
+              SearchGroup {
+                recents.take(5).forEachIndexed { i, term ->
+                  if (i > 0) SearchRowDivider(start = 48.dp)
+                  RecentSearchRow(term, onClick = { onQueryChange(term) }, onRemove = { onRecentsChange(recents.filter { it != term }) })
                 }
               }
             }
           }
+          item { SearchSectionHeader("Try searching") }
           item {
-            Text("Trending near you", color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
+            @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+            androidx.compose.foundation.layout.FlowRow(
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              trending.forEach { term -> SearchChip(text = term, icon = searchTermIcon(term), accent = accent, onClick = { onQueryChange(term) }) }
+            }
           }
-          item {
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-              items(trending) { term -> SearchChip(text = term, accent = accent, onClick = { onQueryChange(term) }) }
+          if (liveNow.isNotEmpty()) {
+            item { SearchSectionHeader("Live now", count = liveNow.size) }
+            item {
+              // Bleed the rail to the screen edges so cards scroll in from off-screen.
+              LazyRow(
+                modifier = Modifier.layout { m, c ->
+                  val bleed = 16.dp.roundToPx()
+                  val p = m.measure(c.copy(maxWidth = c.maxWidth + bleed * 2))
+                  layout(c.maxWidth, p.height) { p.place(-bleed, 0) }
+                },
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+              ) {
+                items(liveNow, key = { it.id }) { m -> SearchLiveCard(m) { onMatchClick(m.id) } }
+              }
+            }
+          }
+          if (nearbyVenues.isNotEmpty()) {
+            item { SearchSectionHeader("Grounds near you") }
+            item {
+              LazyRow(
+                modifier = Modifier.layout { m, c ->
+                  val bleed = 16.dp.roundToPx()
+                  val p = m.measure(c.copy(maxWidth = c.maxWidth + bleed * 2))
+                  layout(c.maxWidth, p.height) { p.place(-bleed, 0) }
+                },
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+              ) {
+                items(nearbyVenues.take(8)) { v -> SearchGroundCard(v) { onVenueClick(v) } }
+              }
             }
           }
         }
       } else if (groundHits.isEmpty() && matchHits.isEmpty() && playerHits.isEmpty()) {
         // ── Empty state ──
-        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-          Icon(Icons.Default.Search, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(44.dp))
-          Spacer(Modifier.height(10.dp))
-          Text("No results for \"$q\"", color = HaraanColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-          Text("Try a venue, team, or player name", color = HaraanColors.TextSecondary, fontSize = 13.sp)
+        Column(
+          contentMod.padding(horizontal = 40.dp).imePadding(),
+          horizontalAlignment = Alignment.CenterHorizontally,
+          verticalArrangement = Arrangement.Center
+        ) {
+          Box(Modifier.size(64.dp).clip(CircleShape).background(HaraanColors.Surface).border(1.dp, HaraanColors.BorderLight, CircleShape), contentAlignment = Alignment.Center) {
+            Icon(Icons.Default.Search, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(28.dp))
+          }
+          Spacer(Modifier.height(16.dp))
+          Text("Nothing for “$q”", color = HaraanColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+          Spacer(Modifier.height(4.dp))
+          Text("Check the spelling, or search a ground, team or player name.", color = HaraanColors.TextSecondary, fontSize = 13.sp, textAlign = TextAlign.Center, lineHeight = 18.sp)
         }
       } else {
         // ── Scoped results ──
         LazyColumn(
-          modifier = Modifier.fillMaxSize(),
-          contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-          verticalArrangement = Arrangement.spacedBy(6.dp)
+          modifier = contentMod,
+          contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 32.dp),
         ) {
           if (groundHits.isNotEmpty()) {
-            item { SearchSectionLabel("Grounds") }
-            items(groundHits) { v -> VenueResultRow(v) { addRecent(q); onVenueClick(v) } }
+            item { SearchSectionHeader("Grounds", count = groundHits.size) }
+            item {
+              SearchGroup {
+                groundHits.forEachIndexed { i, v ->
+                  if (i > 0) SearchRowDivider(start = 76.dp)
+                  VenueResultRow(v, q, accent) { addRecent(q); onVenueClick(v) }
+                }
+              }
+            }
           }
           if (matchHits.isNotEmpty()) {
-            item { SearchSectionLabel("Live Matches") }
-            items(matchHits) { m -> MatchResultRow(m) { addRecent(q); onMatchClick(m.id) } }
+            item { SearchSectionHeader("Matches", count = matchHits.size) }
+            item {
+              SearchGroup {
+                matchHits.forEachIndexed { i, m ->
+                  if (i > 0) SearchRowDivider()
+                  MatchResultRow(m, q, accent) { addRecent(q); onMatchClick(m.id) }
+                }
+              }
+            }
           }
           if (playerHits.isNotEmpty()) {
-            item { SearchSectionLabel("Players") }
-            items(playerHits) { p -> PlayerResultRow(p, accent) { addRecent(p.name) } }
+            item { SearchSectionHeader("Players", count = playerHits.size) }
+            item {
+              SearchGroup {
+                playerHits.forEachIndexed { i, p ->
+                  if (i > 0) SearchRowDivider(start = 70.dp)
+                  PlayerResultRow(p, q, accent) { addRecent(p.name) }
+                }
+              }
+            }
           }
         }
       }
@@ -12871,74 +12959,273 @@ private fun GameHubSearchOverlay(
   }
 }
 
-@Composable
-private fun SearchSectionLabel(text: String) {
-  Text(text, color = HaraanColors.TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp, modifier = Modifier.padding(top = 10.dp, bottom = 2.dp))
+/** Bolds and tints the part of [text] the user typed, so it's clear why a row matched. */
+private fun highlightMatch(text: String, q: String, accent: Color): androidx.compose.ui.text.AnnotatedString = buildAnnotatedString {
+  val at = if (q.isBlank()) -1 else text.indexOf(q, ignoreCase = true)
+  if (at < 0) { append(text); return@buildAnnotatedString }
+  append(text.substring(0, at))
+  pushStyle(androidx.compose.ui.text.SpanStyle(color = accent, fontWeight = FontWeight.ExtraBold))
+  append(text.substring(at, at + q.length))
+  pop()
+  append(text.substring(at + q.length))
 }
 
+/** Live score card for the search rail — batting side on top, real score and overs, team icons. */
 @Composable
-private fun SearchChip(text: String, accent: Color, removable: Boolean = false, onClick: () -> Unit, onRemove: (() -> Unit)? = null) {
-  Row(
-    modifier = Modifier.clip(RoundedCornerShape(50)).background(HaraanColors.Surface).border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(50)).clickable { onClick() }.padding(horizontal = 14.dp, vertical = 8.dp),
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(6.dp)
+private fun SearchLiveCard(m: com.haraan.app.data.LiveMatchRow, onClick: () -> Unit) {
+  val battingSecond = m.battingTeam == 2
+  data class Side(val name: String, val score: String, val overs: String, val icon: String)
+  val one = Side(m.team1, m.score1, m.overs1, m.team1Logo.ifBlank { m.team1Emblem })
+  val two = Side(m.team2, m.score2, m.overs2, m.team2Logo.ifBlank { m.team2Emblem })
+  val top = if (battingSecond) two else one
+  val bot = if (battingSecond) one else two
+  val pulse = rememberInfiniteTransition(label = "liveCardPulse")
+  val dot by pulse.animateFloat(0.35f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "liveCardDot")
+
+  Column(
+    Modifier.width(264.dp)
+      .shadow(3.dp, RoundedCornerShape(18.dp), ambientColor = Color(0x140F172A), spotColor = Color(0x140F172A))
+      .clip(RoundedCornerShape(18.dp))
+      .background(HaraanColors.Surface)
+      .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(18.dp))
+      .clickable { onClick() }
+      .padding(14.dp),
+    verticalArrangement = Arrangement.spacedBy(10.dp)
   ) {
-    Text(text, color = HaraanColors.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-    if (removable && onRemove != null) {
-      Icon(Icons.Default.Close, "Remove", tint = HaraanColors.TextMuted, modifier = Modifier.size(14.dp).clickable { onRemove() })
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Row(
+        Modifier.clip(RoundedCornerShape(50)).background(Color(0xFFFDECEC)).padding(horizontal = 7.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)
+      ) {
+        Box(Modifier.size(6.dp).graphicsLayer { alpha = dot }.clip(CircleShape).background(Color(0xFFE53935)))
+        Text("LIVE", color = Color(0xFFC62828), fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.6.sp)
+      }
+      Spacer(Modifier.width(8.dp))
+      Text(m.competition, color = HaraanColors.TextSecondary, fontSize = 11.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+    listOf(top to true, bot to false).forEach { (s, batting) ->
+      val yetToBat = !batting && hasNotBatted(s.score, s.overs)
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        TeamLogo(team = com.haraan.app.ui.matches.teamShortCode(s.name), logoUrl = s.icon, modifier = Modifier.size(26.dp))
+        Spacer(Modifier.width(10.dp))
+        Text(
+          s.name, color = if (batting) HaraanColors.TextPrimary else HaraanColors.TextSecondary,
+          fontSize = 14.sp, fontWeight = if (batting) FontWeight.ExtraBold else FontWeight.SemiBold,
+          maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
+        )
+        if (yetToBat) {
+          Text("Yet to bat", color = HaraanColors.TextMuted, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        } else {
+          Text(s.score.ifBlank { "0" }, color = if (batting) HaraanColors.TextPrimary else HaraanColors.TextSecondary, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+          if (s.overs.isNotBlank()) {
+            Spacer(Modifier.width(4.dp))
+            Text("(${s.overs})", color = HaraanColors.TextMuted, fontSize = 11.sp)
+          }
+        }
+      }
+    }
+    if (m.venue.isNotBlank()) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Outlined.LocationOn, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(13.dp))
+        Spacer(Modifier.width(4.dp))
+        Text(m.venue, color = HaraanColors.TextMuted, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      }
     }
   }
 }
 
+/** Photo-first ground card for the search rail. Price only for bookable venues that have one. */
 @Composable
-private fun VenueResultRow(venue: VenueItem, onClick: () -> Unit) {
+private fun SearchGroundCard(v: VenueItem, onClick: () -> Unit) {
+  Column(
+    Modifier.width(196.dp)
+      .shadow(3.dp, RoundedCornerShape(18.dp), ambientColor = Color(0x140F172A), spotColor = Color(0x140F172A))
+      .clip(RoundedCornerShape(18.dp))
+      .background(HaraanColors.Surface)
+      .clickable { onClick() }
+  ) {
+    Box(Modifier.fillMaxWidth().height(124.dp).background(HaraanColors.BorderLight)) {
+      AsyncImage(model = v.imageUrl, contentDescription = v.title, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+      val rating = v.rating.toFloatOrNull()
+      if (rating != null && rating > 0f) {
+        Row(
+          Modifier.align(Alignment.TopEnd).padding(8.dp).clip(RoundedCornerShape(50))
+            .background(Color.White.copy(alpha = 0.94f)).padding(horizontal = 7.dp, vertical = 3.dp),
+          verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+          Icon(Icons.Default.Star, null, tint = Color(0xFFF59E0B), modifier = Modifier.size(12.dp))
+          Text(v.rating, color = HaraanColors.TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        }
+      }
+    }
+    Column(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+      Text(v.title, color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      Text(v.location, color = HaraanColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      if (v.bookable && v.price > 0) {
+        Spacer(Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+          Text("₹${v.price}", color = HaraanColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+          Text(" /hr", color = HaraanColors.TextMuted, fontSize = 11.sp, modifier = Modifier.padding(bottom = 2.dp))
+        }
+      }
+    }
+  }
+}
+
+private fun searchTermIcon(term: String): androidx.compose.ui.graphics.vector.ImageVector {
+  val t = term.lowercase()
+  return when {
+    "cricket" in t -> Icons.Default.SportsCricket
+    "badminton" in t -> Icons.Default.SportsTennis
+    "football" in t -> Icons.Default.SportsSoccer
+    "near" in t -> Icons.Outlined.LocationOn
+    "turf" in t -> Icons.Default.Grass
+    else -> Icons.Default.Search
+  }
+}
+
+@Composable
+private fun SearchSectionHeader(text: String, count: Int? = null, action: String? = null, accent: Color = HaraanColors.TextSecondary, onAction: () -> Unit = {}) {
   Row(
-    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(HaraanColors.Surface).border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(14.dp)).clickable { onClick() }.padding(10.dp),
+    Modifier.fillMaxWidth().padding(start = 4.dp, top = 20.dp, bottom = 8.dp),
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Text(text.uppercase(), color = HaraanColors.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.1.sp)
+    if (count != null) {
+      Spacer(Modifier.width(6.dp))
+      Text("$count", color = HaraanColors.TextMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+    }
+    Spacer(Modifier.weight(1f))
+    if (action != null) {
+      Text(
+        action, color = accent, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { onAction() }.padding(horizontal = 6.dp, vertical = 2.dp)
+      )
+    }
+  }
+}
+
+/** One white card holding several rows, split by hairlines — reads as a list, not a pile of boxes. */
+@Composable
+private fun SearchGroup(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+  Column(
+    Modifier.fillMaxWidth()
+      .clip(RoundedCornerShape(18.dp))
+      .background(HaraanColors.Surface)
+      .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(18.dp)),
+    content = content
+  )
+}
+
+@Composable
+private fun SearchRowDivider(start: androidx.compose.ui.unit.Dp = 16.dp) {
+  androidx.compose.material3.HorizontalDivider(
+    modifier = Modifier.padding(start = start),
+    color = HaraanColors.BorderLight.copy(alpha = 0.8f),
+    thickness = 1.dp
+  )
+}
+
+@Composable
+private fun RecentSearchRow(term: String, onClick: () -> Unit, onRemove: () -> Unit) {
+  Row(
+    Modifier.fillMaxWidth().clickable { onClick() }.padding(start = 16.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Icon(Icons.Default.History, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(18.dp))
+    Spacer(Modifier.width(14.dp))
+    Text(term, color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+    Icon(
+      Icons.Default.Close, "Remove $term", tint = HaraanColors.TextMuted,
+      modifier = Modifier.size(40.dp).clip(CircleShape).clickable { onRemove() }.padding(12.dp)
+    )
+  }
+}
+
+@Composable
+private fun SearchChip(text: String, icon: androidx.compose.ui.graphics.vector.ImageVector, accent: Color, onClick: () -> Unit) {
+  Row(
+    modifier = Modifier.height(38.dp).clip(RoundedCornerShape(50)).background(HaraanColors.Surface)
+      .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(50)).clickable { onClick() }
+      .padding(start = 12.dp, end = 14.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(7.dp)
+  ) {
+    Icon(icon, null, tint = accent, modifier = Modifier.size(16.dp))
+    Text(text, color = HaraanColors.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+  }
+}
+
+@Composable
+private fun VenueResultRow(venue: VenueItem, q: String, accent: Color, onClick: () -> Unit) {
+  Row(
+    modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 12.dp, vertical = 10.dp),
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(12.dp)
   ) {
-    AsyncImage(model = venue.imageUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)).background(HaraanColors.BorderLight))
-    Column(Modifier.weight(1f)) {
-      Text(venue.title, color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-      Text(venue.location, color = HaraanColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    AsyncImage(model = venue.imageUrl, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.size(52.dp).clip(RoundedCornerShape(12.dp)).background(HaraanColors.BorderLight))
+    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+      Text(highlightMatch(venue.title, q, accent), color = HaraanColors.TextPrimary, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      // distance can arrive as the literal string "null" from older payloads — never print it.
+      val sub = listOf(venue.location, venue.distance).filter { it.isNotBlank() && !it.equals("null", true) }.joinToString(" · ")
+      if (sub.isNotBlank()) Text(highlightMatch(sub, q, accent), color = HaraanColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-      Icon(Icons.Default.Star, null, tint = Color(0xFFF59E0B), modifier = Modifier.size(14.dp))
-      Text(venue.rating, color = HaraanColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    val rating = venue.rating.toFloatOrNull()
+    if (rating != null && rating > 0f) {
+      Row(
+        Modifier.clip(RoundedCornerShape(50)).background(Color(0xFFFFF7E6)).padding(horizontal = 7.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)
+      ) {
+        Icon(Icons.Default.Star, null, tint = Color(0xFFF59E0B), modifier = Modifier.size(12.dp))
+        Text(venue.rating, color = Color(0xFF92400E), fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+      }
+    } else {
+      Icon(Icons.Default.ChevronRight, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(20.dp))
     }
   }
 }
 
 @Composable
-private fun MatchResultRow(m: com.haraan.app.data.LiveMatchRow, onClick: () -> Unit) {
+private fun MatchResultRow(m: com.haraan.app.data.LiveMatchRow, q: String, accent: Color, onClick: () -> Unit) {
   Row(
-    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(HaraanColors.Surface).border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(14.dp)).clickable { onClick() }.padding(12.dp),
-    verticalAlignment = Alignment.CenterVertically,
-    horizontalArrangement = Arrangement.spacedBy(10.dp)
-  ) {
-    if (m.isLive) Box(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFFEF4444)))
-    Column(Modifier.weight(1f)) {
-      Text("${m.team1} vs ${m.team2}", color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-      val sub = listOf(m.competition, m.venue).filter { it.isNotBlank() }.joinToString(" • ")
-      if (sub.isNotBlank()) Text(sub, color = HaraanColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-    if (m.isLive) Text("LIVE", color = Color(0xFFD32F2F), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold)
-  }
-}
-
-@Composable
-private fun PlayerResultRow(p: PlayerHit, accent: Color, onClick: () -> Unit) {
-  Row(
-    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(HaraanColors.Surface).border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(14.dp)).clickable { onClick() }.padding(10.dp),
+    modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 16.dp, vertical = 12.dp),
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(12.dp)
   ) {
-    Box(Modifier.size(44.dp).clip(CircleShape).background(accent.copy(alpha = 0.12f)), contentAlignment = Alignment.Center) {
-      Text(p.name.take(1), color = accent, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+      Text(highlightMatch("${m.team1} vs ${m.team2}", q, accent), color = HaraanColors.TextPrimary, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      val sub = listOf(m.competition, m.venue).filter { it.isNotBlank() }.joinToString(" · ")
+      if (sub.isNotBlank()) Text(highlightMatch(sub, q, accent), color = HaraanColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
-    Column(Modifier.weight(1f)) {
-      Text(p.name, color = HaraanColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-      Text(p.subtitle, color = HaraanColors.TextSecondary, fontSize = 12.sp, maxLines = 1)
+    if (m.isLive) {
+      val pulse = rememberInfiniteTransition(label = "livePulse")
+      val dot by pulse.animateFloat(0.35f, 1f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "liveDot")
+      Row(
+        Modifier.clip(RoundedCornerShape(50)).background(Color(0xFFFDECEC)).padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)
+      ) {
+        Box(Modifier.size(6.dp).graphicsLayer { alpha = dot }.clip(CircleShape).background(Color(0xFFE53935)))
+        Text("LIVE", color = Color(0xFFC62828), fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.6.sp)
+      }
+    } else {
+      Icon(Icons.Default.ChevronRight, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(20.dp))
+    }
+  }
+}
+
+@Composable
+private fun PlayerResultRow(p: PlayerHit, q: String, accent: Color, onClick: () -> Unit) {
+  Row(
+    modifier = Modifier.fillMaxWidth().clickable { onClick() }.padding(horizontal = 12.dp, vertical = 10.dp),
+    verticalAlignment = Alignment.CenterVertically,
+    horizontalArrangement = Arrangement.spacedBy(12.dp)
+  ) {
+    Box(Modifier.size(44.dp).clip(CircleShape).background(accent.copy(alpha = 0.10f)), contentAlignment = Alignment.Center) {
+      Text(p.name.take(1).uppercase(), color = accent, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+    }
+    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+      Text(highlightMatch(p.name, q, accent), color = HaraanColors.TextPrimary, fontSize = 14.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      Text(p.subtitle, color = HaraanColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
   }
 }
