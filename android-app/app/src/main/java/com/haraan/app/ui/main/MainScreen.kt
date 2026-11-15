@@ -119,6 +119,7 @@ import androidx.compose.material.icons.outlined.TrendingUp
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.SupportAgent
 import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Public
@@ -2916,8 +2917,8 @@ private fun GreetingHeader(
         contentAlignment = Alignment.Center
       ) {
         Icon(
-          imageVector = Icons.Outlined.ChatBubbleOutline,
-          contentDescription = "Messages",
+          imageVector = Icons.Outlined.SupportAgent,
+          contentDescription = "Customer care",
           tint = iconInk,
           modifier = Modifier.size(if (outlinedIcons) 20.dp else 24.dp)
         )
