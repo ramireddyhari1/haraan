@@ -284,6 +284,27 @@ class CourtHourConflictTest extends TestCase
         $this->assertSame('offline', $walkIn->channel);
     }
 
+    public function test_venue_fees_apply_online_but_never_to_a_desk_walk_in(): void
+    {
+        $this->venue->forceFill([
+            'convenience_fee_type' => 'percent', 'convenience_fee_value' => 4,
+            'fees' => [['label' => 'Payment gateway fee', 'type' => 'percent', 'value' => 2]],
+        ])->save();
+
+        // Online: ₹1400 court + 4% + 2% = ₹1484.
+        $online = $this->book(19);
+        $this->assertEqualsWithDelta(84.0, (float) $online->convenience_fee, 0.01);
+        $this->assertEqualsWithDelta(1484.0, (float) $online->total_amount, 0.01);
+
+        // Desk walk-in on the other turf: the court's own rate, no online fees.
+        $slot = $this->venue->slots()->firstOrFail();
+        $walkIn = $this->service->createOfflineVenueBooking(
+            $this->deskOwner(), $this->venue->id, $slot->id, $this->date(), 'Kiran Varma', '+91 90000 55412', $this->turfB->id,
+        );
+        $this->assertEqualsWithDelta(0.0, (float) $walkIn->convenience_fee, 0.01);
+        $this->assertEqualsWithDelta(1600.0, (float) $walkIn->total_amount, 0.01);
+    }
+
     public function test_the_desk_still_respects_court_conflicts_on_a_draft_venue(): void
     {
         $this->venue->unpublish();

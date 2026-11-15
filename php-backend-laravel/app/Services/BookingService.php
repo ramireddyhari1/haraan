@@ -1471,7 +1471,11 @@ final class BookingService
             // arithmetic lives here and nowhere else — a second copy in the controller is
             // how a summary and a charge drift apart.
             $subtotal = round($perHour * $lengthMin / 60, 2);
-            $fee      = $venue->convenienceFeeFor($subtotal);
+            // The venue's fees (convenience, gateway, any named fee) are ONLINE charges:
+            // they pay for the checkout and the payment gateway. A desk walk-in (cash, the
+            // venue's UPI, a desk QR) or a WhatsApp desk hold is charged the court's own
+            // rate — the counter must collect ₹500 for a ₹500 hour, not ₹530.
+            $fee      = $meta['channel'] === 'online' ? $venue->convenienceFeeFor($subtotal) : 0.0;
 
             $applied  = $meta['coupon_code'] !== null && $meta['user'] instanceof User
                 ? $this->resolveVenueCoupon($meta['user'], $venue->id, $meta['coupon_code'], $subtotal, $fee)
