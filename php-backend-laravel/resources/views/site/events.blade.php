@@ -193,6 +193,11 @@
     </div>
     @endif
 
+    {{-- Nothing listed: every rail above has hidden itself, so the stage card holds the page. --}}
+    @if($mEvents->isEmpty())
+        @include('site.partials.events-empty', ['uid' => 'm', 'category' => $activeCategory])
+    @endif
+
     {{-- Explore Nearby: 2-column grid (mirrors the app's EventListCard) --}}
     @if($mEvents->count())
     <div class="mhome__head mhome__head--stack">
@@ -384,10 +389,11 @@
                     </div>
                 </a>
             @empty
-                <div class="events-empty">
-                    <h3>No events yet</h3>
-                    <p>There are no published events right now. Check back soon.</p>
-                </div>
+                {{-- $listedEvents skips the first event (it leads the banner), so only claim
+                     "no events" when there truly are none. --}}
+                @if($events->isEmpty())
+                    @include('site.partials.events-empty', ['uid' => 'd', 'category' => $activeCategory])
+                @endif
             @endforelse
         </div>
     </section>

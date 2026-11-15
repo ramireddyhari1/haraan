@@ -1322,10 +1322,13 @@ private fun EventsTabScreen(
   // rather than showing demo events that aren't in the admin. A transient refresh
   // failure keeps the last good load, so the tab doesn't blank on a network blip.
   var eventsData by remember { mutableStateOf<List<EventItem>>(emptyList()) }
+  // Flips once the first fetch returns, so the empty stage never flashes while loading.
+  var eventsLoaded by remember { mutableStateOf(false) }
   val eventRepo = remember { com.haraan.app.data.EventRepository() }
   val loadEvents: suspend () -> Unit = remember {
     {
       val fetched = runCatching { eventRepo.getEvents() }.getOrNull().orEmpty()
+      eventsLoaded = true
       if (fetched.isNotEmpty()) {
         eventsData = fetched.map {
           EventItem(it.id, it.title, it.date, it.venue, it.price, it.category, it.imageUrl, it.isFillingFast, it.rating, it.placements, it.city, it.latitude, it.longitude, it.soldOut)
@@ -1399,6 +1402,23 @@ private fun EventsTabScreen(
     val forYouEvents = filteredEvents.filter { showsIn("for_you", it) }.ifEmpty { filteredEvents }
     val trendingEvents = filteredEvents.filter { showsIn("trending", it) }.ifEmpty { filteredEvents }
     val nearbyEvents = filteredEvents.filter { showsIn("nearby", it) }.ifEmpty { filteredEvents }
+
+    // Nothing to list → one illustrated card instead of four headings over empty rails
+    // (and a Categories row whose counts are hardcoded).
+    if (filteredEvents.isEmpty()) {
+      if (eventsLoaded) {
+        item {
+          EventsNoShows(
+            filterLabel = selectedCategory.takeIf { it != "All" && eventsData.isNotEmpty() }
+              ?.lowercase()?.removeSuffix("s"),
+            searchQuery = searchQuery,
+            onClearFilter = { selectedCategory = "All" }
+          )
+        }
+      }
+      item { Spacer(modifier = Modifier.height(96.dp)) }
+      return@LazyColumn
+    }
 
     // 2. Hero Section: "Featured For You" with Infinite 3D Loop Pager
     item {
@@ -2756,6 +2776,255 @@ private fun PulseNoVenues(
         }
         .padding(horizontal = 10.dp, vertical = 8.dp)
     )
+  }
+}
+
+/**
+ * Events tab with nothing to show. An empty stage rather than a sad icon: the curtains part,
+ * the spot comes on over a lone mic, and a ticket carrying the crest drops in — the room is
+ * ready, the show just isn't listed yet. Same card family as [PulseNoVenues].
+ *
+ * [filterLabel] is the active category or search ("Comedy", "“karaoke”"); when set, the
+ * copy names it and the button clears it instead of pointing at hosting.
+ */
+@Composable
+private fun EventsNoShows(
+  filterLabel: String?,
+  searchQuery: String,
+  onClearFilter: () -> Unit,
+) {
+  val ctx = LocalContext.current
+  val blue = Color(0xFF2563EB)
+  val mark = painterResource(id = com.haraan.app.R.drawable.ic_haraan_ribbon_mark)
+
+  // One entrance, never looping: curtains part, the spot warms up, then the ticket lands.
+  val curtains = remember { Animatable(0f) }
+  val spot = remember { Animatable(0f) }
+  val ticket = remember { Animatable(0f) }
+  LaunchedEffect(Unit) {
+    curtains.animateTo(1f, tween(750, easing = FastOutSlowInEasing))
+    launch { spot.animateTo(1f, tween(520)) }
+    kotlinx.coroutines.delay(180)
+    ticket.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 220f))
+  }
+
+  val q = searchQuery.trim()
+  val filtered = filterLabel != null
+  val title = when {
+    q.isNotEmpty() -> "Nothing matches “$q”"
+    filtered -> "No $filterLabel events right now"
+    else -> "No events listed right now"
+  }
+  val body = when {
+    q.isNotEmpty() -> "Try another name, venue or artist — or clear the search to see every show."
+    filtered -> "Nothing on the bill for that yet. Everything else is one tap away."
+    else -> "The stage is set. New shows land here the moment a host publishes one."
+  }
+
+  val cardShape = RoundedCornerShape(22.dp)
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(horizontal = 16.dp, vertical = 4.dp)
+      .shadow(10.dp, cardShape, ambientColor = blue.copy(alpha = 0.18f), spotColor = blue.copy(alpha = 0.28f))
+      .background(Color.White, cardShape)
+      .border(1.5.dp, blue, cardShape)
+      .padding(6.dp),
+    horizontalAlignment = Alignment.CenterHorizontally
+  ) {
+    Canvas(
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(176.dp)
+        .clip(RoundedCornerShape(17.dp))
+    ) {
+      val w = size.width
+      val h = size.height
+      val cx = w / 2f
+      val warm = Color(0xFFFFF4D6)
+
+      // Back wall of the hall.
+      drawRect(Brush.verticalGradient(listOf(Color(0xFF15296B), Color(0xFF1E3A8A))))
+
+      // Stage floor — a shallow trapezoid with boards running toward the back.
+      val floorTop = h * 0.70f
+      val floor = androidx.compose.ui.graphics.Path().apply {
+        moveTo(w * 0.10f, floorTop); lineTo(w * 0.90f, floorTop); lineTo(w * 1.02f, h * 0.90f); lineTo(-w * 0.02f, h * 0.90f); close()
+      }
+      drawPath(floor, Brush.verticalGradient(listOf(Color(0xFF2B4FB8), Color(0xFF3563D2)), startY = floorTop, endY = h * 0.9f))
+      for (i in 1..7) {
+        val u = i / 8f
+        drawLine(
+          Color.White.copy(alpha = 0.07f),
+          Offset(w * (0.10f + 0.80f * u), floorTop),
+          Offset(w * (-0.02f + 1.04f * u), h * 0.90f),
+          1.dp.toPx()
+        )
+      }
+      // Front lip of the stage.
+      drawRect(Color(0xFF142766), topLeft = Offset(0f, h * 0.90f), size = Size(w, h * 0.10f))
+      drawLine(Color.White.copy(alpha = 0.18f), Offset(0f, h * 0.90f), Offset(w, h * 0.90f), 1.dp.toPx())
+
+      // The spot: a soft cone from the rig down to a pool on the boards.
+      val poolC = Offset(cx, h * 0.80f)
+      val poolRx = w * 0.17f
+      val poolRy = poolRx * 0.22f
+      val cone = androidx.compose.ui.graphics.Path().apply {
+        moveTo(cx - 7.dp.toPx(), h * 0.10f); lineTo(cx + 7.dp.toPx(), h * 0.10f)
+        lineTo(cx + poolRx, poolC.y); lineTo(cx - poolRx, poolC.y); close()
+      }
+      drawPath(
+        cone,
+        Brush.verticalGradient(
+          listOf(warm.copy(alpha = 0.05f * spot.value), warm.copy(alpha = 0.30f * spot.value)),
+          startY = h * 0.10f, endY = poolC.y
+        )
+      )
+      drawOval(
+        brush = Brush.radialGradient(
+          listOf(warm.copy(alpha = 0.75f * spot.value), warm.copy(alpha = 0f)),
+          center = poolC, radius = poolRx
+        ),
+        topLeft = Offset(poolC.x - poolRx, poolC.y - poolRy), size = Size(poolRx * 2, poolRy * 2)
+      )
+      // Dust caught in the beam.
+      for ((dx, dy, r) in listOf(Triple(-0.04f, 0.36f, 1.4f), Triple(0.05f, 0.47f, 1.1f), Triple(-0.02f, 0.58f, 1.6f), Triple(0.07f, 0.64f, 1.0f), Triple(-0.08f, 0.70f, 1.2f))) {
+        drawCircle(warm.copy(alpha = 0.55f * spot.value), r.dp.toPx(), Offset(cx + w * dx, h * dy))
+      }
+      // The lamp itself, hanging from the rig.
+      drawLine(Color(0xFF5B7FD0), Offset(cx - w * 0.30f, h * 0.06f), Offset(cx + w * 0.30f, h * 0.06f), 2.dp.toPx())
+      drawRoundRect(
+        color = androidx.compose.ui.graphics.lerp(Color(0xFF5B7FD0), Color(0xFFFFFBEB), spot.value),
+        topLeft = Offset(cx - 9.dp.toPx(), h * 0.06f), size = Size(18.dp.toPx(), 8.dp.toPx()),
+        cornerRadius = androidx.compose.ui.geometry.CornerRadius(2.5.dp.toPx())
+      )
+
+      // A lone mic stand in the pool — the act hasn't walked on yet.
+      val steel = androidx.compose.ui.graphics.lerp(Color(0xFF7D98D8), Color(0xFFE8EEF9), spot.value)
+      val sw = 2.dp.toPx()
+      drawLine(steel, Offset(cx - 9.dp.toPx(), poolC.y), Offset(cx + 9.dp.toPx(), poolC.y), sw, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+      drawLine(steel, Offset(cx, poolC.y), Offset(cx, h * 0.47f), sw, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+      drawLine(steel, Offset(cx, h * 0.47f), Offset(cx + 7.dp.toPx(), h * 0.43f), sw, cap = androidx.compose.ui.graphics.StrokeCap.Round)
+      val micPivot = Offset(cx + 9.dp.toPx(), h * 0.41f)
+      withTransform({ rotate(-30f, pivot = micPivot) }) {
+        drawRoundRect(
+          steel, topLeft = Offset(cx + 4.dp.toPx(), h * 0.41f - 4.dp.toPx()), size = Size(12.dp.toPx(), 8.dp.toPx()),
+          cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx())
+        )
+      }
+
+      // Curtains, swagged back to the wings as `curtains` runs 0 → 1.
+      val open = curtains.value
+      for (side in listOf(-1f, 1f)) {
+        val edgeX = if (side < 0) 0f else w
+        val reach = w * (0.50f - 0.33f * open)   // how far into the stage the curtain still hangs
+        val tieY = h * (0.62f + 0.06f * (1f - open))
+        val inner = edgeX - side * reach
+        val curtain = androidx.compose.ui.graphics.Path().apply {
+          moveTo(edgeX, 0f)
+          lineTo(inner, 0f)
+          quadraticBezierTo(inner + side * reach * 0.10f, tieY * 0.55f, edgeX - side * reach * 0.42f, tieY)
+          quadraticBezierTo(edgeX - side * reach * 0.30f, h * 0.80f, edgeX - side * reach * 0.48f, h * 0.90f)
+          lineTo(edgeX, h * 0.90f)
+          close()
+        }
+        drawPath(curtain, Brush.horizontalGradient(
+          if (side < 0) listOf(Color(0xFF2F5FCF), Color(0xFF3B6FE0)) else listOf(Color(0xFF3B6FE0), Color(0xFF2F5FCF)),
+          startX = minOf(edgeX, inner), endX = maxOf(edgeX, inner)
+        ))
+        // Folds.
+        for (f in 1..3) {
+          val fx = edgeX - side * reach * (f / 4f)
+          drawLine(Color.White.copy(alpha = 0.10f), Offset(fx, 0f), Offset(edgeX - side * reach * (f / 4f) * 0.55f, tieY), 1.dp.toPx())
+        }
+        // Tie-back.
+        drawCircle(Color(0xFFFFD27A).copy(alpha = 0.9f), 2.6.dp.toPx(), Offset(edgeX - side * reach * 0.42f, tieY))
+      }
+      // Valance across the top, scalloped.
+      val valH = h * 0.10f
+      drawRect(Color(0xFF2950C2), size = Size(w, valH))
+      val scallops = 9
+      val sW = w / scallops
+      for (i in 0 until scallops) {
+        drawOval(Color(0xFF2950C2), topLeft = Offset(i * sW, valH - sW * 0.22f), size = Size(sW, sW * 0.44f))
+      }
+
+      // The ticket, dropping in from above and settling at a tilt. Notched with a real
+      // cut-out so the hall shows through, perforation line before the stub, crest on the face.
+      val t = ticket.value
+      val tW = 64.dp.toPx(); val tH = 34.dp.toPx()
+      val tC = Offset(w * 0.80f, h * (0.12f + 0.30f * t))
+      withTransform({
+        rotate(-14f + 6f * (1f - t), pivot = tC)
+        translate(tC.x - tW / 2f, tC.y - tH / 2f)
+      }) {
+        val body = androidx.compose.ui.graphics.Path().apply {
+          addRoundRect(androidx.compose.ui.geometry.RoundRect(0f, 0f, tW, tH, androidx.compose.ui.geometry.CornerRadius(5.dp.toPx())))
+        }
+        val notchX = tW * 0.70f
+        val notches = androidx.compose.ui.graphics.Path().apply {
+          addOval(androidx.compose.ui.geometry.Rect(Offset(notchX, 0f), 4.dp.toPx()))
+          addOval(androidx.compose.ui.geometry.Rect(Offset(notchX, tH), 4.dp.toPx()))
+        }
+        val shape = androidx.compose.ui.graphics.Path().apply {
+          op(body, notches, androidx.compose.ui.graphics.PathOperation.Difference)
+        }
+        drawPath(shape, Color.White, alpha = t.coerceIn(0f, 1f))
+        var y = 6.dp.toPx()
+        while (y < tH - 6.dp.toPx()) {
+          drawLine(blue.copy(alpha = 0.45f * t.coerceIn(0f, 1f)), Offset(notchX, y), Offset(notchX, y + 2.dp.toPx()), 1.dp.toPx())
+          y += 4.dp.toPx()
+        }
+        val markH = tH * 0.52f
+        val markW = markH * (mark.intrinsicSize.width / mark.intrinsicSize.height)
+        translate(notchX / 2f - markW / 2f, tH / 2f - markH / 2f) {
+          with(mark) { draw(Size(markW, markH), alpha = t.coerceIn(0f, 1f), colorFilter = androidx.compose.ui.graphics.ColorFilter.tint(blue)) }
+        }
+        // Stub: three short "admit" bars.
+        for (k in 0..2) {
+          val by = tH * (0.32f + 0.18f * k)
+          drawLine(blue.copy(alpha = 0.35f * t.coerceIn(0f, 1f)), Offset(notchX + 5.dp.toPx(), by), Offset(tW - 5.dp.toPx(), by), 1.6.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round)
+        }
+      }
+    }
+
+    Text(
+      text = title,
+      color = Color(0xFF0F172A),
+      fontSize = 15.5.sp,
+      fontWeight = FontWeight.ExtraBold,
+      textAlign = TextAlign.Center,
+      modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 14.dp)
+    )
+    Text(
+      text = body,
+      color = Color(0xFF64748B),
+      fontSize = 13.sp,
+      lineHeight = 18.sp,
+      textAlign = TextAlign.Center,
+      modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 4.dp)
+    )
+    Spacer(modifier = Modifier.height(14.dp))
+    Row(
+      modifier = Modifier
+        .height(40.dp)
+        .clip(CircleShape)
+        .background(blue)
+        .clickable {
+          if (filtered) onClearFilter()
+          else runCatching {
+            ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://haraan.app/become-a-partner")))
+          }
+        }
+        .padding(horizontal = 18.dp),
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Text(
+        text = if (filtered) "Show all events" else "Host an event on Haraan",
+        color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold
+      )
+    }
+    Spacer(modifier = Modifier.height(14.dp))
   }
 }
 
