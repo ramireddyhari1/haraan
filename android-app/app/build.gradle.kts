@@ -22,8 +22,8 @@ android {
         applicationId = "com.haraan.app"
         minSdk = 24
         targetSdk = 36
-        versionCode = 65
-        versionName = "1.0.64"
+        versionCode = 67
+        versionName = "1.0.66"
         // Without this, `connectedDebugAndroidTest` builds the androidTest APK and then runs
         // nothing — the androidTest deps below are inert until a runner is named.
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
