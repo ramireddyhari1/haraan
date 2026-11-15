@@ -3,12 +3,7 @@
 namespace App\Filament\Resources\SupportThreads\RelationManagers;
 
 use App\Events\ContentUpdated;
-use Filament\Actions\CreateAction;
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\Textarea;
-use Filament\Schemas\Components\Utilities\Set;
 use Filament\Resources\RelationManagers\RelationManager;
-use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 
@@ -30,35 +25,47 @@ class MessagesRelationManager extends RelationManager
         'Glad we could help. Is there anything else you need before we close this out?',
     ];
 
-    public function form(Schema $schema): Schema
-    {
-        // Present the templates as a label => text map so picking one fills the box.
-        $templates = collect(self::CANNED_REPLIES)
-            ->mapWithKeys(fn (string $text): array => [$text => \Illuminate\Support\Str::limit($text, 60)])
-            ->all();
+    /** The inline composer's draft. */
+    public string $replyBody = '';
 
-        return $schema
-            ->components([
-                Select::make('template')
-                    ->label('Quick reply')
-                    ->placeholder('Insert a saved response…')
-                    ->options($templates)
-                    ->searchable()
-                    ->live()
-                    ->dehydrated(false) // not a real column — only used to fill the body
-                    ->afterStateUpdated(function ($state, Set $set): void {
-                        if (filled($state)) {
-                            $set('body', $state);
-                        }
-                    })
-                    ->columnSpanFull(),
-                Textarea::make('body')
-                    ->label('Your reply')
-                    ->required()
-                    ->rows(3)
-                    ->maxLength(4000)
-                    ->columnSpanFull(),
-            ]);
+    /** Send the composer's draft as a team reply. */
+    public function sendReply(): void
+    {
+        $body = trim($this->replyBody);
+        if ($body === '') {
+            return;
+        }
+
+        $message = $this->getOwnerRecord()->messages()->create([
+            'sender_type' => 'admin',
+            'sender_id'   => auth()->id(),
+            'body'        => mb_substr($body, 0, 4000),
+        ]);
+
+        $this->afterReply($message);
+        $this->replyBody = '';
+
+        // The page's header and Status field still hold the old status; refresh them
+        // so "Save details" can't write a stale "open" back over "pending".
+        $this->dispatch('support-reply-sent');
+    }
+
+    /** Reply flags the thread for the user, clears our queue, and nudges the app. */
+    private function afterReply($record): void
+    {
+        $thread = $record->thread;
+        if ($thread === null) {
+            return;
+        }
+        $thread->forceFill([
+            'status'             => 'pending',
+            'last_message_at'    => now(),
+            'user_unread_count'  => $thread->user_unread_count + 1,
+            'admin_unread_count' => 0,
+        ])->save();
+
+        // Nudge the app to refetch the thread promptly.
+        ContentUpdated::dispatch('support');
     }
 
     public function table(Table $table): Table
@@ -68,50 +75,17 @@ class MessagesRelationManager extends RelationManager
             // Near-live: pull new user messages while an agent has the chat open.
             ->poll('5s')
             ->defaultSort('id', 'asc')
+            ->modifyQueryUsing(fn ($query) => $query->with('sender'))
+            ->paginated(false)
+            // Drawn as a chat: bubbles, day separators, and an inline composer.
+            ->content(fn () => view('filament.resources.support-threads.messages', [
+                'thread' => $this->getOwnerRecord()->loadMissing('user'),
+            ]))
+            ->contentFooter(fn () => view('filament.resources.support-threads.composer', [
+                'quickReplies' => self::CANNED_REPLIES,
+            ]))
             ->columns([
-                TextColumn::make('sender_type')
-                    ->label('From')
-                    ->badge()
-                    ->formatStateUsing(fn (string $state) => $state === 'admin' ? 'Team' : 'User')
-                    ->color(fn (string $state): string => $state === 'admin' ? 'success' : 'info')
-                    // Show which agent replied (only meaningful for team messages).
-                    ->description(fn ($record) => $record->sender_type === 'admin' ? $record->sender?->name : null),
-                TextColumn::make('body')
-                    ->label('Message')
-                    ->wrap()
-                    ->searchable(),
-                TextColumn::make('created_at')
-                    ->label('Sent')
-                    ->since()
-                    ->sortable(),
-            ])
-            ->headerActions([
-                CreateAction::make()
-                    ->label('Send reply')
-                    ->icon('heroicon-m-paper-airplane')
-                    ->modalHeading('Reply to user')
-                    ->mutateDataUsing(function (array $data): array {
-                        $data['sender_type'] = 'admin';
-                        $data['sender_id'] = auth()->id();
-
-                        return $data;
-                    })
-                    ->after(function ($record): void {
-                        $thread = $record->thread;
-                        if ($thread === null) {
-                            return;
-                        }
-                        // Reply flags the thread for the user and clears our queue.
-                        $thread->forceFill([
-                            'status'            => 'pending',
-                            'last_message_at'   => now(),
-                            'user_unread_count' => $thread->user_unread_count + 1,
-                            'admin_unread_count' => 0,
-                        ])->save();
-
-                        // Nudge the app to refetch the thread promptly.
-                        ContentUpdated::dispatch('support');
-                    }),
+                TextColumn::make('body')->label('Message'),
             ])
             ->recordActions([]);
     }
