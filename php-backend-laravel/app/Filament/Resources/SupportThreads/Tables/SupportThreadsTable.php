@@ -2,15 +2,16 @@
 
 namespace App\Filament\Resources\SupportThreads\Tables;
 
-use App\Filament\Support\AvatarColumn;
 use App\Models\SupportThread;
 use App\Services\Membership\MemberEntitlements;
 use App\Support\Membership\MemberFeature;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Illuminate\Database\Eloquent\Builder;
 use Filament\Actions\EditAction;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Columns\ViewColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 
@@ -22,53 +23,38 @@ class SupportThreadsTable
             // Eager-load the person + assignee + topic the row renders, so the
             // list isn't N+1 once the avatar reads user->avatar too.
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['user', 'assignee', 'category']))
+            ->extraAttributes(['class' => 'stx-table'])
+            // Rows waiting on a reply carry an accent rule so they read first.
+            ->recordClasses(fn (SupportThread $r): ?string => $r->admin_unread_count > 0 ? 'stx-row--unread' : null)
             ->columns([
-                AvatarColumn::make(
-                    'avatar',
-                    nameFor: fn (SupportThread $r): string => (string) ($r->user?->name ?: 'User'),
-                    avatarFor: fn (SupportThread $r): ?string => $r->user?->avatar,
-                ),
-                TextColumn::make('user.name')
-                    ->label('User')
-                    ->weight('bold')
-                    ->description(fn ($record) => $record->subject ?: 'General support')
+                // One cell for the person: photo, unread count, name, plan, subject.
+                // Priority-support members are resolved by the member entitlement
+                // engine, so /control and the app can never disagree.
+                ViewColumn::make('user.name')
+                    ->label('Conversation')
+                    ->view('filament.resources.support-threads.conversation-cell')
+                    ->viewData([
+                        'getPlan' => fn (SupportThread $r): ?string => $r->user !== null
+                            && app(MemberEntitlements::class)->allows($r->user, MemberFeature::SUPPORT_PRIORITY)
+                                ? app(MemberEntitlements::class)->for($r->user)->plan->name
+                                : null,
+                    ])
                     ->searchable(),
-                // Members whose plan includes priority support. Resolved by the member
-                // entitlement engine, so /control and the app can never disagree.
-                TextColumn::make('member_priority')
-                    ->label('Priority')
-                    ->state(fn (SupportThread $r): ?string => $r->user !== null
-                        && app(MemberEntitlements::class)->allows($r->user, MemberFeature::SUPPORT_PRIORITY)
-                            ? app(MemberEntitlements::class)->for($r->user)->plan->name
-                            : null)
-                    ->badge()
-                    ->color('warning')
-                    ->placeholder('—'),
                 TextColumn::make('category.label')
                     ->label('Topic')
-                    ->badge()
-                    ->color('info')
+                    ->extraAttributes(['class' => 'stx-topic'])
                     ->placeholder('Unsorted'),
-                TextColumn::make('status')
-                    ->badge()
-                    ->color(fn (string $state): string => match ($state) {
-                        'open'    => 'danger',
-                        'pending' => 'warning',
-                        'closed'  => 'gray',
-                        default   => 'gray',
-                    }),
-                TextColumn::make('admin_unread_count')
-                    ->label('New')
-                    ->badge()
-                    ->color('danger')
-                    ->formatStateUsing(fn ($state) => $state > 0 ? $state : '—'),
-                TextColumn::make('assignee.name')
-                    ->label('Assigned to')
-                    ->placeholder('Unassigned')
+                ViewColumn::make('status')
+                    ->view('filament.resources.support-threads.status-cell'),
+                ViewColumn::make('assignee.name')
+                    ->label('Owner')
+                    ->view('filament.resources.support-threads.owner-cell')
                     ->searchable(),
                 TextColumn::make('last_message_at')
                     ->label('Last activity')
                     ->since()
+                    ->dateTimeTooltip()
+                    ->color('gray')
                     ->sortable(),
             ])
             // Waiting-on-us first, then most recent activity.
@@ -91,7 +77,15 @@ class SupportThreadsTable
                     ->preload(),
             ])
             ->recordActions([
-                EditAction::make()->label('Open chat'),
+                EditAction::make()
+                    ->label('Open')
+                    ->icon('heroicon-m-chat-bubble-left-right')
+                    ->button()
+                    ->outlined()
+                    ->size('sm')
+                    ->color('primary'),
+
+                ActionGroup::make([
 
                 // Take ownership without opening the thread. Hidden once it's yours.
                 Action::make('assignToMe')
@@ -125,6 +119,10 @@ class SupportThreadsTable
                         $record->forceFill(['status' => 'open'])->save();
                         Notification::make()->title('Conversation reopened')->success()->send();
                     }),
+                ])
+                    ->icon('heroicon-m-ellipsis-horizontal')
+                    ->color('gray')
+                    ->tooltip('More'),
             ]);
     }
 }
