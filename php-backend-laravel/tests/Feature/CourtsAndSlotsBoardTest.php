@@ -6,7 +6,6 @@ namespace Tests\Feature;
 
 use App\Filament\Resources\Venues\Pages\EditVenue;
 use App\Filament\Resources\Venues\RelationManagers\CourtsRelationManager;
-use App\Filament\Resources\Venues\RelationManagers\SlotsRelationManager;
 use App\Models\Booking;
 use App\Models\User;
 use App\Models\Venue;
@@ -131,17 +130,85 @@ final class CourtsAndSlotsBoardTest extends TestCase
         $this->assertSame(['cricket', 'Football'], $this->venue->fresh()->sports);
     }
 
-    public function test_slots_can_be_limited_to_a_sport_and_are_no_longer_dissociable(): void
+    public function test_tapping_a_slot_edits_price_sport_and_open_state(): void
     {
-        $slot = $this->slot('6:00 AM');
+        $mon = $this->slot('6:00 AM', ['day' => 'Monday']);
+        $tue = $this->slot('6:00 AM', ['day' => 'Tuesday']);
 
-        Livewire::test(SlotsRelationManager::class, ['ownerRecord' => $this->venue, 'pageClass' => EditVenue::class])
-            ->assertOk()
-            ->assertTableActionDoesNotExist('dissociate')
-            ->assertTableActionDoesNotExist('associate')
-            ->callTableAction('edit', $slot, data: ['day' => VenueSlot::EVERY_DAY, 'time' => '6:00 AM', 'sports' => ['Football'], 'is_available' => true])
-            ->assertHasNoTableActionErrors();
+        $this->courts()
+            ->callAction('editSlot', data: [
+                'is_available' => false, 'price' => 900,
+                'court_prices' => [$this->pitch->id => 650], 'sports' => ['Football'], 'every_day' => false,
+            ], arguments: ['slot' => $mon->id])
+            ->assertHasNoActionErrors();
 
-        $this->assertSame(['Football'], $slot->fresh()->sportsList());
+        $mon->refresh();
+        $this->assertFalse((bool) $mon->is_available);
+        $this->assertSame(900.0, (float) $mon->price);
+        $this->assertSame(650.0, $mon->priceForCourt($this->pitch));
+        $this->assertSame(['Football'], $mon->sportsList());
+        // Only Monday changed.
+        $this->assertTrue((bool) $tue->fresh()->is_available);
+
+        $this->courts()
+            ->callAction('editSlot', data: ['is_available' => true, 'price' => 400, 'court_prices' => [], 'sports' => [], 'every_day' => true], arguments: ['slot' => $mon->id])
+            ->assertHasNoActionErrors();
+        $this->assertSame(400.0, (float) $tue->fresh()->price);
+        $this->assertSame([], $mon->fresh()->sportsList());
+    }
+
+    public function test_slot_sport_limit_matches_courts_case_blind(): void
+    {
+        $slot = $this->slot('7:00 AM', ['sports' => ['cricket']]);
+        $this->assertTrue($slot->allowsCourt($this->pitch));
+        $this->assertFalse($slot->allowsCourt($this->turf));
+    }
+
+    public function test_open_24_7_saves_round_the_clock_and_reads_back(): void
+    {
+        $data = \App\Filament\Resources\Venues\Schemas\VenueForm::mergeHours(['open_24_7' => true, 'hours_rows' => []]);
+        $this->assertCount(7, $data['hours_json']);
+        $this->assertSame(['open' => '00:00', 'close' => '00:00'], $data['hours_json']['Sun']);
+        $this->assertArrayNotHasKey('open_24_7', $data);
+
+        $this->venue->update(['hours_json' => $data['hours_json'], 'slot_minutes' => 60]);
+        $this->venue->regenerateSlotsFromHours();
+        $this->assertSame(24 * 7, $this->venue->slots()->count());
+        $this->assertSame('Mon–Sun Open 24 hours', $this->venue->fresh()->displayHours());
+
+        $back = \App\Filament\Resources\Venues\Schemas\VenueForm::splitHours(['hours_json' => $data['hours_json']]);
+        $this->assertTrue($back['open_24_7']);
+        $this->assertSame([], $back['hours_rows']);
+    }
+
+    public function test_one_day_24_hours_row(): void
+    {
+        $data = \App\Filament\Resources\Venues\Schemas\VenueForm::mergeHours(['hours_rows' => [
+            ['day' => 'Sat', 'all_day' => true, 'open' => null, 'close' => null],
+            ['day' => 'Mon', 'all_day' => false, 'open' => '06:00', 'close' => '23:00'],
+        ]]);
+        $this->assertSame(['Mon', 'Sat'], array_keys($data['hours_json']));
+        $this->assertSame(['open' => '00:00', 'close' => '00:00'], $data['hours_json']['Sat']);
+
+        $back = \App\Filament\Resources\Venues\Schemas\VenueForm::splitHours(['hours_json' => $data['hours_json']]);
+        $this->assertFalse($back['open_24_7']);
+        $this->assertTrue($back['hours_rows'][1]['all_day']);
+    }
+
+    public function test_board_flags_slots_that_do_not_match_hours_and_sync_fixes_them(): void
+    {
+        $this->venue->update(['hours_json' => ['Mon' => ['open' => '06:00', 'close' => '08:00']], 'slot_minutes' => 60]);
+        // Made by the old generator: an every-day row at a time outside the hours, with a price.
+        $this->slot('6:00 AM', ['price' => 800]);
+        $this->slot('10:00 PM');
+
+        $this->assertFalse($this->courts()->instance()->courtBoard()['inSync']);
+
+        $this->courts()->callAction('syncSlots')->assertHasNoActionErrors();
+
+        $rows = $this->venue->slots()->get();
+        $this->assertSame(['Monday|6:00 AM', 'Monday|7:00 AM'], $rows->map(fn ($s) => $s->day.'|'.$s->time)->sort()->values()->all());
+        $this->assertSame(800.0, (float) $rows->firstWhere('time', '6:00 AM')->price);
+        $this->assertTrue($this->courts()->instance()->courtBoard()['inSync']);
     }
 }

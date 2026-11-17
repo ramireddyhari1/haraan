@@ -51,6 +51,13 @@
     .cb-sum b { color: var(--cc-ink); font-weight: 650; }
     .cb-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; }
     .cb-slot { border-radius: 9px; padding: 6px 8px 5px; border: 1px solid; display: flex; flex-direction: column; gap: 1px; position: relative; }
+    button.cb-slot { cursor: pointer; text-align: left; font: inherit; transition: transform .08s, box-shadow .15s; }
+    button.cb-slot:hover { box-shadow: 0 0 0 2px var(--cc-blue-mid); }
+    button.cb-slot:active { transform: translateY(1px); }
+    .cb-src { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--cc-line); border-radius: 12px; background: var(--cc-sunk); font-size: 12.5px; color: var(--cc-ink-2); margin-bottom: 12px; }
+    .cb-src b { color: var(--cc-ink); font-weight: 650; }
+    .cb-src.warn { background: var(--cc-amber-soft); border-color: transparent; }
+    .cb-src .lnk { color: var(--cc-blue-2); font-weight: 600; background: none; border: 0; padding: 0; cursor: pointer; font-size: 12.5px; }
     .cb-slot .t { font-size: 11px; color: var(--cc-ink-3); font-weight: 550; white-space: nowrap; }
     .cb-slot .r { font-size: 13.5px; font-weight: 700; letter-spacing: -0.01em; }
     .cb-slot .dot { position: absolute; top: 6px; right: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--cc-blue); }
@@ -74,7 +81,7 @@
             <p>
                 {{ $isToday ? 'Today' : 'Next' }} {{ $day }}, {{ $date->format('j M') }}
                 · {{ $slotCount }} {{ $slotCount === 1 ? 'slot' : 'slots' }} of {{ $slotMinutes }} min
-                · prices are exactly what the desk and checkout charge
+                · tap a slot to change its price or close it
             </p>
         </div>
         <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap">
@@ -88,6 +95,24 @@
         <button type="button" class="cb-btn pri" style="flex:none; padding: 8px 14px" wire:click="mountTableAction('create')">+ Add court</button>
         </div>
     </div>
+
+    @php $jump = "const el=document.querySelector('[data-step=vf-hours]'); if(el){el.scrollIntoView({behavior:'smooth',block:'start'})}else{location.href='".$hoursUrl."'}"; @endphp
+    @if ($hasHours && $inSync)
+        <div class="cb-src">
+            <span>Slot times come from the opening hours: <b>{{ $hoursText }}</b> · a slot every <b>{{ $slotMinutes }} min</b>.</span>
+            <button type="button" class="lnk" onclick="{{ $jump }}">Change hours &rarr;</button>
+        </div>
+    @elseif ($hasHours)
+        <div class="cb-src warn">
+            <span><b>Slots don&rsquo;t match the opening hours</b> ({{ $hoursText }}, every {{ $slotMinutes }} min). Some were made by the old slot generator.</span>
+            <button type="button" class="cb-btn pri" style="flex:none; padding: 6px 12px" wire:click="mountAction('syncSlots')">Match slots to hours</button>
+        </div>
+    @else
+        <div class="cb-src warn">
+            <span><b>No opening hours set.</b> Slot times come from the hours &mdash; set them (or switch on &ldquo;Open 24 hours&rdquo;) and save.</span>
+            <button type="button" class="lnk" onclick="{{ $jump }}">Set opening hours &rarr;</button>
+        </div>
+    @endif
 
     @if (empty($courts))
         <div class="cb-empty">
@@ -109,7 +134,7 @@
                 @endfor
                 <path d="M35 35V19M35 35l9 6" stroke="var(--cc-blue)" stroke-width="2.2" stroke-linecap="round"/>
             </svg>
-            <div><b>No slots yet, so nothing can be booked</b>Open the <b style="display:inline">Slots</b> tab and use “Generate slots” — pick opening hours and 30 or 60 minutes. Every court below then gets them.</div>
+            <div><b>No slots yet, so nothing can be booked</b>Set the opening hours in the form above (or switch on “Open 24 hours”) and save. A slot is made every slot length inside them, for every court below.</div>
         </div>
     @endif
 
@@ -153,7 +178,7 @@
                 @if (! $c['active'])
                     <div class="cc-muted-empty">Turned off, so it is not sold in any slot. Edit → Open for booking to bring it back.</div>
                 @elseif (empty($c['chips']))
-                    <div class="cc-muted-empty">No slots on {{ $day }}s. Add some in the Slots tab.</div>
+                    <div class="cc-muted-empty">Closed on {{ $day }}s. Add {{ $day }} to the opening hours to sell it.</div>
                 @else
                     <div class="cb-sum">
                         <span><b class="cc-num">{{ $c['openCount'] }}</b> of {{ count($c['chips']) }} slots sold on {{ $day }}</span>
@@ -171,17 +196,18 @@
                         @foreach ($c['chips'] as $chip)
                             @php $t = $chipTone[$chip['source']]; @endphp
                             @if ($chip['open'])
-                                <div class="cb-slot" style="background: {{ $t['bg'] }}; border-color: {{ $t['bd'] === 'transparent' ? $t['bg'] : $t['bd'] }}"
-                                     title="{{ $chip['time'] }} · ₹{{ number_format($chip['rate']) }} · {{ $sourceLabel[$chip['source']] }}{{ $chip['day'] !== 'Every day' ? ' · '.$chip['day'].' only' : '' }}">
+                                <button type="button" class="cb-slot" style="background: {{ $t['bg'] }}; border-color: {{ $t['bd'] === 'transparent' ? $t['bg'] : $t['bd'] }}"
+                                     wire:click="mountAction('editSlot', { slot: {{ $chip['id'] }} })"
+                                     title="{{ $chip['time'] }} · ₹{{ number_format($chip['rate']) }} · {{ $sourceLabel[$chip['source']] }}{{ $chip['day'] !== 'Every day' ? ' · '.$chip['day'].' only' : '' }} · tap to change">
                                     @if ($chip['source'] === 'own')<span class="dot"></span>@endif
                                     <span class="t">{{ $chip['time'] }}</span>
                                     <span class="r cc-num" style="color: {{ $t['ink'] }}">₹{{ number_format($chip['rate']) }}</span>
-                                </div>
+                                </button>
                             @else
-                                <div class="cb-slot shut" title="{{ $chip['time'] }} · {{ $chip['why'] }}">
+                                <button type="button" class="cb-slot shut" wire:click="mountAction('editSlot', { slot: {{ $chip['id'] }} })" title="{{ $chip['time'] }} · {{ $chip['why'] }} · tap to change">
                                     <span class="t">{{ $chip['time'] }}</span>
                                     <span class="r cc-num">₹{{ number_format($chip['rate']) }}</span>
-                                </div>
+                                </button>
                             @endif
                         @endforeach
                     </div>

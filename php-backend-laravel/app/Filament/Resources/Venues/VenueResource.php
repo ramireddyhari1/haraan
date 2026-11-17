@@ -130,7 +130,8 @@ class VenueResource extends Resource
         return [
             \App\Filament\Resources\Venues\RelationManagers\CourtsRelationManager::class,
             \App\Filament\Resources\Venues\RelationManagers\PricingRulesRelationManager::class,
-            \App\Filament\Resources\Venues\RelationManagers\SlotsRelationManager::class,
+            // No separate Slots tab: times come from the opening hours, and each slot is
+            // edited by tapping it on the Courts & slots board.
             \App\Filament\Resources\Venues\RelationManagers\BlocksRelationManager::class,
             \App\Filament\Resources\Venues\RelationManagers\BlockedDatesRelationManager::class,
             \App\Filament\Resources\Venues\RelationManagers\VenueBookingsRelationManager::class,

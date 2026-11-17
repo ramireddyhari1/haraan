@@ -211,6 +211,8 @@ final class VenueSlot extends Model
         $mine = $this->sportsList();
         $theirs = $court->sportsList();
 
-        return $mine === [] || $theirs === [] || array_intersect($mine, $theirs) !== [];
+        // Case-blind: older rows store "cricket", the forms offer "Cricket".
+        return $mine === [] || $theirs === []
+            || array_intersect(array_map('strtolower', $mine), array_map('strtolower', $theirs)) !== [];
     }
 }

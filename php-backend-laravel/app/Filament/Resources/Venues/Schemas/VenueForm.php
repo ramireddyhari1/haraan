@@ -197,16 +197,31 @@ class VenueForm
                     ->aside()
                     ->columnSpanFull()
                     ->extraAttributes(fn (?Venue $record): array => self::stepAttributes('hours', $record))
-                    ->description('Add a row per open day. Days you don\'t list are treated as closed. Bookable start-times are generated from these hours. Open past midnight? Set the real closing time (e.g. Mon 6:00 PM → 1:00 AM): the hours after 12 AM are sold on the next day\'s date, so a customer books Monday night\'s last hour as Tuesday 12 AM.')
+                    ->description('This is the ONE place slot times come from: saving creates a slot every "slot length" inside these hours, for every court. Prices per slot are set in the Courts & slots tab. Days you don\'t list are closed. Open past midnight? Set the real closing time (e.g. Mon 6:00 PM → 1:00 AM): the hours after 12 AM are sold on the next day\'s date.')
                     ->schema([
                         Placeholder::make('hours_week')
                             ->hiddenLabel()
                             ->content(fn ($get): HtmlString => new HtmlString(view('filament.venue.hours-week', [
-                                'rows' => (array) ($get('hours_rows') ?? []),
+                                'rows' => self::effectiveHoursRows($get('hours_rows') ?? [], (bool) $get('open_24_7')),
                                 'slotMinutes' => (int) ($get('slot_minutes') ?: 60),
                             ])->render())),
+                        Toggle::make('open_24_7')
+                            ->label('Open 24 hours, every day')
+                            ->helperText('Slots run round the clock, 12 AM to 12 AM, Monday to Sunday.')
+                            ->live()
+                            ->dehydrated()
+                            // Switching it off hands back seven 24-hour days to trim, not an empty week.
+                            ->afterStateUpdated(function ($state, $get, $set): void {
+                                if (! $state && empty($get('hours_rows'))) {
+                                    $set('hours_rows', array_map(
+                                        fn (string $d): array => ['day' => $d, 'all_day' => true, 'open' => null, 'close' => null],
+                                        ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+                                    ));
+                                }
+                            }),
                         Repeater::make('hours_rows')
                             ->hiddenLabel()
+                            ->hidden(fn ($get): bool => (bool) $get('open_24_7'))
                             ->schema([
                                 Select::make('day')
                                     ->options([
@@ -214,27 +229,36 @@ class VenueForm
                                         'Thu' => 'Thursday', 'Fri' => 'Friday', 'Sat' => 'Saturday', 'Sun' => 'Sunday',
                                     ])
                                     ->required()
+                                    ->distinct()
                                     ->native(false),
+                                Toggle::make('all_day')
+                                    ->label('24 hours')
+                                    ->inline(false)
+                                    ->live(),
                                 TimePicker::make('open')
                                     ->label('Opens')
                                     ->seconds(false)->format('H:i')->displayFormat('h:i A')
-                                    ->required(),
+                                    ->disabled(fn ($get): bool => (bool) $get('all_day'))
+                                    ->required(fn ($get): bool => ! $get('all_day')),
                                 TimePicker::make('close')
                                     ->label('Closes')
                                     ->seconds(false)->format('H:i')->displayFormat('h:i A')
-                                    ->required()
+                                    ->disabled(fn ($get): bool => (bool) $get('all_day'))
+                                    ->required(fn ($get): bool => ! $get('all_day'))
                                     // Equal times used to save and then silently produce no slots.
+                                    // Round the clock is the "24 hours" switch, not equal times.
                                     ->rules([
                                         fn ($get): \Closure => function (string $attribute, $value, \Closure $fail) use ($get): void {
-                                            if ($value !== null && substr((string) $value, 0, 5) === substr((string) $get('open'), 0, 5)) {
-                                                $fail('Closing time can’t be the same as opening time.');
+                                            if (! $get('all_day') && $value !== null && substr((string) $value, 0, 5) === substr((string) $get('open'), 0, 5)) {
+                                                $fail('Same as opening time. Open all day? Switch on "24 hours".');
                                             }
                                         },
                                     ]),
                             ])
-                            ->columns(3)
+                            ->columns(4)
                             ->table([
                                 TableColumn::make('Day'),
+                                TableColumn::make('24 hours'),
                                 TableColumn::make('Opens'),
                                 TableColumn::make('Closes'),
                             ])
@@ -248,7 +272,7 @@ class VenueForm
                             ->default(60)
                             ->live()
                             ->native(false)
-                            ->helperText('Start-times are generated every this-many minutes between open and close.'),
+                            ->helperText('A slot starts every this-many minutes between open and close.'),
                     ]),
 
                 Section::make('Cancellation policy')
@@ -826,19 +850,50 @@ class VenueForm
     public static function mergeHours(array $data): array
     {
         $map = [];
-        foreach ((array) ($data['hours_rows'] ?? []) as $row) {
-            $day = $row['day'] ?? null;
-            $open = $row['open'] ?? null;
-            $close = $row['close'] ?? null;
-            if ($day && $open && $close) {
-                $map[$day] = ['open' => substr((string) $open, 0, 5), 'close' => substr((string) $close, 0, 5)];
-            }
+        foreach (self::effectiveHoursRows($data['hours_rows'] ?? [], ! empty($data['open_24_7'])) as $row) {
+            $map[$row['day']] = ['open' => $row['open'], 'close' => $row['close']];
         }
 
         $data['hours_json'] = $map === [] ? null : $map;
-        unset($data['hours_rows']);
+        unset($data['hours_rows'], $data['open_24_7']);
 
         return $data;
+    }
+
+    /**
+     * The hours as they will be saved, from the form's helpers: "Open 24 hours, every day"
+     * gives all seven days, and a row ticked "24 hours" stores open = close = 00:00, which
+     * Venue::windowsForWeekday() reads as round the clock. Rows missing a day or a time are
+     * dropped; a later row for the same day wins.
+     *
+     * @return list<array{day: string, open: string, close: string}>
+     */
+    public static function effectiveHoursRows(mixed $rows, bool $allWeek): array
+    {
+        $order = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+        if ($allWeek) {
+            return array_map(fn (string $d): array => ['day' => $d, 'open' => '00:00', 'close' => '00:00'], $order);
+        }
+
+        $byDay = [];
+        foreach ((array) $rows as $row) {
+            $day = is_array($row) ? ($row['day'] ?? null) : null;
+            if (! in_array($day, $order, true)) {
+                continue;
+            }
+            if (! empty($row['all_day'])) {
+                $byDay[$day] = ['day' => $day, 'open' => '00:00', 'close' => '00:00'];
+
+                continue;
+            }
+            $open = $row['open'] ?? null;
+            $close = $row['close'] ?? null;
+            if ($open && $close) {
+                $byDay[$day] = ['day' => $day, 'open' => substr((string) $open, 0, 5), 'close' => substr((string) $close, 0, 5)];
+            }
+        }
+
+        return array_values(array_filter(array_map(fn (string $d) => $byDay[$d] ?? null, $order)));
     }
 
     /**
@@ -856,11 +911,16 @@ class VenueForm
         foreach ($order as $key) {
             $day = $hours[$key] ?? null;
             if (is_array($day) && empty($day['closed']) && ! empty($day['open']) && ! empty($day['close'])) {
-                $rows[] = ['day' => $key, 'open' => $day['open'], 'close' => $day['close']];
+                $allDay = substr((string) $day['open'], 0, 5) === substr((string) $day['close'], 0, 5);
+                $rows[] = $allDay
+                    ? ['day' => $key, 'all_day' => true, 'open' => null, 'close' => null]
+                    : ['day' => $key, 'all_day' => false, 'open' => $day['open'], 'close' => $day['close']];
             }
         }
 
-        $data['hours_rows'] = $rows;
+        // Every day round the clock reads back as the one switch it was set with.
+        $data['open_24_7'] = count($rows) === 7 && collect($rows)->every(fn (array $r): bool => $r['all_day']);
+        $data['hours_rows'] = $data['open_24_7'] ? [] : $rows;
 
         return $data;
     }

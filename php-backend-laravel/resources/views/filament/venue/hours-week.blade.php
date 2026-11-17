@@ -9,8 +9,9 @@
     $byDay = array_fill_keys($order, []);
     foreach ((array) $rows as $r) {
         $d = $r['day'] ?? null; $o = $toMin($r['open'] ?? null); $c = $toMin($r['close'] ?? null);
-        if ($d && isset($byDay[$d]) && $o !== null && $c !== null && $o !== $c) {
-            $byDay[$d][] = [$o, $c <= $o ? $c + 1440 : $c];
+        if ($d && isset($byDay[$d]) && $o !== null && $c !== null) {
+            // Open = close is a 24-hour day (Venue::windowsForWeekday).
+            $byDay[$d][] = $o === $c ? [0, 1440] : [$o, $c <= $o ? $c + 1440 : $c];
         }
     }
     $openDays = count(array_filter($byDay));

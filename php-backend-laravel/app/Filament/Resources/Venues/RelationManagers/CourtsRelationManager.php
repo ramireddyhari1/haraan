@@ -254,7 +254,7 @@ class CourtsRelationManager extends RelationManager
                     return [
                         \Filament\Forms\Components\Placeholder::make('none')
                             ->hiddenLabel()
-                            ->content('This venue has no slots yet. Create them in the Slots tab (Generate slots), then set this court\'s prices here.'),
+                            ->content('This venue has no slots yet. Set its opening hours (or switch on Open 24 hours) and save, then set this court\'s prices here.'),
                     ];
                 }
 
@@ -307,6 +307,150 @@ class CourtsRelationManager extends RelationManager
                     ->success()
                     ->send();
             });
+    }
+
+    /**
+     * Tap a slot on the board to change it: its all-courts price, each court's price, which
+     * sports it runs for, and whether it is sold. This replaced the separate Slots tab, whose
+     * own "Generate slots" made times that disagreed with the opening hours. The times
+     * themselves now come only from the hours (Venue::regenerateSlotsFromHours).
+     */
+    public function editSlotAction(): Action
+    {
+        $slotFor = fn (array $arguments): ?VenueSlot => $this->getOwnerRecord()->slots()->find($arguments['slot'] ?? 0);
+
+        return Action::make('editSlot')
+            ->modalHeading(function (array $arguments) use ($slotFor): string {
+                $s = $slotFor($arguments);
+
+                return $s ? $s->time.' · '.(VenueSlot::normaliseDay($s->day) === VenueSlot::EVERY_DAY ? 'every day' : $s->day) : 'Slot';
+            })
+            ->modalDescription('Blank prices fall back to each court\'s own rate (and its peak price).')
+            ->modalSubmitActionLabel('Save slot')
+            ->modalWidth('lg')
+            ->fillForm(function (array $arguments) use ($slotFor): array {
+                $s = $slotFor($arguments);
+                if (! $s) {
+                    return [];
+                }
+                $court = [];
+                foreach ($s->courtPriceList() as $id => $p) {
+                    $court[$id] = (string) (int) $p;
+                }
+
+                return [
+                    'is_available' => (bool) $s->is_available,
+                    'price' => (float) $s->price > 0 ? (string) (int) $s->price : null,
+                    'court_prices' => $court,
+                    'sports' => $s->sportsList(),
+                    'every_day' => false,
+                ];
+            })
+            ->schema(function (array $arguments) use ($slotFor): array {
+                $s = $slotFor($arguments);
+                $venue = $this->getOwnerRecord();
+
+                return [
+                    Toggle::make('is_available')->label('Sold at this time'),
+                    TextInput::make('price')
+                        ->label('Price for all courts')
+                        ->numeric()->minValue(0)->prefix('₹')
+                        ->placeholder('Each court\'s own rate')
+                        ->helperText('Replaces the court rate and its peak price at this time.'),
+                    Grid::make(['default' => 2])->schema(
+                        $venue->courts()->where('is_active', true)->orderBy('sort_order')->get()
+                            ->map(fn (VenueCourt $c) => TextInput::make('court_prices.'.$c->id)
+                                ->label($c->name)
+                                ->numeric()->minValue(0)->prefix('₹')
+                                ->placeholder('₹'.number_format((float) ($c->price ?? $venue->price ?? 0)).' rate'))
+                            ->all()
+                    ),
+                    Select::make('sports')
+                        ->label('Runs for')
+                        ->multiple()
+                        ->native(false)
+                        ->options($this->slotSportOptions())
+                        ->placeholder('All sports'),
+                    Toggle::make('every_day')
+                        ->label('Apply to '.($s?->time ?? 'this time').' on every day')
+                        ->helperText('Off: only this day changes.'),
+                ];
+            })
+            ->action(function (array $arguments, array $data) use ($slotFor): void {
+                $slot = $slotFor($arguments);
+                if (! $slot) {
+                    return;
+                }
+                $venue = $this->getOwnerRecord();
+                $courtIds = $venue->courts()->pluck('id')->map(fn ($id) => (int) $id)->all();
+                $prices = [];
+                foreach ((array) ($data['court_prices'] ?? []) as $id => $p) {
+                    if (in_array((int) $id, $courtIds, true) && $p !== null && $p !== '' && (float) $p > 0) {
+                        $prices[(int) $id] = (float) $p;
+                    }
+                }
+                $sports = array_values(array_filter((array) ($data['sports'] ?? [])));
+                $start = VenueSlot::startMinutes((string) $slot->time);
+                $targets = ! empty($data['every_day'])
+                    ? $venue->slots()->get()->filter(fn (VenueSlot $s): bool => VenueSlot::startMinutes((string) $s->time) === $start)
+                    : collect([$slot]);
+
+                DB::transaction(function () use ($targets, $data, $prices, $sports): void {
+                    foreach ($targets as $t) {
+                        $t->is_available = (bool) ($data['is_available'] ?? true);
+                        $t->price = isset($data['price']) && $data['price'] !== '' ? (float) $data['price'] : 0;
+                        $t->court_prices = $prices === [] ? null : $prices;
+                        $t->sports = $sports === [] ? null : $sports;
+                        $t->save();
+                    }
+                });
+
+                AdminAction::log('venue.slot_updated', ['time' => $slot->time, 'day' => $slot->day, 'rows' => $targets->count()], $venue);
+                Notification::make()
+                    ->title($slot->time.' saved'.($targets->count() > 1 ? ' on '.$targets->count().' days' : ''))
+                    ->success()
+                    ->send();
+            });
+    }
+
+    /**
+     * Rebuild the slot times from the opening hours. Keeps every price, sport limit and
+     * closed switch on times the hours still cover. Fixes a venue whose slots were made by
+     * the old generator and no longer match its hours.
+     */
+    public function syncSlotsAction(): Action
+    {
+        return Action::make('syncSlots')
+            ->requiresConfirmation()
+            ->modalHeading('Match slots to opening hours')
+            ->modalDescription(fn (): string => 'Creates a slot every '.$this->getOwnerRecord()->slotLength().' min inside the opening hours ('.$this->getOwnerRecord()->displayHours().') and removes times outside them. Prices on times that stay are kept. Bookings are never touched.')
+            ->modalSubmitActionLabel('Match slots')
+            ->action(function (): void {
+                $venue = $this->getOwnerRecord();
+                $before = $venue->slots()->count();
+                $venue->regenerateSlotsFromHours();
+                $after = $venue->slots()->count();
+                AdminAction::log('venue.slots_synced', ['before' => $before, 'after' => $after], $venue);
+                Notification::make()->title('Slots now match the opening hours')->body($after.' slots across the week.')->success()->send();
+            });
+    }
+
+    /** Sports a slot can be limited to: the venue's own plus every sport its courts host. */
+    private function slotSportOptions(): array
+    {
+        $venue = $this->getOwnerRecord();
+        $list = is_array($venue->sports) ? $venue->sports : [];
+        foreach ($venue->courts()->get() as $c) {
+            $list = [...$list, ...$c->sportsList()];
+        }
+        $byLower = [];
+        foreach (array_filter(array_map(fn ($x) => trim((string) $x), $list)) as $sp) {
+            $byLower[strtolower($sp)] ??= $sp;
+        }
+        $list = array_values($byLower);
+        sort($list);
+
+        return array_combine($list, $list) ?: [];
     }
 
     /** Keep the venue's sports list covering every sport its courts host, and log the change. */
@@ -393,6 +537,7 @@ class CourtsRelationManager extends RelationManager
                 };
 
                 return [
+                    'id' => (int) $s->id,
                     'time' => $s->time,
                     'rate' => $rate,
                     'source' => $source,
@@ -425,8 +570,31 @@ class CourtsRelationManager extends RelationManager
             ];
         })->all();
 
+        // Do the slot rows still match the opening hours? The old Slots tab generator made
+        // "Every day" rows and its own times, so a venue could sell hours it never opens.
+        $hasHours = is_array($venue->hours_json) && $venue->hours_json !== [];
+        $inSync = true;
+        if ($hasHours) {
+            $step = $venue->slotLength();
+            $want = [];
+            $full = ['Mon' => 'Monday', 'Tue' => 'Tuesday', 'Wed' => 'Wednesday', 'Thu' => 'Thursday', 'Fri' => 'Friday', 'Sat' => 'Saturday', 'Sun' => 'Sunday'];
+            foreach ($full as $key => $name) {
+                foreach ($venue->windowsForWeekday($key) as [$o, $c]) {
+                    for ($m = $o; $m + $step <= $c; $m += $step) {
+                        $want[$name.'|'.$m] = true;
+                    }
+                }
+            }
+            $have = $allSlots->mapWithKeys(fn (VenueSlot $s): array => [$s->day.'|'.VenueSlot::startMinutes((string) $s->time) => true])->all();
+            $inSync = $have == $want;
+        }
+
         return [
             'courts' => $courts,
+            'hasHours' => $hasHours,
+            'hoursUrl' => \App\Filament\Resources\Venues\VenueResource::getUrl('edit', ['record' => $venue]),
+            'hoursText' => $hasHours ? $venue->displayHours() : '',
+            'inSync' => $inSync,
             'day' => $day,
             'date' => $date,
             'isToday' => $date->isSameDay($today),
