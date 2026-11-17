@@ -2635,21 +2635,40 @@
         background: #fff;
         box-shadow: 0 -6px 20px rgba(15, 23, 42, 0.10);
     }
-    .mven__bar-price b { font-size: 22px; font-weight: 800; color: #0F172A; }
+    .mven__bar-price { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .mven__bar-amt { display: flex; align-items: baseline; gap: 4px; }
+    .mven__bar-amt small { font-size: 12px; font-weight: 600; color: #64748B; }
+    .mven__bar-price b { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: #0F172A; font-variant-numeric: tabular-nums; }
     .mven__bar-price i { font-size: 13px; font-style: normal; color: #64748B; }
     .mven__bar-noprice { font-size: 14px; font-weight: 600; color: #64748B; }
+    /* Open / opens-at line: a status dot, green only when it is really open now. */
+    .mven__bar-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #64748B; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mven__bar-state::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: #94A3B8; }
+    .mven__bar-state.is-open { color: #15803D; }
+    .mven__bar-state.is-open::before { background: #16A34A; box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.16); }
+    /* A pressable key (same as checkout's Proceed), not a glossy pill. */
     .mven__book {
-        height: 48px;
-        padding: 0 24px;
+        flex: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        height: 50px;
+        padding: 0 20px;
         border: 0;
-        border-radius: 50px;
+        border-radius: 14px;
         background: #2563EB;
+        box-shadow: inset 0 -3px 0 #1E40AF;
+        font: inherit;
         font-size: 15px;
-        font-weight: 700;
+        font-weight: 800;
+        letter-spacing: -0.01em;
         color: #fff;
         cursor: pointer;
+        -webkit-tap-highlight-color: transparent;
+        transition: transform 0.08s ease, box-shadow 0.08s ease;
     }
-    .mven__book:disabled { background: #CBD5E1; color: #fff; }
+    .mven__book:active { transform: translateY(1px); box-shadow: inset 0 -1px 0 #1E40AF; }
+    .mven__book:disabled { background: #E2E8F0; box-shadow: none; color: #64748B; font-weight: 700; }
 
     /* --- The sheet the real booking widget / review form move into --------
        Three rows: grip + title, the scrolling picker, and a docked summary

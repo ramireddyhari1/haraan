@@ -45,6 +45,21 @@
         $venue->rules ?? []
     )));
 
+    // Each line gets the mark its meaning calls for. A green tick on every line read
+    // "No smoking" and "No alcohol" as perks; a prohibition is a no-entry sign, a must
+    // is an alert, the cancellation policy is a clock, anything else is plain info.
+    $mvKnowIcon = function (string $rule) use ($venue): array {
+        $r = strtolower(trim($rule));
+        $has = fn (string ...$n) => array_reduce($n, fn ($c, $x) => $c || str_contains($r, $x), false);
+
+        return match (true) {
+            $rule === $venue->cancellation || $has('cancel', 'refund') => ['#2563EB', '<circle cx="12" cy="13" r="8"></circle><path d="M12 9v4l2.5 2M9.5 2.5h5"></path>'],
+            str_starts_with($r, 'no ') || $has('not allowed', 'prohibited', 'banned', "don't", 'do not') => ['#DC2626', '<circle cx="12" cy="12" r="9"></circle><path d="M5.7 5.7l12.6 12.6"></path>'],
+            $has('mandatory', 'required', 'must', 'compulsory') => ['#B45309', '<path d="M12 3.5 21.5 20h-19z"></path><path d="M12 10v4.2M12 17.2v.01"></path>'],
+            default => ['#2563EB', '<circle cx="12" cy="12" r="9"></circle><path d="M12 11v5.5M12 7.8v.01"></path>'],
+        };
+    };
+
     $mvScore = (float) $venue->rating;
     $mvAddress = $venue->address ?: $venue->location;
 
@@ -605,8 +620,9 @@
             <h2 class="mven__h2">Good to know</h2>
             <ul class="mven__know">
                 @foreach($mvGoodToKnow as $rule)
+                    @php [$mvTone, $mvGlyph] = $mvKnowIcon($rule); @endphp
                     <li>
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: {{ $mvTone }}">{!! $mvGlyph !!}</svg>
                         {{ $rule }}
                     </li>
                 @endforeach
@@ -704,14 +720,29 @@
     <div class="mven__bar">
         <span class="mven__bar-price">
             @if($venue->from_price > 0)
-                <b>₹{{ number_format($venue->from_price) }}</b><i>/hr</i>
+                <span class="mven__bar-amt"><small>from</small><b>₹{{ number_format($venue->from_price) }}</b><i>/hr</i></span>
             @else
                 {{-- The app guards this so the bar never shows a bare "₹0 /hr". --}}
                 <span class="mven__bar-noprice">Tap to see slots</span>
             @endif
+            {{-- Facts from the venue's own hours and courts — nothing a template could say. --}}
+            @php
+                $mvFacts = array_filter([
+                    $venue->open_state ?? null,
+                    ($venue->court_count ?? 0) > 0 ? $venue->court_count . ' ' . ($venue->court_count === 1 ? 'court' : 'courts') : null,
+                ]);
+            @endphp
+            @if($mvFacts)
+                <span class="mven__bar-state {{ ($venue->open_now ?? false) ? 'is-open' : '' }}">{{ implode(' · ', $mvFacts) }}</span>
+            @endif
         </span>
         <button type="button" class="mven__book" data-mven-book @unless($venue->is_bookable) disabled @endunless>
-            {{ $venue->is_bookable ? 'Book Now' : 'Not bookable' }}
+            @if($venue->is_bookable)
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="3"></rect><path d="M3.5 10h17M8 3v4M16 3v4"></path><path d="m9.5 15 1.8 1.8 3.4-3.6"></path></svg>
+                Book a slot
+            @else
+                Not bookable online
+            @endif
         </button>
     </div>
 </div>
@@ -1209,8 +1240,9 @@
                     <div class="vdk-sec__head"><h2>Good to know</h2></div>
                     <ul class="vdk-know">
                         @foreach($mvGoodToKnow as $rule)
+                            @php [$mvTone, $mvGlyph] = $mvKnowIcon($rule); @endphp
                             <li>
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+                                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: {{ $mvTone }}">{!! $mvGlyph !!}</svg>
                                 {{ $rule }}
                             </li>
                         @endforeach

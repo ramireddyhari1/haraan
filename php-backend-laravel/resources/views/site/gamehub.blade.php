@@ -400,12 +400,22 @@
     .dvc:focus-visible { outline: none; box-shadow: 0 0 0 4px rgba(37, 99, 235, .25); }
     .dvc__img { position: relative; display: block; aspect-ratio: 16 / 10; border-radius: 18px; overflow: hidden; background: #E7ECF3; }
     /* Listed venues: a drawn court under the photo, shown when Google has none. */
+    /* Listed venues without a photo: the venue's own court drawn under where the photo
+       would be (a badminton academy gets a badminton court, not a generic pitch). */
     .dvc--listed .dvc__img, .mhub__vcard--listed .mhub__vcard-img {
-        background: #EEF3EF url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 100'%3E%3Cg fill='none' stroke='%2394A3B8' stroke-width='1.4'%3E%3Crect x='14' y='12' width='132' height='76' rx='4'/%3E%3Cpath d='M80 12v76'/%3E%3Ccircle cx='80' cy='50' r='12'/%3E%3C/g%3E%3C/svg%3E") center / 62% no-repeat;
+        --cc-ink: #94A3B8; --cc-blue-soft: #EAF1EC; --cc-surface: #fff;
+        background: #F3F6F4;
     }
+    .lv-court { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 14px 22%; }
+    .lv-court .cb-pitch { width: 100%; height: auto; max-height: 100%; }
+    /* No photo: no photo shading over the drawing either. */
+    .mhub__vcard-img:not(:has(img)) .mhub__vcard-scrim, .dvc__img:not(:has(img))::after { display: none; }
+    .lv-court + img, .dvc__img img, .mhub__vcard-img img { position: relative; }
+    .mhub__vcard-call, .dvc__call { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 700; color: #0F172A; }
+    .mhub__vcard-call svg, .dvc__call svg { color: #16A34A; }
     .dhub__sechead--listed { margin-top: 36px; }
     .dvc__view { font-size: 14px; font-weight: 700; color: var(--blue); }
-    .mhub__vcard-nobook { font-size: 13px; font-weight: 700; color: #92400E; }
+    .mhub__vcard-nobook { font-size: 13px; font-weight: 600; color: #64748B; }
     .dvc__img img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .5s cubic-bezier(.2, .7, .3, 1); }
     .dvc:hover .dvc__img img { transform: scale(1.04); }
     .dvc__img::after {
@@ -789,7 +799,8 @@
                     ->values();
                 $hubMeta = collect([
                     $hubFeatured['competition'] ?: null,
-                    ($hubFeatured['home']['overs'] ?: $hubFeatured['away']['overs']) ? trim((string) ($hubFeatured['home']['overs'] ?: $hubFeatured['away']['overs'])) . ' ov' : null,
+                    // Overs only mean something in cricket; elsewhere the small number is game points.
+                    (($hubFeatured['sport'] ?? 'cricket') === 'cricket' && ($hubFeatured['home']['overs'] ?: $hubFeatured['away']['overs'])) ? trim((string) ($hubFeatured['home']['overs'] ?: $hubFeatured['away']['overs'])) . ' ov' : null,
                 ])->filter()->implode(' • ');
             @endphp
             <div class="mhub__ab-strip">
@@ -1008,6 +1019,7 @@
                 {{-- The normal venue card, with booking off: no price, View instead of Book Slot. --}}
                 <a class="mhub__vcard mhub__vcard--listed" href="{{ $lv->url }}">
                     <span class="mhub__vcard-img">
+                        @if($lv->court)<span class="lv-court" aria-hidden="true">@include('filament.venue.court-pitch', ['sport' => $lv->court, 'kind' => 'court'])</span>@endif
                         @if($lv->photo)<img src="{{ $lv->photo }}" alt="{{ $lv->title }}" loading="lazy" decoding="async" onerror="this.remove()">@endif
                         <span class="mhub__vcard-scrim"></span>
                         @if($lv->sports)<span class="mhub__arena-cat">{{ $lv->sports[0] }}</span>@endif
@@ -1024,7 +1036,11 @@
                             </span>
                         </span>
                         <span class="mhub__vcard-foot">
-                            <span class="mhub__vcard-nobook">Not bookable online</span>
+                            @if($lv->phone)
+                                <span class="mhub__vcard-call"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"></path></svg>Call to book</span>
+                            @else
+                                <span class="mhub__vcard-nobook">Book by request</span>
+                            @endif
                             <span class="mhub__book">View</span>
                         </span>
                     </span>
@@ -1307,6 +1323,7 @@
                     @foreach($listedVenues as $lv)
                         <a class="dvc dvc--listed" href="{{ $lv->url }}">
                             <span class="dvc__img">
+                                @if($lv->court)<span class="lv-court" aria-hidden="true">@include('filament.venue.court-pitch', ['sport' => $lv->court, 'kind' => 'court'])</span>@endif
                                 @if($lv->photo)<img src="{{ $lv->photo }}" alt="{{ $lv->title }}" loading="lazy" decoding="async" onerror="this.remove()">@endif
                                 @if($lv->open_state)
                                     <span class="dvc__open {{ $lv->open_now ? 'is-open' : '' }}"><i></i>{{ $lv->open_state }}</span>
@@ -1324,7 +1341,11 @@
                                     @endif
                                 </span>
                                 <span class="dvc__foot">
-                                    <span class="dvc__price"><small>No online booking</small></span>
+                                    @if($lv->phone)
+                                        <span class="dvc__call"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"></path></svg>Call to book</span>
+                                    @else
+                                        <span class="dvc__price"><small>Book by request</small></span>
+                                    @endif
                                     <span class="dvc__view">View</span>
                                 </span>
                             </span>

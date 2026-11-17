@@ -660,6 +660,11 @@ final class PublicWebController extends Controller
                 'open_now' => (bool) ($open['open'] ?? false),
                 'url' => SeoUrl::venue($v),
                 'city' => (string) $v->city,
+                // Set in /control (Venue phone). Lets the card say "Call to book" instead of
+                // only what the player can't do.
+                'phone' => trim((string) ($v->contact_phone ?? '')),
+                // Which court to draw when there's no photo: the venue's main sport.
+                'court' => \App\Support\SportGlyph::courtKind($v->sportsList()[0] ?? (string) $v->category),
             ];
         });
     }
@@ -872,6 +877,33 @@ final class PublicWebController extends Controller
      */
     private function decorateLiveStrip(LiveMatch $m): array
     {
+        // Every sport but cricket: the big number is sets/games won and the small slot is
+        // the current game's points — the same rule as the ActionBoard list. This card used
+        // to print a badminton match as "1/0 (0.0)" with "0.0 ov".
+        $sport = strtolower((string) ($m->sport ?: 'cricket'));
+        if ($sport !== 'cricket') {
+            $state = is_array($m->sport_state) ? $m->sport_state : [];
+            $live = is_array($state['points'] ?? null) && count($state['points']) >= 2 ? $state['points']
+                : (is_array($state['current'] ?? null) && count($state['current']) >= 2 && ((int) $state['current'][0] > 0 || (int) $state['current'][1] > 0) ? $state['current'] : null);
+            $side = fn (string $abbr, ?string $full, $logo, $emblem, $score, int $i): array => [
+                'abbr' => $abbr,
+                'name' => $full ?: $abbr,
+                'logo' => (string) ($logo ?? ''),
+                'emblem' => (string) ($emblem ?? ''),
+                'score' => (string) ((int) $score),
+                'overs' => $live !== null ? (string) $live[$i] : '',
+                'batting' => false,
+            ];
+
+            return [
+                'id' => $m->id,
+                'sport' => $sport,
+                'competition' => $m->competition,
+                'home' => $side((string) $m->home, $m->home_full, $m->home_logo, $m->home_emblem, $m->home_score, 0),
+                'away' => $side((string) $m->away, $m->away_full, $m->away_logo, $m->away_emblem, $m->away_score, 1),
+            ];
+        }
+
         $overs = is_array($m->over_summary)
             ? $m->over_summary
             : (json_decode((string) $m->over_summary, true) ?: []);
@@ -905,6 +937,7 @@ final class PublicWebController extends Controller
 
         return [
             'id' => $m->id,
+            'sport' => 'cricket',
             'competition' => $m->competition,
             'home' => [
                 'abbr' => $m->home,
@@ -2710,6 +2743,12 @@ final class PublicWebController extends Controller
             $short = static fn (string $l): string => str_replace(':00 ', ' ', $l);
 
             foreach ($v->windowsForWeekday($now->format('D')) as [$open, $close]) {
+                if ($open === 0 && $close >= 1440 && $minute < $close) {
+                    // Round the clock: "Open till midnight" would read as closing soon.
+                    $state = 'Open 24 hours';
+                    $openNow = true;
+                    break;
+                }
                 if ($minute >= $open && $minute < $close) {
                     $state = 'Open till ' . $short($label($close));
                     $openNow = true;
@@ -2868,6 +2907,9 @@ final class PublicWebController extends Controller
             // The "from ₹X/hr" everywhere on the page (bar, sidebar, About) — what checkout
             // really charges at its cheapest, not the bare venue price.
             'from_price' => $v->fromPrice(),
+            // The sticky book bar's second line: open now / opens at, and how many courts.
+            // ('courts' below is the list of courts, so the count goes in as court_count.)
+            ...(static fn (array $f): array => ['open_state' => $f['open_state'], 'open_now' => $f['open_now'], 'court_count' => $f['courts']])($this->venueCardFacts($v)),
             // The booking sheet estimates the total from these; the server recomputes it.
             'convenience_fee_type' => (string) ($v->convenience_fee_type ?? 'none'),
             'convenience_fee_value' => (float) ($v->convenience_fee_value ?? 0),

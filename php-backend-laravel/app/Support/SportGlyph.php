@@ -58,6 +58,23 @@ final class SportGlyph
         . '<path d="M12 12V3M12 12l7.8 4.5M12 12l-7.8 4.5"></path>'
         . '<path d="M7.5 4.2A9 9 0 0 0 12 12M20.8 13.6A9 9 0 0 0 12 12M5.8 18.6A9 9 0 0 0 12 12"></path>';
 
+    /** The court-drawing key (filament/venue/court-pitch) for a sport name, or '' for none. */
+    public static function courtKind(string $sport): string
+    {
+        $s = strtolower($sport);
+
+        return match (true) {
+            str_contains($s, 'cricket') => 'cricket',
+            str_contains($s, 'football'), str_contains($s, 'soccer'), str_contains($s, 'futsal') => 'football',
+            str_contains($s, 'basket') => 'basketball',
+            str_contains($s, 'volley') => 'volleyball',
+            str_contains($s, 'pickle') => 'pickleball',
+            str_contains($s, 'tennis') && ! str_contains($s, 'table') => 'tennis',
+            str_contains($s, 'badminton'), str_contains($s, 'shuttle') => 'badminton',
+            default => '',
+        };
+    }
+
     /** The glyph for a sport name as venues store it ("Cricket", "cricket", "Box cricket"). */
     public static function for(string $sport): string
     {
