@@ -2873,6 +2873,7 @@ final class PublicWebController extends Controller
             'convenience_fee_value' => (float) ($v->convenience_fee_value ?? 0),
             // Every fee (convenience + the admin's named ones), for the same estimate.
             'fee_rules' => $v->feeRules(),
+            'advance_percent' => $v->advancePercent(),
             // Falls back to the slot times when the weekly hours aren't set.
             'hours' => $v->publicHours(),
             // Mon…Sun [open, close] minutes — drawn as the desktop page's week of hours.

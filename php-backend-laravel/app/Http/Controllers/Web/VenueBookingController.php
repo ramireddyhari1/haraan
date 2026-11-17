@@ -56,6 +56,7 @@ final class VenueBookingController extends Controller
             'slots'      => ['required', 'array', 'min:1', 'max:24'],
             'slots.*'    => ['required', 'string', 'max:40'],
             'couponCode' => ['nullable', 'string', 'max:40'],
+            'payMode'    => ['nullable', 'string', 'in:full,advance'],
         ]);
 
         $date = Carbon::createFromFormat('Y-m-d', $validated['date'])->startOfDay();
@@ -108,6 +109,11 @@ final class VenueBookingController extends Controller
         }
 
         $tax = Venue::taxFor($subtotal, $discount);
+        $total = max(0.0, round($subtotal + $fee - $discount + $tax, 2));
+        // Advance payment: Haraan sets the % per venue; the customer picks full or advance.
+        $payAtVenue = ($validated['payMode'] ?? 'full') === 'advance'
+            ? $venue->payAtVenueFor(max(0.0, $subtotal - $discount))
+            : 0.0;
 
         return response()->json([
             'ok'        => true,
@@ -120,7 +126,15 @@ final class VenueBookingController extends Controller
             'discount'  => $discount,
             'tax'       => $tax,
             'tax_label' => Venue::taxLabel(),
-            'total'     => max(0.0, round($subtotal + $fee - $discount + $tax, 2)),
+            'total'     => $total,
+            'advance'   => [
+                'offered'      => $venue->offersAdvance(),
+                'percent'      => $venue->advancePercent(),
+                // What "Pay advance" would leave for the venue, whatever mode is picked now.
+                'pay_at_venue' => $venue->payAtVenueFor(max(0.0, $subtotal - $discount)),
+            ],
+            'pay_at_venue' => $payAtVenue,
+            'pay_now'      => max(0.0, round($total - $payAtVenue, 2)),
             'coupon'    => $coupon,
             'hold_minutes' => BookingService::holdMinutes(),
         ]);
@@ -149,6 +163,7 @@ final class VenueBookingController extends Controller
             'court_id'   => ['nullable', 'integer'],
             'slots'      => ['required', 'array', 'min:1'],
             'couponCode' => ['nullable', 'string', 'max:40'],
+            'payMode'    => ['nullable', 'string', 'in:full,advance'],
         ]);
 
         try {
@@ -341,7 +356,13 @@ final class VenueBookingController extends Controller
         $tax = Venue::taxFor($subtotal, $discount);
 
         $grandTotal = max(0.0, round($subtotal + $fee - $discount + $tax, 2));
-        $grandPaise = (int) round($grandTotal * 100);
+        // Advance payment: the customer pays the venue's advance share of the court value plus
+        // every online charge now, and the rest at the venue. Split across rows like the fee.
+        $payAtVenue = ($validated['payMode'] ?? 'full') === 'advance'
+            ? $venue->payAtVenueFor(max(0.0, $subtotal - $discount))
+            : 0.0;
+        $payNow = max(0.0, round($grandTotal - $payAtVenue, 2));
+        $grandPaise = (int) round($payNow * 100);
 
         try {
             Operations::assertBookingsOpen(Operations::VENUES);
@@ -355,12 +376,13 @@ final class VenueBookingController extends Controller
         $feeShares = self::split($fee, $rates);
         $discountShares = self::split($discount, $rates);
         $taxShares = self::split($tax, $rates);
+        $venueShares = self::split($payAtVenue, $rates);
         $commissionPercent = $venue->commissionPercent();
 
         /** @var Collection<int, Booking> $bookings */
         $bookings = collect();
 
-        DB::transaction(function () use ($venue, $court, $user, $bookingDate, $slotsToReserve, $feeShares, $discountShares, $taxShares, $commissionPercent, $applied, &$bookings) {
+        DB::transaction(function () use ($venue, $court, $user, $bookingDate, $slotsToReserve, $feeShares, $discountShares, $taxShares, $venueShares, $commissionPercent, $applied, &$bookings) {
             foreach ($slotsToReserve as $i => $s) {
                 $slotRate = (float) $s['rate'];
                 $rowFee = $feeShares[$i];
@@ -371,6 +393,7 @@ final class VenueBookingController extends Controller
                     'total_amount'    => max(0.0, round($slotRate + $rowFee - $rowDiscount, 2)),
                     'convenience_fee' => $rowFee,
                     'tax_amount'      => $taxShares[$i],
+                    'pay_at_venue'    => $venueShares[$i],
                     'discount'        => $rowDiscount,
                     // One row per order carries the code: the per-customer coupon limit counts
                     // discounted rows, so tagging every slot would spend it once per slot.
@@ -407,6 +430,8 @@ final class VenueBookingController extends Controller
             'tax'            => $tax,
             'taxLabel'       => Venue::taxLabel(),
             'total'          => $grandTotal,
+            'payAtVenue'     => $payAtVenue,
+            'payNow'         => $payNow,
         ];
 
         // Free order (0 paise)

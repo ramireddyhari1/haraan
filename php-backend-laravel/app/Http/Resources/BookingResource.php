@@ -30,6 +30,9 @@ final class BookingResource extends JsonResource
             'taxAmount' => (float) $this->tax_amount,
             // What the customer paid for this row, tax included (Booking::amountCharged()).
             'amountCharged' => $this->resource->amountCharged(),
+            // Advance bookings: paid online now vs. left to pay at the venue.
+            'payAtVenue' => (float) ($this->pay_at_venue ?? 0),
+            'onlineDue' => $this->resource->onlineDue(),
             'status'      => $this->status,
             // Scannable entry-pass code — the app renders `haraan:ticket:<ticketCode>` as the QR.
             'ticketCode'  => $this->ticket_code,

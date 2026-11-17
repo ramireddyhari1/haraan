@@ -2232,6 +2232,21 @@ body.vco-locked { overflow: hidden; }
 .vco__row--pay { padding-top: 2px; font-size: 13.5px; color: #64748B; }
 .vco__row--pay span:last-child { color: #1D4ED8; }
 .vco__rule { height: 1px; margin: 6px 0 0; background: #E2E8F0; }
+.vco__row--venue { padding-top: 0; font-size: 13.5px; color: #64748B; }
+.vco__row--venue span:last-child { color: #B45309; font-weight: 700; }
+.vco__paymode { display: grid; gap: 8px; margin: 2px 0 10px; }
+.vco__paymode[hidden] { display: none; }
+.vco__paymode-opt {
+    display: flex; align-items: center; gap: 12px; width: 100%;
+    padding: 12px 14px; border: 1.5px solid #E2E8F0; border-radius: 12px;
+    background: #fff; font: inherit; text-align: left; cursor: pointer;
+}
+.vco__paymode-opt.is-on { border-color: #2563EB; background: #F5F8FF; }
+.vco__paymode-dot { flex: none; width: 18px; height: 18px; border: 2px solid #CBD5E1; border-radius: 50%; }
+.vco__paymode-opt.is-on .vco__paymode-dot { border: 5px solid #2563EB; }
+.vco__paymode-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.vco__paymode-text b { font-size: 14px; font-weight: 700; color: #0F172A; }
+.vco__paymode-text small { font-size: 12.5px; color: #64748B; }
 
 .vco__link {
     padding: 0;

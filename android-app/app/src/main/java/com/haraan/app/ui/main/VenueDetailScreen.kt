@@ -1319,6 +1319,8 @@ internal fun BookingSheet(
   var couponMessage by remember { mutableStateOf<String?>(null) }
   var appliedCode by remember { mutableStateOf<String?>(null) }
   var discountRs by remember { mutableStateOf(0) }
+  // "Pay advance" picked on the review page (only offered when Haraan set an advance %).
+  var payAdvance by remember { mutableStateOf(false) }
   // The fee the server quoted for this order, once it has quoted one. Until then the
   // venue's own rule stands in — see [feeRs] below. It used to be a plain 0 that only
   // filled in if the customer happened to try a coupon, so a fee-charging venue showed
@@ -1436,6 +1438,10 @@ internal fun BookingSheet(
   val taxRs = venue.taxOn(subtotalRs, discountRs)
   // Fee added, discount taken off, tax on top — mirroring reserveVenue's order exactly.
   val total = (subtotalRs + feeRs - discountRs).coerceAtLeast(0) + taxRs
+  // Advance payment: the balance of the court value left for the venue, and what is paid now.
+  val advanceBalanceRs = venue.payAtVenueOn((subtotalRs - discountRs).coerceAtLeast(0))
+  val atVenueRs = if (payAdvance && venue.offersAdvance) advanceBalanceRs else 0
+  val payNowRs = (total - atVenueRs).coerceAtLeast(0)
 
   // A coupon is quoted against ONE subtotal. Change the duration, court or slot and that
   // quote is about a different order — and since the code now travels with the booking,
@@ -1571,6 +1577,7 @@ internal fun BookingSheet(
         // The code the summary discounted by. Without it the server priced the order
         // at full rate: the screen said one number and Razorpay asked for another.
         couponCode = appliedCode,
+        payAdvance = atVenueRs > 0,
       )) {
         is BookingResult.Success -> {
           // Free slot, or a server that still confirms without payment.
@@ -1639,7 +1646,7 @@ internal fun BookingSheet(
           timeLabel = endLabel ?: (selectedSlot?.time ?: ""),
           courtName = selectedCourt?.name,
           durationHours = duration,
-          totalLabel = "₹$total",
+          totalLabel = if (atVenueRs > 0) "₹$payNowRs paid · ₹$atVenueRs at venue" else "₹$total",
           ticketCode = bookedCode,
           // Only show 'Pay at the venue' if not paid online and amount > 0.
           payAtVenue = !isPaidOnline && total > 0,
@@ -1709,6 +1716,10 @@ internal fun BookingSheet(
         tax = taxRs,
         appliedCode = appliedCode,
         total = total,
+        advancePercent = venue.advancePercent,
+        advanceBalance = advanceBalanceRs,
+        payAdvance = atVenueRs > 0,
+        onPayAdvance = { payAdvance = it },
         isPeak = isPeakNow,
         couponInput = couponInput,
         couponBusy = couponBusy,
@@ -1992,6 +2003,10 @@ private fun VenueReviewPage(
   tax: Int,
   appliedCode: String?,
   total: Int,
+  advancePercent: Double = 0.0,
+  advanceBalance: Int = 0,
+  payAdvance: Boolean = false,
+  onPayAdvance: (Boolean) -> Unit = {},
   isPeak: Boolean,
   couponInput: String,
   couponBusy: Boolean,
@@ -2006,6 +2021,8 @@ private fun VenueReviewPage(
 ) {
   var couponOpen by remember { mutableStateOf(couponInput.isNotBlank()) }
   var breakupOpen by remember { mutableStateOf(false) }
+  val atVenue = if (payAdvance) advanceBalance else 0
+  val payNow = (total - atVenue).coerceAtLeast(0)
 
   Column(
     modifier = Modifier
@@ -2292,7 +2309,16 @@ private fun VenueReviewPage(
           horizontalArrangement = Arrangement.SpaceBetween,
         ) {
           Text("Payable now", color = BookInk.Muted, fontSize = 13.5.sp)
-          Text("₹${inr(total)}", color = BookInk.BlueDeep, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+          Text("₹${inr(payNow)}", color = BookInk.BlueDeep, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+        }
+        if (atVenue > 0) {
+          Row(
+            Modifier.fillMaxWidth().padding(bottom = 10.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+          ) {
+            Text("Pay at the venue", color = BookInk.Muted, fontSize = 13.5.sp)
+            Text("₹${inr(atVenue)}", color = BookInk.Amber, fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+          }
         }
         Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
           Icon(Icons.Default.Lock, null, tint = BookInk.Faint, modifier = Modifier.size(13.dp))
@@ -2301,8 +2327,28 @@ private fun VenueReviewPage(
         }
       }
 
+      // ── Advance payment — Haraan sets the % per venue; the customer picks ──
+      if (advanceBalance > 0 && total > 0) {
+        ReviewCard {
+          Text("How do you want to pay?", color = BookInk.Ink, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, letterSpacing = (-0.34).sp)
+          Spacer(Modifier.height(10.dp))
+          PayMethodRow(
+            title = "Pay full amount",
+            sub = "₹${inr(total)} now",
+            selected = !payAdvance,
+          ) { onPayAdvance(false) }
+          Spacer(Modifier.height(8.dp))
+          val pct = if (advancePercent % 1.0 == 0.0) advancePercent.toInt().toString() else advancePercent.toString()
+          PayMethodRow(
+            title = "Pay advance ($pct%)",
+            sub = "₹${inr((total - advanceBalance).coerceAtLeast(0))} now · ₹${inr(advanceBalance)} at the venue",
+            selected = payAdvance,
+          ) { onPayAdvance(true) }
+        }
+      }
+
       // ── Pay with — UPI always on the list, whatever this phone has installed ──
-      if (total > 0) {
+      if (payNow > 0) {
         ReviewCard {
           Text("Pay with", color = BookInk.Ink, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp, letterSpacing = (-0.34).sp)
           Spacer(Modifier.height(10.dp))
@@ -2370,9 +2416,9 @@ private fun VenueReviewPage(
         } else {
           Text(
             when {
-              total <= 0 -> "Confirm booking"
-              payByUpi -> "Pay ₹${inr(total)} by UPI"
-              else -> "Proceed ₹${inr(total)}"
+              payNow <= 0 -> "Confirm booking"
+              payByUpi -> "Pay ₹${inr(payNow)} by UPI"
+              else -> "Proceed ₹${inr(payNow)}"
             },
             color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, maxLines = 1,
           )

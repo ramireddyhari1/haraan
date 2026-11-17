@@ -72,6 +72,10 @@ final class VenuesController extends Controller
             'tax_type' => PlatformRules::string('fees.venue_tax_type'),
             'tax_value' => PlatformRules::float('fees.venue_tax_value'),
             'tax_label' => Venue::taxLabel(),
+            // Advance payment (/control → venue): 0 = full payment only. Otherwise the customer
+            // may pay this % of the court value (after discount, rounded UP to the rupee) plus
+            // every fee and tax online, and the rest at the venue (payMode: advance).
+            'advance_percent' => $venue->advancePercent(),
             'about' => $venue->about,
             'amenities' => $venue->amenities ?? [],
             // Courts are physical bookable units, each carrying the sports it can host and its

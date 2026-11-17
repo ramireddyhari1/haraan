@@ -814,7 +814,18 @@
 
                     <div class="vco__rule"></div>
                     <div class="vco__row vco__row--total"><span>Total amount</span><span id="vco-total">—</span></div>
+                    <div class="vco__paymode" id="vco-paymode" role="radiogroup" aria-label="How do you want to pay?" hidden>
+                        <button type="button" class="vco__paymode-opt is-on" data-paymode="full" role="radio" aria-checked="true">
+                            <span class="vco__paymode-dot" aria-hidden="true"></span>
+                            <span class="vco__paymode-text"><b>Pay full amount</b><small id="vco-paymode-full">—</small></span>
+                        </button>
+                        <button type="button" class="vco__paymode-opt" data-paymode="advance" role="radio" aria-checked="false">
+                            <span class="vco__paymode-dot" aria-hidden="true"></span>
+                            <span class="vco__paymode-text"><b>Pay advance <span id="vco-paymode-pct"></span></b><small id="vco-paymode-adv">—</small></span>
+                        </button>
+                    </div>
                     <div class="vco__row vco__row--pay"><span>Payable now</span><span id="vco-paynow">—</span></div>
+                    <div class="vco__row vco__row--venue" id="vco-atvenue-row" hidden><span>Pay at the venue</span><span id="vco-atvenue">—</span></div>
 
                     <div class="vco__pay">
                         <span class="vco__pay-total" id="vco-foot-total" aria-hidden="true"></span>
@@ -3494,6 +3505,7 @@
                     court_id: courtIds[selectedCourt] ?? null,
                     slots: selectedSlots.map(s => ({ time: s.time, price: s.price })),
                     couponCode: couponCode || null,
+                    payMode: reviewPayMode,
                 })
             });
 
@@ -3610,6 +3622,7 @@
 
     /* ---- Review page: what you're booking, priced by the server, then Proceed ---- */
     let reviewCoupon = '';   // the code the last quote accepted
+    let reviewPayMode = 'full'; // 'advance' = pay the venue's advance now, the rest at the venue
     let reviewSeq = 0;
     const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
     const esc = (t) => String(t ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -3618,6 +3631,7 @@
         const el = document.getElementById('vco');
         if (!el || !selectedSlots.length) return;
         reviewCoupon = '';
+        reviewPayMode = 'full';
         const form = document.getElementById('vco-coupon-form');
         if (form) form.hidden = true;
         const input = document.getElementById('vco-coupon-input');
@@ -3696,6 +3710,7 @@
                     court_id: courtIds[selectedCourt] ?? null,
                     slots: selectedSlots.map(s => s.time),
                     couponCode: code || null,
+                    payMode: reviewPayMode,
                 }),
             });
             const q = await res.json().catch(() => ({}));
@@ -3757,10 +3772,34 @@
         if (applied) document.getElementById('vco-coupon-form').hidden = true;
 
         document.getElementById('vco-total').textContent = inr(q.total);
-        document.getElementById('vco-paynow').textContent = inr(q.total);
+
+        // Advance payment (Haraan sets the % per venue in /control): pay the advance + fees
+        // now and the rest at the venue, or pay in full. The server prices both.
+        const adv = q.advance || {};
+        const offered = !!adv.offered && Number(adv.pay_at_venue || 0) > 0;
+        if (!offered) reviewPayMode = 'full';
+        document.getElementById('vco-paymode').hidden = !offered;
+        if (offered) {
+            const pct = Number(adv.percent || 0);
+            document.getElementById('vco-paymode-pct').textContent = '(' + pct.toLocaleString('en-IN', { maximumFractionDigits: 2 }) + '%)';
+            document.getElementById('vco-paymode-full').textContent = inr(q.total) + ' now';
+            document.getElementById('vco-paymode-adv').textContent =
+                inr(Math.max(0, q.total - adv.pay_at_venue)) + ' now · ' + inr(adv.pay_at_venue) + ' at the venue';
+            document.querySelectorAll('#vco-paymode [data-paymode]').forEach(b => {
+                const on = b.dataset.paymode === reviewPayMode;
+                b.classList.toggle('is-on', on);
+                b.setAttribute('aria-checked', on ? 'true' : 'false');
+            });
+        }
+        const atVenue = Number(q.pay_at_venue || 0);
+        const payNow = q.pay_now != null ? Number(q.pay_now) : Number(q.total);
+        document.getElementById('vco-paynow').textContent = inr(payNow);
+        document.getElementById('vco-atvenue-row').hidden = !(atVenue > 0);
+        document.getElementById('vco-atvenue').textContent = inr(atVenue);
+
         const hold = document.getElementById('vco-hold');
         if (hold && q.hold_minutes) hold.textContent = `Your slot${n === 1 ? ' is' : 's are'} held for ${q.hold_minutes} minutes once you proceed.`;
-        setProceed(q.total > 0 ? 'Proceed ' + inr(q.total) : 'Confirm booking', true);
+        setProceed(payNow > 0 ? 'Proceed ' + inr(payNow) : 'Confirm booking', true);
     }
 
     document.addEventListener('click', (e) => {
@@ -3785,6 +3824,11 @@
             form.hidden = !form.hidden;
             e.target.closest('#vco-coupon-open').setAttribute('aria-expanded', String(!form.hidden));
             if (!form.hidden) document.getElementById('vco-coupon-input').focus();
+            return;
+        }
+        const pm = e.target.closest('#vco-paymode [data-paymode]');
+        if (pm) {
+            if (pm.dataset.paymode !== reviewPayMode) { reviewPayMode = pm.dataset.paymode; requote(reviewCoupon); }
             return;
         }
         if (e.target.closest('#vco-coupon-remove')) { setCouponMsg(''); requote(''); return; }
@@ -3892,7 +3936,11 @@
         if (discountRow) discountRow.style.display = discount > 0 ? '' : 'none';
 
         const totalEl = document.getElementById('tp-total');
-        if (totalEl) totalEl.innerText = '₹' + finalTotal.toLocaleString('en-IN');
+        if (totalEl) {
+            const atVenue = Number(b.payAtVenue || 0);
+            totalEl.innerText = '₹' + finalTotal.toLocaleString('en-IN')
+                + (atVenue > 0 ? ' · ₹' + atVenue.toLocaleString('en-IN') + ' to pay at venue' : '');
+        }
 
         // Populate slot item rows
         const slotsContainer = document.getElementById('tp-slots');

@@ -155,7 +155,22 @@ data class VenueDetailData(
     val taxType: String = "none",
     val taxValue: Double = 0.0,
     val taxLabel: String = "GST",
+    // Advance payment, set by Haraan per venue in /control: the % of the court value a
+    // customer may pay online now, the rest at the venue. 0 = full payment only.
+    val advancePercent: Double = 0.0,
 ) {
+    val offersAdvance: Boolean get() = advancePercent > 0.0 && advancePercent < 100.0
+
+    /**
+     * What "Pay advance" leaves to pay at the venue on a [courtValue] (subtotal − discount):
+     * the advance is rounded UP to the rupee — mirrors Venue::payAtVenueFor() on the server.
+     */
+    fun payAtVenueOn(courtValue: Int): Int {
+        if (!offersAdvance || courtValue <= 0) return 0
+        val advance = kotlin.math.ceil(courtValue * advancePercent / 100.0).toInt()
+        return (courtValue - advance).coerceAtLeast(0)
+    }
+
     /** Every fee this venue adds to a [subtotal] — the sum of [feeLinesOn]. */
     fun convenienceFeeOn(subtotal: Int): Int = feeLinesOn(subtotal).sumOf { it.amount }
 
@@ -402,6 +417,7 @@ class VenueRepository {
             taxType = s("tax_type").ifBlank { "none" },
             taxValue = d.optDouble("tax_value", 0.0).let { if (it.isNaN()) 0.0 else it },
             taxLabel = s("tax_label").ifBlank { "GST" },
+            advancePercent = d.optDouble("advance_percent", 0.0).let { if (it.isNaN()) 0.0 else it },
         )
     }
 

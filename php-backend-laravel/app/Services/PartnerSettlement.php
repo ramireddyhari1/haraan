@@ -55,7 +55,11 @@ final class PartnerSettlement
     {
         $paid = $this->bookings($partnerId)->whereIn(DB::raw('lower(status)'), self::PAID_BOOKING);
 
-        return max(0.0, (float) (clone $paid)->sum('total_amount') - (float) (clone $paid)->sum('host_deduction'));
+        // pay_at_venue: the balance of an advance booking, collected by the venue itself at
+        // its desk — it never passed through Haraan, so it is not Haraan's to pay out.
+        return max(0.0, (float) (clone $paid)->sum('total_amount')
+            - (float) (clone $paid)->sum('pay_at_venue')
+            - (float) (clone $paid)->sum('host_deduction'));
     }
 
     /** The platform's share of this partner's paid bookings (host-paid fees + commission). */

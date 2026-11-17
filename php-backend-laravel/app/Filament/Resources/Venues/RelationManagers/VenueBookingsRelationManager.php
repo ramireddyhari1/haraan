@@ -4,7 +4,14 @@ declare(strict_types=1);
 
 namespace App\Filament\Resources\Venues\RelationManagers;
 
+use App\Filament\Resources\Venues\Schemas\VenueForm;
 use App\Models\Booking;
+use App\Models\Venue;
+use Filament\Actions\Action;
+use Filament\Facades\Filament;
+use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
+use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
@@ -51,12 +58,78 @@ class VenueBookingsRelationManager extends RelationManager
         return $upcoming > 0 ? (string) $upcoming : null;
     }
 
+    private function venue(): Venue
+    {
+        /** @var Venue $venue */
+        $venue = $this->getOwnerRecord();
+
+        return $venue;
+    }
+
+    /** "On a ₹1,000 booking: ₹200 online now (plus fees), ₹800 at the venue." */
+    private static function example(float $pct): string
+    {
+        if ($pct <= 0 || $pct >= 100) {
+            return '';
+        }
+
+        $advance = (int) ceil(1000 * $pct / 100);
+
+        return 'On a ₹1,000 booking: ₹' . number_format($advance) . ' online now (plus fees), ₹' . number_format(1000 - $advance) . ' at the venue.';
+    }
+
     public function table(Table $table): Table
     {
         return $table
             ->recordTitleAttribute('ticket_code')
             ->defaultSort('slot_date', 'desc')
             ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['user']))
+            ->description(fn (): string => 'Advance payment: ' . ($this->venue()->advanceLabel() ?? 'off — customers pay the full amount online'))
+            ->headerActions([
+                // Haraan's call, not the partner's: the share of the court price a customer may
+                // pay online as an advance, the rest at the venue (Venue::payAtVenueFor()).
+                Action::make('advancePayment')
+                    ->label(fn (): string => $this->venue()->offersAdvance()
+                        ? 'Advance ' . rtrim(rtrim(number_format($this->venue()->advancePercent(), 2), '0'), '.') . '%'
+                        : 'Advance payment')
+                    ->icon('heroicon-o-banknotes')
+                    ->color(fn (): string => $this->venue()->offersAdvance() ? 'primary' : 'gray')
+                    ->modalHeading('Advance payment')
+                    ->modalDescription('Customers choose at checkout: pay only the advance online and the rest at the venue, or pay in full. Applies to new bookings only.')
+                    ->modalWidth('lg')
+                    ->modalSubmitActionLabel('Save')
+                    ->fillForm(fn (): array => [
+                        'enabled' => $this->venue()->offersAdvance(),
+                        'advance_percent' => $this->venue()->offersAdvance() ? $this->venue()->advancePercent() : 20,
+                    ])
+                    ->schema([
+                        Toggle::make('enabled')
+                            ->label('Offer advance payment')
+                            ->live(),
+                        TextInput::make('advance_percent')
+                            ->label('Advance (% of the court price)')
+                            ->numeric()
+                            ->minValue(1)
+                            ->maxValue(99)
+                            ->suffix('%')
+                            ->live(onBlur: true)
+                            ->required(fn ($get): bool => (bool) $get('enabled'))
+                            ->visible(fn ($get): bool => (bool) $get('enabled'))
+                            ->helperText(fn ($get): string => trim(self::example((float) ($get('advance_percent') ?: 0)) . ' ' . VenueForm::ADVANCE_HELP)),
+                    ])
+                    ->action(function (array $data): void {
+                        $venue = $this->venue();
+                        $venue->advance_percent = ! empty($data['enabled']) ? round((float) $data['advance_percent'], 2) : null;
+                        $venue->save();
+
+                        Notification::make()
+                            ->title($venue->offersAdvance() ? 'Advance payment on' : 'Advance payment off')
+                            ->body($venue->advanceLabel() ?? 'Customers pay the full amount online.')
+                            ->success()
+                            ->send();
+                    })
+                    ->visible(fn (): bool => Filament::getCurrentPanel()?->getId() !== 'partner'),
+            ])
             ->emptyStateHeading('No bookings yet')
             ->emptyStateIcon('heroicon-o-calendar-days')
             ->columns([
@@ -104,6 +177,15 @@ class VenueBookingsRelationManager extends RelationManager
                     ->label('Order total')
                     ->money('INR')
                     ->sortable(),
+
+                TextColumn::make('pay_at_venue')
+                    ->label('Pay at venue')
+                    ->money('INR')
+                    ->description(fn (Booking $record): ?string => (float) $record->pay_at_venue > 0
+                        ? '₹' . number_format($record->onlineDue(), 2) . ' advance online'
+                        : null)
+                    ->color(fn (Booking $record): string => (float) $record->pay_at_venue > 0 ? 'warning' : 'gray')
+                    ->toggleable(),
 
                 TextColumn::make('amount_paid')
                     ->label('Collected')

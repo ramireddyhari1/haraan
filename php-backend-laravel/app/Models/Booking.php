@@ -96,6 +96,7 @@ final class Booking extends Model
         'gateway_fee',
         'tax_amount',
         'host_deduction',
+        'pay_at_venue',
         'status',
         // Razorpay reserve→confirm: order id links the rows of one payment, payment id
         // is stamped once the signature verifies, reserved_until bounds the PENDING hold.
@@ -143,6 +144,7 @@ final class Booking extends Model
             'gateway_fee' => 'float',
             'tax_amount' => 'float',
             'host_deduction' => 'float',
+            'pay_at_venue' => 'float',
             'discount'        => 'float',
             'seat_numbers' => 'array',
             'slot_date'    => 'date',
@@ -189,6 +191,16 @@ final class Booking extends Model
             (float) $this->total_amount + $this->customerCharges() - (float) $this->discount,
             2,
         ));
+    }
+
+    /**
+     * What the customer pays online for this row: the whole charge, less the balance they
+     * chose to settle at the venue (advance payment). The Razorpay order, the ledger's
+     * online settlement and any automatic gateway refund all use this, never amountCharged().
+     */
+    public function onlineDue(): float
+    {
+        return max(0.0, round($this->amountCharged() - (float) ($this->pay_at_venue ?? 0), 2));
     }
 
     /** Fees and tax the customer paid on top of the ticket subtotal (event rows). */

@@ -633,6 +633,9 @@ final class BookingsController extends Controller
             'date'       => ['required', 'date'],
             'duration'   => ['nullable', 'integer', 'min:1', 'max:12'],
             'couponCode' => ['nullable', 'string', 'max:40'],
+            // 'advance' = pay only the venue's advance online, rest at the venue. Anything
+            // else (or absent — every app build before this) pays in full.
+            'payMode'    => ['nullable', 'string', 'in:full,advance'],
         ]);
 
         // Reserve first, price second: the court is held while we talk to Razorpay, so two
@@ -649,10 +652,12 @@ final class BookingsController extends Controller
             // Priced server-side: the discount is resolved against the coupon's own rules,
             // never taken from a client-supplied total.
             couponCode: $data['couponCode'] ?? null,
+            payAdvance: ($data['payMode'] ?? 'full') === 'advance',
         );
 
-        // amountCharged(), not total_amount: Pulse tax sits beside the venue's share.
-        $amountPaise = (int) round($booking->amountCharged() * 100);
+        // onlineDue(): the whole charge (Pulse tax included), less any balance the customer
+        // chose to pay at the venue.
+        $amountPaise = (int) round($booking->onlineDue() * 100);
 
         // Free slot (₹0 rate): nothing to charge, so confirm on the spot rather than
         // sending the user to a checkout for zero rupees.

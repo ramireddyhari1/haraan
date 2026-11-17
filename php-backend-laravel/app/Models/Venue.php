@@ -21,7 +21,7 @@ final class Venue extends Model
     use AuditsAdminChanges;
 
     /** Only changes to these fields are audit-logged (see AuditsAdminChanges). */
-    protected array $auditedAttributes = ['status', 'published_at', 'price', 'convenience_fee_type', 'convenience_fee_value', 'fees', 'commission_percent', 'is_bookable', 'is_active', 'booking_window_days', 'partner_id', 'cancel_free_hours', 'cancel_refund_percent'];
+    protected array $auditedAttributes = ['status', 'published_at', 'price', 'convenience_fee_type', 'convenience_fee_value', 'fees', 'commission_percent', 'advance_percent', 'is_bookable', 'is_active', 'booking_window_days', 'partner_id', 'cancel_free_hours', 'cancel_refund_percent'];
 
     use BroadcastsContentChanges;
 
@@ -40,7 +40,7 @@ final class Venue extends Model
     protected $fillable = [
         'name', 'category', 'kind', 'branch_label', 'branch_code', 'capabilities',
         'sports', 'location', 'city', 'address', 'distance', 'latitude', 'longitude', 'map_link', 'place_id',
-        'price', 'convenience_fee_type', 'convenience_fee_value', 'fees', 'commission_percent',
+        'price', 'convenience_fee_type', 'convenience_fee_value', 'fees', 'commission_percent', 'advance_percent',
         'price_chart', 'price_note', 'rating', 'ratings_count', 'reviews_count', 'tagline', 'hours',
         'about', 'rules', 'images', 'amenities', 'status', 'published_at', 'is_bookable', 'booking_window_days', 'is_active', 'is_featured',
         'sort_order', 'partner_id', 'organization_id', 'contact_phone', 'listing_source',
@@ -55,6 +55,7 @@ final class Venue extends Model
         'rules' => 'array',
         'fees' => 'array',
         'commission_percent' => 'float',
+        'advance_percent' => 'float',
         'price_chart' => 'array',
         'hours_json' => 'array',
         'slot_minutes' => 'integer',
@@ -773,6 +774,48 @@ final class Venue extends Model
         return $this->commission_percent !== null
             ? (float) $this->commission_percent
             : \App\Support\PlatformRules::float('fees.venue_commission_percent');
+    }
+
+    /**
+     * Share of the court price a customer may pay online as an advance, set by Haraan in
+     * /control. 0 = no advance option (the whole booking is paid online).
+     */
+    public function advancePercent(): float
+    {
+        $pct = (float) ($this->advance_percent ?? 0);
+
+        return $pct > 0 && $pct < 100 ? round($pct, 2) : 0.0;
+    }
+
+    public function offersAdvance(): bool
+    {
+        return $this->advancePercent() > 0;
+    }
+
+    /**
+     * What a customer paying only the advance leaves to settle at the venue: the rest of the
+     * court value (slot price after discount), in whole rupees. Fees and tax are online
+     * charges and are always paid online, so they never fall into this balance.
+     */
+    public function payAtVenueFor(float $courtValue): float
+    {
+        if (! $this->offersAdvance() || $courtValue <= 0) {
+            return 0.0;
+        }
+
+        $advance = ceil($courtValue * $this->advancePercent() / 100);
+
+        return max(0.0, round($courtValue - $advance, 2));
+    }
+
+    /** "20% advance online, rest at the venue", or null when the venue takes full payment. */
+    public function advanceLabel(): ?string
+    {
+        $pct = $this->advancePercent();
+
+        return $pct > 0
+            ? rtrim(rtrim(number_format($pct, 2), '0'), '.') . '% advance online, rest at the venue'
+            : null;
     }
 
     /** "Free", or "12.5% of each online booking" — how the partner reads their rate. */

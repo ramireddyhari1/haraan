@@ -523,10 +523,14 @@ class BookingRepository(
     courtId: Int? = null,
     duration: Int = 1,
     couponCode: String? = null,
+    // Pay only the venue's advance online, the rest at the venue (server ignores it when the
+    // venue offers no advance).
+    payAdvance: Boolean = false,
   ): BookingResult = withContext(Dispatchers.IO) {
     try {
       val jsonBody = JSONObject().apply {
         put("venueId", venueId)
+        put("payMode", if (payAdvance) "advance" else "full")
         put("date", date)
         if (slotId != null) put("slotId", slotId)
         if (courtId != null) put("courtId", courtId)

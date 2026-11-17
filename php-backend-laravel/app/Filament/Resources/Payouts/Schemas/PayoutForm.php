@@ -170,10 +170,13 @@ class PayoutForm
         return Booking::query()->with(['user:id,name,email,phone', 'event:id,title,partner_id', 'venue:id,name,partner_id'])->find($id);
     }
 
-    /** What the partner keeps from this booking: the ticket/slot value less the platform's deduction. */
+    /**
+     * What Haraan owes the partner for this booking: the ticket/slot value less the platform's
+     * deduction, less any advance-booking balance the venue collected itself at the desk.
+     */
     public static function partnerShare(Booking $b): float
     {
-        return round(max(0.0, (float) $b->total_amount - (float) $b->host_deduction), 2);
+        return round(max(0.0, (float) $b->total_amount - (float) $b->pay_at_venue - (float) $b->host_deduction), 2);
     }
 
     public static function partnerId(Booking $b): ?int

@@ -568,7 +568,9 @@ final class BookingService
                 // court paid for in the app read 'unpaid' at the partner's desk. The
                 // ledger row is idempotent on the payment id, so whichever of the two
                 // arrives second is a no-op rather than double takings.
-                $this->ledger->settleOnline($booking, $booking->amountCharged(), $paymentId);
+                // onlineDue(): an advance booking paid only its advance online; the rest is
+                // the venue's to collect, so it stays on the desk's balance-due list.
+                $this->ledger->settleOnline($booking, $booking->onlineDue(), $paymentId);
             }
 
             // Count the coupon use now that the order is paid — once, and not on a re-confirm.
@@ -870,7 +872,7 @@ final class BookingService
         $found = [];
 
         foreach ($rows as $booking) {
-            $amount = $booking->amountCharged();
+            $amount = $booking->onlineDue();
 
             if ($amount <= 0.0) {
                 continue;
@@ -1099,7 +1101,7 @@ final class BookingService
             Log::critical("Booking {$booking->id} payment cleared after hold expired, but court is now occupied: " . $e->getMessage());
 
             if ($paymentId !== null) {
-                $charged = $booking->amountCharged();
+                $charged = $booking->onlineDue();
                 $this->ledger->refund($booking, $charged, 'online', null, $paymentId, 'Automatic refund: court overbooked after hold expired');
                 try {
                     $this->razorpay->refund($paymentId, (int) round($charged * 100), [
@@ -1135,6 +1137,7 @@ final class BookingService
         int $duration = 1,
         bool $reserve = false,
         ?string $couponCode = null,
+        bool $payAdvance = false,
     ): Booking {
         // Emergency switch (/control → Operations). Walk-ins at the desk are not affected.
         Operations::assertBookingsOpen(Operations::VENUES);
@@ -1147,6 +1150,9 @@ final class BookingService
             // Carried for the coupon's per-customer cap; only the online path can discount.
             'user'        => $user,
             'coupon_code' => $couponCode,
+            // The customer chose to pay only the venue's advance online (Haraan sets the %
+            // per venue in /control). Ignored when the venue offers no advance.
+            'pay_advance' => $payAdvance,
         ], $reserve);
     }
 
@@ -1508,8 +1514,16 @@ final class BookingService
                 ? round(max(0.0, $subtotal - $discount) * $venue->commissionPercent() / 100, 2)
                 : 0.0;
 
+            // Advance payment (/control → venue → Advance payment %): the customer pays the
+            // advance share of the court value plus every online charge now, and the rest at
+            // the venue. Online only — a desk booking is settled at the counter anyway.
+            $payAtVenue = $meta['channel'] === 'online' && ! empty($meta['pay_advance'])
+                ? $venue->payAtVenueFor(max(0.0, $subtotal - $discount))
+                : 0.0;
+
             return Booking::query()->create([
                 'quantity'        => 1,
+                'pay_at_venue'    => $payAtVenue,
                 'host_deduction' => $commission,
                 'convenience_fee' => $fee,
                 'discount'        => round($discount, 2),

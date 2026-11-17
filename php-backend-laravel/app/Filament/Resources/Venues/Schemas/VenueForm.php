@@ -28,6 +28,8 @@ use Illuminate\Support\HtmlString;
 
 class VenueForm
 {
+    public const ADVANCE_HELP = 'Lets customers pay only this share of the court price online and the rest at the venue (they can still choose to pay in full). Fees and tax are always paid online. The balance shows as “Balance due” on the partner desk; the advance reaches the venue in its payout, less Haraan commission. Blank or 0 = off.';
+
     /** True while the request is being served by the partner console. */
     private static function isPartnerPanel(): bool
     {
@@ -344,6 +346,22 @@ class VenueForm
                             ->suffix('%')
                             ->placeholder(fn (): string => 'Platform default — ' . rtrim(rtrim(number_format(\App\Support\PlatformRules::float('fees.venue_commission_percent'), 2), '0'), '.') . '%')
                             ->helperText('Haraan’s share of each online booking at this venue, taken from the payout. 0 = free. Blank = the platform default (Platform rules → Fees). Walk-ins are never charged. The partner sees this rate, read-only.'),
+
+                        // Advance payment (Venue::payAtVenueFor()). Haraan decides the share; the
+                        // customer picks "Pay advance" or "Pay full" at checkout.
+                        Placeholder::make('advance_readonly')
+                            ->label('Advance payment')
+                            ->visible(fn (): bool => self::isPartnerPanel())
+                            ->content(fn (?Venue $record): string => ($record?->advanceLabel() ?? 'Off — customers pay the full amount online') . ' — set by Haraan'),
+                        TextInput::make('advance_percent')
+                            ->label('Advance payment (%)')
+                            ->visible(fn (): bool => ! self::isPartnerPanel())
+                            ->numeric()
+                            ->minValue(0)
+                            ->maxValue(99)
+                            ->suffix('%')
+                            ->placeholder('Off — full payment online')
+                            ->helperText(self::ADVANCE_HELP),
 
                         // Any other fee, named by Haraan ("Floodlight charge", "Maintenance fee"),
                         // each its own line on the customer's bill. Venue::feeRules() adds these
