@@ -351,6 +351,11 @@ class CourtsRelationManager extends RelationManager
                 $venue = $this->getOwnerRecord();
 
                 return [
+                    \Filament\Forms\Components\Placeholder::make('ladder')
+                        ->label('What each court charges now, and why')
+                        ->content(fn (): \Illuminate\Support\HtmlString => new \Illuminate\Support\HtmlString(
+                            $s ? $this->priceLadderHtml($s) : ''
+                        )),
                     Toggle::make('is_available')->label('Sold at this time'),
                     TextInput::make('price')
                         ->label('Price for all courts')
@@ -433,6 +438,85 @@ class CourtsRelationManager extends RelationManager
                 AdminAction::log('venue.slots_synced', ['before' => $before, 'after' => $after], $venue);
                 Notification::make()->title('Slots now match the opening hours')->body($after.' slots across the week.')->success()->send();
             });
+    }
+
+    /** The date the board is showing: the next date on the chosen weekday (today when it matches). */
+    private function boardDate(): \Illuminate\Support\Carbon
+    {
+        $date = BusinessClock::now()->startOfDay();
+        $day = $this->boardDay !== '' ? $this->boardDay : $date->format('l');
+        for ($i = 0; $i < 7 && $date->format('l') !== $day; $i++) {
+            $date->addDay();
+        }
+
+        return Carbon::parse($date->toDateString());
+    }
+
+    /**
+     * For each court, the price steps in the order VenueCourt::rateFor() tries them, with the
+     * one that wins marked. Price can come from five places (pricing matrix, this court's
+     * slot price, the all-courts slot price, the court's peak, the court's base / venue
+     * price); this shows which one is in charge and where to change it.
+     */
+    private function priceLadderHtml(VenueSlot $slot): string
+    {
+        $venue = $this->getOwnerRecord();
+        $date = $this->boardDate();
+        $venuePrice = (int) ($venue->price ?? 0);
+        $e = fn ($v): string => e((string) $v);
+        $inr = fn ($n): string => '₹'.number_format((float) $n);
+        $out = '';
+
+        foreach ($venue->courts()->where('is_active', true)->orderBy('sort_order')->orderBy('id')->get() as $c) {
+            $own = $slot->courtPriceList()[(int) $c->id] ?? null;
+            $all = (float) $slot->price > 0 ? (float) $slot->price : null;
+            $slotPrice = $slot->priceForCourt($c);
+            $rate = $c->rateFor($date, $slot->time, $venuePrice, $slotPrice);
+            $base = $slotPrice ?? (float) ($c->price ?? $venuePrice);
+
+            $rule = \App\Models\PricingRule::where('venue_id', $venue->id)
+                ->where(fn ($q) => $q->where('venue_court_id', $c->id)->orWhereNull('venue_court_id'))
+                ->where('is_active', true)
+                ->orderBy('priority', 'desc')
+                ->orderByRaw('CASE WHEN venue_court_id IS NOT NULL THEN 0 ELSE 1 END')
+                ->orderBy('id', 'desc')
+                ->get()
+                ->first(fn ($r) => $r->matches($date, $slot->time));
+            $peak = $slotPrice === null && $c->peakRate() !== null && $c->isPeak($date, $slot->time);
+
+            $winner = match (true) {
+                $rule !== null => 'rule',
+                $own !== null => 'own',
+                $all !== null => 'all',
+                $peak => 'peak',
+                $c->price !== null => 'court',
+                default => 'venue',
+            };
+            $steps = [
+                'rule' => ['Pricing matrix', $rule ? $e($rule->name ?: 'Rule').' (on '.$inr($base).')' : 'no rule at this time', 'Pricing matrix tab'],
+                'own' => ['This court at this slot', $own !== null ? $inr($own) : 'not set', 'box below'],
+                'all' => ['All courts at this slot', $all !== null ? $inr($all) : 'not set', 'box below'],
+                'peak' => ['Court peak price', $c->peakRate() ? $inr($c->peakRate()).($peak ? '' : ' (not in window)') : 'not set', 'court → Edit'],
+                'court' => ['Court base price', $c->price !== null ? $inr($c->price) : 'not set', 'court → Edit'],
+                'venue' => ['Venue price', $inr($venuePrice), 'form → Pricing'],
+            ];
+
+            $rows = '';
+            foreach ($steps as $k => [$label, $value, $where]) {
+                $win = $k === $winner;
+                $rows .= '<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 8px;border-radius:6px;'
+                    .($win ? 'background:rgba(37,99,235,.10);font-weight:650' : 'opacity:.62').'">'
+                    .'<span>'.($win ? '✓ ' : '').$label.' <span style="opacity:.7;font-weight:400">· '.$where.'</span></span>'
+                    .'<span>'.$value.'</span></div>';
+            }
+            $out .= '<div style="border:1px solid rgba(127,127,127,.25);border-radius:10px;padding:8px;margin-bottom:8px;font-size:12.5px">'
+                .'<div style="display:flex;justify-content:space-between;font-weight:700;margin-bottom:4px"><span>'.$e($c->name).'</span><span>'.$inr($rate).'/hr</span></div>'
+                .$rows.'</div>';
+        }
+
+        return $out !== ''
+            ? $out.'<div style="font-size:11.5px;opacity:.7">Checked top to bottom; the first one that applies wins. Shown for '.$e($date->format('l j M')).'.</div>'
+            : '<div style="font-size:12.5px;opacity:.7">No active courts.</div>';
     }
 
     /** Sports a slot can be limited to: the venue's own plus every sport its courts host. */

@@ -206,6 +206,23 @@ final class VenueCourt extends Model
     }
 
     /**
+     * {@see rateFor()} with the slot price looked up for you: the venue's slot row that starts
+     * at $time on $date (weekday row over every-day row), and this court's price on it. Paths
+     * that quote without going through BookingService (WhatsApp bot, WhatsApp Desk, the
+     * partner desk) used to skip the slot price and quote the court rate instead, so a slot
+     * set to ₹777 was quoted at ₹1,200 on WhatsApp.
+     */
+    public function rateAt(Venue $venue, Carbon $date, ?string $time): int
+    {
+        $venue->loadMissing('slots');
+        $start = $time !== null ? VenueSlot::startMinutes($time) : null;
+        $slot = $start === null ? null : $venue->slotsOn($date)
+            ->first(fn (VenueSlot $s): bool => VenueSlot::startMinutes((string) $s->time) === $start);
+
+        return $this->rateFor($date, $time, (int) ($venue->price ?? 0), $slot?->priceForCourt($this));
+    }
+
+    /**
      * The effective hourly rate for a booking: dynamic pricing rules take top precedence,
      * falling back to peak price when applicable, else this court's base price or venue default.
      *

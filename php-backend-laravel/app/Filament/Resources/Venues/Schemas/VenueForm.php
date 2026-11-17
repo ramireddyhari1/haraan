@@ -127,6 +127,25 @@ class VenueForm
                             ->label('About this venue')
                             ->rows(3)
                             ->columnSpanFull(),
+                        // Shown on a listed venue's public page ("Call the venue on …") and
+                        // in its FAQ, but nothing in /control could change it before.
+                        TextInput::make('contact_phone')
+                            ->label('Venue phone')
+                            ->tel()
+                            ->maxLength(20)
+                            ->placeholder('98765 43210')
+                            ->helperText('Shown to players on the venue page. For a listed venue it is how players book.'),
+                        // The partner console's branch switcher and branch comparison read these.
+                        TextInput::make('branch_label')
+                            ->label('Branch name')
+                            ->maxLength(80)
+                            ->placeholder('e.g. Benz Circle')
+                            ->helperText('For an owner with several venues: the name in their branch switcher. Blank uses the area.'),
+                        TextInput::make('branch_code')
+                            ->label('Branch code')
+                            ->maxLength(20)
+                            ->placeholder('e.g. VJA-01')
+                            ->helperText('Optional short code shown next to the branch name.'),
                     ]),
 
                 Section::make('Location')

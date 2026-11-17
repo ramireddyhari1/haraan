@@ -4491,12 +4491,13 @@ private fun PeakPricingDialog(
 private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, venueName: String, onBack: () -> Unit) {
     var reload by remember { mutableStateOf(0) }
     var editing by remember { mutableStateOf<SlotEdit?>(null) }
-    var adding by remember { mutableStateOf(false) }
     var showCourts by remember { mutableStateOf(false) }
-    var generating by remember { mutableStateOf(false) }
-    // Delete asks first: one tap used to remove a slot at once, and a stray run of taps
-    // emptied a venue's whole week.
-    var confirmDelete by remember { mutableStateOf<SlotEdit?>(null) }
+    // Slot times come from the opening hours only (same rule as /control). The old
+    // "Generate slots" and "Add slot" made times that disagreed with the hours.
+    var editingHours by remember { mutableStateOf(false) }
+    val hours by produceState<com.haraan.partner.VenueHours?>(null, venueId, reload) {
+        value = runCatching { api.venueHours(token, venueId) }.getOrNull()
+    }
     var note by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val view = LocalView.current
@@ -4561,7 +4562,7 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = AuthInk) }
                 },
                 actions = {
-                    HeaderIcon(Icons.Filled.Add, "Add slot") { Haptics.tick(view); adding = true }
+                    HeaderIcon(Icons.Filled.Schedule, "Opening hours") { Haptics.tick(view); editingHours = true }
                     Spacer(Modifier.width(4.dp))
                 },
             )
@@ -4626,9 +4627,9 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
                                 onClick = { showCourts = true }, modifier = Modifier.weight(1f),
                             )
                             com.haraan.partner.ui.pricing.ToolTile(
-                                "Generate slots", "Open to close in one tap, 30 or 60 min",
+                                "Opening hours", "Slot times come from your hours. 24 hours too",
                                 art = { generateArt() },
-                                onClick = { generating = true }, modifier = Modifier.weight(1f),
+                                onClick = { editingHours = true }, modifier = Modifier.weight(1f),
                             )
                         }
                     }
@@ -4676,16 +4677,13 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
                             Column(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                                 com.haraan.partner.ui.pricing.EmptyDayArt(Modifier.size(width = 180.dp, height = 130.dp))
                                 Spacer(Modifier.height(10.dp))
-                                Text("No slots on ${day}s", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
-                                Text("Nothing can be booked this day until you add times.", fontSize = 12.5.sp, color = AuthMuted)
+                                Text("Closed on ${day}s", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+                                Text("Open this day in your opening hours and its slots appear here.", fontSize = 12.5.sp, color = AuthMuted)
                                 Spacer(Modifier.height(12.dp))
-                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    OutlinedButton(onClick = { Haptics.tick(view); adding = true }, shape = RoundedCornerShape(14.dp)) { Text("Add one") }
-                                    Button(
-                                        onClick = { Haptics.tick(view); generating = true }, shape = RoundedCornerShape(14.dp),
-                                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = AuthAccent),
-                                    ) { Text("Generate slots", fontWeight = FontWeight.Bold) }
-                                }
+                                Button(
+                                    onClick = { Haptics.tick(view); editingHours = true }, shape = RoundedCornerShape(14.dp),
+                                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = AuthAccent),
+                                ) { Text("Opening hours", fontWeight = FontWeight.Bold) }
                             }
                         }
                     } else {
@@ -4735,7 +4733,7 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
                             }
                         item(key = "rule") {
                             Text(
-                                "Every-day slots run on all days. A day's own slot at the same time replaces it — that's what the desk sells.",
+                                "Times come from your opening hours. Tap a slot to change its price, or switch it off.",
                                 fontSize = 11.5.sp, color = AuthMuted, lineHeight = 16.sp,
                                 modifier = Modifier.padding(top = 6.dp, start = 4.dp, end = 4.dp),
                             )
@@ -4745,61 +4743,15 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
             }
         }
 
-    if (generating) {
-        val count = (state as? UiState.Data)?.value?.size ?: 0
-        com.haraan.partner.slots.GenerateSlotsSheet(
-            api = api,
-            token = token,
-            venueId = venueId,
-            existingCount = count,
-            onDismiss = { generating = false },
-            onGenerated = { r ->
-                generating = false
-                noteIsError = false
-                note = buildString {
-                    append("${r.created} slot${if (r.created == 1) "" else "s"} created")
-                    if (r.removed > 0) append(" · ${r.removed} replaced")
-                    if (r.kept > 0) append(" · ${r.kept} already there")
-                }
-                reload++
-            },
-        )
-    }
-
-    confirmDelete?.let { slot ->
-        AlertDialog(
-            onDismissRequest = { confirmDelete = null },
-            title = { Text("Delete ${slot.time}?", fontWeight = FontWeight.Bold) },
-            text = { Text("${slot.day ?: "Every day"} · this time stops being bookable. Bookings already taken stay.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    confirmDelete = null
-                    scope.launch {
-                        runCatching { api.deleteSlot(token, venueId, slot.id) }
-                            .onSuccess { Haptics.confirm(view) }
-                            .onFailure { Haptics.reject(view) }
-                        reload++
-                    }
-                }) { Text("Delete", color = RED, fontWeight = FontWeight.Bold) }
-            },
-            dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Keep") } },
+    if (editingHours) {
+        com.haraan.partner.ui.venues.HoursEditor(
+            api = api, token = token, venueId = venueId, venueName = venueName, current = hours,
+            onDismiss = { editingHours = false },
+            onSaved = { editingHours = false; noteIsError = false; note = "Hours saved. Slots updated"; reload++ },
         )
     }
     }
 
-    if (adding) {
-        SlotEditDialog(
-            existing = null,
-            initialDay = day,
-            venueSports = venueSports,
-            courts = activeCourts,
-            courtRate = courtRate,
-            onDismiss = { adding = false },
-            onSave = { day, time, price, capacity, isOpen, sports, courtPrices ->
-                trySave(null, day, time, price, capacity, isOpen, sports, courtPrices).also { if (it == null) { adding = false; noteIsError = false; note = "$time added to $day" } }
-            },
-        )
-    }
     editing?.let { slot ->
         SlotEditDialog(
             existing = slot,
@@ -4807,7 +4759,6 @@ private fun VenuePricingScreen(api: PartnerApi, token: String, venueId: Long, ve
             courts = activeCourts,
             courtRate = courtRate,
             onDismiss = { editing = null },
-            onDelete = { editing = null; confirmDelete = slot },
             onSave = { day, time, price, capacity, isOpen, sports, courtPrices ->
                 trySave(slot.id, day, time, price, capacity, isOpen, sports, courtPrices).also { if (it == null) { editing = null; noteIsError = false; note = "$day $time saved" } }
             },
@@ -4861,6 +4812,12 @@ private fun SlotEditDialog(
         title = { Text(if (existing == null) "Add slot" else "Edit slot", fontWeight = FontWeight.Bold) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState())) {
+                if (existing != null) {
+                    // The time belongs to the opening hours; here only what it sells for changes.
+                    Text("${existing.day ?: "Every day"} · ${existing.time}", fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
+                    Text("Times come from your opening hours.", fontSize = 11.5.sp, color = AuthMuted, modifier = Modifier.padding(top = 2.dp))
+                    Spacer(Modifier.height(12.dp))
+                } else {
                 Text("Day", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AuthMuted)
                 Spacer(Modifier.height(6.dp))
                 Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
@@ -4888,6 +4845,7 @@ private fun SlotEditDialog(
                     Icon(Icons.Filled.Schedule, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(8.dp))
                     Text(minutes?.let { label(it) } ?: "Pick a time", fontWeight = FontWeight.Bold)
+                }
                 }
                 Spacer(Modifier.height(12.dp))
                 OutlinedTextField(

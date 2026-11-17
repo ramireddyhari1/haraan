@@ -66,6 +66,14 @@
     .cb-empty { display: flex; align-items: center; gap: 16px; padding: 18px; border: 1px dashed var(--cc-line); border-radius: 14px; margin-bottom: 12px; color: var(--cc-ink-2); font-size: 13px; }
     .cb-empty b { color: var(--cc-ink); display: block; font-size: 14px; margin-bottom: 2px; }
 
+    /* The board IS the courts list: the plain table under it repeated every court, so it is
+       hidden. Its row actions (edit, delete, slot prices) still run from the board buttons. */
+    .fi-ta:has(.cb) .fi-ta-content-ctn > :not(.fi-ta-header-ctn),
+    .fi-ta:has(.cb) .fi-ta-header-toolbar,
+    .fi-ta:has(.cb) .fi-ta-empty-state,
+    .fi-ta:has(.cb) .fi-pagination { display: none !important; }
+    .cb-btn.del { flex: none; color: var(--cc-red, #b91c1c); }
+
     @media (max-width: 820px) {
         .cb-court { grid-template-columns: 1fr; }
         .cb-side { border-right: 0; border-bottom: 1px solid var(--cc-line); display: grid; grid-template-columns: 110px 1fr; align-items: start; }
@@ -171,6 +179,7 @@
                 <div class="cb-btns">
                     <button type="button" class="cb-btn pri" wire:click="mountTableAction('slotPrices', '{{ $c['id'] }}')">Slot prices</button>
                     <button type="button" class="cb-btn" wire:click="mountTableAction('edit', '{{ $c['id'] }}')">Edit</button>
+                    <button type="button" class="cb-btn del" title="Delete court" aria-label="Delete {{ $c['name'] }}" wire:click="mountTableAction('delete', '{{ $c['id'] }}')">Delete</button>
                 </div>
             </div>
 

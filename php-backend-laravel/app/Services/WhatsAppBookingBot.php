@@ -662,7 +662,7 @@ final class WhatsAppBookingBot
     /** What the booking engine will charge before tax: the court's rate at that time × length. */
     private function price(Venue $venue, VenueCourt $court, Carbon $date, int $start, int $length): float
     {
-        return round($court->rateFor($date, self::hm($start), (int) ($venue->price ?? 0)) * $length / 60, 2);
+        return round($court->rateAt($venue, $date, self::hm($start)) * $length / 60, 2);
     }
 
     // ---------------------------------------------------------------- plumbing

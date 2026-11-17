@@ -404,7 +404,7 @@ final class WhatsAppDeskController extends Controller
                     'time_label'   => Carbon::createFromTime(intdiv($m, 60), $m % 60)->format('g:i A'),
                     'is_available' => ! $past && $this->intentEngine->checkCourtAvailability($venue, $court, $date, $start, $m + $step >= 24 * 60 ? '24:00:00' : $end),
                     'is_past'      => $past,
-                    'price'        => round($court->rateFor($date, substr($start, 0, 5), (int) ($venue->price ?? 0)) * $step / 60, 2),
+                    'price'        => round($court->rateAt($venue, $date, substr($start, 0, 5)) * $step / 60, 2),
                 ];
             }, $starts);
 

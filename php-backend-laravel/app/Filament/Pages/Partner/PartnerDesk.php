@@ -174,7 +174,7 @@ class PartnerDesk extends Page
                 'kind' => $c->kindLabel($this->lane()),
                 'seats' => $c->seatsLabel(),
                 'seat_count' => $c->seats,
-                'rate' => $c->rateFor($now, $now->format('g:i A'), (int) ($branch->price ?? 0)),
+                'rate' => $c->rateAt($branch, $now, $now->format('g:i A')),
                 'busy' => $current !== null,
                 'busy_until' => $current?->end_time,
                 'guest' => $current?->guest_name,

@@ -39,7 +39,7 @@ class BlocksRelationManager extends RelationManager
 {
     protected static string $relationship = 'blocks';
 
-    protected static ?string $title = 'Blocked time';
+    protected static ?string $title = 'Closures';
 
     protected static string | \BackedEnum | null $icon = 'heroicon-o-no-symbol';
 
@@ -78,7 +78,8 @@ class BlocksRelationManager extends RelationManager
     {
         $active = $ownerRecord->blocks()
             ->where(fn ($q) => $q->whereNull('ends_on')->orWhereDate('ends_on', '>=', now()->toDateString()))
-            ->count();
+            ->count()
+            + $ownerRecord->blockedDates()->whereDate('date', '>=', now()->toDateString())->count();
 
         return $active > 0 ? (string) $active : null;
     }
@@ -183,7 +184,12 @@ class BlocksRelationManager extends RelationManager
         return $table
             ->recordTitleAttribute('title')
             ->defaultSort('starts_on', 'desc')
-            ->emptyStateHeading('Nothing blocked')
+            // One tab for every way a venue goes off sale. Closed days (the desk's "close
+            // this date", the old Blocked Dates tab) are listed here with a Reopen button;
+            // the table below holds hours, courts and repeating blocks.
+            ->heading('Closures')
+            ->description(fn (): \Illuminate\Support\HtmlString => $this->closedDaysHtml())
+            ->emptyStateHeading('No hours or courts blocked')
             ->emptyStateDescription('Every open hour at this venue is on sale.')
             ->emptyStateIcon('heroicon-o-no-symbol')
             ->columns([
@@ -239,8 +245,9 @@ class BlocksRelationManager extends RelationManager
                             ->orWhereDate('ends_on', '>=', now()->toDateString()))),
             ])
             ->headerActions([
+                $this->closeDaysAction(),
                 CreateAction::make()
-                    ->label('Block time')
+                    ->label('Block hours or a court')
                     ->mutateDataUsing(function (array $data): array {
                         $data['created_by'] = auth()->id();
 
@@ -266,5 +273,86 @@ class BlocksRelationManager extends RelationManager
                     DeleteBulkAction::make(),
                 ]),
             ]);
+    }
+
+    /** Whole days the venue is shut (venue_blocked_dates), upcoming first, each with Reopen. */
+    private function closedDaysHtml(): \Illuminate\Support\HtmlString
+    {
+        $days = $this->getOwnerRecord()->blockedDates()
+            ->whereDate('date', '>=', now()->toDateString())
+            ->orderBy('date')
+            ->limit(60)
+            ->get();
+
+        if ($days->isEmpty()) {
+            return new \Illuminate\Support\HtmlString('No whole days closed. Use “Close whole days” for a holiday; block hours or one court below.');
+        }
+
+        $chips = $days->map(fn ($d): string => '<span style="display:inline-flex;align-items:center;gap:6px;margin:3px 6px 3px 0;padding:3px 4px 3px 10px;border:1px solid rgba(127,127,127,.3);border-radius:999px;font-size:12.5px">'
+            .e(\Illuminate\Support\Carbon::parse($d->date)->format('D j M'))
+            .($d->reason ? ' <span style="opacity:.65">· '.e($d->reason).'</span>' : '')
+            .'<button type="button" wire:click="mountAction(\'reopenDay\', { id: '.(int) $d->id.' })" style="border:0;background:rgba(37,99,235,.12);color:rgb(29,78,216);border-radius:999px;padding:1px 8px;font-weight:600;cursor:pointer">Reopen</button></span>')
+            ->implode('');
+
+        return new \Illuminate\Support\HtmlString('<div style="margin-bottom:2px"><b>Closed all day:</b></div>'.$chips);
+    }
+
+    /** Shut the whole venue for one or more days, the same as the desk's "close this date". */
+    private function closeDaysAction(): \Filament\Actions\Action
+    {
+        return \Filament\Actions\Action::make('closeDays')
+            ->label('Close whole days')
+            ->icon('heroicon-m-calendar-days')
+            ->color('gray')
+            ->visible(fn (): bool => $this->canCreate())
+            ->modalHeading('Close the whole venue')
+            ->modalDescription('No court can be booked on these days. Bookings already taken stay; move or cancel them from Bookings.')
+            ->schema([
+                DatePicker::make('from')->label('From')->native(false)->required()->default(today())->minDate(today()),
+                DatePicker::make('until')->label('Until')->native(false)->required()->default(today())->afterOrEqual('from')
+                    ->helperText('Same day for one day.'),
+                TextInput::make('reason')->maxLength(255)->placeholder('Holiday / maintenance'),
+            ])
+            ->action(function (array $data): void {
+                $venue = $this->getOwnerRecord();
+                $from = \Illuminate\Support\Carbon::parse($data['from']);
+                $until = \Illuminate\Support\Carbon::parse($data['until']);
+                if ($from->diffInDays($until) > 90) {
+                    \Filament\Notifications\Notification::make()->title('Up to 90 days at a time')->danger()->send();
+
+                    return;
+                }
+                $n = 0;
+                for ($d = $from->copy(); $d->lte($until); $d->addDay()) {
+                    // whereDate: the date cast may store "Y-m-d 00:00:00", which an exact match misses.
+                    if (! $venue->blockedDates()->whereDate('date', $d->toDateString())->exists()) {
+                        $venue->blockedDates()->create(['date' => $d->toDateString(), 'reason' => $data['reason'] ?? null]);
+                        $n++;
+                    }
+                }
+                AdminAction::log('venue.days_closed', ['from' => $from->toDateString(), 'until' => $until->toDateString(), 'reason' => $data['reason'] ?? null], $venue);
+                \Filament\Notifications\Notification::make()->title($n.' '.($n === 1 ? 'day' : 'days').' closed')->success()->send();
+            });
+    }
+
+    public function reopenDayAction(): \Filament\Actions\Action
+    {
+        return \Filament\Actions\Action::make('reopenDay')
+            ->requiresConfirmation()
+            ->modalHeading('Reopen this day?')
+            ->modalDescription('Its slots go back on sale.')
+            ->modalSubmitActionLabel('Reopen')
+            ->visible(fn (): bool => $this->canCreate())
+            ->action(function (array $arguments): void {
+                $venue = $this->getOwnerRecord();
+                $row = $venue->blockedDates()->find($arguments['id'] ?? 0);
+                if (! $row) {
+                    return;
+                }
+                $date = \Illuminate\Support\Carbon::parse($row->date)->toDateString();
+                $row->delete();
+                AdminAction::log('venue.day_reopened', ['date' => $date], $venue);
+                \Filament\Notifications\Notification::make()->title('Reopened '.\Illuminate\Support\Carbon::parse($date)->format('D j M'))->success()->send();
+            });
     }
 }

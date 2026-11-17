@@ -70,7 +70,7 @@ final class WhatsAppIntentEngine
         if ($court !== null && $date !== null && $startTime !== null && $endTime !== null) {
             $day = Carbon::parse($date);
             $isAvailable = $this->checkCourtAvailability($venue, $court, $day, $startTime, $endTime);
-            $perHour = $court->rateFor($day, substr($startTime, 0, 5), (int) ($venue->price ?? 0));
+            $perHour = $court->rateAt($venue, $day, substr($startTime, 0, 5));
             $rate = round($perHour * $durationMinutes / 60, 2);
         }
 

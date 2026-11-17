@@ -211,4 +211,44 @@ final class CourtsAndSlotsBoardTest extends TestCase
         $this->assertSame(800.0, (float) $rows->firstWhere('time', '6:00 AM')->price);
         $this->assertTrue($this->courts()->instance()->courtBoard()['inSync']);
     }
+
+    public function test_whatsapp_and_desk_quotes_use_the_slot_price(): void
+    {
+        $date = \Illuminate\Support\Carbon::parse('next monday');
+        $this->slot('8:00 AM', ['day' => 'Monday', 'price' => 777]);
+        $this->slot('9:00 AM', ['day' => 'Monday', 'court_prices' => [$this->pitch->id => 640]]);
+
+        $this->assertSame(777, $this->pitch->rateAt($this->venue, $date, '08:00'));
+        $this->assertSame(640, $this->pitch->rateAt($this->venue->fresh(), $date, '9:00 AM'));
+        // No slot at that time: the court's own rate, as before.
+        $this->assertSame(500, $this->pitch->rateAt($this->venue->fresh(), $date, '15:00'));
+    }
+
+    public function test_slot_editor_shows_which_price_wins(): void
+    {
+        $slot = $this->slot('6:00 AM', ['court_prices' => [$this->pitch->id => 650]]);
+        $html = (fn () => $this->priceLadderHtml($slot))->call($this->courts()->instance());
+
+        $this->assertStringContainsString('VADI', $html);
+        $this->assertStringContainsString('₹650/hr', $html);
+        $this->assertStringContainsString('✓ This court at this slot', $html);
+        $this->assertStringContainsString('✓ Court base price', $html);   // padi has no own price
+    }
+
+    public function test_closures_tab_closes_and_reopens_whole_days(): void
+    {
+        $rm = Livewire::test(\App\Filament\Resources\Venues\RelationManagers\BlocksRelationManager::class, ['ownerRecord' => $this->venue, 'pageClass' => EditVenue::class]);
+        $from = now()->addDays(2)->toDateString();
+        $until = now()->addDays(4)->toDateString();
+
+        $rm->callTableAction('closeDays', data: ['from' => $from, 'until' => $until, 'reason' => 'Diwali'])->assertHasNoTableActionErrors();
+        $this->assertSame(3, $this->venue->blockedDates()->count());
+        // Again over the same days: no duplicates.
+        $rm->callTableAction('closeDays', data: ['from' => $from, 'until' => $from])->assertHasNoTableActionErrors();
+        $this->assertSame(3, $this->venue->blockedDates()->count());
+
+        $first = $this->venue->blockedDates()->orderBy('date')->first();
+        $rm->callAction('reopenDay', arguments: ['id' => $first->id])->assertHasNoActionErrors();
+        $this->assertSame(2, $this->venue->blockedDates()->count());
+    }
 }

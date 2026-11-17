@@ -133,7 +133,7 @@ class VenueResource extends Resource
             // No separate Slots tab: times come from the opening hours, and each slot is
             // edited by tapping it on the Courts & slots board.
             \App\Filament\Resources\Venues\RelationManagers\BlocksRelationManager::class,
-            \App\Filament\Resources\Venues\RelationManagers\BlockedDatesRelationManager::class,
+            // Blocked Dates folded into Closures (BlocksRelationManager).
             \App\Filament\Resources\Venues\RelationManagers\VenueBookingsRelationManager::class,
             \App\Filament\Resources\Venues\RelationManagers\VenueMatchesRelationManager::class,
             \App\Filament\Resources\Venues\RelationManagers\ReviewsRelationManager::class,
