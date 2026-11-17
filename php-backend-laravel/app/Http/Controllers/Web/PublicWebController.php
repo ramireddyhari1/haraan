@@ -2729,6 +2729,46 @@ final class PublicWebController extends Controller
      *
      * @return array{courts: int, from_price: int, open_state: ?string, open_now: bool}
      */
+    /**
+     * The next start time a player could actually book (today after now, else tomorrow),
+     * as "11 PM today" / "6 AM tomorrow", or null when nothing is free in that window.
+     * Uses {@see \App\Services\VenueSlotAvailability} — the bookings, holds, blocks and
+     * closed days checkout itself refuses on.
+     */
+    private function nextFreeSlot(Venue $v): ?string
+    {
+        if (! $v->is_bookable) {
+            return null;
+        }
+        try {
+            $avail = app(\App\Services\VenueSlotAvailability::class);
+            $now = \App\Support\BusinessClock::now();
+            $nowMin = (int) $now->format('G') * 60 + (int) $now->format('i');
+
+            foreach ([0, 1] as $offset) {
+                $date = $now->copy()->startOfDay()->addDays($offset);
+                $free = collect($avail->forDate($v, $date))
+                    ->filter(fn (array $r): bool => $r['courts_free'] > 0)
+                    ->pluck('id')->flip();
+                $first = $v->slotsOn($date)
+                    ->filter(fn (\App\Models\VenueSlot $s): bool => $free->has($s->id))
+                    ->map(fn (\App\Models\VenueSlot $s): ?int => \App\Models\VenueSlot::startMinutes((string) $s->time))
+                    ->filter(fn (?int $m): bool => $m !== null && ($offset > 0 || $m > $nowMin))
+                    ->sort()
+                    ->first();
+                if ($first !== null) {
+                    $label = str_replace(':00', '', date('g:i A', mktime(0, $first)));
+
+                    return $label . ' ' . ($offset === 0 ? 'today' : 'tomorrow');
+                }
+            }
+        } catch (\Throwable) {
+            // A display nicety: never let it break the venue page.
+        }
+
+        return null;
+    }
+
     private function venueCardFacts(Venue $v): array
     {
         $courts = $v->courts->where('is_active', true);
@@ -2910,6 +2950,8 @@ final class PublicWebController extends Controller
             // The sticky book bar's second line: open now / opens at, and how many courts.
             // ('courts' below is the list of courts, so the count goes in as court_count.)
             ...(static fn (array $f): array => ['open_state' => $f['open_state'], 'open_now' => $f['open_now'], 'court_count' => $f['courts']])($this->venueCardFacts($v)),
+            // "Next free slot · 11 PM today" — read from real bookings, the same check checkout makes.
+            'next_free' => $this->nextFreeSlot($v),
             // The booking sheet estimates the total from these; the server recomputes it.
             'convenience_fee_type' => (string) ($v->convenience_fee_type ?? 'none'),
             'convenience_fee_value' => (float) ($v->convenience_fee_value ?? 0),

@@ -720,20 +720,24 @@
     <div class="mven__bar">
         <span class="mven__bar-price">
             @if($venue->from_price > 0)
-                <span class="mven__bar-amt"><small>from</small><b>₹{{ number_format($venue->from_price) }}</b><i>/hr</i></span>
+                {{-- Priced the way Indian booking apps say it: "₹400/hr onwards". --}}
+                <span class="mven__bar-amt"><span class="mven__bar-rs">₹</span><b>{{ number_format($venue->from_price) }}</b><i>/hr onwards</i></span>
             @else
                 {{-- The app guards this so the bar never shows a bare "₹0 /hr". --}}
                 <span class="mven__bar-noprice">Tap to see slots</span>
             @endif
-            {{-- Facts from the venue's own hours and courts — nothing a template could say. --}}
-            @php
-                $mvFacts = array_filter([
-                    $venue->open_state ?? null,
-                    ($venue->court_count ?? 0) > 0 ? $venue->court_count . ' ' . ($venue->court_count === 1 ? 'court' : 'courts') : null,
-                ]);
-            @endphp
-            @if($mvFacts)
-                <span class="mven__bar-state {{ ($venue->open_now ?? false) ? 'is-open' : '' }}">{{ implode(' · ', $mvFacts) }}</span>
+            {{-- The one thing a player wants before tapping: when can I play. Read from
+                 real bookings; falls back to the venue's hours. --}}
+            @if(!empty($venue->next_free))
+                <span class="mven__bar-next">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7.5V12l3 2"></path></svg>
+                    Next free <b>{{ $venue->next_free }}</b>
+                </span>
+            @elseif(!empty($venue->open_state))
+                <span class="mven__bar-next">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7.5V12l3 2"></path></svg>
+                    <b>{{ $venue->open_state }}</b>
+                </span>
             @endif
         </span>
         <button type="button" class="mven__book" data-mven-book @unless($venue->is_bookable) disabled @endunless>

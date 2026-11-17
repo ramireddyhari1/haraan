@@ -2635,17 +2635,17 @@
         background: #fff;
         box-shadow: 0 -6px 20px rgba(15, 23, 42, 0.10);
     }
-    .mven__bar-price { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-    .mven__bar-amt { display: flex; align-items: baseline; gap: 4px; }
-    .mven__bar-amt small { font-size: 12px; font-weight: 600; color: #64748B; }
-    .mven__bar-price b { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; color: #0F172A; font-variant-numeric: tabular-nums; }
-    .mven__bar-price i { font-size: 13px; font-style: normal; color: #64748B; }
+    .mven__bar-price { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    /* Price set like a shop tag: a smaller ₹ riding high, the figure, then the unit. */
+    .mven__bar-amt { display: flex; align-items: baseline; gap: 1px; color: #0F172A; line-height: 1; }
+    .mven__bar-rs { align-self: flex-start; margin-top: 2px; font-size: 14px; font-weight: 700; }
+    .mven__bar-amt b { font-size: 25px; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+    .mven__bar-amt i { margin-left: 4px; font-size: 12.5px; font-style: normal; font-weight: 600; color: #64748B; }
     .mven__bar-noprice { font-size: 14px; font-weight: 600; color: #64748B; }
-    /* Open / opens-at line: a status dot, green only when it is really open now. */
-    .mven__bar-state { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: #64748B; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .mven__bar-state::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: #94A3B8; }
-    .mven__bar-state.is-open { color: #15803D; }
-    .mven__bar-state.is-open::before { background: #16A34A; box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.16); }
+    /* When can I play: plain ink, a clock, no glowing status dot. */
+    .mven__bar-next { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; color: #64748B; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .mven__bar-next svg { flex: none; color: #2563EB; }
+    .mven__bar-next b { font-weight: 700; color: #0F172A; }
     /* A pressable key (same as checkout's Proceed), not a glossy pill. */
     .mven__book {
         flex: none;
