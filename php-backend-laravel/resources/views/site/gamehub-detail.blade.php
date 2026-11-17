@@ -51,8 +51,15 @@
     // The app's sportIcon(): cricket / football / basketball, else a racket for
     // badminton + the other racquet sports.
     $mvCat = strtolower($venue->category);
+    // Every sport the venue sells, main sport first — the page used to list only the category.
+    // The sports list is the truth; the category (the main sport) only orders it, and is
+    // used alone when no list is set — a default category must not invent a sport.
+    $mvList = array_values(array_filter(array_map('trim', (array) ($venue->sports ?? []))));
+    $mvSports = $mvList === [] ? array_filter([$venue->category]) : $mvList;
+    usort($mvSports, fn ($a, $b) => (strcasecmp($b, (string) $venue->category) === 0) <=> (strcasecmp($a, (string) $venue->category) === 0));
+    $mvSports = array_values(array_intersect_key($mvSports, array_unique(array_map('strtolower', $mvSports))));
     $mvSportGlyph = match (true) {
-        str_contains($mvCat, 'cricket') => '<path d="M15.5 3.5a2.1 2.1 0 0 1 3 3L9 16l-3 1 1-3z"></path><circle cx="6.5" cy="17.5" r="3"></circle>',
+        str_contains($mvCat, 'cricket') => \App\Support\SportGlyph::CRICKET,
         str_contains($mvCat, 'football'), str_contains($mvCat, 'soccer') => '<circle cx="12" cy="12" r="9"></circle><path d="M12 7.5 8.5 10l1.3 4h4.4l1.3-4z"></path><path d="M12 3v4.5M4 9.5 8.5 10M20 9.5 15.5 10M7 20l2.8-6M17 20l-2.8-6"></path>',
         str_contains($mvCat, 'basketball') => '<circle cx="12" cy="12" r="9"></circle><path d="M12 3v18M3 12h18M5.6 5.6a12 12 0 0 0 12.8 12.8M18.4 5.6A12 12 0 0 1 5.6 18.4"></path>',
         // Each racquet sport gets its own object — the old bare racket (oval + stick)
@@ -541,16 +548,20 @@
         {{-- ── 4. Available Sports → the booking sheet's pricing ──────────── --}}
         <div class="mven__rule"></div>
         <h2 class="mven__h2">Available Sports</h2>
-        <button type="button" class="mven__sport" data-mven-book>
-            <span class="mven__sport-ico">
-                <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $mvSportGlyph ?? '' !!}</svg>
-            </span>
-            <span class="mven__sport-copy">
-                <strong>{{ $venue->category }}</strong>
-                <small>View pricing</small>
-            </span>
-            <svg class="mven__chev" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
-        </button>
+        <div class="mven__sports">
+            @foreach($mvSports as $mvSport)
+                <button type="button" class="mven__sport" data-mven-book data-mven-sport="{{ $mvSport }}">
+                    <span class="mven__sport-ico">
+                        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! \App\Support\SportGlyph::for($mvSport) !!}</svg>
+                    </span>
+                    <span class="mven__sport-copy">
+                        <strong>{{ ucfirst($mvSport) }}</strong>
+                        <small>View pricing &amp; slots</small>
+                    </span>
+                    <svg class="mven__chev" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                </button>
+            @endforeach
+        </div>
 
         {{-- ── 5. Amenities ───────────────────────────────────────────────── --}}
         @if(count($venue->amenities))
@@ -750,11 +761,15 @@
                 {{-- What you're booking --}}
                 <section class="vco__card vco__summary" aria-label="Booking summary">
                     <div class="vco__summary-head">
+                        @if(count($mvImages))
+                            {{-- The venue's own first photo: what you're paying for, at a glance. --}}
+                            <img class="vco__photo" src="{{ $mvImages[0] }}"{!! \App\Support\VenuePhoto::imgAttrs($mvImages[0], '96px') !!} alt="" loading="lazy" decoding="async">
+                        @endif
                         <div class="vco__venue">
                             <strong>{{ $venue->title }}</strong>
                             @if($venue->location)<small>{{ $venue->location }}</small>@endif
+                            <span class="vco__sport" id="vco-sport"></span>
                         </div>
-                        <span class="vco__sport" id="vco-sport"></span>
                     </div>
                     <div class="vco__meta">
                         <span class="vco__meta-row">
@@ -816,12 +831,17 @@
                     <div class="vco__row vco__row--total"><span>Total amount</span><span id="vco-total">—</span></div>
                     <div class="vco__paymode" id="vco-paymode" role="radiogroup" aria-label="How do you want to pay?" hidden>
                         <button type="button" class="vco__paymode-opt is-on" data-paymode="full" role="radio" aria-checked="true">
-                            <span class="vco__paymode-dot" aria-hidden="true"></span>
-                            <span class="vco__paymode-text"><b>Pay full amount</b><small id="vco-paymode-full">—</small></span>
+                            <span class="vco__pm-top"><b>Pay full</b><span class="vco__pm-tick" aria-hidden="true"></span></span>
+                            <span class="vco__pm-amt" id="vco-pm-full-amt">—</span>
+                            {{-- The bill as a bar: blue is paid now, striped is paid at the venue. --}}
+                            <span class="vco__pm-bar" aria-hidden="true"><i style="width:100%"></i></span>
+                            <small id="vco-paymode-full">Nothing to pay at the venue</small>
                         </button>
                         <button type="button" class="vco__paymode-opt" data-paymode="advance" role="radio" aria-checked="false">
-                            <span class="vco__paymode-dot" aria-hidden="true"></span>
-                            <span class="vco__paymode-text"><b>Pay advance <span id="vco-paymode-pct"></span></b><small id="vco-paymode-adv">—</small></span>
+                            <span class="vco__pm-top"><b>Advance <span id="vco-paymode-pct"></span></b><span class="vco__pm-tick" aria-hidden="true"></span></span>
+                            <span class="vco__pm-amt" id="vco-pm-adv-amt">—</span>
+                            <span class="vco__pm-bar" aria-hidden="true"><i id="vco-pm-adv-bar" style="width:30%"></i></span>
+                            <small id="vco-paymode-adv">—</small>
                         </button>
                     </div>
                     <div class="vco__row vco__row--pay"><span>Payable now</span><span id="vco-paynow">—</span></div>
@@ -1125,7 +1145,7 @@
                                 @php
                                     $sc = strtolower($sport);
                                     $glyph = match (true) {
-                                        str_contains($sc, 'cricket') => '<path d="M15.5 3.5a2.1 2.1 0 0 1 3 3L9 16l-3 1 1-3z"></path><circle cx="6.5" cy="17.5" r="3"></circle>',
+                                        str_contains($sc, 'cricket') => \App\Support\SportGlyph::CRICKET,
                                         str_contains($sc, 'football'), str_contains($sc, 'soccer') => '<circle cx="12" cy="12" r="9"></circle><path d="M12 7.5 8.5 10l1.3 4h4.4l1.3-4z"></path>',
                                         str_contains($sc, 'basket') => '<circle cx="12" cy="12" r="9"></circle><path d="M12 3v18M3 12h18"></path>',
                                         str_contains($sc, 'pickle') => \App\Support\SportGlyph::PICKLEBALL,
@@ -3781,10 +3801,13 @@
         document.getElementById('vco-paymode').hidden = !offered;
         if (offered) {
             const pct = Number(adv.percent || 0);
-            document.getElementById('vco-paymode-pct').textContent = '(' + pct.toLocaleString('en-IN', { maximumFractionDigits: 2 }) + '%)';
-            document.getElementById('vco-paymode-full').textContent = inr(q.total) + ' now';
-            document.getElementById('vco-paymode-adv').textContent =
-                inr(Math.max(0, q.total - adv.pay_at_venue)) + ' now · ' + inr(adv.pay_at_venue) + ' at the venue';
+            const advNow = Math.max(0, q.total - adv.pay_at_venue);
+            document.getElementById('vco-paymode-pct').textContent = pct.toLocaleString('en-IN', { maximumFractionDigits: 2 }) + '%';
+            document.getElementById('vco-pm-full-amt').textContent = inr(q.total);
+            document.getElementById('vco-paymode-full').textContent = 'Nothing to pay at the venue';
+            document.getElementById('vco-pm-adv-amt').textContent = inr(advNow);
+            document.getElementById('vco-pm-adv-bar').style.width = (q.total > 0 ? Math.max(6, Math.round(advNow / q.total * 100)) : 0) + '%';
+            document.getElementById('vco-paymode-adv').textContent = inr(adv.pay_at_venue) + ' at the venue';
             document.querySelectorAll('#vco-paymode [data-paymode]').forEach(b => {
                 const on = b.dataset.paymode === reviewPayMode;
                 b.classList.toggle('is-on', on);
@@ -4343,6 +4366,9 @@
 
     root.querySelectorAll('[data-mven-book]').forEach((b) => b.addEventListener('click', () => {
         open([document.getElementById('booking-widget')], 'Book a slot', [document.querySelector('.sticky-booking-card')]);
+        // A sport row opens the sheet on that sport (the tabs exist only for multi-sport venues).
+        const sp = b.dataset.mvenSport;
+        if (sp && typeof selectSport === 'function' && document.getElementById('sport-tab-' + sp)) selectSport(sp);
         // Bring the picked day into view — the strip can be scrolled past it.
         if (typeof centerActiveDate === 'function') centerActiveDate();
         // Opening the sheet is the moment to be sure: re-check unless we just did.

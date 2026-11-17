@@ -2528,7 +2528,22 @@
         text-align: left;
         cursor: pointer;
     }
-    .mven__sport-ico { flex-shrink: 0; display: inline-flex; color: #1E3A8A; }
+    .mven__sports { display: grid; gap: 10px; }
+    .mven__sport { font: inherit; }
+    .mven__sport { border-bottom-width: 2px; transition: border-color .15s ease, transform .08s ease; -webkit-tap-highlight-color: transparent; }
+    .mven__sport:active { transform: translateY(1px); border-bottom-width: 1px; }
+    /* Same tinted tile as the amenities below, a size up: the sport is the headline. */
+    .mven__sport-ico {
+        flex-shrink: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 46px;
+        height: 46px;
+        border-radius: 13px;
+        background: #EEF4FF;
+        color: #1D4ED8;
+    }
     .mven__sport-copy { flex: 1; min-width: 0; }
     .mven__sport-copy strong { display: block; font-size: 15px; font-weight: 700; color: #0F172A; }
     .mven__sport-copy small { display: block; margin-top: 2px; font-size: 12px; color: #64748B; }

@@ -2151,12 +2151,23 @@ body.vco-locked { overflow: hidden; }
 /* Summary */
 .vco__summary-head {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
+    align-items: center;
+    gap: 14px;
     padding-bottom: 14px;
     border-bottom: 1px solid #EEF2F7;
 }
+.vco__photo {
+    flex: none;
+    width: 76px;
+    height: 76px;
+    border-radius: 14px;
+    object-fit: cover;
+    background: #EEF2F7;
+    box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.06);
+}
+.vco__venue { min-width: 0; flex: 1; }
+.vco__venue .vco__sport { display: inline-block; margin-top: 8px; }
+.vco__venue .vco__sport:empty { display: none; }
 .vco__venue strong { display: block; font-size: 17px; font-weight: 800; line-height: 1.25; }
 .vco__venue small { display: block; margin-top: 2px; font-size: 13px; color: #64748B; }
 .vco__sport {
@@ -2234,19 +2245,40 @@ body.vco-locked { overflow: hidden; }
 .vco__rule { height: 1px; margin: 6px 0 0; background: #E2E8F0; }
 .vco__row--venue { padding-top: 0; font-size: 13.5px; color: #64748B; }
 .vco__row--venue span:last-child { color: #B45309; font-weight: 700; }
-.vco__paymode { display: grid; gap: 8px; margin: 2px 0 10px; }
+/* How to pay: two cards side by side, each drawing the bill as a bar —
+   solid blue is what you pay now, the striped rest is paid at the venue. */
+.vco__paymode { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 4px 0 12px; }
 .vco__paymode[hidden] { display: none; }
 .vco__paymode-opt {
-    display: flex; align-items: center; gap: 12px; width: 100%;
-    padding: 12px 14px; border: 1.5px solid #E2E8F0; border-radius: 12px;
-    background: #fff; font: inherit; text-align: left; cursor: pointer;
+    position: relative;
+    display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+    min-width: 0; padding: 12px 12px 11px;
+    border: 1.5px solid #E2E8F0; border-bottom-width: 3px; border-radius: 14px;
+    background: #fff; font: inherit; text-align: left; color: #0F172A; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    transition: border-color 0.15s ease, background 0.15s ease, transform 0.08s ease;
 }
-.vco__paymode-opt.is-on { border-color: #2563EB; background: #F5F8FF; }
-.vco__paymode-dot { flex: none; width: 18px; height: 18px; border: 2px solid #CBD5E1; border-radius: 50%; }
-.vco__paymode-opt.is-on .vco__paymode-dot { border: 5px solid #2563EB; }
-.vco__paymode-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.vco__paymode-text b { font-size: 14px; font-weight: 700; color: #0F172A; }
-.vco__paymode-text small { font-size: 12.5px; color: #64748B; }
+.vco__paymode-opt:active { transform: translateY(1px); border-bottom-width: 2px; }
+.vco__paymode-opt.is-on { border-color: #2563EB; background: #F7FAFF; }
+.vco__pm-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.vco__pm-top b { font-size: 13px; font-weight: 700; color: #475569; white-space: nowrap; }
+.vco__paymode-opt.is-on .vco__pm-top b { color: #1D4ED8; }
+.vco__pm-tick {
+    flex: none; width: 18px; height: 18px; border-radius: 50%;
+    border: 1.5px solid #CBD5E1; background: #fff;
+}
+.vco__paymode-opt.is-on .vco__pm-tick {
+    border-color: #2563EB;
+    background: #2563EB url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E") center / 11px no-repeat;
+}
+.vco__pm-amt { font-size: 20px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.vco__pm-bar {
+    display: block; height: 6px; border-radius: 99px; overflow: hidden;
+    background: repeating-linear-gradient(-45deg, #FDE7C2 0 4px, #FEF3DC 4px 8px);
+}
+.vco__pm-bar i { display: block; height: 100%; border-radius: 99px; background: #93B4F5; transition: width 0.3s ease; }
+.vco__paymode-opt.is-on .vco__pm-bar i { background: #2563EB; }
+.vco__paymode-opt small { font-size: 11.5px; line-height: 1.35; color: #64748B; }
 
 .vco__link {
     padding: 0;
@@ -2357,14 +2389,16 @@ body.vco-locked { overflow: hidden; }
     font: inherit;
     font-size: 16px;
     font-weight: 800;
+    letter-spacing: -0.01em;
     color: #fff;
     cursor: pointer;
-    box-shadow: 0 10px 24px rgba(37, 99, 235, 0.30);
+    /* A pressable key, not a glowing slab: a darker bottom edge that flattens on press. */
+    box-shadow: inset 0 -3px 0 #1E40AF;
     -webkit-tap-highlight-color: transparent;
     transition: transform 0.12s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
 .vco__proceed:hover { background: #1D4ED8; }
-.vco__proceed:active { transform: scale(0.98); }
+.vco__proceed:active { transform: translateY(1px); box-shadow: inset 0 -1px 0 #1E40AF; }
 .vco__proceed:disabled { background: #CBD5E1; box-shadow: none; cursor: default; transform: none; }
 
 .vco__secure {

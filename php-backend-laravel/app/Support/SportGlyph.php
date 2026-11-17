@@ -38,4 +38,39 @@ final class SportGlyph
         . '</g>'
         . '<circle cx="18.6" cy="18.4" r="3"></circle>'
         . '<path d="M17.5 17.4h.01M19.7 17.4h.01M18.6 19.4h.01" stroke-width="2.2"></path>';
+
+    /** A bat (blade, shoulders, taped handle) leaning on a ball with its seam. The old
+     *  glyph was a single slanted stroke with a circle and read as a pen. */
+    public const CRICKET = '<path d="M3.3 17.9 12.4 8.8l2.8 2.8-9.1 9.1a2 2 0 0 1-2.8 0 2 2 0 0 1 0-2.8z"></path>'
+        . '<path d="m13.8 10.2 6.4-6.4M17.4 5.2l1.4 1.4M18.8 3.8l1.4 1.4"></path>'
+        . '<circle cx="6.6" cy="6.6" r="2.9"></circle>'
+        . '<path d="M4.4 4.9c1.5.5 2.6 1.7 3 3.4"></path>';
+
+    /** Panelled ball: a centre pentagon and the seams running out to the edge. */
+    public const FOOTBALL = '<circle cx="12" cy="12" r="9"></circle>'
+        . '<path d="M12 8.2 8.6 10.6l1.3 4h4.2l1.3-4z"></path>'
+        . '<path d="M12 3v5.2M3.6 9.6l5 1M20.4 9.6l-5 1M7.2 19.6l2.7-5M16.8 19.6l-2.7-5"></path>';
+
+    public const BASKETBALL = '<circle cx="12" cy="12" r="9"></circle>'
+        . '<path d="M12 3v18M3 12h18M5.6 5.6a12 12 0 0 1 0 12.8M18.4 5.6a12 12 0 0 0 0 12.8"></path>';
+
+    public const VOLLEYBALL = '<circle cx="12" cy="12" r="9"></circle>'
+        . '<path d="M12 12V3M12 12l7.8 4.5M12 12l-7.8 4.5"></path>'
+        . '<path d="M7.5 4.2A9 9 0 0 0 12 12M20.8 13.6A9 9 0 0 0 12 12M5.8 18.6A9 9 0 0 0 12 12"></path>';
+
+    /** The glyph for a sport name as venues store it ("Cricket", "cricket", "Box cricket"). */
+    public static function for(string $sport): string
+    {
+        $s = strtolower($sport);
+
+        return match (true) {
+            str_contains($s, 'cricket') => self::CRICKET,
+            str_contains($s, 'football'), str_contains($s, 'soccer'), str_contains($s, 'futsal') => self::FOOTBALL,
+            str_contains($s, 'basket') => self::BASKETBALL,
+            str_contains($s, 'volley') => self::VOLLEYBALL,
+            str_contains($s, 'pickle') => self::PICKLEBALL,
+            str_contains($s, 'tennis') => self::TENNIS,
+            default => self::BADMINTON,
+        };
+    }
 }
