@@ -425,6 +425,17 @@ Route::middleware('auth.jwt')->prefix('dm')->group(function (): void {
     // Forward a message into another of your conversations.
     Route::post('/messages/{message}/forward', [DirectMessageController::class, 'forward'])->whereNumber('message');
     Route::post('/{id}/leave', [DirectMessageController::class, 'leave'])->whereNumber('id');
+    // A photo message (multipart). Throttled harder than text: each one is a stored file.
+    Route::post('/{id}/photo', [DirectMessageController::class, 'photo'])->whereNumber('id')->middleware('throttle:30,1');
+    // Mute this thread for yourself — {hours: 8 | 168 | -1 forever | 0 unmute}.
+    Route::post('/{id}/mute', [DirectMessageController::class, 'mute'])->whereNumber('id');
+    // The info screen: members, admin, your mute.
+    Route::get('/{id}/info', [DirectMessageController::class, 'info'])->whereNumber('id');
+    // Group management. POST, not PATCH: the app's HttpURLConnection can't send PATCH.
+    Route::post('/{id}/rename', [DirectMessageController::class, 'rename'])->whereNumber('id');
+    Route::post('/{id}/members', [DirectMessageController::class, 'addMembers'])->whereNumber('id');
+    Route::delete('/{id}/members/{playerId}', [DirectMessageController::class, 'removeMember'])->whereNumber('id');
+    Route::post('/{id}/avatar', [DirectMessageController::class, 'avatar'])->whereNumber('id')->middleware('throttle:10,1');
 });
 
 // Public (read-only): view any player's ActionBoard profile by Player ID (HRN…).

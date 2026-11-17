@@ -19,4 +19,16 @@ object ActionBoardNav {
     fun consumeCreate() {
         _createRequested.value = false
     }
+
+    /** A conversation to open, from a tapped chat notification. 0 = none. */
+    private val _chatRequested = MutableStateFlow(0L)
+    val chatRequested: StateFlow<Long> = _chatRequested
+
+    fun requestChat(conversationId: Long) {
+        _chatRequested.value = conversationId
+    }
+
+    fun consumeChat() {
+        _chatRequested.value = 0L
+    }
 }

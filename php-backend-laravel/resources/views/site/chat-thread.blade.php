@@ -85,11 +85,20 @@
                 @if ($unreadAt === $i)
                     <div class="hthr__new"><span>{{ $unreadOnOpen }} new {{ $unreadOnOpen === 1 ? 'message' : 'messages' }}</span></div>
                 @endif
+                @if ($m['system'] ?? false)
+                    <div class="hthr__sys" data-id="{{ $m['id'] }}"><span>{{ $m['body'] }}</span></div>
+                    @continue
+                @endif
                 <div class="hthr__b {{ $m['mine'] ? 'is-mine' : '' }} {{ $endOfRun ? 'is-last' : '' }}" data-id="{{ $m['id'] }}">
                     @if ($thread['isGroup'] && !$m['mine'] && $endOfRun)
                         <span class="hthr__from">{{ $m['senderName'] }}</span>
                     @endif
-                    <span class="hthr__txt {{ $m['unsent'] ? 'is-unsent' : '' }}">{{ $m['unsent'] ? 'This message was unsent' : $m['body'] }}</span>
+                    @if (!empty($m['image']))
+                        <a class="hthr__img" href="{{ $m['image'] }}" target="_blank" rel="noopener"><img src="{{ $m['image'] }}" alt="Photo" loading="lazy"></a>
+                    @endif
+                    @if ($m['unsent'] || $m['body'] !== '' || empty($m['image']))
+                        <span class="hthr__txt {{ $m['unsent'] ? 'is-unsent' : '' }}">{{ $m['unsent'] ? 'This message was unsent' : $m['body'] }}</span>
+                    @endif
                     @if ($endOfRun && $sent)
                         <time datetime="{{ $sent->toIso8601String() }}">{{ $sent->format('g:i A') }}</time>
                     @endif
@@ -172,6 +181,10 @@
 .hthr__from { font-size: 11px; font-weight: 700; color: var(--blue); }
 .hthr__txt { font-size: 14px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
 .hthr__txt.is-unsent { font-style: italic; opacity: .7; }
+.hthr__img { display: block; margin: -4px -6px 4px; border-radius: 12px; overflow: hidden; max-width: 260px; }
+.hthr__img img { display: block; width: 100%; height: auto; }
+.hthr__sys { align-self: center; margin: 8px 0; font-size: 12px; color: var(--muted); text-align: center; }
+.hthr__sys span { background: rgba(0, 0, 0, .04); padding: 4px 10px; border-radius: 999px; }
 .hthr__b time { align-self: flex-end; font-size: 10.5px; color: var(--muted); }
 .hthr__b.is-mine time { color: rgba(255, 255, 255, .75); }
 /* In flight, and failed. Both states are visible on the bubble itself. */
@@ -284,10 +297,31 @@
         var el = document.createElement('div');
         el.className = 'hthr__b is-last' + (m.mine ? ' is-mine' : '');
         if (m.id) el.dataset.id = m.id;
-        var txt = document.createElement('span');
-        txt.className = 'hthr__txt';
-        txt.textContent = m.body;          // never innerHTML: this is someone's typing
-        el.appendChild(txt);
+        if (m.system) {
+            el.className = 'hthr__sys';
+            var s = document.createElement('span');
+            s.textContent = m.body;
+            el.appendChild(s);
+            list.appendChild(el);
+            lastBubble = null;
+            lastMine = null;
+            return el;
+        }
+        if (m.image) {
+            var a = document.createElement('a');
+            a.className = 'hthr__img';
+            a.href = m.image; a.target = '_blank'; a.rel = 'noopener';
+            var img = document.createElement('img');
+            img.src = m.image; img.alt = 'Photo'; img.loading = 'lazy';
+            a.appendChild(img);
+            el.appendChild(a);
+        }
+        if (m.body || !m.image) {
+            var txt = document.createElement('span');
+            txt.className = 'hthr__txt';
+            txt.textContent = m.body;          // never innerHTML: this is someone's typing
+            el.appendChild(txt);
+        }
         var t = document.createElement('time');
         t.dateTime = when.toISOString();
         t.textContent = when.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });

@@ -207,6 +207,12 @@ final class PlayerChatController extends Controller
             // never carry the body, or an old client could still render it.
             'body' => $unsent ? '' : (string) $m->body,
             'unsent' => $unsent,
+            // "Ravi added Kiran" — drawn centred, not as anyone's bubble.
+            'system' => $m->kind === 'system',
+            // A photo sent from the app. Absolute, and gone once unsent.
+            'image' => ! $unsent && $m->image_path !== null
+                ? \App\Support\MediaUrl::resolve(\Illuminate\Support\Facades\Storage::disk('public')->url($m->image_path))
+                : null,
             'senderName' => (string) ($sender?->name ?? 'Player'),
             // ISO, always. A bare "2026-08-20 10:14:05" is a UTC instant with nothing
             // saying so, and the browser reads it as local — which shifted every

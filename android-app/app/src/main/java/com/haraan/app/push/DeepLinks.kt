@@ -23,6 +23,9 @@ sealed interface DeepLinkTarget {
 
     /** A player's post-match rewards: `haraan://rewards/match/{id}`. */
     data class MatchRewards(val matchId: String) : DeepLinkTarget
+
+    /** One ActionBoard conversation: `haraan://chat/{id}` — a tapped message notification. */
+    data class Chat(val conversationId: Long) : DeepLinkTarget
 }
 
 /** Parses a `deep_link` payload into a [DeepLinkTarget]. HTTP(S) URLs are handled */
@@ -33,6 +36,7 @@ object DeepLinks {
         if (link.isEmpty()) return null
 
         REWARDS_MATCH.matchEntire(link)?.let { return DeepLinkTarget.MatchRewards(it.groupValues[1]) }
+        CHAT.matchEntire(link)?.let { m -> m.groupValues[1].toLongOrNull()?.let { return DeepLinkTarget.Chat(it) } }
         if (link.removePrefix("haraan://").trim('/') == "actionboard/create") return DeepLinkTarget.CreateMatch
 
         // Normalise "haraan://events", "/events", "events" to a bare keyword.
@@ -51,6 +55,7 @@ object DeepLinks {
     }
 
     private val REWARDS_MATCH = Regex("^(?:haraan://)?/?rewards/match/(\\d+)/?$")
+    private val CHAT = Regex("^(?:haraan://)?/?chat/(\\d+)/?$")
 
     /** True when the payload is a web URL HomeActivity should open in a browser. */
     fun isWebUrl(raw: String?): Boolean {

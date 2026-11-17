@@ -25,6 +25,8 @@ data class ChatThread(
   val memberAvatars: List<String?> = emptyList(),
   val memberNames: List<String> = emptyList(),
   val memberCount: Int = 0,
+  /** This viewer muted the thread: no phone notification, a bell-off on the row. */
+  val muted: Boolean = false,
 )
 
 /**
@@ -65,6 +67,37 @@ data class ChatMessage(
   val share: SharedCard? = null,
   /** Who sent it — matched against a "typing" signal to name the typist in a group. */
   val senderId: Long = 0L,
+  /** A photo (absolute URL). [body] is then its caption, possibly empty. */
+  val image: String? = null,
+  /** The photo's pixel size, so the bubble holds its shape before the image loads. */
+  val imageWidth: Int? = null,
+  val imageHeight: Int? = null,
+  /** "Ravi added Kiran" — a group event drawn centred, not as anyone's bubble. */
+  val system: Boolean = false,
+)
+
+/** One person in a conversation, as the info screen lists them. */
+data class ChatMember(
+  val playerId: String,
+  val name: String,
+  val username: String?,
+  val avatar: String?,
+  val isAdmin: Boolean,
+  val isMe: Boolean,
+)
+
+/** What a thread's info screen shows. */
+data class ChatInfo(
+  val id: Long,
+  val isGroup: Boolean,
+  val title: String,
+  val avatar: String?,
+  val muted: Boolean,
+  /** When a timed mute runs out (ISO); null while muted means "until turned back on". */
+  val mutedUntil: String?,
+  val isAdmin: Boolean,
+  val maxMembers: Int,
+  val members: List<ChatMember>,
 )
 
 /**
@@ -127,6 +160,8 @@ class DirectMessageRepository(
       val inboxChannel: String? = null,
       /** Whether the share (+) button shows in a conversation — a /control switch. */
       val shareCards: Boolean = false,
+      /** Whether the photo button shows in a conversation — a /control switch. */
+      val photos: Boolean = false,
     ) : ThreadsResult
     data object Failed : ThreadsResult
   }
@@ -177,6 +212,7 @@ class DirectMessageRepository(
         unreadTotal = json.optInt("unread_total", 0),
         inboxChannel = json.optString("inbox_channel", null).cleanNull(),
         shareCards = json.optBoolean("share_cards", false),
+        photos = json.optBoolean("photos", false),
       )
     } catch (_: Exception) {
       ThreadsResult.Failed
@@ -300,6 +336,10 @@ class DirectMessageRepository(
               senderAvatar = o.optString("sender_avatar", null).cleanNull(),
               share = o.optJSONObject("share")?.let(::parseCard),
               senderId = o.optLong("sender_id", 0L),
+              image = ApiConfig.mediaUrl(o.optString("image", null).cleanNull()),
+              imageWidth = o.optInt("image_width", 0).takeIf { it > 0 },
+              imageHeight = o.optInt("image_height", 0).takeIf { it > 0 },
+              system = o.optString("kind", "") == "system",
             )
           )
         }
@@ -565,7 +605,206 @@ class DirectMessageRepository(
         }
       },
       memberCount = o.optInt("member_count", 0),
+      muted = o.optBoolean("muted", false),
     )
+  }
+
+  // ── Photos, mute, info and group management ─────────────────────────────────────────
+
+  /** Outcome of a call that can be refused for a reason the UI should say out loud. */
+  sealed interface Outcome {
+    data object Ok : Outcome
+    /** The server's own sentence ("Only the group admin can remove people."). */
+    data class Refused(val message: String) : Outcome
+    data object Failed : Outcome
+  }
+
+  private fun readError(c: HttpURLConnection): String? = try {
+    val stream = c.errorStream ?: return null
+    val txt = BufferedReader(InputStreamReader(stream)).use { it.readText() }
+    JSONObject(txt).optString("error", null).cleanNull()
+      ?: JSONObject(txt).optString("message", null).cleanNull()
+  } catch (_: Exception) {
+    null
+  }
+
+  private fun outcomeOf(c: HttpURLConnection): Outcome {
+    val code = c.responseCode
+    return when {
+      code in 200..299 -> Outcome.Ok
+      code in 400..499 -> Outcome.Refused(readError(c) ?: "That didn't work.")
+      else -> Outcome.Failed
+    }
+  }
+
+  /** Multipart upload of one JPEG as `image`, plus string fields. */
+  private fun multipart(path: String, token: String, image: ByteArray, fields: Map<String, String>): HttpURLConnection {
+    val boundary = "----HaraanChat${System.currentTimeMillis()}"
+    val c = (URL("${baseUrl.trimEnd('/')}$path").openConnection() as HttpURLConnection).apply {
+      requestMethod = "POST"
+      doOutput = true
+      connectTimeout = 20000
+      readTimeout = 60000
+      setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+      setRequestProperty("Accept", "application/json")
+      setRequestProperty("Authorization", "Bearer $token")
+    }
+    c.outputStream.use { out ->
+      fields.forEach { (k, v) ->
+        out.write("--$boundary\r\n".toByteArray())
+        out.write("Content-Disposition: form-data; name=\"$k\"\r\n\r\n".toByteArray())
+        out.write(v.toByteArray(Charsets.UTF_8))
+        out.write("\r\n".toByteArray())
+      }
+      out.write("--$boundary\r\n".toByteArray())
+      out.write("Content-Disposition: form-data; name=\"image\"; filename=\"photo.jpg\"\r\n".toByteArray())
+      out.write("Content-Type: image/jpeg\r\n\r\n".toByteArray())
+      out.write(image)
+      out.write("\r\n--$boundary--\r\n".toByteArray())
+    }
+    return c
+  }
+
+  /** Send a photo (already shrunk to JPEG). Null means it did not send. */
+  suspend fun sendPhoto(
+    token: String,
+    conversationId: Long,
+    jpeg: ByteArray,
+    caption: String,
+    replyToId: Long?,
+  ): ChatMessage? = withContext(Dispatchers.IO) {
+    var c: HttpURLConnection? = null
+    try {
+      val fields = buildMap {
+        if (caption.isNotBlank()) put("body", caption.trim())
+        if (replyToId != null && replyToId > 0) put("reply_to_id", replyToId.toString())
+      }
+      c = multipart("/api/dm/$conversationId/photo", token, jpeg, fields)
+      if (c.responseCode !in 200..299) return@withContext null
+      val o = JSONObject(BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() })
+      ChatMessage(
+        id = o.optLong("id"),
+        body = o.optString("body", ""),
+        mine = true,
+        sentAt = o.optString("sent_at", null).cleanNull(),
+        image = ApiConfig.mediaUrl(o.optString("image", null).cleanNull()),
+        imageWidth = o.optInt("image_width", 0).takeIf { it > 0 },
+        imageHeight = o.optInt("image_height", 0).takeIf { it > 0 },
+      )
+    } catch (_: Exception) {
+      null
+    } finally {
+      c?.disconnect()
+    }
+  }
+
+  /** Mute for [hours] (8, 168, or -1 = until turned back on); 0 unmutes. Null on failure. */
+  suspend fun mute(token: String, conversationId: Long, hours: Int): Boolean? = withContext(Dispatchers.IO) {
+    val c = conn("/api/dm/$conversationId/mute", "POST", token)
+    try {
+      c.outputStream.use { it.write(JSONObject().put("hours", hours).toString().toByteArray()) }
+      if (c.responseCode !in 200..299) return@withContext null
+      JSONObject(BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() }).optBoolean("muted")
+    } catch (_: Exception) {
+      null
+    } finally {
+      c.disconnect()
+    }
+  }
+
+  /** Members, admin and the viewer's mute. Null when it could not be read. */
+  suspend fun info(token: String, conversationId: Long): ChatInfo? = withContext(Dispatchers.IO) {
+    val c = conn("/api/dm/$conversationId/info", "GET", token)
+    try {
+      if (c.responseCode !in 200..299) return@withContext null
+      val o = JSONObject(BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() })
+      val arr = o.optJSONArray("members") ?: org.json.JSONArray()
+      ChatInfo(
+        id = o.optLong("id"),
+        isGroup = o.optBoolean("is_group", false),
+        title = o.optString("title", "").cleanNull() ?: "Chat",
+        avatar = ApiConfig.mediaUrl(o.optString("avatar", null).cleanNull()),
+        muted = o.optBoolean("muted", false),
+        mutedUntil = o.optString("muted_until", null).cleanNull(),
+        isAdmin = o.optBoolean("is_admin", false),
+        maxMembers = o.optInt("max_members", 50),
+        members = buildList {
+          for (i in 0 until arr.length()) {
+            val m = arr.optJSONObject(i) ?: continue
+            val pid = m.optString("player_id", null).cleanNull() ?: continue
+            add(
+              ChatMember(
+                playerId = pid,
+                name = m.optString("name", "").ifBlank { "Player" },
+                username = m.optString("username", null).cleanNull(),
+                avatar = ApiConfig.mediaUrl(m.optString("avatar", null).cleanNull()),
+                isAdmin = m.optBoolean("is_admin", false),
+                isMe = m.optBoolean("is_me", false),
+              )
+            )
+          }
+        },
+      )
+    } catch (_: Exception) {
+      null
+    } finally {
+      c.disconnect()
+    }
+  }
+
+  suspend fun renameGroup(token: String, conversationId: Long, title: String): Outcome = withContext(Dispatchers.IO) {
+    val c = conn("/api/dm/$conversationId/rename", "POST", token)
+    try {
+      c.outputStream.use { it.write(JSONObject().put("title", title.trim()).toString().toByteArray()) }
+      outcomeOf(c)
+    } catch (_: Exception) {
+      Outcome.Failed
+    } finally {
+      c.disconnect()
+    }
+  }
+
+  suspend fun addMembers(token: String, conversationId: Long, playerIds: List<String>): Outcome = withContext(Dispatchers.IO) {
+    val c = conn("/api/dm/$conversationId/members", "POST", token)
+    try {
+      c.outputStream.use {
+        it.write(JSONObject().put("members", org.json.JSONArray(playerIds)).toString().toByteArray())
+      }
+      outcomeOf(c)
+    } catch (_: Exception) {
+      Outcome.Failed
+    } finally {
+      c.disconnect()
+    }
+  }
+
+  suspend fun removeMember(token: String, conversationId: Long, playerId: String): Outcome = withContext(Dispatchers.IO) {
+    val encoded = URLEncoder.encode(playerId, "UTF-8")
+    val c = conn("/api/dm/$conversationId/members/$encoded", "DELETE", token)
+    try {
+      outcomeOf(c)
+    } catch (_: Exception) {
+      Outcome.Failed
+    } finally {
+      c.disconnect()
+    }
+  }
+
+  /** Change a group's photo. Returns the new absolute URL, or null on failure. */
+  suspend fun setGroupPhoto(token: String, conversationId: Long, jpeg: ByteArray): String? = withContext(Dispatchers.IO) {
+    var c: HttpURLConnection? = null
+    try {
+      c = multipart("/api/dm/$conversationId/avatar", token, jpeg, emptyMap())
+      if (c.responseCode !in 200..299) return@withContext null
+      ApiConfig.mediaUrl(
+        JSONObject(BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() })
+          .optString("avatar", null).cleanNull()
+      )
+    } catch (_: Exception) {
+      null
+    } finally {
+      c?.disconnect()
+    }
   }
 
   private fun String?.cleanNull(): String? =

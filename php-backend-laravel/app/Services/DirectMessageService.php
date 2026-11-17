@@ -127,13 +127,22 @@ final class DirectMessageService
      */
     public function leaveGroup(Conversation $conversation, User $user): void
     {
-        DB::transaction(function () use ($conversation, $user): void {
+        $remaining = DB::transaction(function () use ($conversation, $user): int {
             $conversation->participants()->detach($user->id);
 
-            if ($conversation->participants()->count() === 0) {
+            $left = $conversation->participants()->count();
+            if ($left === 0) {
                 $conversation->delete();
             }
+
+            return $left;
         });
+
+        // Said in the thread, so nobody wonders why someone stopped answering. Written as the
+        // leaver (they are the actor) even though they can no longer read it.
+        if ($remaining > 0) {
+            $this->systemLine($conversation, $user, ($user->name ?: 'A player').' left');
+        }
     }
 
     /**
@@ -151,8 +160,10 @@ final class DirectMessageService
         bool $forwarded = false,
         ?string $shareType = null,
         ?string $shareRef = null,
+        ?array $image = null,
+        ?string $kind = null,
     ): DirectMessage {
-        return DB::transaction(function () use ($conversation, $sender, $body, $replyToId, $forwarded, $shareType, $shareRef): DirectMessage {
+        return DB::transaction(function () use ($conversation, $sender, $body, $replyToId, $forwarded, $shareType, $shareRef, $image, $kind): DirectMessage {
             // A reply may only quote a message from THIS conversation. Quoting across threads
             // would put words from a conversation the reader isn't in onto their screen.
             $replyTo = null;
@@ -167,12 +178,18 @@ final class DirectMessageService
                 'is_forwarded' => $forwarded,
                 'share_type' => $shareType,
                 'share_ref' => $shareRef,
+                'image_path' => $image['path'] ?? null,
+                'image_width' => $image['width'] ?? null,
+                'image_height' => $image['height'] ?? null,
+                'kind' => $kind,
             ]);
 
             // A card with no words still needs a line in the thread list — "Shared a match:
             // Lions vs Tigers" — built for the sender, who has just been allowed to share it.
             $preview = $body;
-            if ($preview === '' && $shareType !== null && $shareRef !== null) {
+            if ($image !== null) {
+                $preview = $body !== '' ? '📷 '.$body : '📷 Photo';
+            } elseif ($preview === '' && $shareType !== null && $shareRef !== null) {
                 $preview = \App\Support\ChatShareCards::preview(
                     $shareType,
                     \App\Support\ChatShareCards::resolve($shareType, $shareRef, $sender),
@@ -186,11 +203,14 @@ final class DirectMessageService
             ])->save();
 
             // Everyone except the sender gains an unread; the sender is caught up by
-            // definition.
-            DB::table('conversation_participants')
-                ->where('conversation_id', $conversation->id)
-                ->where('user_id', '!=', $sender->id)
-                ->increment('unread_count');
+            // definition. A system line ("Ravi added Kiran") is news, not a message — it
+            // shows in the thread but doesn't light the badge.
+            if ($kind === null) {
+                DB::table('conversation_participants')
+                    ->where('conversation_id', $conversation->id)
+                    ->where('user_id', '!=', $sender->id)
+                    ->increment('unread_count');
+            }
 
             DB::table('conversation_participants')
                 ->where('conversation_id', $conversation->id)
@@ -216,13 +236,174 @@ final class DirectMessageService
         bool $forwarded = false,
         ?string $shareType = null,
         ?string $shareRef = null,
+        ?array $image = null,
+        ?string $kind = null,
     ): DirectMessage {
-        $message = $this->send($conversation, $sender, $body, $replyToId, $forwarded, $shareType, $shareRef);
+        $message = $this->send($conversation, $sender, $body, $replyToId, $forwarded, $shareType, $shareRef, $image, $kind);
 
         \App\Events\ConversationUpdated::dispatch($conversation->id, $sender->id);
         $this->broadcastInbox($conversation);
 
+        // The phone in a pocket. After the response, so the sender's tick never waits on FCM;
+        // the job itself decides who is muted and whether push is on at all.
+        if ($kind === null) {
+            \App\Jobs\SendChatPush::dispatchAfterResponse((int) $message->id);
+        }
+
         return $message;
+    }
+
+    /** A line the app draws centred and grey: "Ravi added Kiran". Never pushed, never unread. */
+    public function systemLine(Conversation $conversation, User $actor, string $text): void
+    {
+        try {
+            $this->sendAndBroadcast($conversation, $actor, mb_substr($text, 0, 200), kind: 'system');
+        } catch (\Throwable $e) {
+            report($e);
+        }
+    }
+
+    // ── Mute ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Mute [$conversation] for [$user] until [$until] — null unmutes. "Until I turn it back
+     * on" is stored as a far-future date so one column answers "is this muted right now".
+     */
+    public function setMute(Conversation $conversation, User $user, ?\DateTimeInterface $until): void
+    {
+        DB::table('conversation_participants')
+            ->where('conversation_id', $conversation->id)
+            ->where('user_id', $user->id)
+            ->update(['muted_until' => $until]);
+    }
+
+    /** When [$user]'s mute on this thread runs out, or null when it isn't muted now. */
+    public function mutedUntil(Conversation $conversation, User $user): ?\Illuminate\Support\Carbon
+    {
+        $raw = DB::table('conversation_participants')
+            ->where('conversation_id', $conversation->id)
+            ->where('user_id', $user->id)
+            ->value('muted_until');
+        if ($raw === null) {
+            return null;
+        }
+        $until = \Illuminate\Support\Carbon::parse($raw);
+
+        return $until->isFuture() ? $until : null;
+    }
+
+    // ── Groups ────────────────────────────────────────────────────────────────────────
+
+    /**
+     * The group's admin: whoever created it while they are still in it, otherwise the member
+     * who has been there longest. Derived rather than stored as a role, so a group can never
+     * be left with nobody able to manage it.
+     */
+    public function adminId(Conversation $conversation): ?int
+    {
+        $members = DB::table('conversation_participants')
+            ->where('conversation_id', $conversation->id)
+            ->orderBy('created_at')
+            ->orderBy('id')
+            ->pluck('user_id')
+            ->map(fn ($id) => (int) $id);
+
+        if ($conversation->created_by !== null && $members->contains((int) $conversation->created_by)) {
+            return (int) $conversation->created_by;
+        }
+
+        return $members->first();
+    }
+
+    public function isAdmin(Conversation $conversation, User $user): bool
+    {
+        return $this->adminId($conversation) === (int) $user->id;
+    }
+
+    /**
+     * Add players to a group. Each one must mutually follow the person adding them — the
+     * same rule that makes an unwanted chat impossible by construction. Returns the users
+     * actually added (already-members are skipped), or null when any one fails the rule or
+     * the group would pass the /control size cap.
+     *
+     * @param  array<int, User>  $members
+     * @return array<int, User>|null
+     */
+    public function addMembers(Conversation $conversation, User $actor, array $members): ?array
+    {
+        $existing = DB::table('conversation_participants')
+            ->where('conversation_id', $conversation->id)
+            ->pluck('user_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+
+        $fresh = [];
+        foreach ($members as $m) {
+            if (! in_array((int) $m->id, $existing, true) && (int) $m->id !== (int) $actor->id) {
+                $fresh[(int) $m->id] = $m;
+            }
+        }
+        if ($fresh === []) {
+            return [];
+        }
+
+        if (count($existing) + count($fresh) > \App\Support\PlatformRules::int('chat.group_max_members')) {
+            return null;
+        }
+
+        foreach ($fresh as $member) {
+            if (! $this->canMessage($actor, $member)) {
+                return null;
+            }
+        }
+
+        $conversation->participants()->attach(array_keys($fresh));
+
+        $names = collect($fresh)->map(fn (User $u) => $u->name ?: 'a player')->values()->all();
+        $this->systemLine($conversation, $actor, ($actor->name ?: 'Someone').' added '.self::joinNames($names));
+
+        return array_values($fresh);
+    }
+
+    /** Remove one member. Admin only — checked by the caller, so the reason can be said. */
+    public function removeMember(Conversation $conversation, User $actor, User $member): void
+    {
+        $conversation->participants()->detach($member->id);
+        $this->systemLine($conversation, $actor, ($actor->name ?: 'The admin').' removed '.($member->name ?: 'a player'));
+    }
+
+    public function renameGroup(Conversation $conversation, User $actor, string $title): void
+    {
+        $title = mb_substr(trim($title), 0, 80);
+        if ($title === '' || $title === $conversation->title) {
+            return;
+        }
+        $conversation->forceFill(['title' => $title])->save();
+        $this->systemLine($conversation, $actor, ($actor->name ?: 'Someone').' renamed the group to “'.$title.'”');
+    }
+
+    public function setGroupPhoto(Conversation $conversation, User $actor, string $path): void
+    {
+        $old = $conversation->avatar;
+        $conversation->forceFill(['avatar' => $path])->save();
+        if ($old !== null && ! str_starts_with($old, 'http')) {
+            \Illuminate\Support\Facades\Storage::disk('public')->delete($old);
+        }
+        $this->systemLine($conversation, $actor, ($actor->name ?: 'Someone').' changed the group photo');
+    }
+
+    /** "Kiran", "Kiran and Asha", "Kiran, Asha and 2 others". */
+    private static function joinNames(array $names): string
+    {
+        $n = count($names);
+
+        return match (true) {
+            $n === 0 => 'nobody',
+            $n === 1 => $names[0],
+            $n === 2 => $names[0].' and '.$names[1],
+            $n === 3 => $names[0].', '.$names[1].' and '.$names[2],
+            default => $names[0].', '.$names[1].' and '.($n - 2).' others',
+        };
     }
 
     /**
@@ -343,18 +524,24 @@ final class DirectMessageService
             ->whereNull('deleted_at')
             ->first();
 
-        if ($message === null || (int) $message->sender_id !== (int) $user->id) {
+        if ($message === null || (int) $message->sender_id !== (int) $user->id || $message->kind !== null) {
             return false;
         }
 
-        $message->forceFill(['body' => '', 'deleted_at' => now()])->save();
+        // An unsent photo is deleted from storage too — "unsent" means gone, not merely hidden.
+        // Unless a forward still points at the same file.
+        $image = $message->image_path;
+        $message->forceFill(['body' => '', 'deleted_at' => now(), 'image_path' => null])->save();
+        if ($image !== null && ! DirectMessage::query()->where('image_path', $image)->exists()) {
+            \Illuminate\Support\Facades\Storage::disk('public')->delete($image);
+        }
 
         // The preview on the thread list quotes the last message; if that was this one, it
         // has to stop quoting it.
         if ((int) ($conversation->last_sender_id ?? 0) === (int) $user->id) {
             $latest = $conversation->messages()->whereNull('deleted_at')->orderByDesc('id')->first();
             $conversation->forceFill([
-                'last_message_preview' => $latest?->body ?? 'Message deleted',
+                'last_message_preview' => $latest !== null ? \App\Jobs\SendChatPush::preview($latest) : 'Message deleted',
                 'last_message_at' => $latest?->created_at ?? $conversation->last_message_at,
                 'last_sender_id' => $latest?->sender_id ?? $conversation->last_sender_id,
             ])->save();
@@ -423,7 +610,7 @@ final class DirectMessageService
      */
     public function forward(User $sender, int $messageId, int $toConversationId): ?DirectMessage
     {
-        $source = DirectMessage::query()->whereKey($messageId)->whereNull('deleted_at')->first();
+        $source = DirectMessage::query()->whereKey($messageId)->whereNull('deleted_at')->whereNull('kind')->first();
         if ($source === null) {
             return null;
         }
@@ -451,6 +638,11 @@ final class DirectMessageService
             true,
             $source->share_type,
             $source->share_ref,
+            // A forwarded photo points at the same stored file — copying bytes per forward
+            // would multiply storage for nothing. Unsend only deletes it when nothing else uses it.
+            $source->image_path !== null
+                ? ['path' => $source->image_path, 'width' => $source->image_width, 'height' => $source->image_height]
+                : null,
         );
     }
 

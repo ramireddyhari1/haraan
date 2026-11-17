@@ -30,6 +30,17 @@ class HaraanMessagingService : FirebaseMessagingService() {
         // deep_link lets a tap route into the app (e.g. a booking or event screen).
         val deepLink = data["deep_link"]
 
+        // A chat message: one stacked card per conversation, and none at all for the thread
+        // that is open on screen right now — the message is already in front of the reader.
+        if (data["type"] == "dm") {
+            val conversationId = data["conversation_id"]?.toLongOrNull() ?: 0L
+            if (conversationId > 0L && ChatPresence.openConversationId == conversationId) return
+            if (conversationId > 0L) {
+                PushNotifications.showChat(this, conversationId, title, body, deepLink)
+                return
+            }
+        }
+
         PushNotifications.show(this, title, body, deepLink)
     }
 }

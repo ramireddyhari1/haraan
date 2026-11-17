@@ -42,6 +42,13 @@ import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Group
+import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
@@ -536,18 +543,32 @@ private fun ThreadRow(thread: ChatThread, typing: Boolean = false, onClick: () -
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (thread.isGroup) GroupAvatar(thread, 54.dp) else Avatar(thread.avatar, thread.name, 54.dp)
+        if (thread.isGroup && thread.avatar.isNullOrBlank()) GroupAvatar(thread, 54.dp)
+        else Avatar(thread.avatar, thread.name, 54.dp)
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text(
-                thread.name,
-                color = HaraanColors.TextPrimary,
-                fontSize = 15.5.sp,
-                // Unread threads sit heavier — the list is scanned, not read.
-                fontWeight = if (unread) FontWeight.Bold else FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    thread.name,
+                    color = HaraanColors.TextPrimary,
+                    fontSize = 15.5.sp,
+                    // Unread threads sit heavier — the list is scanned, not read.
+                    fontWeight = if (unread) FontWeight.Bold else FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                // Muted: say so where the name is, so a quiet phone isn't a mystery.
+                if (thread.muted) {
+                    Spacer(Modifier.width(5.dp))
+                    Icon(
+                        Icons.Filled.NotificationsOff,
+                        "Muted",
+                        tint = HaraanColors.TextMuted,
+                        modifier = Modifier.size(14.dp),
+                    )
+                }
+            }
             Spacer(Modifier.height(3.dp))
             // While they type, the preview says so — the reason to open this thread NOW.
             if (typing) {
@@ -584,7 +605,7 @@ private fun ThreadRow(thread: ChatThread, typing: Boolean = false, onClick: () -
                         .heightIn(min = 20.dp)
                         .widthIn(min = 20.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(HaraanColors.EventsBlue)
+                        .background(if (thread.muted) HaraanColors.TextMuted else HaraanColors.EventsBlue)
                         .padding(horizontal = 6.dp),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -601,7 +622,7 @@ private fun ThreadRow(thread: ChatThread, typing: Boolean = false, onClick: () -
 }
 
 @Composable
-private fun Avatar(url: String?, name: String, size: androidx.compose.ui.unit.Dp) {
+internal fun Avatar(url: String?, name: String, size: androidx.compose.ui.unit.Dp) {
     Box(
         Modifier.size(size).clip(CircleShape).background(HaraanColors.Field),
         contentAlignment = Alignment.Center,
@@ -771,9 +792,60 @@ fun ChatThreadScreen(
     subtitle: String? = null,
     /** Present only for groups: returns true if the leave took, so we can close then. */
     onLeave: (suspend () -> Boolean)? = null,
+    /** Shows the photo button — a /control switch. */
+    photosEnabled: Boolean = false,
+    /** Send a photo (shrunk JPEG) with an optional caption and reply. Null = it did not send. */
+    sendPhoto: (suspend (jpeg: ByteArray, caption: String, replyToId: Long?) -> ChatMessage?)? = null,
+    /** Whether this viewer has the thread muted when it opens. */
+    muted: Boolean = false,
+    /** Mute for hours (8 / 168 / -1 forever), 0 to unmute. Returns the new state, null on failure. */
+    onMute: (suspend (hours: Int) -> Boolean?)? = null,
+    /** The header was tapped: a 1:1 opens their profile, a group its info screen. */
+    onOpenInfo: (() -> Unit)? = null,
+    /** 1:1 only: block them. True when it took — the caller closes the thread. */
+    onBlock: (suspend () -> Boolean)? = null,
+    /** 1:1 only: report them. True when the report was filed. */
+    onReport: (suspend (reason: String, details: String?) -> Boolean)? = null,
     modifier: Modifier = Modifier,
 ) {
     var messages by remember { mutableStateOf<List<ChatMessage>?>(null) }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // ── Thread menu, mute, block/report, photos ─────────────────────────────────────
+    var isMuted by remember(conversationId, muted) { mutableStateOf(muted) }
+    var menuOpen by remember { mutableStateOf(false) }
+    var showMutePicker by remember { mutableStateOf(false) }
+    var confirmBlock by remember { mutableStateOf(false) }
+    var showReport by remember { mutableStateOf(false) }
+    // The photo being looked at full-screen, and the one waiting for a caption.
+    var viewingPhoto by remember { mutableStateOf<String?>(null) }
+    var photoToSend by remember { mutableStateOf<PreparedPhoto?>(null) }
+    var preparingPhoto by remember { mutableStateOf(false) }
+    val pickPhoto = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia(),
+    ) { uri ->
+        if (uri != null) {
+            preparingPhoto = true
+            // Shrinking happens off the main thread; the preview opens once it's ready.
+            kotlinx.coroutines.MainScope().launch {
+                val prepared = prepareChatPhoto(context, uri)
+                preparingPhoto = false
+                if (prepared == null) {
+                    android.widget.Toast.makeText(context, "Couldn't open that photo.", android.widget.Toast.LENGTH_SHORT).show()
+                } else {
+                    photoToSend = prepared
+                }
+            }
+        }
+    }
+
+    // While this thread is on screen, a push for it would be noise: the message is already
+    // here. Also clears any notification already sitting in the shade for it.
+    if (conversationId > 0L) {
+        DisposableEffect(conversationId) {
+            com.haraan.app.push.ChatPresence.open(context, conversationId)
+            onDispose { com.haraan.app.push.ChatPresence.close(conversationId) }
+        }
+    }
     var draft by remember { mutableStateOf("") }
     var confirmLeave by remember { mutableStateOf(false) }
     var leaving by remember { mutableStateOf(false) }
@@ -1036,7 +1108,15 @@ fun ChatThreadScreen(
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = HaraanColors.TextPrimary, modifier = Modifier.size(18.dp))
             }
             Spacer(Modifier.width(12.dp))
-            if (isGroup) {
+            // Avatar + name are one target: tapping who you're talking to opens them.
+            Row(
+                Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(10.dp))
+                    .then(if (onOpenInfo != null) Modifier.pressable(onClick = onOpenInfo) else Modifier),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+            if (isGroup && avatar.isNullOrBlank()) {
                 Box(
                     Modifier.size(34.dp).clip(CircleShape).background(HaraanColors.Field),
                     contentAlignment = Alignment.Center,
@@ -1056,18 +1136,71 @@ fun ChatThreadScreen(
                         messages?.lastOrNull { it.senderId.toString() == typist }?.senderName?.substringBefore(' ')
                     } else null
                     TypingLabel(if (who != null) "$who is typing" else "typing", 12f)
-                } else if (!subtitle.isNullOrBlank()) {
-                    Text(subtitle, color = HaraanColors.TextMuted, fontSize = 12.sp, maxLines = 1)
+                } else if (!subtitle.isNullOrBlank() || isMuted) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (isMuted) {
+                            Icon(Icons.Filled.NotificationsOff, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(12.dp))
+                            Spacer(Modifier.width(4.dp))
+                        }
+                        Text(
+                            listOfNotNull(subtitle?.takeIf { it.isNotBlank() }, if (isMuted) "Muted" else null).joinToString(" · "),
+                            color = HaraanColors.TextMuted,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                        )
+                    }
                 }
             }
-            // Leave — only for groups, and deliberately understated (it's destructive).
-            if (isGroup && onLeave != null) {
-                Box(
-                    Modifier.size(38.dp).pressable(haptic = Feel.REMOVE) { confirmLeave = true }
-                        .clip(CircleShape).background(HaraanColors.Field),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(Icons.AutoMirrored.Filled.Logout, "Leave group", tint = HaraanColors.Danger, modifier = Modifier.size(18.dp))
+            }
+            // Everything about the conversation itself lives behind one quiet ⋮ — Leave and
+            // Block are destructive and shouldn't sit one stray tap from the back arrow.
+            val hasMenu = onOpenInfo != null || onMute != null || onLeave != null || onBlock != null || onReport != null
+            if (hasMenu) {
+                Box {
+                    Box(
+                        Modifier.size(38.dp).clip(CircleShape).pressable(haptic = Feel.SELECT) { menuOpen = true },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Filled.MoreVert, "Chat options", tint = HaraanColors.TextPrimary, modifier = Modifier.size(21.dp))
+                    }
+                    androidx.compose.material3.DropdownMenu(
+                        expanded = menuOpen,
+                        onDismissRequest = { menuOpen = false },
+                        containerColor = Color.White,
+                        shape = RoundedCornerShape(14.dp),
+                    ) {
+                        if (onOpenInfo != null) {
+                            ThreadMenuItem(if (isGroup) "Group info" else "View profile", if (isGroup) Icons.Filled.Info else Icons.Filled.Person) {
+                                menuOpen = false; onOpenInfo()
+                            }
+                        }
+                        if (onMute != null) {
+                            ThreadMenuItem(
+                                if (isMuted) "Unmute notifications" else "Mute notifications",
+                                if (isMuted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
+                            ) {
+                                menuOpen = false
+                                if (isMuted) {
+                                    scope.launch {
+                                        val now = onMute(0)
+                                        if (now != null) isMuted = now
+                                        else android.widget.Toast.makeText(context, "Couldn't unmute. Try again.", android.widget.Toast.LENGTH_SHORT).show()
+                                    }
+                                } else {
+                                    showMutePicker = true
+                                }
+                            }
+                        }
+                        if (onReport != null) {
+                            ThreadMenuItem("Report", Icons.Filled.Flag) { menuOpen = false; showReport = true }
+                        }
+                        if (onBlock != null) {
+                            ThreadMenuItem("Block", Icons.Filled.Block, danger = true) { menuOpen = false; confirmBlock = true }
+                        }
+                        if (isGroup && onLeave != null) {
+                            ThreadMenuItem("Leave group", Icons.AutoMirrored.Filled.Logout, danger = true) { menuOpen = false; confirmLeave = true }
+                        }
+                    }
                 }
             }
         }
@@ -1127,8 +1260,15 @@ fun ChatThreadScreen(
                     // In a group, an incoming bubble shows WHO sent it (grouped: only the
                     // first of a run from the same sender carries the name).
                     itemsIndexed(list, key = { _, m -> m.id }) { i, m ->
-                        val prev = list.getOrNull(i - 1)
-                        val next = list.getOrNull(i + 1)
+                        // A group event ("Ravi added Kiran") is not anyone's bubble and breaks a run.
+                        if (m.system) {
+                            val day = dayLabel(m.sentAt)
+                            if (day != null && day != dayLabel(list.getOrNull(i - 1)?.sentAt)) DaySeparator(day)
+                            SystemLine(m.body)
+                            return@itemsIndexed
+                        }
+                        val prev = list.getOrNull(i - 1)?.takeUnless { it.system }
+                        val next = list.getOrNull(i + 1)?.takeUnless { it.system }
                         val showSender = isGroup && !m.mine &&
                             (prev == null || prev.mine || prev.senderName != m.senderName)
                         // A date rule whenever the day changes — without it a thread reads
@@ -1163,6 +1303,7 @@ fun ChatThreadScreen(
                             onLongPress = { sheetFor = m },
                             onOpenShare = onOpenShare,
                             refreshCard = refreshCard,
+                            onOpenPhoto = { url -> viewingPhoto = url },
                         )
                     }
                     // In flight, below everything that has landed.
@@ -1172,7 +1313,7 @@ fun ChatThreadScreen(
                             // Retry: drop it from the outbox and send it again.
                             outbox = outbox.filterNot { it.tempId == p.tempId }
                             scope.launch {
-                                sendWithOutbox(p.body, p.replyToId, p.share, { outbox }, { outbox = it }, send) {
+                                sendWithOutbox(p.body, p.replyToId, p.share, { outbox }, { outbox = it }, send, photo = p.photo, sendPhoto = sendPhoto) {
                                     messages = it(messages)
                                 }
                             }
@@ -1315,6 +1456,91 @@ fun ChatThreadScreen(
             )
         }
 
+        if (showMutePicker) {
+            MutePicker(
+                onPick = { hours ->
+                    showMutePicker = false
+                    scope.launch {
+                        val now = onMute?.invoke(hours)
+                        if (now != null) isMuted = now
+                        else android.widget.Toast.makeText(context, "Couldn't mute. Try again.", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onDismiss = { showMutePicker = false },
+            )
+        }
+
+        if (confirmBlock) {
+            androidx.compose.material3.AlertDialog(
+                onDismissRequest = { confirmBlock = false },
+                title = { Text("Block $title?", fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        "They won't be able to message you or follow you, and you'll stop following each other. " +
+                            "They aren't told. You can unblock them from their profile.",
+                    )
+                },
+                confirmButton = {
+                    androidx.compose.material3.TextButton(onClick = {
+                        confirmBlock = false
+                        scope.launch {
+                            val ok = onBlock?.invoke() ?: false
+                            android.widget.Toast.makeText(
+                                context,
+                                if (ok) "$title is blocked." else "Couldn't block. Try again.",
+                                android.widget.Toast.LENGTH_SHORT,
+                            ).show()
+                            if (ok) onClose()
+                        }
+                    }) { Text("Block", color = HaraanColors.Danger, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    androidx.compose.material3.TextButton(onClick = { confirmBlock = false }) {
+                        Text("Cancel", color = HaraanColors.TextSecondary)
+                    }
+                },
+                containerColor = Color.White,
+            )
+        }
+
+        if (showReport) {
+            com.haraan.app.ui.profile.PlayerReportSheet(
+                name = title,
+                onDismiss = { showReport = false },
+                onSubmit = { reason, details ->
+                    showReport = false
+                    scope.launch {
+                        val ok = onReport?.invoke(reason, details) ?: false
+                        android.widget.Toast.makeText(
+                            context,
+                            if (ok) "Thanks — our team will look into it." else "Couldn't send the report. Try again.",
+                            android.widget.Toast.LENGTH_LONG,
+                        ).show()
+                    }
+                },
+            )
+        }
+
+        photoToSend?.let { photo ->
+            ChatPhotoPreview(
+                photo = photo,
+                recipient = title,
+                onSend = { caption ->
+                    photoToSend = null
+                    val quoted = replyingTo?.id
+                    replyingTo = null
+                    scope.launch {
+                        sendWithOutbox(caption, quoted, null, { outbox }, { outbox = it }, send, photo = photo, sendPhoto = sendPhoto) { update ->
+                            messages = update(messages)
+                        }
+                    }
+                },
+                onCancel = { photoToSend = null },
+            )
+        }
+
+        viewingPhoto?.let { url -> ChatPhotoViewer(url) { viewingPhoto = null } }
+
         if (confirmLeave) {
             androidx.compose.material3.AlertDialog(
                 onDismissRequest = { if (!leaving) confirmLeave = false },
@@ -1405,6 +1631,38 @@ fun ChatThreadScreen(
             //
             // It folds away while you type — the field takes its room, the way a camera app's
             // tools step aside once you start a caption — and springs back when the box is empty.
+            androidx.compose.animation.AnimatedVisibility(
+                visible = photosEnabled && sendPhoto != null && draft.isEmpty(),
+                enter = androidx.compose.animation.expandHorizontally(
+                    androidx.compose.animation.core.spring(dampingRatio = 0.6f, stiffness = 500f),
+                ) + androidx.compose.animation.scaleIn(initialScale = 0.6f) + androidx.compose.animation.fadeIn(),
+                exit = androidx.compose.animation.shrinkHorizontally() +
+                    androidx.compose.animation.scaleOut(targetScale = 0.6f) + androidx.compose.animation.fadeOut(),
+            ) {
+                Row {
+                    Box(
+                        Modifier
+                            .size(46.dp)
+                            .pressable(enabled = !preparingPhoto, haptic = Feel.SELECT) {
+                                pickPhoto.launch(
+                                    androidx.activity.result.PickVisualMediaRequest(
+                                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly,
+                                    )
+                                )
+                            }
+                            .clip(CircleShape)
+                            .background(HaraanColors.Field),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (preparingPhoto) {
+                            CircularProgressIndicator(color = HaraanColors.EventsBlue, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
+                        } else {
+                            Icon(Icons.Filled.Photo, "Send a photo", tint = HaraanColors.EventsBlue, modifier = Modifier.size(22.dp))
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                }
+            }
             androidx.compose.animation.AnimatedVisibility(
                 visible = shareEnabled && draft.isEmpty(),
                 enter = androidx.compose.animation.expandHorizontally(
@@ -1524,6 +1782,8 @@ data class PendingMessage(
     val replyToId: Long? = null,
     /** A card being shared — the pending bubble shows it, and a retry sends it again. */
     val share: SharedCard? = null,
+    /** A photo being sent; [body] is its caption. Held as bytes so a retry re-uploads it. */
+    val photo: PreparedPhoto? = null,
 )
 
 /**
@@ -1539,14 +1799,20 @@ private suspend fun sendWithOutbox(
     outbox: () -> List<PendingMessage>,
     setOutbox: (List<PendingMessage>) -> Unit,
     send: suspend (String, Long?, SharedCard?) -> ChatMessage?,
+    photo: PreparedPhoto? = null,
+    sendPhoto: (suspend (ByteArray, String, Long?) -> ChatMessage?)? = null,
     updateMessages: ((List<ChatMessage>?) -> List<ChatMessage>) -> Unit,
 ) {
-    if (text.isBlank() && share == null) return
+    if (text.isBlank() && share == null && photo == null) return
     val tempId = -System.currentTimeMillis()
     // The quote rides with the pending row, so a retry answers the same message rather than
     // quietly becoming a stray line.
-    setOutbox(outbox() + PendingMessage(tempId, text, replyToId = replyToId, share = share))
-    val sent = send(text, replyToId, share)
+    setOutbox(outbox() + PendingMessage(tempId, text, replyToId = replyToId, share = share, photo = photo))
+    val sent = if (photo != null) {
+        sendPhoto?.invoke(photo.jpeg, text, replyToId)
+    } else {
+        send(text, replyToId, share)
+    }
     if (sent == null) {
         setOutbox(outbox().map { if (it.tempId == tempId) it.copy(failed = true) else it })
     } else {
@@ -1567,6 +1833,7 @@ private fun Bubble(
     onLongPress: (() -> Unit)? = null,
     onOpenShare: (SharedCard) -> Unit = {},
     refreshCard: suspend (SharedCard) -> SharedCard? = { null },
+    onOpenPhoto: (String) -> Unit = {},
 ) {
     Column(
         Modifier.fillMaxWidth(),
@@ -1670,10 +1937,16 @@ private fun Bubble(
                 SharedCardView(card, onOpen = onOpenShare, refresh = refreshCard)
                 if (m.body.isNotBlank()) Spacer(Modifier.height(8.dp))
             }
-            // A card sent on its own has no words; an empty Text would still take a line.
-            if (m.body.isNotBlank() || m.share == null) {
+            m.image?.let { url ->
+                ChatPhoto(url, m.imageWidth, m.imageHeight, onClick = { onOpenPhoto(url) }, onLongPress = onLongPress)
+                if (m.body.isNotBlank()) Spacer(Modifier.height(6.dp))
+            }
+            // A card or photo sent on its own has no words; an empty Text would still take a line.
+            if (m.body.isNotBlank() || (m.share == null && m.image == null)) {
+                // Links open in the browser; the rest of the bubble still long-presses.
+                val annotated = remember(m.body, m.mine) { linkified(m.body, m.mine) }
                 Text(
-                    m.body,
+                    annotated,
                     color = if (m.mine) Color.White else HaraanColors.TextPrimary,
                     fontSize = 14.5.sp,
                     lineHeight = 20.sp,
@@ -2036,7 +2309,11 @@ private fun PendingBubble(p: PendingMessage, onRetry: () -> Unit) {
         BubbleShell(mine = true, dimmed = !p.failed, failed = p.failed, onClick = if (p.failed) onRetry else null) {
             // The card as picked — not tappable while in flight, so a tap means "retry".
             p.share?.let { SharedCardView(it, onOpen = null) }
-            if (p.body.isNotBlank() || p.share == null) {
+            p.photo?.let { ph ->
+                ChatPhoto(ph.uri, ph.width, ph.height, onClick = if (p.failed) onRetry else null)
+                if (p.body.isNotBlank()) Spacer(Modifier.height(6.dp))
+            }
+            if (p.body.isNotBlank() || (p.share == null && p.photo == null)) {
                 Text(
                     p.body,
                     color = Color.White,
@@ -2374,7 +2651,7 @@ fun NewGroupScreen(
 }
 
 @Composable
-private fun CandidateRow(cand: com.haraan.app.data.ChatCandidate, selected: Boolean, onToggle: () -> Unit) {
+internal fun CandidateRow(cand: com.haraan.app.data.ChatCandidate, selected: Boolean, onToggle: () -> Unit) {
     Row(
         Modifier.fillMaxWidth().pressable(onClick = onToggle).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -2398,4 +2675,65 @@ private fun CandidateRow(cand: com.haraan.app.data.ChatCandidate, selected: Bool
             if (selected) Icon(Icons.Filled.Check, null, tint = Color.White, modifier = Modifier.size(15.dp))
         }
     }
+}
+
+/** One row of the thread's ⋮ menu. */
+@Composable
+private fun ThreadMenuItem(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
+    androidx.compose.material3.DropdownMenuItem(
+        text = {
+            Text(
+                label,
+                color = if (danger) HaraanColors.Danger else HaraanColors.TextPrimary,
+                fontSize = 14.5.sp,
+                fontWeight = FontWeight.Medium,
+            )
+        },
+        leadingIcon = {
+            Icon(icon, null, tint = if (danger) HaraanColors.Danger else HaraanColors.TextSecondary, modifier = Modifier.size(19.dp))
+        },
+        onClick = onClick,
+    )
+}
+
+/** How long to mute for — the three answers people actually want. */
+@Composable
+internal fun MutePicker(onPick: (hours: Int) -> Unit, onDismiss: () -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Mute notifications", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                Text(
+                    "You'll still get the messages — your phone just won't ring for them. They aren't told.",
+                    color = HaraanColors.TextSecondary,
+                    fontSize = 13.5.sp,
+                )
+                Spacer(Modifier.height(10.dp))
+                listOf(8 to "For 8 hours", 168 to "For a week", -1 to "Until I turn it back on").forEach { (hours, label) ->
+                    Text(
+                        label,
+                        color = HaraanColors.TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .pressable(haptic = Feel.SELECT) { onPick(hours) }
+                            .padding(horizontal = 8.dp, vertical = 13.dp),
+                    )
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Cancel", color = HaraanColors.TextSecondary) }
+        },
+        containerColor = Color.White,
+    )
 }

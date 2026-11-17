@@ -13,6 +13,8 @@ use App\Support\PlatformRules;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 
 /**
  * Player-to-player direct messages. Distinct from SupportController, which is the
@@ -50,6 +52,8 @@ final class DirectMessageController extends Controller
             'inbox_channel' => DirectMessageService::inboxChannel($me),
             // Whether the + (share a match / venue / player) button should show.
             'share_cards' => PlatformRules::bool('chat.share_cards'),
+            // Whether the photo button shows in a conversation.
+            'photos' => PlatformRules::bool('chat.photos'),
             'results' => $conversations->map(fn (Conversation $c) => $this->card($c, $me))->values(),
         ]);
     }
@@ -218,6 +222,15 @@ final class DirectMessageController extends Controller
                     // An unsent message keeps its place in the thread but carries no words.
                     'deleted' => $m->deleted_at !== null,
                     'forwarded' => (bool) $m->is_forwarded,
+                    // 'system' for "Ravi added Kiran"; null for anything a person wrote.
+                    'kind' => $m->kind,
+                    // A photo, absolute, with its size so the bubble can hold the shape
+                    // before the image arrives. Null once unsent.
+                    'image' => $m->deleted_at === null && $m->image_path !== null
+                        ? \App\Support\MediaUrl::resolve(Storage::disk('public')->url($m->image_path))
+                        : null,
+                    'image_width' => $m->image_width !== null ? (int) $m->image_width : null,
+                    'image_height' => $m->image_height !== null ? (int) $m->image_height : null,
                     // A shared match / venue / player, built for THIS reader at read time.
                     // Null for plain text, for an unsent message, and while sharing is off.
                     'share' => $m->deleted_at === null && $m->share_type !== null
@@ -354,6 +367,12 @@ final class DirectMessageController extends Controller
             return response()->json(['error' => 'None of those players could be found.'], 422);
         }
 
+        if (count($members) + 1 > PlatformRules::int('chat.group_max_members')) {
+            return response()->json([
+                'error' => 'A group can have up to '.PlatformRules::int('chat.group_max_members').' people.',
+            ], 422);
+        }
+
         $conversation = $this->dm->createGroup($me, $data['title'], $members);
         if ($conversation === null) {
             return response()->json([
@@ -485,6 +504,264 @@ final class DirectMessageController extends Controller
     }
 
     /**
+     * POST /api/dm/{id}/photo — a photo, with an optional caption and reply.
+     *
+     * Multipart (`image`, `body?`, `reply_to_id?`). The app shrinks photos before sending, so
+     * the /control size cap is a guard, not the usual case. Stored under an unguessable name:
+     * the file is served from the public disk, so the name is what keeps it private.
+     */
+    public function photo(Request $request, int $id): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+        if (! PlatformRules::bool('chat.photos')) {
+            return response()->json(['error' => 'Photos in chat are switched off right now.'], 403);
+        }
+
+        $maxKb = PlatformRules::int('chat.photo_max_mb') * 1024;
+        $data = $request->validate([
+            'image' => ['required', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:'.$maxKb],
+            'body' => ['nullable', 'string', 'max:2000'],
+            'reply_to_id' => ['nullable', 'integer'],
+        ]);
+
+        if (! $conversation->is_group) {
+            $other = $conversation->counterpart($me);
+            if ($other !== null && ! $this->dm->canMessage($me, $other)) {
+                return response()->json(['error' => 'You can no longer message this player.'], 403);
+            }
+        }
+
+        $file = $request->file('image');
+        $size = @getimagesize($file->getRealPath()) ?: [null, null];
+        $path = $file->storeAs(
+            'chat-photos/'.$conversation->id,
+            Str::random(40).'.'.strtolower($file->guessExtension() ?: 'jpg'),
+            'public',
+        );
+        if ($path === false) {
+            return response()->json(['error' => 'Could not save the photo.'], 500);
+        }
+
+        $message = $this->dm->sendAndBroadcast(
+            $conversation,
+            $me,
+            trim((string) ($data['body'] ?? '')),
+            isset($data['reply_to_id']) ? (int) $data['reply_to_id'] : null,
+            false,
+            null,
+            null,
+            [
+                'path' => $path,
+                'width' => $size[0] ? min((int) $size[0], 65535) : null,
+                'height' => $size[1] ? min((int) $size[1], 65535) : null,
+            ],
+        );
+
+        return response()->json([
+            'id' => (int) $message->id,
+            'body' => $message->body,
+            'sender_id' => (int) $message->sender_id,
+            'mine' => true,
+            'sent_at' => $message->created_at?->toIso8601String(),
+            'image' => \App\Support\MediaUrl::resolve(Storage::disk('public')->url($path)),
+            'image_width' => $message->image_width !== null ? (int) $message->image_width : null,
+            'image_height' => $message->image_height !== null ? (int) $message->image_height : null,
+        ], 201);
+    }
+
+    /**
+     * POST /api/dm/{id}/mute — `{ hours: 8 | 168 | -1 }` mutes (-1 = until turned back on),
+     * `{ hours: 0 }` unmutes. Per viewer: the other side is never told.
+     */
+    public function mute(Request $request, int $id): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+
+        $data = $request->validate(['hours' => ['required', 'integer', 'min:-1', 'max:8760']]);
+        $hours = (int) $data['hours'];
+        $until = match (true) {
+            $hours === 0 => null,
+            $hours < 0 => now()->addYears(50),
+            default => now()->addHours($hours),
+        };
+        $this->dm->setMute($conversation, $me, $until);
+
+        return response()->json([
+            'muted' => $until !== null,
+            'muted_until' => $until !== null && $hours > 0 ? $until->toIso8601String() : null,
+        ]);
+    }
+
+    /**
+     * GET /api/dm/{id}/info — what the thread's info screen shows: the members (and who
+     * administers a group), the viewer's mute, and what the viewer may change.
+     */
+    public function info(Request $request, int $id): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+
+        $adminId = $conversation->is_group ? $this->dm->adminId($conversation) : null;
+        $mutedUntil = $this->dm->mutedUntil($conversation, $me);
+        // Admin first, then you, then everyone else by name.
+        $members = $conversation->participants
+            ->sortBy(fn (User $u) => sprintf(
+                '%d%d%s',
+                (int) $u->id === $adminId ? 0 : 1,
+                (int) $u->id === (int) $me->id ? 0 : 1,
+                mb_strtolower((string) $u->name),
+            ))
+            ->values();
+
+        return response()->json([
+            'id' => (int) $conversation->id,
+            'is_group' => (bool) $conversation->is_group,
+            'title' => $conversation->is_group ? $conversation->title : $conversation->counterpart($me)?->name,
+            'avatar' => $conversation->is_group && $conversation->avatar !== null
+                ? \App\Support\MediaUrl::resolve(Storage::disk('public')->url($conversation->avatar))
+                : null,
+            'muted' => $mutedUntil !== null,
+            // Null for "until I turn it back on" (stored decades out) — the app just says "Muted".
+            'muted_until' => $mutedUntil !== null && $mutedUntil->lessThan(now()->addYear())
+                ? $mutedUntil->toIso8601String()
+                : null,
+            'is_admin' => $adminId !== null && $adminId === (int) $me->id,
+            'max_members' => PlatformRules::int('chat.group_max_members'),
+            'photos' => PlatformRules::bool('chat.photos'),
+            'members' => $members->map(fn (User $u) => [
+                'player_id' => $u->player_id,
+                'name' => $u->name,
+                'username' => $u->username,
+                'avatar' => $u->avatar,
+                'is_admin' => (int) $u->id === $adminId,
+                'is_me' => (int) $u->id === (int) $me->id,
+            ])->values(),
+        ]);
+    }
+
+    /** POST /api/dm/{id}/rename — `{ title }`. Any member of a group may rename it. */
+    public function rename(Request $request, int $id): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+        if (! $conversation->is_group) {
+            return response()->json(['error' => 'This is not a group.'], 422);
+        }
+
+        $data = $request->validate(['title' => ['required', 'string', 'max:80']]);
+        if (trim($data['title']) === '') {
+            return response()->json(['error' => 'Give the group a name.'], 422);
+        }
+        $this->dm->renameGroup($conversation, $me, $data['title']);
+
+        return response()->json(['title' => $conversation->fresh()?->title]);
+    }
+
+    /**
+     * POST /api/dm/{id}/members — `{ members: [player ids] }`. Any member may add people who
+     * mutually follow THEM; 403 when one doesn't, 422 past the /control size cap.
+     */
+    public function addMembers(Request $request, int $id): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+        if (! $conversation->is_group) {
+            return response()->json(['error' => 'This is not a group.'], 422);
+        }
+
+        $data = $request->validate([
+            'members' => ['required', 'array', 'min:1', 'max:50'],
+            'members.*' => ['string'],
+        ]);
+        $members = User::query()->whereIn('player_id', $data['members'])->where('is_guest', false)->get()->all();
+        if ($members === []) {
+            return response()->json(['error' => 'None of those players could be found.'], 422);
+        }
+
+        $currentCount = $conversation->participants->count();
+        $added = $this->dm->addMembers($conversation, $me, $members);
+        if ($added === null) {
+            $cap = PlatformRules::int('chat.group_max_members');
+
+            return $currentCount + count($members) > $cap
+                ? response()->json(['error' => "A group can have up to {$cap} people."], 422)
+                : response()->json(['error' => 'You can only add players who follow you back.'], 403);
+        }
+
+        return response()->json(['added' => count($added)]);
+    }
+
+    /** DELETE /api/dm/{id}/members/{playerId} — remove someone. Group admin only. */
+    public function removeMember(Request $request, int $id, string $playerId): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+        if (! $conversation->is_group) {
+            return response()->json(['error' => 'This is not a group.'], 422);
+        }
+        if (! $this->dm->isAdmin($conversation, $me)) {
+            return response()->json(['error' => 'Only the group admin can remove people.'], 403);
+        }
+
+        $member = $conversation->participants->firstWhere('player_id', $playerId);
+        if (! $member instanceof User) {
+            return response()->json(['error' => 'They are not in this group.'], 404);
+        }
+        if ((int) $member->id === (int) $me->id) {
+            return response()->json(['error' => 'Use Leave group to leave.'], 422);
+        }
+
+        $this->dm->removeMember($conversation, $me, $member);
+
+        return response()->json(['removed' => true]);
+    }
+
+    /** POST /api/dm/{id}/avatar — multipart `image`. Any member may change a group's photo. */
+    public function avatar(Request $request, int $id): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+        if (! $conversation->is_group) {
+            return response()->json(['error' => 'This is not a group.'], 422);
+        }
+
+        $request->validate([
+            'image' => ['required', 'file', 'image', 'mimes:jpg,jpeg,png,webp', 'max:'.(PlatformRules::int('chat.photo_max_mb') * 1024)],
+        ]);
+        $file = $request->file('image');
+        $path = $file->storeAs('chat-groups', Str::random(40).'.'.strtolower($file->guessExtension() ?: 'jpg'), 'public');
+        if ($path === false) {
+            return response()->json(['error' => 'Could not save the photo.'], 500);
+        }
+        $this->dm->setGroupPhoto($conversation, $me, $path);
+
+        return response()->json(['avatar' => \App\Support\MediaUrl::resolve(Storage::disk('public')->url($path))]);
+    }
+
+    /**
      * POST /api/dm/{id}/typing — "I'm typing in this thread." No body: nothing typed is sent.
      * 202 whether it was broadcast or throttled; the client just keeps typing.
      */
@@ -579,6 +856,8 @@ final class DirectMessageController extends Controller
             'last_message' => $c->last_message_preview,
             'last_message_at' => $c->last_message_at?->toIso8601String(),
             'unread_count' => (int) ($mine?->pivot?->unread_count ?? 0),
+            // Muted by THIS viewer right now — the row shows a bell-off and the phone stays quiet.
+            'muted' => $this->dm->mutedUntil($c, $me) !== null,
         ];
 
         if ($c->is_group) {
@@ -590,7 +869,9 @@ final class DirectMessageController extends Controller
                 'player_id' => null,
                 'name' => $c->title,
                 'username' => null,
-                'avatar' => null,
+                'avatar' => $c->avatar !== null
+                    ? \App\Support\MediaUrl::resolve(Storage::disk('public')->url($c->avatar))
+                    : null,
                 'member_count' => $c->participants->count(),
                 'member_avatars' => $others->take(3)->map(fn (User $u) => $u->avatar)->values(),
                 'member_names' => $others->take(3)->map(fn (User $u) => $u->name)->values(),

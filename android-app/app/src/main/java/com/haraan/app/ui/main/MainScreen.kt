@@ -579,6 +579,12 @@ internal fun MainAppContainer(
       com.haraan.app.push.DeepLinkTarget.Events -> { selectedTab = 0; activeSubTab = "Events" }
       com.haraan.app.push.DeepLinkTarget.GameHub -> { selectedTab = 0; activeSubTab = "GameHub" }
       is com.haraan.app.push.DeepLinkTarget.MatchRewards -> com.haraan.app.data.rewards.RewardsNav.open(target.matchId)
+      is com.haraan.app.push.DeepLinkTarget.Chat -> {
+        // A tapped message notification: into the ActionBoard, which opens the thread itself.
+        selectedTab = 0
+        showActionBoardDetail = true
+        com.haraan.app.ui.matches.ActionBoardNav.requestChat(target.conversationId)
+      }
       com.haraan.app.push.DeepLinkTarget.CreateMatch -> {
         // "Play again": open the ActionBoard; it opens its create wizard (ranked-access gate included).
         selectedTab = 0
@@ -4553,7 +4559,7 @@ private fun DistrictActionBoardScreen(
 private val ChatThreadSaver = androidx.compose.runtime.saveable.listSaver<com.haraan.app.data.ChatThread?, Any>(
   save = { t ->
     if (t == null) emptyList()
-    else listOf(t.id, t.playerId.orEmpty(), t.name, t.avatar.orEmpty(), t.isGroup, t.memberCount)
+    else listOf(t.id, t.playerId.orEmpty(), t.name, t.avatar.orEmpty(), t.isGroup, t.memberCount, t.muted)
   },
   restore = { v ->
     if (v.size < 6) null
@@ -4568,6 +4574,7 @@ private val ChatThreadSaver = androidx.compose.runtime.saveable.listSaver<com.ha
       unreadCount = 0,
       isGroup = v[4] as Boolean,
       memberCount = v[5] as Int,
+      muted = (v.getOrNull(6) as? Boolean) ?: false,
     )
   },
 )
@@ -4624,6 +4631,8 @@ private fun CrexMatchesScreen(
   // A player card tapped inside a conversation opens their profile OVER the thread, so Back
   // returns to the chat (the search profile sits underneath the thread and would be hidden).
   var chatProfileId by androidx.compose.runtime.saveable.rememberSaveable(key = "ab_chat_profile") { mutableStateOf<String?>(null) }
+  // The group whose info screen is open over its thread (0 = none).
+  var groupInfoFor by androidx.compose.runtime.saveable.rememberSaveable(key = "ab_group_info") { mutableStateOf(0L) }
   val dmRepository = remember { com.haraan.app.data.DirectMessageRepository() }
   var showCreateWizard by remember { mutableStateOf(false) }
   // Asked for from outside (post-match "Play again"): open the wizard through the same gate.
@@ -5017,6 +5026,22 @@ private fun CrexMatchesScreen(
       com.haraan.app.ui.matches.ActionBoardNav.consumeCreate()
       requireRankedAccess { showCreateWizard = true }
     }
+  }
+
+  // A tapped chat notification: land on the Chat tab with that conversation open on top.
+  // The row comes from the inbox so the header has the right name, photo and mute state;
+  // a thread no longer in the inbox (left, removed) just shows the list.
+  val chatRequested by com.haraan.app.ui.matches.ActionBoardNav.chatRequested.collectAsState()
+  LaunchedEffect(chatRequested) {
+    val wanted = chatRequested
+    if (wanted <= 0L) return@LaunchedEffect
+    com.haraan.app.ui.matches.ActionBoardNav.consumeChat()
+    val token = com.haraan.app.data.TokenStore.getSignedInToken(context) ?: return@LaunchedEffect
+    showProfile = false
+    showHomeFeed = false
+    showChatList = true
+    val inbox = dmRepository.threads(token) as? com.haraan.app.data.DirectMessageRepository.ThreadsResult.Ready
+    inbox?.threads?.firstOrNull { it.id == wanted }?.let { openThread = it }
   }
 
   Box(modifier = Modifier.fillMaxSize()) {
@@ -6264,13 +6289,111 @@ private fun CrexMatchesScreen(
             ok
           }
         } else null,
+        // Photos: the /control switch rides on the inbox fetch, like share cards.
+        photosEnabled = inbox?.photos == true,
+        sendPhoto = { jpeg, caption, replyToId ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else dmRepository.sendPhoto(token, thread.id, jpeg, caption, replyToId)
+        },
+        muted = thread.muted,
+        onMute = { hours ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          val now = if (token == null) null else dmRepository.mute(token, thread.id, hours)
+          if (now != null) {
+            openThread = thread.copy(muted = now)
+            chatReload++
+          }
+          now
+        },
+        // Who you're talking to: a 1:1 opens their profile (over the thread), a group its info.
+        onOpenInfo = when {
+          thread.isGroup -> { { groupInfoFor = thread.id } }
+          thread.playerId != null -> { { chatProfileId = thread.playerId } }
+          else -> null
+        },
+        onBlock = thread.playerId?.takeIf { !thread.isGroup }?.let { pid ->
+          {
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            val ok = token != null && playerRepository.setBlocked(token, pid, true) == true
+            if (ok) chatReload++
+            ok
+          }
+        },
+        onReport = thread.playerId?.takeIf { !thread.isGroup }?.let { pid ->
+          { reason, details ->
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            token != null && playerRepository.reportPlayer(
+              token, pid, reason,
+              // Say where it happened, so a moderator knows to look at the conversation.
+              listOfNotNull("Reported from a chat.", details).joinToString("\n"),
+            )
+          }
+        },
         onClose = {
           openThread = null
+          groupInfoFor = 0L
           // Leaving a thread has almost certainly changed the list behind it — the unread
           // badge is cleared and the preview may be a message you just sent. Without this
           // the list kept showing what it loaded when the tab was first opened.
           chatReload++
         },
+        modifier = Modifier.statusBarsPadding(),
+      )
+    }
+
+    // A group's info screen, over its thread: members, add/remove, rename, photo, mute, leave.
+    if (groupInfoFor > 0L) {
+      val infoId = groupInfoFor
+      com.haraan.app.ui.social.ChatGroupInfoScreen(
+        load = {
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else dmRepository.info(token, infoId)
+        },
+        loadCandidates = {
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) emptyList() else dmRepository.eligibleMembers(token)
+        },
+        rename = { title ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) com.haraan.app.data.DirectMessageRepository.Outcome.Failed
+          else dmRepository.renameGroup(token, infoId, title)
+        },
+        addMembers = { ids ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) com.haraan.app.data.DirectMessageRepository.Outcome.Failed
+          else dmRepository.addMembers(token, infoId, ids)
+        },
+        removeMember = { pid ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) com.haraan.app.data.DirectMessageRepository.Outcome.Failed
+          else dmRepository.removeMember(token, infoId, pid)
+        },
+        setPhoto = { jpeg ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else dmRepository.setGroupPhoto(token, infoId, jpeg)
+        },
+        mute = { hours ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else dmRepository.mute(token, infoId, hours)
+        },
+        leave = {
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          token != null && dmRepository.leaveGroup(token, infoId)
+        },
+        onOpenProfile = { pid -> chatProfileId = pid },
+        // Keep the thread header in step with what the group now is.
+        onChanged = { info ->
+          openThread?.takeIf { it.id == infoId }?.let { t ->
+            openThread = t.copy(name = info.title, avatar = info.avatar, memberCount = info.members.size, muted = info.muted)
+          }
+          chatReload++
+        },
+        onLeft = {
+          groupInfoFor = 0L
+          openThread = null
+          chatReload++
+        },
+        onClose = { groupInfoFor = 0L },
         modifier = Modifier.statusBarsPadding(),
       )
     }

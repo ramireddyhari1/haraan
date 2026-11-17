@@ -1606,6 +1606,14 @@ private fun BlockConfirmDialog(name: String, onDismiss: () -> Unit, onConfirm: (
     )
 }
 
+/** The same report sheet, for the chat's ⋮ menu — one sheet, one set of reason keys. */
+@Composable
+internal fun PlayerReportSheet(
+    name: String,
+    onDismiss: () -> Unit,
+    onSubmit: (reason: String, details: String?) -> Unit,
+) = ReportSheet(name, onDismiss, onSubmit)
+
 /**
  * Report a player. A reason is required — an unlabelled report is one a moderator has
  * to guess at — and the free-text box stays optional so filing one is never a chore.
