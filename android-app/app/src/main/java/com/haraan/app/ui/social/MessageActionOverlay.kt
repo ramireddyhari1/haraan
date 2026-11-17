@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Block
 import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -71,6 +72,8 @@ fun MessageActionOverlay(
     onForward: (() -> Unit)? = null,
     onInfo: () -> Unit,
     onDismiss: () -> Unit,
+    /** Your own text, still inside the /control edit window. Null hides the row. */
+    onEdit: (() -> Unit)? = null,
 ) {
     Dialog(
         onDismissRequest = onDismiss,
@@ -202,6 +205,9 @@ fun MessageActionOverlay(
                     )
                     if (!message.deleted) {
                         OverlayAction(Icons.AutoMirrored.Filled.Reply, "Reply", onClick = onReply)
+                        if (onEdit != null) {
+                            OverlayAction(Icons.Filled.Edit, "Edit", onClick = onEdit)
+                        }
                         if (onForward != null) {
                             OverlayAction(Icons.AutoMirrored.Filled.Send, "Forward", onClick = onForward)
                         }

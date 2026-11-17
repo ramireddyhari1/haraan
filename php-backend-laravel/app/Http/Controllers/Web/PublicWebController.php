@@ -558,7 +558,17 @@ final class PublicWebController extends Controller
 
         // One catalogue, two presentations — no venue appears twice. Mirrors the app:
         // the reel is the top 5 by rating, "more" is strictly what the reel didn't show.
-        $popularVenues = $filteredVenues->sortByDesc(fn ($v) => (float) $v->rating)->take(5)->values();
+        // With the viewer's location the reel is the 5 NEAREST (rating only breaks ties) —
+        // ranking by rating put a 5.0★ ground 27 km away ahead of one 2 km away. Without a
+        // location there's no "near", so rating decides.
+        $hasDistance = $filteredVenues->contains(fn ($v) => isset($v->distance_km));
+        $popularVenues = ($hasDistance
+            ? $filteredVenues->sortBy([
+                fn ($a, $b) => ($a->distance_km ?? PHP_FLOAT_MAX) <=> ($b->distance_km ?? PHP_FLOAT_MAX),
+                fn ($a, $b) => (float) $b->rating <=> (float) $a->rating,
+            ])
+            : $filteredVenues->sortByDesc(fn ($v) => (float) $v->rating)
+        )->take(5)->values();
         $moreVenues = $filteredVenues->whereNotIn('id', $popularVenues->pluck('id'))->values();
 
         $listedVenues = $this->pulseListedVenues($city, $userLat, $userLng, $selectedSport);

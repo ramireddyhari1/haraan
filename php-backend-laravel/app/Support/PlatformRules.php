@@ -397,6 +397,9 @@ final class PlatformRules
         'chat.push_preview' => ['section' => 'chat', 'type' => self::TYPE_BOOL, 'default' => true, 'label' => 'Show the message in the notification', 'help' => 'Off: the notification says only “Sent you a message”, so nothing private shows on a lock screen.'],
         'chat.photos' => ['section' => 'chat', 'type' => self::TYPE_BOOL, 'default' => true, 'label' => 'Photos in chat', 'help' => 'The photo button in a conversation. Off: nobody can send a new photo; photos already sent still show.'],
         'chat.photo_max_mb' => ['section' => 'chat', 'type' => self::TYPE_INT, 'default' => 8, 'min' => 1, 'max' => 20, 'label' => 'Largest photo (MB)', 'help' => 'The app shrinks photos before sending, so most are well under 1 MB.'],
+        'chat.edit_window_minutes' => ['section' => 'chat', 'type' => self::TYPE_INT, 'default' => 15, 'min' => 0, 'max' => 1440, 'label' => 'Minutes to edit a sent message', 'help' => '0 turns editing off. An edited message says “edited” on it.'],
+        'chat.show_last_seen' => ['section' => 'chat', 'type' => self::TYPE_BOOL, 'default' => true, 'label' => 'Show “online” and “last seen”', 'help' => 'Under the name in a one-to-one chat. Only players who can already message each other see it.'],
+        'chat.max_pins' => ['section' => 'chat', 'type' => self::TYPE_INT, 'default' => 3, 'min' => 1, 'max' => 10, 'label' => 'Chats a player can pin', 'help' => 'Pinned chats stay at the top of their list.'],
         'chat.group_max_members' => ['section' => 'chat', 'type' => self::TYPE_INT, 'default' => 50, 'min' => 3, 'max' => 256, 'label' => 'Most people in a group', 'help' => 'Counts the person who made the group. Groups already bigger keep their members but cannot add more.'],
     ];
 

@@ -99,6 +99,9 @@
                     @if ($m['unsent'] || $m['body'] !== '' || empty($m['image']))
                         <span class="hthr__txt {{ $m['unsent'] ? 'is-unsent' : '' }}">{{ $m['unsent'] ? 'This message was unsent' : $m['body'] }}</span>
                     @endif
+                    @if (!empty($m['edited']))
+                        <time class="hthr__edited">edited</time>
+                    @endif
                     @if ($endOfRun && $sent)
                         <time datetime="{{ $sent->toIso8601String() }}">{{ $sent->format('g:i A') }}</time>
                     @endif

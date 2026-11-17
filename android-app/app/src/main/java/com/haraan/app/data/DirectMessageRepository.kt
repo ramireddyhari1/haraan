@@ -27,6 +27,19 @@ data class ChatThread(
   val memberCount: Int = 0,
   /** This viewer muted the thread: no phone notification, a bell-off on the row. */
   val muted: Boolean = false,
+  /** Pinned to the top of this viewer's list. */
+  val pinned: Boolean = false,
+  /** Moved out of the main list by this viewer; a new message brings it back. */
+  val archived: Boolean = false,
+)
+
+/** One message found by searching inside a thread. */
+data class ChatSearchHit(
+  val id: Long,
+  val body: String,
+  val sentAt: String?,
+  val mine: Boolean,
+  val senderName: String?,
 )
 
 /**
@@ -74,6 +87,8 @@ data class ChatMessage(
   val imageHeight: Int? = null,
   /** "Ravi added Kiran" — a group event drawn centred, not as anyone's bubble. */
   val system: Boolean = false,
+  /** Corrected by its author after sending. */
+  val edited: Boolean = false,
 )
 
 /** One person in a conversation, as the info screen lists them. */
@@ -162,6 +177,8 @@ class DirectMessageRepository(
       val shareCards: Boolean = false,
       /** Whether the photo button shows in a conversation — a /control switch. */
       val photos: Boolean = false,
+      /** How many chats a player may pin — a /control setting. */
+      val maxPins: Int = 3,
     ) : ThreadsResult
     data object Failed : ThreadsResult
   }
@@ -213,6 +230,7 @@ class DirectMessageRepository(
         inboxChannel = json.optString("inbox_channel", null).cleanNull(),
         shareCards = json.optBoolean("share_cards", false),
         photos = json.optBoolean("photos", false),
+        maxPins = json.optInt("max_pins", 3),
       )
     } catch (_: Exception) {
       ThreadsResult.Failed
@@ -268,6 +286,11 @@ class DirectMessageRepository(
     val viewerId: Long = 0L,
     /** Whether "typing…" is switched on in /control. */
     val typingIndicator: Boolean = false,
+    /** 1:1 only, when /control allows it: the other person's last activity (ISO) and "online". */
+    val theirLastSeenAt: String? = null,
+    val theirOnline: Boolean = false,
+    /** Minutes after sending that a message may be edited; 0 = editing off. */
+    val editWindowMinutes: Int = 0,
   )
 
   /** Kept for callers that only want the lines. */
@@ -340,6 +363,7 @@ class DirectMessageRepository(
               imageWidth = o.optInt("image_width", 0).takeIf { it > 0 },
               imageHeight = o.optInt("image_height", 0).takeIf { it > 0 },
               system = o.optString("kind", "") == "system",
+              edited = o.optBoolean("edited", false),
             )
           )
         }
@@ -351,6 +375,9 @@ class DirectMessageRepository(
         hasMore = root.optBoolean("has_more", false),
         viewerId = root.optLong("viewer_id", 0L),
         typingIndicator = root.optBoolean("typing_indicator", false),
+        theirLastSeenAt = root.optString("their_last_seen_at", null).cleanNull(),
+        theirOnline = root.optBoolean("their_online", false),
+        editWindowMinutes = root.optInt("edit_window_minutes", 0),
       )
     } catch (_: Exception) {
       ThreadPage(emptyList(), ok = false)
@@ -606,7 +633,66 @@ class DirectMessageRepository(
       },
       memberCount = o.optInt("member_count", 0),
       muted = o.optBoolean("muted", false),
+      pinned = o.optBoolean("pinned", false),
+      archived = o.optBoolean("archived", false),
     )
+  }
+
+  // ── Tier 2: list housekeeping, edits, search ───────────────────────────────────────
+
+  private suspend fun postOutcome(path: String, token: String, body: JSONObject): Outcome = withContext(Dispatchers.IO) {
+    val c = conn(path, "POST", token)
+    try {
+      c.outputStream.use { it.write(body.toString().toByteArray()) }
+      outcomeOf(c)
+    } catch (_: Exception) {
+      Outcome.Failed
+    } finally {
+      c.disconnect()
+    }
+  }
+
+  /** Pin or unpin. Refused (with the server's sentence) past the /control pin cap. */
+  suspend fun pin(token: String, conversationId: Long, pinned: Boolean): Outcome =
+    postOutcome("/api/dm/$conversationId/pin", token, JSONObject().put("pinned", pinned))
+
+  suspend fun archive(token: String, conversationId: Long, archived: Boolean): Outcome =
+    postOutcome("/api/dm/$conversationId/archive", token, JSONObject().put("archived", archived))
+
+  /** "Delete chat" for this viewer only. */
+  suspend fun clear(token: String, conversationId: Long): Outcome =
+    postOutcome("/api/dm/$conversationId/clear", token, JSONObject())
+
+  /** Correct one of your own messages. Refused outside the edit window. */
+  suspend fun edit(token: String, conversationId: Long, messageId: Long, body: String): Outcome =
+    postOutcome("/api/dm/$conversationId/messages/$messageId/edit", token, JSONObject().put("body", body.trim()))
+
+  /** Messages in this thread containing [q], newest first. Empty on failure or a short query. */
+  suspend fun search(token: String, conversationId: Long, q: String): List<ChatSearchHit> = withContext(Dispatchers.IO) {
+    val c = conn("/api/dm/$conversationId/search?q=" + URLEncoder.encode(q.trim(), "UTF-8"), "GET", token)
+    try {
+      if (c.responseCode !in 200..299) return@withContext emptyList()
+      val arr = JSONObject(BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() })
+        .optJSONArray("results") ?: return@withContext emptyList()
+      buildList {
+        for (i in 0 until arr.length()) {
+          val o = arr.optJSONObject(i) ?: continue
+          add(
+            ChatSearchHit(
+              id = o.optLong("id"),
+              body = o.optString("body", ""),
+              sentAt = o.optString("sent_at", null).cleanNull(),
+              mine = o.optBoolean("mine", false),
+              senderName = o.optString("sender_name", null).cleanNull(),
+            )
+          )
+        }
+      }
+    } catch (_: Exception) {
+      emptyList()
+    } finally {
+      c.disconnect()
+    }
   }
 
   // ── Photos, mute, info and group management ─────────────────────────────────────────

@@ -436,6 +436,12 @@ Route::middleware('auth.jwt')->prefix('dm')->group(function (): void {
     Route::post('/{id}/members', [DirectMessageController::class, 'addMembers'])->whereNumber('id');
     Route::delete('/{id}/members/{playerId}', [DirectMessageController::class, 'removeMember'])->whereNumber('id');
     Route::post('/{id}/avatar', [DirectMessageController::class, 'avatar'])->whereNumber('id')->middleware('throttle:10,1');
+    // Tier 2: this person's list (pin / archive / delete chat), edits and in-thread search.
+    Route::post('/{id}/pin', [DirectMessageController::class, 'pin'])->whereNumber('id');
+    Route::post('/{id}/archive', [DirectMessageController::class, 'archive'])->whereNumber('id');
+    Route::post('/{id}/clear', [DirectMessageController::class, 'clear'])->whereNumber('id');
+    Route::post('/{id}/messages/{message}/edit', [DirectMessageController::class, 'edit'])->whereNumber('id')->whereNumber('message');
+    Route::get('/{id}/search', [DirectMessageController::class, 'search'])->whereNumber('id')->middleware('throttle:60,1');
 });
 
 // Public (read-only): view any player's ActionBoard profile by Player ID (HRN…).

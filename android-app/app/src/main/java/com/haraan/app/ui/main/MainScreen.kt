@@ -2433,8 +2433,13 @@ private fun GameHubTabScreen(
     // count, so a new town's only ground isn't hidden), and "More venues" is strictly the rest,
     // so nothing repeats. distinctBy guards the lazy keys — a duplicated API id must not crash.
     val uniqueVenues = filteredVenues.distinctBy { it.id }
-    val popularVenues = uniqueVenues
-      .sortedWith(compareByDescending<VenueItem> { it.bookable }.thenByDescending { it.rating.toFloatOrNull() ?: 0f })
+    // With a GPS fix, filteredVenues is already nearest-first — keep that order (stable sort,
+    // bookable first) so a 5.0★ ground 27 km away never outranks one 2 km away. Without a
+    // fix there's no "near", so rating decides.
+    val popularVenues = (if (userLat != null && userLng != null)
+        uniqueVenues.sortedByDescending { it.bookable }
+      else uniqueVenues
+        .sortedWith(compareByDescending<VenueItem> { it.bookable }.thenByDescending { it.rating.toFloatOrNull() ?: 0f }))
       .take(5)
     val popularIds = popularVenues.map { it.id }.toSet()
     val allVenues = uniqueVenues.filterNot { it.id in popularIds }
@@ -5484,6 +5489,27 @@ private fun CrexMatchesScreen(
           onClose = { showChatList = false },
           showBack = false,
           reloadKey = chatReload,
+          // Long-press on a row: pin, mute, archive, delete chat — all per viewer.
+          onAction = { t, action ->
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            if (token == null) {
+              "Sign in again to do that."
+            } else {
+              val outcome = when (action) {
+                is com.haraan.app.ui.social.ChatListAction.Pin -> dmRepository.pin(token, t.id, action.pinned)
+                is com.haraan.app.ui.social.ChatListAction.Archive -> dmRepository.archive(token, t.id, action.archived)
+                com.haraan.app.ui.social.ChatListAction.Clear -> dmRepository.clear(token, t.id)
+                is com.haraan.app.ui.social.ChatListAction.Mute ->
+                  if (dmRepository.mute(token, t.id, action.hours) != null) com.haraan.app.data.DirectMessageRepository.Outcome.Ok
+                  else com.haraan.app.data.DirectMessageRepository.Outcome.Failed
+              }
+              when (outcome) {
+                com.haraan.app.data.DirectMessageRepository.Outcome.Ok -> null
+                is com.haraan.app.data.DirectMessageRepository.Outcome.Refused -> outcome.message
+                com.haraan.app.data.DirectMessageRepository.Outcome.Failed -> "Couldn't reach Haraan. Try again."
+              }
+            }
+          },
           // A pull on the inbox also re-reads join requests (the row at its top).
           onPullRefresh = {
             val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
@@ -6180,6 +6206,10 @@ private fun CrexMatchesScreen(
       // Who is reading and whether "typing…" is on — both arrive with the first page.
       var threadViewerId by remember(thread.id) { mutableStateOf(0L) }
       var threadTyping by remember(thread.id) { mutableStateOf(false) }
+      // "online / last seen" and how long edits are allowed — both ride on the page fetches.
+      var threadLastSeen by remember(thread.id) { mutableStateOf<String?>(null) }
+      var threadOnline by remember(thread.id) { mutableStateOf(false) }
+      var threadEditWindow by remember(thread.id) { mutableStateOf(0) }
       // Where a message can be forwarded: the viewer own threads, fetched once when this
       // one opens. Empty on failure, which simply hides the Forward action rather than
       // offering a picker that cannot deliver.
@@ -6212,6 +6242,10 @@ private fun CrexMatchesScreen(
             val page = dmRepository.page(token, thread.id, sinceId)
             threadDeliveredAt = page.theirDeliveredAt
             threadReadAt = page.theirReadAt
+            if (page.ok) {
+              threadLastSeen = page.theirLastSeenAt
+              threadOnline = page.theirOnline
+            }
             page.messages
           }
         },
@@ -6228,6 +6262,9 @@ private fun CrexMatchesScreen(
               threadReadAt = page.theirReadAt
               threadViewerId = page.viewerId
               threadTyping = page.typingIndicator
+              threadLastSeen = page.theirLastSeenAt
+              threadOnline = page.theirOnline
+              threadEditWindow = page.editWindowMinutes
             }
             page
           }
@@ -6289,6 +6326,18 @@ private fun CrexMatchesScreen(
             ok
           }
         } else null,
+        onEdit = { messageId, body ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) com.haraan.app.data.DirectMessageRepository.Outcome.Failed
+          else dmRepository.edit(token, thread.id, messageId, body)
+        },
+        editWindowMinutes = threadEditWindow,
+        searchMessages = { q ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) emptyList() else dmRepository.search(token, thread.id, q)
+        },
+        theirLastSeenAt = if (thread.isGroup) null else threadLastSeen,
+        theirOnline = !thread.isGroup && threadOnline,
         // Photos: the /control switch rides on the inbox fetch, like share cards.
         photosEnabled = inbox?.photos == true,
         sendPhoto = { jpeg, caption, replyToId ->

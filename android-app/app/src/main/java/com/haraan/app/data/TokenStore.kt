@@ -65,6 +65,8 @@ object TokenStore {
   }
 
   fun clearToken(context: Context) {
+    // Unsent chat drafts belong to the account that wrote them.
+    runCatching { ChatDrafts.clearAll(context) }
     try {
       val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
       val prefs = EncryptedSharedPreferences.create(

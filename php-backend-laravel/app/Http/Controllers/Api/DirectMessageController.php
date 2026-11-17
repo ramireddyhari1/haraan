@@ -41,6 +41,41 @@ final class DirectMessageController extends Controller
             ->limit(100)
             ->get();
 
+        // This viewer's own row per thread (pin, archive, mute, "deleted up to"), in one read.
+        $rows = DB::table('conversation_participants')
+            ->where('user_id', $me->id)
+            ->whereIn('conversation_id', $conversations->pluck('id'))
+            ->get()
+            ->keyBy('conversation_id');
+        $latestIds = \App\Models\DirectMessage::query()
+            ->whereIn('conversation_id', $conversations->pluck('id'))
+            ->groupBy('conversation_id')
+            ->selectRaw('conversation_id, max(id) as max_id')
+            ->pluck('max_id', 'conversation_id');
+
+        $conversations = $conversations
+            // A chat this viewer deleted stays gone until someone writes again.
+            ->filter(function (Conversation $c) use ($rows, $latestIds): bool {
+                $row = $rows->get($c->id);
+
+                return $row === null || $row->cleared_upto_id === null
+                    || (int) ($latestIds[$c->id] ?? 0) > (int) $row->cleared_upto_id;
+            })
+            // Pinned first (most recently pinned on top), then by latest activity.
+            ->sort(function (Conversation $a, Conversation $b) use ($rows): int {
+                $pa = $rows->get($a->id)?->pinned_at;
+                $pb = $rows->get($b->id)?->pinned_at;
+                if (($pa === null) !== ($pb === null)) {
+                    return $pa === null ? 1 : -1;
+                }
+                if ($pa !== null && $pa !== $pb) {
+                    return strcmp((string) $pb, (string) $pa);
+                }
+
+                return ($b->last_message_at?->getTimestamp() ?? 0) <=> ($a->last_message_at?->getTimestamp() ?? 0);
+            })
+            ->values();
+
         // Their app now holds every message in these threads — that is what the second
         // tick means. Stamped here, NOT on opening a thread (that is `read`).
         $this->dm->markDelivered($me);
@@ -54,7 +89,8 @@ final class DirectMessageController extends Controller
             'share_cards' => PlatformRules::bool('chat.share_cards'),
             // Whether the photo button shows in a conversation.
             'photos' => PlatformRules::bool('chat.photos'),
-            'results' => $conversations->map(fn (Conversation $c) => $this->card($c, $me))->values(),
+            'max_pins' => PlatformRules::int('chat.max_pins'),
+            'results' => $conversations->map(fn (Conversation $c) => $this->card($c, $me, $rows->get($c->id)))->values(),
         ]);
     }
 
@@ -95,6 +131,8 @@ final class DirectMessageController extends Controller
 
         // Opening the thread IS reading it.
         $this->dm->markRead($conversation, $me);
+        // "Delete chat" hid everything up to here, for this viewer only.
+        $clearedUpto = (int) ($this->dm->participantRow($conversation, $me)?->cleared_upto_id ?? 0);
 
         // ?since_id= returns only what has arrived since the client last looked.
         //
@@ -110,7 +148,7 @@ final class DirectMessageController extends Controller
         $before = is_numeric($before) ? (int) $before : null;
 
         if ($since !== null && $since > 0) {
-            $messages = $conversation->messages()->where('id', '>', $since)->orderBy('id')->limit(300)->get();
+            $messages = $conversation->messages()->where('id', '>', max($since, $clearedUpto))->orderBy('id')->limit(300)->get();
             $hasMore = null;
         } else {
             // The NEWEST page, read newest-first and flipped back to reading order.
@@ -121,7 +159,7 @@ final class DirectMessageController extends Controller
             $limit = $request->has('limit')
                 ? max(1, min((int) $request->query('limit'), PlatformRules::int('chat.page_size')))
                 : 300;
-            $query = $conversation->messages()->orderByDesc('id');
+            $query = $conversation->messages()->where('id', '>', $clearedUpto)->orderByDesc('id');
             if ($before !== null && $before > 0) {
                 $query->where('id', '<', $before);
             }
@@ -182,8 +220,19 @@ final class DirectMessageController extends Controller
                 ->first();
         }
 
+        // "online" / "last seen" for a 1:1, from the heartbeat every signed-in request stamps
+        // (throttled to one write per 5 minutes — so "online" means seen in the last 6).
+        $lastSeen = null;
+        if (! $conversation->is_group && PlatformRules::bool('chat.show_last_seen')) {
+            $lastSeen = $conversation->counterpart($me)?->last_seen_at;
+        }
+
         return response()->json([
             'is_group' => (bool) $conversation->is_group,
+            'their_last_seen_at' => $lastSeen?->toIso8601String(),
+            'their_online' => $lastSeen !== null && $lastSeen->gt(now()->subMinutes(6)),
+            // How long after sending a message its author may still edit it (0 = never).
+            'edit_window_minutes' => PlatformRules::int('chat.edit_window_minutes'),
             // Who is reading, so the client can ignore the echo of its own typing signal
             // (which arrives on the same public thread channel as everyone else's).
             'viewer_id' => (int) $me->id,
@@ -222,6 +271,8 @@ final class DirectMessageController extends Controller
                     // An unsent message keeps its place in the thread but carries no words.
                     'deleted' => $m->deleted_at !== null,
                     'forwarded' => (bool) $m->is_forwarded,
+                    // Corrected by its author after sending — the bubble says so.
+                    'edited' => $m->edited_at !== null && $m->deleted_at === null,
                     // 'system' for "Ravi added Kiran"; null for anything a person wrote.
                     'kind' => $m->kind,
                     // A photo, absolute, with its size so the bubble can hold the shape
@@ -501,6 +552,113 @@ final class DirectMessageController extends Controller
             'sent_at' => $message->created_at?->toIso8601String(),
             'share' => $shareType !== null ? ChatShareCards::resolve($shareType, (string) $shareRef, $me) : null,
         ], 201);
+    }
+
+    /** POST /api/dm/{id}/pin — `{ pinned: bool }`. 422 past the /control pin cap. */
+    public function pin(Request $request, int $id): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+        $data = $request->validate(['pinned' => ['required', 'boolean']]);
+        if (! $this->dm->setPinned($conversation, $me, (bool) $data['pinned'])) {
+            return response()->json([
+                'error' => 'You can pin up to '.PlatformRules::int('chat.max_pins').' chats. Unpin one first.',
+            ], 422);
+        }
+
+        return response()->json(['pinned' => (bool) $data['pinned']]);
+    }
+
+    /** POST /api/dm/{id}/archive — `{ archived: bool }`. A new message brings it back. */
+    public function archive(Request $request, int $id): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+        $data = $request->validate(['archived' => ['required', 'boolean']]);
+        $this->dm->setArchived($conversation, $me, (bool) $data['archived']);
+
+        return response()->json(['archived' => (bool) $data['archived']]);
+    }
+
+    /** POST /api/dm/{id}/clear — "Delete chat", for this viewer only. */
+    public function clear(Request $request, int $id): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+        $this->dm->clearFor($conversation, $me);
+
+        return response()->json(['cleared' => true]);
+    }
+
+    /** POST /api/dm/{id}/messages/{message}/edit — `{ body }`. Sender only, inside the window. */
+    public function edit(Request $request, int $id, int $message): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+        $data = $request->validate(['body' => ['required', 'string', 'max:2000']]);
+
+        if (! $this->dm->edit($conversation, $me, $message, (string) $data['body'])) {
+            $window = PlatformRules::int('chat.edit_window_minutes');
+
+            return response()->json([
+                'error' => $window > 0
+                    ? "Messages can only be edited for {$window} minutes after sending."
+                    : 'Editing messages is switched off.',
+            ], 422);
+        }
+
+        return response()->json(['ok' => true, 'body' => trim((string) $data['body'])]);
+    }
+
+    /**
+     * GET /api/dm/{id}/search?q= — this thread's messages containing q, newest first. Only
+     * what this viewer can see: not unsent, not before their "Delete chat", not system lines.
+     */
+    public function search(Request $request, int $id): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+        $q = trim(mb_substr((string) $request->query('q', ''), 0, 60));
+        if (mb_strlen($q) < 2) {
+            return response()->json(['results' => []]);
+        }
+        $clearedUpto = (int) ($this->dm->participantRow($conversation, $me)?->cleared_upto_id ?? 0);
+        $like = '%'.str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $q).'%';
+
+        $hits = $conversation->messages()
+            ->where('id', '>', $clearedUpto)
+            ->whereNull('deleted_at')
+            ->whereNull('kind')
+            ->where('body', 'like', $like)
+            ->orderByDesc('id')
+            ->limit(30)
+            ->get();
+        $senders = User::query()->whereIn('id', $hits->pluck('sender_id')->unique())->get()->keyBy('id');
+
+        return response()->json([
+            'results' => $hits->map(fn ($m) => [
+                'id' => (int) $m->id,
+                'body' => (string) $m->body,
+                'sent_at' => $m->created_at?->toIso8601String(),
+                'mine' => (int) $m->sender_id === (int) $me->id,
+                'sender_name' => $senders->get($m->sender_id)?->name,
+            ])->values(),
+        ]);
     }
 
     /**
@@ -846,9 +1004,11 @@ final class DirectMessageController extends Controller
     }
 
     /** @return array<string, mixed> */
-    private function card(Conversation $c, User $me): array
+    private function card(Conversation $c, User $me, ?object $row = null): array
     {
         $mine = $c->participants->firstWhere('id', $me->id);
+        $row ??= $this->dm->participantRow($c, $me);
+        $mutedUntil = $row?->muted_until !== null ? \Illuminate\Support\Carbon::parse($row->muted_until) : null;
 
         $base = [
             'id' => (int) $c->id,
@@ -857,7 +1017,10 @@ final class DirectMessageController extends Controller
             'last_message_at' => $c->last_message_at?->toIso8601String(),
             'unread_count' => (int) ($mine?->pivot?->unread_count ?? 0),
             // Muted by THIS viewer right now — the row shows a bell-off and the phone stays quiet.
-            'muted' => $this->dm->mutedUntil($c, $me) !== null,
+            'muted' => $mutedUntil !== null && $mutedUntil->isFuture(),
+            // This viewer's own list housekeeping; nobody else is told.
+            'pinned' => $row?->pinned_at !== null,
+            'archived' => $row?->archived_at !== null,
         ];
 
         if ($c->is_group) {

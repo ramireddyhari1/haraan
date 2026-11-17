@@ -217,6 +217,17 @@ final class DirectMessageService
                 ->where('user_id', $sender->id)
                 ->update(['unread_count' => 0, 'last_read_at' => now()]);
 
+            // A new message brings an archived thread back to the inbox — unless the reader
+            // muted it, which is exactly the "keep this out of my way" they asked for.
+            if ($kind === null) {
+                DB::table('conversation_participants')
+                    ->where('conversation_id', $conversation->id)
+                    ->where('user_id', '!=', $sender->id)
+                    ->whereNotNull('archived_at')
+                    ->where(fn ($q) => $q->whereNull('muted_until')->orWhere('muted_until', '<', now()))
+                    ->update(['archived_at' => null]);
+            }
+
             return $message;
         });
     }
@@ -290,6 +301,114 @@ final class DirectMessageService
         $until = \Illuminate\Support\Carbon::parse($raw);
 
         return $until->isFuture() ? $until : null;
+    }
+
+    // ── This person's list: pin, archive, delete chat ───────────────────────────────
+
+    /** This viewer's own row in a conversation (pin, archive, mute, clear line). */
+    public function participantRow(Conversation $conversation, User $user): ?object
+    {
+        return DB::table('conversation_participants')
+            ->where('conversation_id', $conversation->id)
+            ->where('user_id', $user->id)
+            ->first();
+    }
+
+    /** Pin or unpin. False when pinning would pass the /control cap. */
+    public function setPinned(Conversation $conversation, User $user, bool $pinned): bool
+    {
+        if ($pinned) {
+            $already = DB::table('conversation_participants')
+                ->where('user_id', $user->id)
+                ->whereNotNull('pinned_at')
+                ->where('conversation_id', '!=', $conversation->id)
+                ->count();
+            if ($already >= \App\Support\PlatformRules::int('chat.max_pins')) {
+                return false;
+            }
+        }
+
+        DB::table('conversation_participants')
+            ->where('conversation_id', $conversation->id)
+            ->where('user_id', $user->id)
+            ->update(['pinned_at' => $pinned ? now() : null]);
+
+        return true;
+    }
+
+    public function setArchived(Conversation $conversation, User $user, bool $archived): void
+    {
+        DB::table('conversation_participants')
+            ->where('conversation_id', $conversation->id)
+            ->where('user_id', $user->id)
+            // An archived thread isn't pinned — the two would fight over where it sits.
+            ->update($archived ? ['archived_at' => now(), 'pinned_at' => null] : ['archived_at' => null]);
+    }
+
+    /**
+     * "Delete chat" for [$user] only: everything up to now disappears from their view and the
+     * thread leaves their list until someone writes again. The other side keeps theirs.
+     */
+    public function clearFor(Conversation $conversation, User $user): void
+    {
+        $latest = (int) ($conversation->messages()->max('id') ?? 0);
+        DB::table('conversation_participants')
+            ->where('conversation_id', $conversation->id)
+            ->where('user_id', $user->id)
+            ->update([
+                'cleared_upto_id' => $latest,
+                'unread_count' => 0,
+                'last_read_at' => now(),
+                'pinned_at' => null,
+                'archived_at' => null,
+            ]);
+    }
+
+    // ── Editing ─────────────────────────────────────────────────────────────────────
+
+    /**
+     * Correct your own message within the /control edit window. Only words can change: a
+     * photo's caption may, a forwarded line or a system line may not (they aren't yours to
+     * reword). Returns false when any rule says no.
+     */
+    public function edit(Conversation $conversation, User $user, int $messageId, string $body): bool
+    {
+        $window = \App\Support\PlatformRules::int('chat.edit_window_minutes');
+        $body = trim($body);
+        if ($window <= 0 || $body === '') {
+            return false;
+        }
+
+        $message = $conversation->messages()->whereKey($messageId)->whereNull('deleted_at')->first();
+        if (
+            $message === null
+            || (int) $message->sender_id !== (int) $user->id
+            || $message->kind !== null
+            || $message->is_forwarded
+            || ($message->share_type !== null && trim((string) $message->body) === '')
+            || $message->created_at === null
+            || $message->created_at->lt(now()->subMinutes($window))
+        ) {
+            return false;
+        }
+        if ($body === (string) $message->body) {
+            return true;
+        }
+
+        $message->forceFill(['body' => mb_substr($body, 0, 2000), 'edited_at' => now()])->save();
+
+        // The list quotes the last message; if this was it, quote the corrected words.
+        $latest = $conversation->messages()->whereNull('deleted_at')->orderByDesc('id')->first();
+        if ($latest !== null && (int) $latest->id === (int) $message->id) {
+            $conversation->forceFill([
+                'last_message_preview' => mb_substr(\App\Jobs\SendChatPush::preview($message), 0, 200),
+            ])->save();
+        }
+
+        \App\Events\ConversationUpdated::dispatch($conversation->id, $user->id);
+        $this->broadcastInbox($conversation);
+
+        return true;
     }
 
     // ── Groups ────────────────────────────────────────────────────────────────────────

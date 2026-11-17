@@ -51,6 +51,17 @@ import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Photo
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Archive
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.runtime.collectAsState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalTextStyle
@@ -144,6 +155,11 @@ fun ChatListScreen(
     reloadKey: Int = 0,
     /** Extra work a pull-to-refresh should also do (the caller re-reads join requests). */
     onPullRefresh: suspend () -> Unit = {},
+    /**
+     * Long-press actions on a row (pin, archive, mute, delete chat). Returns null when it
+     * took, or the sentence to show when it didn't. Null hides the long-press menu.
+     */
+    onAction: (suspend (ChatThread, ChatListAction) -> String?)? = null,
     modifier: Modifier = Modifier,
 ) {
     var result by remember {
@@ -174,7 +190,28 @@ fun ChatListScreen(
     // "Groups"/"Others" set would be labels for things that don't exist.
     var unreadOnly by remember { mutableStateOf(false) }
 
-    BackHandler(enabled = true) { onClose() }
+    // The archived view, the row a long press opened its menu on, and that menu's dialogs.
+    var showArchived by remember { mutableStateOf(false) }
+    var actionsFor by remember { mutableStateOf<ChatThread?>(null) }
+    var muteFor by remember { mutableStateOf<ChatThread?>(null) }
+    var deleteFor by remember { mutableStateOf<ChatThread?>(null) }
+    val listContext = androidx.compose.ui.platform.LocalContext.current
+    val drafts by com.haraan.app.data.ChatDrafts.drafts.collectAsState()
+    LaunchedEffect(Unit) { com.haraan.app.data.ChatDrafts.all(listContext) }
+    fun act(t: ChatThread, a: ChatListAction) {
+        val handler = onAction ?: return
+        scope.launch {
+            val problem = handler(t, a)
+            if (problem != null) {
+                android.widget.Toast.makeText(listContext, problem, android.widget.Toast.LENGTH_LONG).show()
+            } else {
+                val fresh = load()
+                if (fresh is com.haraan.app.data.DirectMessageRepository.ThreadsResult.Ready) result = fresh
+            }
+        }
+    }
+
+    BackHandler(enabled = true) { if (showArchived) showArchived = false else onClose() }
     LaunchedEffect(reloadKey) { result = load() }
 
     // ── Live inbox ───────────────────────────────────────────────────────────────
@@ -246,7 +283,17 @@ fun ChatListScreen(
                 }
                 Spacer(Modifier.width(10.dp))
             }
-            Text("Messages", color = HaraanColors.TextPrimary, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold)
+            if (showArchived) {
+                Box(
+                    Modifier.size(38.dp).pressable { showArchived = false }.clip(CircleShape)
+                        .background(HaraanColors.Field),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to messages", tint = HaraanColors.TextPrimary, modifier = Modifier.size(18.dp))
+                }
+                Spacer(Modifier.width(10.dp))
+            }
+            Text(if (showArchived) "Archived" else "Messages", color = HaraanColors.TextPrimary, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold)
             Spacer(Modifier.weight(1f))
             // New group — the one honest compose action here: 1:1s start from a profile
             // (mutual-follow rule), but a group is something only this screen can begin.
@@ -267,7 +314,7 @@ fun ChatListScreen(
         // A single summary row, not the cards themselves: the inbox is a list of
         // conversations, and stacking accept/decline cards on top of it would bury the
         // messages under a queue of chores.
-        if (joinRequests.isNotEmpty()) {
+        if (joinRequests.isNotEmpty() && !showArchived) {
             Row(
                 Modifier
                     .fillMaxWidth()
@@ -415,15 +462,22 @@ fun ChatListScreen(
                 }
             } else {
                 val q = query.trim()
+                val archivedCount = r.threads.count { it.archived }
                 val filtered = r.threads.filter { t ->
+                    t.archived == showArchived &&
                     (!unreadOnly || t.unreadCount > 0) &&
                         (q.isEmpty() || t.name.contains(q, ignoreCase = true) ||
                             (t.lastMessage?.contains(q, ignoreCase = true) == true))
                 }
-                if (filtered.isEmpty()) {
+                if (filtered.isEmpty() && (showArchived || archivedCount == 0)) {
                     PullableFill(Modifier.padding(horizontal = 40.dp)) {
                         Text(
-                            if (unreadOnly) "You're all caught up." else "No matches for \"$q\".",
+                            when {
+                                showArchived -> "No archived chats."
+                                unreadOnly -> "You're all caught up."
+                                q.isEmpty() -> "No chats here."
+                                else -> "No matches for \"$q\"."
+                            },
                             color = HaraanColors.TextMuted,
                             fontSize = 14.sp,
                             textAlign = TextAlign.Center,
@@ -431,8 +485,32 @@ fun ChatListScreen(
                     }
                 } else {
                     LazyColumn(Modifier.fillMaxSize()) {
+                        // Archived chats wait one tap away, not mixed into the inbox.
+                        if (!showArchived && archivedCount > 0 && q.isEmpty() && !unreadOnly) {
+                            item(key = "archived") {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .pressable { showArchived = true }
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Box(Modifier.size(54.dp), contentAlignment = Alignment.Center) {
+                                        Icon(Icons.Filled.Archive, null, tint = HaraanColors.TextSecondary, modifier = Modifier.size(24.dp))
+                                    }
+                                    Spacer(Modifier.width(12.dp))
+                                    Text("Archived", color = HaraanColors.TextPrimary, fontSize = 15.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                                    Text("$archivedCount", color = HaraanColors.TextMuted, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                            }
+                        }
                         items(filtered, key = { it.id }) { t ->
-                            ThreadRow(t, typing = typingIn.containsKey(t.id.toString())) { onOpenThread(t) }
+                            ThreadRow(
+                                t,
+                                typing = typingIn.containsKey(t.id.toString()),
+                                draft = drafts[t.id],
+                                onLongClick = if (onAction != null) { { actionsFor = t } } else null,
+                            ) { onOpenThread(t) }
                             // Hairline inset to the text column — the premium messaging
                             // rhythm, and it keeps avatars from crowding the eye.
                             Box(
@@ -448,6 +526,48 @@ fun ChatListScreen(
             }
         }
         }
+    }
+
+    actionsFor?.let { t ->
+        ThreadActionsSheet(
+            thread = t,
+            onPin = { actionsFor = null; act(t, ChatListAction.Pin(!t.pinned)) },
+            onMute = {
+                actionsFor = null
+                if (t.muted) act(t, ChatListAction.Mute(0)) else muteFor = t
+            },
+            onArchive = { actionsFor = null; act(t, ChatListAction.Archive(!t.archived)) },
+            onDelete = { actionsFor = null; deleteFor = t },
+            onDismiss = { actionsFor = null },
+        )
+    }
+    muteFor?.let { t ->
+        MutePicker(onPick = { hours -> muteFor = null; act(t, ChatListAction.Mute(hours)) }, onDismiss = { muteFor = null })
+    }
+    deleteFor?.let { t ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { deleteFor = null },
+            title = { Text("Delete this chat?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    "Its messages are removed from your phone only — ${if (t.isGroup) "everyone else" else t.name} still has them. " +
+                        if (t.isGroup) "You stay in the group." else "It comes back if either of you writes again.",
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(onClick = {
+                    deleteFor = null
+                    com.haraan.app.data.ChatDrafts.set(listContext, t.id, "")
+                    act(t, ChatListAction.Clear)
+                }) { Text("Delete", color = HaraanColors.Danger, fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { deleteFor = null }) {
+                    Text("Cancel", color = HaraanColors.TextSecondary)
+                }
+            },
+            containerColor = Color.White,
+        )
     }
 }
 
@@ -534,12 +654,23 @@ private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun ThreadRow(thread: ChatThread, typing: Boolean = false, onClick: () -> Unit) {
+private fun ThreadRow(
+    thread: ChatThread,
+    typing: Boolean = false,
+    /** Words typed here and not sent — shown instead of the last message. */
+    draft: String? = null,
+    onLongClick: (() -> Unit)? = null,
+    onClick: () -> Unit,
+) {
     val unread = thread.unreadCount > 0
+    val rowView = androidx.compose.ui.platform.LocalView.current
     Row(
         Modifier
             .fillMaxWidth()
-            .pressable(onClick = onClick)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick?.let { l -> { rowView.performHapticFeedback(Feel.SELECT); l() } },
+            )
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -573,6 +704,17 @@ private fun ThreadRow(thread: ChatThread, typing: Boolean = false, onClick: () -
             // While they type, the preview says so — the reason to open this thread NOW.
             if (typing) {
                 TypingLabel("typing", 13.5f)
+            } else if (!draft.isNullOrBlank()) {
+                Text(
+                    buildAnnotatedString {
+                        withStyle(SpanStyle(color = HaraanColors.Danger, fontWeight = FontWeight.SemiBold)) { append("Draft: ") }
+                        append(draft.replace('\n', ' '))
+                    },
+                    color = HaraanColors.TextMuted,
+                    fontSize = 13.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             } else {
                 Text(
                     thread.lastMessage ?: "Say hello",
@@ -597,6 +739,11 @@ private fun ThreadRow(thread: ChatThread, typing: Boolean = false, onClick: () -
                     fontWeight = if (unread) FontWeight.Bold else FontWeight.Medium,
                     maxLines = 1,
                 )
+            }
+            // Pinned: a small pin where the badge would be, so it's clear why it sits on top.
+            if (thread.pinned && !unread) {
+                Spacer(Modifier.height(6.dp))
+                Icon(Icons.Filled.PushPin, "Pinned", tint = HaraanColors.TextMuted, modifier = Modifier.size(15.dp))
             }
             if (unread) {
                 Spacer(Modifier.height(6.dp))
@@ -806,6 +953,15 @@ fun ChatThreadScreen(
     onBlock: (suspend () -> Boolean)? = null,
     /** 1:1 only: report them. True when the report was filed. */
     onReport: (suspend (reason: String, details: String?) -> Boolean)? = null,
+    /** Correct one of your own messages. Null hides Edit. */
+    onEdit: (suspend (messageId: Long, body: String) -> com.haraan.app.data.DirectMessageRepository.Outcome)? = null,
+    /** Minutes after sending that Edit is offered (0 = never) — from /control, via the page. */
+    editWindowMinutes: Int = 0,
+    /** Search this thread. Null hides Search in the menu. */
+    searchMessages: (suspend (String) -> List<com.haraan.app.data.ChatSearchHit>)? = null,
+    /** 1:1: the other person's last activity, and whether that counts as online now. */
+    theirLastSeenAt: String? = null,
+    theirOnline: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     var messages by remember { mutableStateOf<List<ChatMessage>?>(null) }
@@ -846,7 +1002,30 @@ fun ChatThreadScreen(
             onDispose { com.haraan.app.push.ChatPresence.close(conversationId) }
         }
     }
-    var draft by remember { mutableStateOf("") }
+    // What's in the box survives leaving the chat (and shows as "Draft:" on the list).
+    val draftContext = androidx.compose.ui.platform.LocalContext.current
+    var draft by remember(conversationId) {
+        mutableStateOf(com.haraan.app.data.ChatDrafts.get(draftContext, conversationId))
+    }
+    // The message being corrected, if any. While editing, the box holds ITS words, so the
+    // real draft is parked here and put back afterwards.
+    var editing by remember { mutableStateOf<ChatMessage?>(null) }
+    var parkedDraft by remember { mutableStateOf("") }
+    LaunchedEffect(draft, editing) {
+        if (editing != null) return@LaunchedEffect
+        kotlinx.coroutines.delay(400)
+        com.haraan.app.data.ChatDrafts.set(draftContext, conversationId, draft)
+    }
+    val latestDraft by androidx.compose.runtime.rememberUpdatedState(if (editing != null) parkedDraft else draft)
+    DisposableEffect(conversationId) {
+        onDispose { com.haraan.app.data.ChatDrafts.set(draftContext, conversationId, latestDraft) }
+    }
+    // In-thread search, the hit being jumped to, and the "new messages below" count.
+    var searchOpen by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var searchHits by remember { mutableStateOf<List<com.haraan.app.data.ChatSearchHit>?>(null) }
+    var highlightId by remember { mutableStateOf<Long?>(null) }
+    var newBelow by remember { mutableStateOf(0) }
     var confirmLeave by remember { mutableStateOf(false) }
     var leaving by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -1005,12 +1184,71 @@ fun ChatThreadScreen(
     // count too, and must leave the reader where they are rather than throw them to the bottom.
     // The list's item 0 is the history header, so the newest row sits at index n.
     var settledOnce by remember { mutableStateOf(false) }
+    var lastKnownId by remember { mutableStateOf<Long?>(null) }
+    var lastOutbox by remember { mutableStateOf(0) }
     LaunchedEffect(messages?.lastOrNull()?.id, outbox.size) {
         val n = (messages?.size ?: 0) + outbox.size
-        if (n > 0) {
-            if (settledOnce) listState.animateScrollToItem(n)
-            else { listState.scrollToItem(n); settledOnce = true }
+        val before = lastKnownId
+        val sentSomething = outbox.size > lastOutbox
+        lastKnownId = messages?.lastOrNull()?.id
+        lastOutbox = outbox.size
+        if (n <= 0) return@LaunchedEffect
+        if (!settledOnce) {
+            listState.scrollToItem(n); settledOnce = true
+            return@LaunchedEffect
         }
+        // Someone reading back through history isn't thrown to the bottom by every new line —
+        // they get a "↓ 2 new" pill instead. Your own sends always follow you down.
+        val info = listState.layoutInfo
+        val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+        val atEnd = lastVisible >= info.totalItemsCount - 4
+        val newest = messages?.lastOrNull()
+        if (atEnd || sentSomething || newest?.mine == true) {
+            listState.animateScrollToItem(n)
+        } else if (before != null) {
+            newBelow += messages.orEmpty().count { it.id > before && !it.mine && !it.system }
+        }
+    }
+    // Far enough up that a way back down is worth offering.
+    val awayFromEnd by remember {
+        androidx.compose.runtime.derivedStateOf {
+            val info = listState.layoutInfo
+            val lastVisible = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+            info.totalItemsCount > 0 && lastVisible < info.totalItemsCount - 4
+        }
+    }
+    LaunchedEffect(awayFromEnd) { if (!awayFromEnd) newBelow = 0 }
+
+    // Jump to a search hit: page back through history until it is loaded, then bring it into
+    // view and light it up for a moment.
+    suspend fun jumpTo(id: Long) {
+        var guard = 0
+        while ((messages?.none { it.id == id } != false) && hasMore && loadPage != null && guard < 40) {
+            val current = messages ?: break
+            loadingOlder = true
+            val page = try { loadPage(current.first().id) } finally { loadingOlder = false }
+            if (!page.ok) break
+            val known = current.map { it.id }.toSet()
+            messages = page.messages.filterNot { it.id in known } + current
+            hasMore = page.hasMore
+            guard++
+        }
+        val at = messages?.indexOfFirst { it.id == id } ?: -1
+        if (at < 0) {
+            android.widget.Toast.makeText(draftContext, "That message isn't available any more.", android.widget.Toast.LENGTH_SHORT).show()
+            return
+        }
+        listState.scrollToItem(1 + at, -200)
+        highlightId = id
+        kotlinx.coroutines.delay(2200)
+        if (highlightId == id) highlightId = null
+    }
+    LaunchedEffect(searchQuery, searchOpen) {
+        if (!searchOpen) { searchHits = null; return@LaunchedEffect }
+        val q = searchQuery.trim()
+        if (q.length < 2) { searchHits = null; return@LaunchedEffect }
+        kotlinx.coroutines.delay(300)
+        searchHits = searchMessages?.invoke(q) ?: emptyList()
     }
 
     // Keyboard up: keep the conversation's end in view. The list shrinks from the bottom as the
@@ -1136,15 +1374,19 @@ fun ChatThreadScreen(
                         messages?.lastOrNull { it.senderId.toString() == typist }?.senderName?.substringBefore(' ')
                     } else null
                     TypingLabel(if (who != null) "$who is typing" else "typing", 12f)
-                } else if (!subtitle.isNullOrBlank() || isMuted) {
+                } else if (!subtitle.isNullOrBlank() || isMuted || (!isGroup && theirLastSeenAt != null)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         if (isMuted) {
                             Icon(Icons.Filled.NotificationsOff, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(12.dp))
                             Spacer(Modifier.width(4.dp))
                         }
                         Text(
-                            listOfNotNull(subtitle?.takeIf { it.isNotBlank() }, if (isMuted) "Muted" else null).joinToString(" · "),
-                            color = HaraanColors.TextMuted,
+                            listOfNotNull(
+                                subtitle?.takeIf { it.isNotBlank() }
+                                    ?: if (!isGroup) presenceLabel(theirLastSeenAt, theirOnline) else null,
+                                if (isMuted) "Muted" else null,
+                            ).joinToString(" · "),
+                            color = if (!isGroup && theirOnline && subtitle.isNullOrBlank()) HaraanColors.EventsBlue else HaraanColors.TextMuted,
                             fontSize = 12.sp,
                             maxLines = 1,
                         )
@@ -1191,6 +1433,9 @@ fun ChatThreadScreen(
                                 }
                             }
                         }
+                        if (searchMessages != null) {
+                            ThreadMenuItem("Search", Icons.Filled.Search) { menuOpen = false; searchQuery = ""; searchOpen = true }
+                        }
                         if (onReport != null) {
                             ThreadMenuItem("Report", Icons.Filled.Flag) { menuOpen = false; showReport = true }
                         }
@@ -1205,7 +1450,60 @@ fun ChatThreadScreen(
             }
         }
 
+        if (searchOpen) {
+            BackHandler { searchOpen = false }
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(HaraanColors.Field)
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Filled.Search, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Box(Modifier.weight(1f)) {
+                        if (searchQuery.isEmpty()) Text("Search this chat", color = HaraanColors.TextMuted, fontSize = 14.5.sp)
+                        val focus = remember { androidx.compose.ui.focus.FocusRequester() }
+                        BasicTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it.take(60) },
+                            singleLine = true,
+                            textStyle = androidx.compose.ui.text.TextStyle(color = HaraanColors.TextPrimary, fontSize = 14.5.sp),
+                            cursorBrush = SolidColor(HaraanColors.EventsBlue),
+                            modifier = Modifier.fillMaxWidth().focusRequester(focus),
+                        )
+                        LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Cancel",
+                    color = HaraanColors.EventsBlue,
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).pressable { searchOpen = false }.padding(8.dp),
+                )
+            }
+        }
+
         Box(Modifier.weight(1f).fillMaxWidth()) {
+            if (searchOpen && searchQuery.trim().length >= 2) {
+                SearchResults(
+                    hits = searchHits,
+                    query = searchQuery.trim(),
+                    otherName = title,
+                    onPick = { hit ->
+                        searchOpen = false
+                        scope.launch { jumpTo(hit.id) }
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else
             when (val list = messages) {
                 null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     CircularProgressIndicator(color = HaraanColors.EventsBlue)
@@ -1288,6 +1586,29 @@ fun ChatThreadScreen(
                         // times — noise that made the thread look like a log file.
                         val endsRun = next == null || next.mine != m.mine ||
                             dayLabel(next.sentAt) != day
+                        // In a group, the speaker's face sits beside the LAST bubble of their run,
+                        // so a busy thread reads as people, not a column of grey.
+                        val lastOfSpeaker = next == null || next.senderId != m.senderId ||
+                            dayLabel(next.sentAt) != day
+                        val glow by androidx.compose.animation.animateColorAsState(
+                            if (highlightId == m.id) HaraanColors.EventsBlue.copy(alpha = 0.12f) else Color.Transparent,
+                            label = "hitGlow",
+                        )
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(glow),
+                            verticalAlignment = Alignment.Bottom,
+                        ) {
+                        if (isGroup && !m.mine) {
+                            if (lastOfSpeaker) {
+                                Box(Modifier.padding(bottom = if (m.reactions.isNotEmpty()) 18.dp else 0.dp)) {
+                                    Avatar(m.senderAvatar?.let { com.haraan.app.data.ApiConfig.mediaUrl(it) }, m.senderName ?: "", 28.dp)
+                                }
+                            } else {
+                                Spacer(Modifier.width(28.dp))
+                            }
+                            Spacer(Modifier.width(6.dp))
+                        }
+                        Box(Modifier.weight(1f)) {
                         Bubble(
                             m,
                             showSenderName = showSender,
@@ -1305,6 +1626,8 @@ fun ChatThreadScreen(
                             refreshCard = refreshCard,
                             onOpenPhoto = { url -> viewingPhoto = url },
                         )
+                        }
+                        }
                     }
                     // In flight, below everything that has landed.
                     items(outbox, key = { it.tempId }) { p ->
@@ -1341,6 +1664,44 @@ fun ChatThreadScreen(
                                 else Avatar(avatar, title, 26.dp)
                             }
                         }
+                    }
+                }
+            }
+            androidx.compose.animation.AnimatedVisibility(
+                visible = !searchOpen && messages != null && (awayFromEnd || newBelow > 0),
+                enter = androidx.compose.animation.fadeIn() + androidx.compose.animation.scaleIn(initialScale = 0.7f),
+                exit = androidx.compose.animation.fadeOut() + androidx.compose.animation.scaleOut(targetScale = 0.7f),
+                modifier = Modifier.align(Alignment.BottomEnd).padding(end = 14.dp, bottom = 12.dp),
+            ) {
+                Row(
+                    Modifier
+                        .shadow(6.dp, RoundedCornerShape(50))
+                        .clip(RoundedCornerShape(50))
+                        .background(if (newBelow > 0) HaraanColors.EventsBlue else Color.White)
+                        .pressable(haptic = Feel.SELECT) {
+                            newBelow = 0
+                            scope.launch {
+                                val total = listState.layoutInfo.totalItemsCount
+                                if (total > 0) listState.animateScrollToItem(total - 1)
+                            }
+                        }
+                        .padding(horizontal = if (newBelow > 0) 14.dp else 11.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Filled.KeyboardArrowDown,
+                        "Jump to the latest message",
+                        tint = if (newBelow > 0) Color.White else HaraanColors.EventsBlue,
+                        modifier = Modifier.size(20.dp),
+                    )
+                    if (newBelow > 0) {
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            if (newBelow == 1) "1 new" else "$newBelow new",
+                            color = Color.White,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
                     }
                 }
             }
@@ -1419,6 +1780,17 @@ fun ChatThreadScreen(
                     },
                     onInfo = { showInfoFor = target },
                     onDismiss = { sheetFor = null; actionNote = "" },
+                    onEdit = if (onEdit != null && canEdit(target, editWindowMinutes)) {
+                        {
+                            sheetFor = null
+                            if (editing == null) parkedDraft = draft
+                            editing = target
+                            replyingTo = null
+                            draft = target.body
+                        }
+                    } else {
+                        null
+                    },
                 )
             }
         }
@@ -1576,6 +1948,32 @@ fun ChatThreadScreen(
         // up in this same file). It read as a settings screen, not a conversation.
         // What you are answering, above the input — so the quote is visible while you type
         // rather than a mode you have to remember you are in.
+        editing?.let { e ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(HaraanColors.Field)
+                    .padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Filled.Edit, null, tint = HaraanColors.EventsBlue, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Editing message", color = HaraanColors.EventsBlue, fontSize = 11.5.sp, fontWeight = FontWeight.Bold)
+                    Text(e.body, color = HaraanColors.TextSecondary, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Box(
+                    Modifier.size(30.dp).clip(CircleShape).pressable { editing = null; draft = parkedDraft; parkedDraft = "" },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Close, "Cancel edit", tint = HaraanColors.TextMuted, modifier = Modifier.size(16.dp))
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+
         replyingTo?.let { q ->
             Row(
                 Modifier
@@ -1632,7 +2030,7 @@ fun ChatThreadScreen(
             // It folds away while you type — the field takes its room, the way a camera app's
             // tools step aside once you start a caption — and springs back when the box is empty.
             androidx.compose.animation.AnimatedVisibility(
-                visible = photosEnabled && sendPhoto != null && draft.isEmpty(),
+                visible = photosEnabled && sendPhoto != null && draft.isEmpty() && editing == null,
                 enter = androidx.compose.animation.expandHorizontally(
                     androidx.compose.animation.core.spring(dampingRatio = 0.6f, stiffness = 500f),
                 ) + androidx.compose.animation.scaleIn(initialScale = 0.6f) + androidx.compose.animation.fadeIn(),
@@ -1664,7 +2062,7 @@ fun ChatThreadScreen(
                 }
             }
             androidx.compose.animation.AnimatedVisibility(
-                visible = shareEnabled && draft.isEmpty(),
+                visible = shareEnabled && draft.isEmpty() && editing == null,
                 enter = androidx.compose.animation.expandHorizontally(
                     androidx.compose.animation.core.spring(dampingRatio = 0.6f, stiffness = 500f),
                 ) + androidx.compose.animation.scaleIn(initialScale = 0.6f) + androidx.compose.animation.fadeIn(),
@@ -1746,8 +2144,28 @@ fun ChatThreadScreen(
                     .size(46.dp)
                     .graphicsLayer { scaleX = sendScale; scaleY = sendScale }
                     .pressable(enabled = canSend, haptic = Feel.COMMIT) {
+                        val fixing = editing
+                        if (fixing != null) {
+                            val text = draft.trim()
+                            editing = null
+                            draft = parkedDraft
+                            parkedDraft = ""
+                            if (text == fixing.body.trim()) return@pressable
+                            scope.launch {
+                                when (val r = onEdit?.invoke(fixing.id, text)) {
+                                    com.haraan.app.data.DirectMessageRepository.Outcome.Ok ->
+                                        messages = messages?.map { if (it.id == fixing.id) it.copy(body = text, edited = true) else it }
+                                    is com.haraan.app.data.DirectMessageRepository.Outcome.Refused ->
+                                        android.widget.Toast.makeText(draftContext, r.message, android.widget.Toast.LENGTH_LONG).show()
+                                    else ->
+                                        android.widget.Toast.makeText(draftContext, "Couldn't save the edit. Try again.", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                            return@pressable
+                        }
                         val text = draft.trim()
                         draft = ""
+                        com.haraan.app.data.ChatDrafts.set(draftContext, conversationId, "")
                         val quoted = replyingTo?.id
                         replyingTo = null
                         scope.launch {
@@ -1761,8 +2179,8 @@ fun ChatThreadScreen(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    "Send",
+                    if (editing != null) Icons.Filled.Check else Icons.AutoMirrored.Filled.Send,
+                    if (editing != null) "Save edit" else "Send",
                     tint = if (canSend) Color.White else HaraanColors.TextMuted,
                     modifier = Modifier.size(19.dp),
                 )
@@ -1955,12 +2373,21 @@ private fun Bubble(
             // Time, and — on your own messages — how far it has got. Both live inside the
             // bubble, on one line, so a run of messages doesn't grow a column of metadata.
             val time = timeLabel(m.sentAt).takeIf { showTime }
-            if (time != null || status != null) {
+            if (time != null || status != null || m.edited) {
                 Spacer(Modifier.height(3.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.align(Alignment.End),
                 ) {
+                    if (m.edited) {
+                        Text(
+                            "edited",
+                            color = if (m.mine) Color.White.copy(alpha = 0.75f) else HaraanColors.TextMuted,
+                            fontSize = 10.5.sp,
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                        )
+                        if (time != null) Spacer(Modifier.width(5.dp))
+                    }
                     if (time != null) {
                         Text(
                             time,
@@ -2736,4 +3163,135 @@ internal fun MutePicker(onPick: (hours: Int) -> Unit, onDismiss: () -> Unit) {
         },
         containerColor = Color.White,
     )
+}
+
+/** A long-press action on a chat-list row. */
+sealed interface ChatListAction {
+    data class Pin(val pinned: Boolean) : ChatListAction
+    data class Archive(val archived: Boolean) : ChatListAction
+    /** Hours to mute (8 / 168 / -1 forever), 0 to unmute. */
+    data class Mute(val hours: Int) : ChatListAction
+    /** "Delete chat" — for this viewer only. */
+    data object Clear : ChatListAction
+}
+
+@Composable
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+private fun ThreadActionsSheet(
+    thread: ChatThread,
+    onPin: () -> Unit,
+    onMute: () -> Unit,
+    onArchive: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    androidx.compose.material3.ModalBottomSheet(onDismissRequest = onDismiss, containerColor = Color.White) {
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
+            Row(Modifier.padding(horizontal = 20.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (thread.isGroup && thread.avatar.isNullOrBlank()) GroupAvatar(thread, 36.dp) else Avatar(thread.avatar, thread.name, 36.dp)
+                Spacer(Modifier.width(12.dp))
+                Text(thread.name, color = HaraanColors.TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.height(6.dp))
+            if (!thread.archived) {
+                SheetRow(Icons.Filled.PushPin, if (thread.pinned) "Unpin" else "Pin to top", onClick = onPin)
+            }
+            SheetRow(
+                if (thread.muted) Icons.Filled.Notifications else Icons.Filled.NotificationsOff,
+                if (thread.muted) "Unmute notifications" else "Mute notifications",
+                onClick = onMute,
+            )
+            SheetRow(Icons.Filled.Archive, if (thread.archived) "Move back to Messages" else "Archive", onClick = onArchive)
+            SheetRow(Icons.Filled.Delete, "Delete chat", danger = true, onClick = onDelete)
+        }
+    }
+}
+
+@Composable
+private fun SheetRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    danger: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Row(
+        Modifier.fillMaxWidth().pressable(onClick = onClick).padding(horizontal = 22.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, tint = if (danger) HaraanColors.Danger else HaraanColors.TextSecondary, modifier = Modifier.size(21.dp))
+        Spacer(Modifier.width(16.dp))
+        Text(label, color = if (danger) HaraanColors.Danger else HaraanColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+/** Found messages; tap one to jump to it in the thread. */
+@Composable
+private fun SearchResults(
+    hits: List<com.haraan.app.data.ChatSearchHit>?,
+    query: String,
+    otherName: String,
+    onPick: (com.haraan.app.data.ChatSearchHit) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    when {
+        hits == null -> Box(modifier, contentAlignment = Alignment.Center) {
+            CircularProgressIndicator(color = HaraanColors.EventsBlue, strokeWidth = 2.dp, modifier = Modifier.size(22.dp))
+        }
+        hits.isEmpty() -> Box(modifier.padding(32.dp), contentAlignment = Alignment.TopCenter) {
+            Text("No messages with \"$query\".", color = HaraanColors.TextMuted, fontSize = 14.sp, textAlign = TextAlign.Center)
+        }
+        else -> LazyColumn(modifier) {
+            items(hits, key = { it.id }) { h ->
+                Column(Modifier.fillMaxWidth().pressable { onPick(h) }.padding(horizontal = 18.dp, vertical = 11.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (h.mine) "You" else (h.senderName ?: otherName),
+                            color = HaraanColors.TextPrimary,
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Text(listOfNotNull(dayLabel(h.sentAt), timeLabel(h.sentAt)).joinToString(" "), color = HaraanColors.TextMuted, fontSize = 11.5.sp)
+                    }
+                    Spacer(Modifier.height(2.dp))
+                    Text(highlighted(h.body, query), color = HaraanColors.TextSecondary, fontSize = 13.5.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
+    }
+}
+
+/** The query in bold blue inside a result line. */
+private fun highlighted(body: String, query: String): androidx.compose.ui.text.AnnotatedString = buildAnnotatedString {
+    var i = 0
+    val lower = body.lowercase()
+    val q = query.lowercase()
+    while (i < body.length) {
+        val at = if (q.isEmpty()) -1 else lower.indexOf(q, i)
+        if (at < 0) { append(body.substring(i)); break }
+        append(body.substring(i, at))
+        withStyle(SpanStyle(color = HaraanColors.EventsBlue, fontWeight = FontWeight.Bold)) { append(body.substring(at, at + q.length)) }
+        i = at + q.length
+    }
+}
+
+/** Your own words, still inside the edit window. Photos keep their caption editable. */
+private fun canEdit(m: ChatMessage, windowMinutes: Int): Boolean {
+    if (!m.mine || m.deleted || m.system || m.forwarded || windowMinutes <= 0) return false
+    if (m.body.isBlank()) return false
+    val sent = parseIso(m.sentAt) ?: return false
+    return System.currentTimeMillis() - sent.time < windowMinutes * 60_000L
+}
+
+/** "online", "last seen today at 5:40 PM", "last seen yesterday", "last seen 12 Nov". */
+private fun presenceLabel(lastSeenIso: String?, online: Boolean): String? {
+    if (online) return "online"
+    if (parseIso(lastSeenIso) == null) return null
+    val time = timeLabel(lastSeenIso)
+    return when (val day = dayLabel(lastSeenIso)) {
+        "Today" -> "last seen today at $time"
+        "Yesterday" -> "last seen yesterday at $time"
+        null -> null
+        else -> "last seen $day"
+    }
 }

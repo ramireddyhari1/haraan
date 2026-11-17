@@ -69,7 +69,9 @@ final class PlayerChatController extends Controller
         $unreadOnOpen = (int) ($conversation->participants->firstWhere('id', $me->id)?->pivot?->unread_count ?? 0);
         $this->dm->markRead($conversation, $me);
 
-        $messages = $conversation->messages()->orderBy('id')->limit(300)->get();
+        // Honour the app's "Delete chat": what this viewer deleted stays deleted here too.
+        $clearedUpto = (int) ($this->dm->participantRow($conversation, $me)?->cleared_upto_id ?? 0);
+        $messages = $conversation->messages()->where('id', '>', $clearedUpto)->orderBy('id')->limit(300)->get();
         $senders = User::query()->whereIn('id', $messages->pluck('sender_id')->unique()->all())->get()->keyBy('id');
 
         return view('site.chat-thread', [
@@ -128,7 +130,8 @@ final class PlayerChatController extends Controller
         $since = $request->query('since_id');
         $since = is_numeric($since) ? (int) $since : 0;
 
-        $query = $conversation->messages()->orderBy('id');
+        $clearedUpto = (int) ($this->dm->participantRow($conversation, $me)?->cleared_upto_id ?? 0);
+        $query = $conversation->messages()->where('id', '>', $clearedUpto)->orderBy('id');
         if ($since > 0) {
             $query->where('id', '>', $since);
         }
@@ -207,6 +210,7 @@ final class PlayerChatController extends Controller
             // never carry the body, or an old client could still render it.
             'body' => $unsent ? '' : (string) $m->body,
             'unsent' => $unsent,
+            'edited' => ! $unsent && $m->edited_at !== null,
             // "Ravi added Kiran" — drawn centred, not as anyone's bubble.
             'system' => $m->kind === 'system',
             // A photo sent from the app. Absolute, and gone once unsent.
