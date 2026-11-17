@@ -927,7 +927,9 @@ private fun courtRate(court: VenueCourt, date: LocalDate, time: String?, venuePr
 
 /** Human "when" for a court's peak pricing, e.g. "Sat, Sun · 6:00 PM–11:00 PM". */
 private fun courtPeakWhen(court: VenueCourt): String {
-  val days = if (court.peakDays.isNotEmpty()) court.peakDays.joinToString(", ") else "Every day"
+  // All seven days listed out ("Mon, Tue, … Sun") is just "Every day", and far shorter.
+  val days = if (court.peakDays.isEmpty() || court.peakDays.toSet().size >= 7) "Every day"
+  else court.peakDays.joinToString(", ")
   val window = if (court.peakStart != null && court.peakEnd != null) {
     " · ${to12h(court.peakStart)}–${to12h(court.peakEnd)}"
   } else ""
@@ -1886,17 +1888,20 @@ internal fun BookingSheet(
               Spacer(Modifier.height(12.dp))
               // The price once, and the peak rate only where this court has one.
               val peakCourt = selectedCourt?.takeIf { (it.peakPrice ?: 0) > baseRate }
-              Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 2.dp),
-                verticalAlignment = Alignment.Bottom,
-              ) {
-                Text("₹${inr(baseRate)}", color = BookInk.Ink, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
-                Text(" / hour", color = BookInk.Muted, fontSize = 12.5.sp, modifier = Modifier.weight(1f))
+              // Price on its own line, the peak rate under it. Side by side, a long peak
+              // window ("Peak ₹600 · Every day · 6:00 PM–6:00 AM") was measured first and
+              // squeezed "/ hour" into one letter per line.
+              Column(Modifier.fillMaxWidth().padding(horizontal = 2.dp)) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                  Text("₹${inr(baseRate)}", color = BookInk.Ink, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, maxLines = 1)
+                  Text(" / hour", color = BookInk.Muted, fontSize = 12.5.sp, maxLines = 1, softWrap = false)
+                }
                 if (peakCourt != null) {
                   Text(
                     "Peak ₹${inr(peakCourt.peakPrice ?: 0)} · ${courtPeakWhen(peakCourt)}",
                     color = BookInk.Amber, fontWeight = FontWeight.SemiBold, fontSize = 12.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.padding(top = 2.dp),
                   )
                 }
               }
