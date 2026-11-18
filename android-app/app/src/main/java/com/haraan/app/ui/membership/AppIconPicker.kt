@@ -18,6 +18,8 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -60,48 +62,61 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.haraan.app.data.membership.AppIcon
+import com.haraan.app.data.TokenStore
+import com.haraan.app.data.membership.AppIconCatalog
+import com.haraan.app.data.membership.AppIconSlot
 import com.haraan.app.data.membership.AppIcons
-import com.haraan.app.data.membership.CataloguePlan
-import com.haraan.app.data.membership.Membership
+import com.haraan.app.data.membership.MembershipRepository
 import com.haraan.app.ui.Feel
 import com.haraan.app.ui.matches.Thud
 import com.haraan.app.ui.matches.cricketThud
 import com.haraan.app.ui.theme.HaraanColors
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private val TileSize = 64.dp
 private val TileShape = RoundedCornerShape(16.dp)
 
 /**
- * "App icon": the member swaps Haraan's home-screen icon for their tier's.
+ * "App icon": the member swaps Haraan's home-screen icon.
  *
- * What's unlocked comes only from the member's own entitlements ([AppIcon.unlockedBy]). A locked
- * icon still shows in full colour — it's the honest picture of what that plan gives — and a tap
- * on it opens that plan in the showcase above instead of doing nothing.
+ * Which icons show, which are unlocked, and which plan unlocks a locked one all come from the
+ * server (/control → Finance → App icons, via [AppIconCatalog]); this build only owns the art. A
+ * locked icon still shows in full colour — the honest picture of what that plan gives — and a
+ * tap on it opens that plan in the showcase above instead of doing nothing.
  *
  * Feel, because this is a physical object on their phone:
  *  - press sinks the tile into the page (it shrinks and its shadow tightens) while the finger is
  *    down, and it springs back past rest on release;
- *  - picking an icon lands with the app's knock vocabulary — one knock for Pro, two for Hero, a
- *    plain click for the default — and the icon settles like a coin set down;
+ *  - picking an icon lands with the app's knock vocabulary and settles like a coin set down;
  *  - a locked tile shakes its head once with a reject haptic.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AppIconPicker(
-    membership: Membership,
-    plans: List<CataloguePlan>,
     onShowPlan: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val view = LocalView.current
     val scope = rememberCoroutineScope()
-    val unlocked = remember(membership) { AppIcon.unlockedBy(membership.entitlements) }
+    var catalog by remember { mutableStateOf<AppIconCatalog?>(null) }
+    LaunchedEffect(Unit) {
+        catalog = runCatching {
+            withContext(Dispatchers.IO) {
+                MembershipRepository().appIcons(TokenStore.getSignedInToken(context))
+            }
+        }.getOrNull()
+    }
     var current by remember { mutableStateOf(AppIcons.current(context)) }
     var switched by remember { mutableStateOf(false) }
     // Bumped on each landing so only the tile just picked plays its settle.
     var landed by remember { mutableIntStateOf(0) }
+
+    val offers = catalog?.known ?: return
+    // Only the default on offer: nothing to choose between.
+    if (offers.size < 2) return
 
     Column(modifier) {
         Text("App icon", color = HaraanColors.TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp)
@@ -112,19 +127,18 @@ fun AppIconPicker(
             fontSize = 13.sp,
         )
         Spacer(Modifier.height(16.dp))
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-            AppIcon.entries.forEach { icon ->
-                val open = icon in unlocked
-                // The cheapest plan whose catalogue entry switches this icon on — read from the
-                // server's plan sheet, never assumed from the icon's name.
-                val unlockingPlan = remember(plans, icon) {
-                    plans.sortedBy { it.rank }.firstOrNull { p -> p.features.any { it.key == icon.feature && it.enabled } }
-                }
+        FlowRow(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            offers.forEach { (icon, offer) ->
                 IconTile(
                     icon = icon,
+                    label = offer.name,
                     selected = icon == current,
-                    locked = !open,
-                    lockLabel = unlockingPlan?.name,
+                    locked = !offer.unlocked,
+                    lockLabel = offer.unlockedBy?.name,
                     landedTick = if (icon == current) landed else 0,
                     onPick = {
                         if (icon == current) return@IconTile
@@ -136,9 +150,9 @@ fun AppIconPicker(
                                 cricketThud(
                                     context,
                                     when (icon) {
-                                        AppIcon.DEFAULT -> Thud.RUN
-                                        AppIcon.PRO -> Thud.FOUR
-                                        AppIcon.HERO -> Thud.SIX
+                                        AppIconSlot.DEFAULT -> Thud.RUN
+                                        AppIconSlot.HERO -> Thud.SIX
+                                        else -> Thud.FOUR
                                     },
                                 )
                             }
@@ -148,7 +162,7 @@ fun AppIconPicker(
                     },
                     onLocked = {
                         view.performHapticFeedback(Feel.REMOVE)
-                        unlockingPlan?.let { onShowPlan(it.code) }
+                        offer.unlockedBy?.let { onShowPlan(it.code) }
                     },
                 )
             }
@@ -167,7 +181,8 @@ fun AppIconPicker(
 
 @Composable
 private fun IconTile(
-    icon: AppIcon,
+    icon: AppIconSlot,
+    label: String,
     selected: Boolean,
     locked: Boolean,
     lockLabel: String?,
@@ -201,9 +216,9 @@ private fun IconTile(
     val shake = remember { Animatable(0f) }
 
     val accent = when (icon) {
-        AppIcon.DEFAULT -> HaraanColors.EventsBlue
-        AppIcon.PRO -> MemberTierStyles.Pro.accent
-        AppIcon.HERO -> MemberTierStyles.Hero.accent
+        AppIconSlot.PRO -> MemberTierStyles.Pro.accent
+        AppIconSlot.HERO, AppIconSlot.FESTIVE -> MemberTierStyles.Hero.accent
+        else -> HaraanColors.EventsBlue
     }
     val ring by animateFloatAsState(
         targetValue = if (selected) 1f else 0f,
@@ -217,9 +232,9 @@ private fun IconTile(
             role = Role.RadioButton
             this.selected = selected
             contentDescription = when {
-                locked && lockLabel != null -> "${icon.label} icon, included with $lockLabel"
-                locked -> "${icon.label} icon, locked"
-                else -> "${icon.label} icon"
+                locked && lockLabel != null -> "$label icon, included with $lockLabel"
+                locked -> "$label icon, locked"
+                else -> "$label icon"
             }
         },
     ) {
@@ -287,7 +302,7 @@ private fun IconTile(
                 Spacer(Modifier.width(3.dp))
             }
             Text(
-                icon.label,
+                label,
                 color = if (selected) HaraanColors.TextPrimary else HaraanColors.TextSecondary,
                 fontSize = 12.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
@@ -301,7 +316,7 @@ private fun IconTile(
  * scaled so the middle 72dp fills [size], clipped to a rounded tile.
  */
 @Composable
-private fun LauncherIcon(icon: AppIcon, size: Dp) {
+private fun LauncherIcon(icon: AppIconSlot, size: Dp) {
     val canvas = size * (108f / 72f)
     Box(Modifier.size(size).clip(TileShape), contentAlignment = Alignment.Center) {
         Image(painterResource(icon.plate), contentDescription = null, modifier = Modifier.requiredSize(canvas))

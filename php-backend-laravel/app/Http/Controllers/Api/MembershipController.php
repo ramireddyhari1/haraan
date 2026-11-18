@@ -9,6 +9,7 @@ use App\Models\FeatureFlag;
 use App\Models\MemberPlanPrice;
 use App\Models\MemberSubscription;
 use App\Models\User;
+use App\Services\Membership\AppIconCatalogue;
 use App\Services\Membership\MembershipException;
 use App\Services\Membership\MembershipPresenter;
 use App\Services\Membership\MemberSubscriptions;
@@ -133,6 +134,15 @@ final class MembershipController extends Controller
     public function payments(Request $request): JsonResponse
     {
         return response()->json(['data' => $this->presenter->payments($this->requireMember($request))]);
+    }
+
+    /**
+     * GET /api/membership/app-icons — which home-screen icons the caller may wear and which
+     * one goes on automatically (/control → Finance → App icons). Guests get the default plan's.
+     */
+    public function appIcons(Request $request, AppIconCatalogue $icons): JsonResponse
+    {
+        return response()->json(['data' => $icons->for($this->member($request))]);
     }
 
     /** GET /api/membership/insight-sports */

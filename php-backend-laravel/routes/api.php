@@ -850,6 +850,7 @@ Route::middleware(['auth.jwt', 'throttle:60,1'])->group(function (): void {
 Route::middleware('throttle:120,1')->get('/webhooks/admob/rewarded', [RewardsController::class, 'admobCallback']);
 
 Route::middleware('auth.jwt.optional')->get('/membership/plans', [MembershipController::class, 'plans']);
+Route::middleware('auth.jwt.optional')->get('/membership/app-icons', [MembershipController::class, 'appIcons']);
 
 Route::middleware('auth.jwt')->prefix('membership')->controller(MembershipController::class)->group(function (): void {
     Route::get('/', 'show');

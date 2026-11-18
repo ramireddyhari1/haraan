@@ -119,6 +119,120 @@
         </activity-alias>
 
         <!--
+          The icon library: more launcher icons /control (Membership → App icons) can give to any
+          plan without an app update. The art is fixed here; which plan may wear which is the
+          server's. Keys must match AppIconSlot in AppIcons.kt and app_icon_slots on the server.
+        -->
+        <activity-alias
+            android:name=".LauncherOnyx"
+            android:targetActivity=".HomeActivity"
+            android:icon="@mipmap/ic_launcher_onyx"
+            android:roundIcon="@mipmap/ic_launcher_onyx_round"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherPaper"
+            android:targetActivity=".HomeActivity"
+            android:icon="@mipmap/ic_launcher_paper"
+            android:roundIcon="@mipmap/ic_launcher_paper_round"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherTurf"
+            android:targetActivity=".HomeActivity"
+            android:icon="@mipmap/ic_launcher_turf"
+            android:roundIcon="@mipmap/ic_launcher_turf_round"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherLeather"
+            android:targetActivity=".HomeActivity"
+            android:icon="@mipmap/ic_launcher_leather"
+            android:roundIcon="@mipmap/ic_launcher_leather_round"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherFestive"
+            android:targetActivity=".HomeActivity"
+            android:icon="@mipmap/ic_launcher_festive"
+            android:roundIcon="@mipmap/ic_launcher_festive_round"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherSunrise"
+            android:targetActivity=".HomeActivity"
+            android:icon="@mipmap/ic_launcher_sunrise"
+            android:roundIcon="@mipmap/ic_launcher_sunrise_round"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherMonsoon"
+            android:targetActivity=".HomeActivity"
+            android:icon="@mipmap/ic_launcher_monsoon"
+            android:roundIcon="@mipmap/ic_launcher_monsoon_round"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherRoyal"
+            android:targetActivity=".HomeActivity"
+            android:icon="@mipmap/ic_launcher_royal"
+            android:roundIcon="@mipmap/ic_launcher_royal_round"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherSilver"
+            android:targetActivity=".HomeActivity"
+            android:icon="@mipmap/ic_launcher_silver"
+            android:roundIcon="@mipmap/ic_launcher_silver_round"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!--
           A phone joining a match AS A CAMERA. Its own Activity on purpose: this flow has
           no account, no splash and no bottom nav, and routing it through MainActivity
           would mean teaching the whole navigation graph about a mode that has none of

@@ -194,14 +194,12 @@ fun MembershipScreen(
                             }
                         }
 
-                        // Their plan's icons, and the ones another plan would add. Needs their own
-                        // entitlements, so only once the server has said who they are.
-                        state.membership?.let { m ->
+                        // Their icons, and the ones another plan would add (/control → App icons).
+                        // Only once the server has said who they are.
+                        if (state.membership != null) {
                             item(key = "app-icon") {
                                 Spacer(Modifier.height(20.dp))
                                 AppIconPicker(
-                                    membership = m,
-                                    plans = state.plans,
                                     // A locked icon opens the plan that includes it.
                                     onShowPlan = { code ->
                                         vm.selectPlan(code)

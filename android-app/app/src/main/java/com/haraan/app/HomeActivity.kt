@@ -27,7 +27,7 @@ import com.haraan.app.data.RealtimeClient
 import com.haraan.app.data.RemoteBootstrap
 import com.haraan.app.data.RemoteConfigStore
 import com.haraan.app.data.TokenStore
-import com.haraan.app.data.membership.AppIcon
+import com.haraan.app.data.membership.AppIconDecision
 import com.haraan.app.data.membership.AppIcons
 import com.haraan.app.data.membership.MembershipRepository
 import com.haraan.app.push.DeepLinkState
@@ -68,8 +68,8 @@ class HomeActivity : ComponentActivity(), PaymentResultWithDataListener {
    */
   private val warmupsStarted = java.util.concurrent.atomic.AtomicBoolean(false)
 
-  /** Set by the warm-ups when a lapsed plan's icon must go; applied once we're backgrounded. */
-  @Volatile private var iconCorrection: AppIcon? = null
+  /** Set by the warm-ups when the home-screen icon should change; applied once we're backgrounded. */
+  @Volatile private var iconCorrection: AppIconDecision? = null
 
   private fun startDeferredWarmups() {
     if (!warmupsStarted.compareAndSet(false, true)) return
@@ -79,10 +79,11 @@ class HomeActivity : ComponentActivity(), PaymentResultWithDataListener {
       // works without it) and the token sync retries on the next launch.
       val preload = runCatching { Checkout.preload(applicationContext) }
       val push = runCatching { PushRegistrar.syncToken(applicationContext) }
-      // A Pro/Hero icon whose plan has lapsed goes back to the default — applied in onStop.
+      // The icon /control says this member should wear (a lapsed plan's goes, a new automatic
+      // one goes on) — applied in onStop.
       iconCorrection = runCatching {
-        AppIcons.lapsed(applicationContext, TokenStore.getSignedInToken(applicationContext)) { token ->
-          MembershipRepository().membership(token)
+        AppIcons.plan(applicationContext) {
+          MembershipRepository().appIcons(TokenStore.getSignedInToken(applicationContext))
         }
       }.getOrNull()
       if (BuildConfig.DEBUG) {
@@ -208,7 +209,7 @@ class HomeActivity : ComponentActivity(), PaymentResultWithDataListener {
     val fix = iconCorrection ?: return
     if (isChangingConfigurations || PaymentBridge.isAwaiting) return
     iconCorrection = null
-    AppIcons.apply(applicationContext, fix)
+    AppIcons.commit(applicationContext, fix)
   }
 
   // A push tapped while the app is already running (singleTop) arrives here.

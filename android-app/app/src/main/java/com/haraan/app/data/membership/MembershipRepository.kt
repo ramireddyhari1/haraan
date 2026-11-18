@@ -15,6 +15,9 @@ interface MembershipApi {
     @GET("api/membership/plans")
     suspend fun plans(@Header("Authorization") auth: String?): DataEnvelope<MembershipCatalogue>
 
+    @GET("api/membership/app-icons")
+    suspend fun appIcons(@Header("Authorization") auth: String?): DataEnvelope<AppIconCatalog>
+
     @GET("api/membership")
     suspend fun membership(@Header("Authorization") auth: String): DataEnvelope<Membership>
 
@@ -57,6 +60,10 @@ class MembershipRepository(
 ) {
     suspend fun catalogue(token: String?): MembershipCatalogue =
         call { api.plans(token?.let(::bearer)).data }
+
+    /** Which home-screen icons the caller may wear (/control → App icons). Guests: the default plan's. */
+    suspend fun appIcons(token: String?): AppIconCatalog =
+        call { api.appIcons(token?.let(::bearer)).data }
 
     suspend fun membership(token: String): Membership =
         call { api.membership(bearer(token)).data }

@@ -60,6 +60,71 @@ TIERS = {
         'lip': ('#FFF4D2', 0.70),
         'shadow': ('#000000', 0.55, 0.26),
     },
+    # ── The icon library: slots any plan can be given from /control (App icons). The art is
+    # fixed in the APK; which plan may wear which is the server's call.
+    'onyx': {
+        'label': 'ONYX',
+        'ramp': ['#2A2A2C', '#141415', '#070708'], 'ramp_mid': 0.5,
+        'light': ('#FFFFFF', 0.10), 'shade': ('#000000', 0.40),
+        'face': [(0, '#FFFFFF'), (1, '#D9D9DE')],
+        'lip': ('#FFFFFF', 0.50), 'shadow': ('#000000', 0.55, 0.25),
+    },
+    'paper': {
+        'label': 'PAPER',
+        'ramp': ['#FFFFFF', '#F1F3F7', '#DCE1EA'], 'ramp_mid': 0.5,
+        'light': ('#FFFFFF', 0.60), 'shade': ('#9AA6BD', 0.25),
+        'face': [(0, '#4D8BFF'), (0.5, '#2563EB'), (1, '#0A2A93')],
+        'lip': ('#FFFFFF', 0.90), 'shadow': ('#1E2B4A', 0.22, 0.10),
+    },
+    'turf': {
+        'label': 'TURF',
+        'ramp': ['#2E8B4A', '#13592C', '#06301A'], 'ramp_mid': 0.48,
+        'light': ('#C7F0C9', 0.25), 'shade': ('#021A0C', 0.45),
+        'face': [(0, '#FFFFFF'), (0.55, '#E3F5E6'), (1, '#BFE3C6')],
+        'lip': ('#FFFFFF', 0.55), 'shadow': ('#021A0C', 0.45, 0.22),
+    },
+    'leather': {
+        'label': 'LEATHER',
+        'ramp': ['#C63A2B', '#8E1B14', '#4C0906'], 'ramp_mid': 0.48,
+        'light': ('#FFC2A8', 0.25), 'shade': ('#200302', 0.45),
+        'face': [(0, '#FFF8EC'), (0.6, '#F4E6CC'), (1, '#E2CCA5')],
+        'lip': ('#FFFFFF', 0.55), 'shadow': ('#1E0201', 0.50, 0.24),
+    },
+    'festive': {
+        'label': 'FESTIVE',
+        'ramp': ['#7A1E3A', '#4A0E22', '#22040F'], 'ramp_mid': 0.5,
+        'light': ('#FFB86B', 0.26), 'shade': ('#000000', 0.45),
+        'face': [(0, '#FFF1C9'), (0.42, '#DDAE52'), (0.78, '#9C6E24'), (1, '#C9974A')],
+        'lip': ('#FFF4D2', 0.70), 'shadow': ('#000000', 0.55, 0.26),
+    },
+    'sunrise': {
+        'label': 'SUNRISE',
+        'ramp': ['#FFB547', '#F07A12', '#A8420A'], 'ramp_mid': 0.5,
+        'light': ('#FFF0C2', 0.35), 'shade': ('#5A1F02', 0.35),
+        'face': [(0, '#FFFFFF'), (1, '#FFF0DC')],
+        'lip': ('#FFFFFF', 0.60), 'shadow': ('#5A1F02', 0.38, 0.18),
+    },
+    'monsoon': {
+        'label': 'MONSOON',
+        'ramp': ['#2BA6A0', '#126A6E', '#063A40'], 'ramp_mid': 0.48,
+        'light': ('#C8F4EE', 0.28), 'shade': ('#01191C', 0.45),
+        'face': [(0, '#FFFFFF'), (1, '#D8F1EE')],
+        'lip': ('#FFFFFF', 0.55), 'shadow': ('#01191C', 0.45, 0.22),
+    },
+    'royal': {
+        'label': 'ROYAL',
+        'ramp': ['#7B5CF0', '#4A2DB8', '#1E1062'], 'ramp_mid': 0.48,
+        'light': ('#E0D6FF', 0.28), 'shade': ('#0A0430', 0.45),
+        'face': [(0, '#FFFFFF'), (1, '#E4DDFF')],
+        'lip': ('#FFFFFF', 0.55), 'shadow': ('#0A0430', 0.45, 0.22),
+    },
+    'silver': {
+        'label': 'SILVER',
+        'ramp': ['#F2F3F5', '#C9CDD4', '#8E949E'], 'ramp_mid': 0.5,
+        'light': ('#FFFFFF', 0.50), 'shade': ('#2B3038', 0.30),
+        'face': [(0, '#5A606A'), (0.5, '#2E333B'), (1, '#15181D')],
+        'lip': ('#FFFFFF', 0.80), 'shadow': ('#1A1D22', 0.30, 0.14),
+    },
 }
 
 # Layer geometry, in dp on the 108dp canvas.
@@ -295,7 +360,18 @@ def emit():
             icon(t, size, squircle_mask).save(os.path.join(d, f'ic_launcher_{n}.webp'), lossless=True, quality=100, method=6)
             icon(t, size, circle_mask).save(os.path.join(d, f'ic_launcher_{n}_round.webp'), lossless=True, quality=100, method=6)
         icon(t, 512).convert('RGB').save(os.path.join(REPO, 'store', f'ic_launcher_{n}_512.png'))
+    emit_previews()
     print('emitted')
+
+
+def emit_previews():
+    """192px previews for /control → App icons (php-backend-laravel/public/images/app-icons)."""
+    from make_icon import icon as default_icon
+    out = os.path.join(REPO, '..', 'php-backend-laravel', 'public', 'images', 'app-icons')
+    os.makedirs(out, exist_ok=True)
+    default_icon(192, mask=squircle_mask).save(os.path.join(out, 'default.png'), optimize=True)
+    for n, t in TIERS.items():
+        icon(t, 192, squircle_mask).save(os.path.join(out, f'{n}.png'), optimize=True)
 
 
 def preview(path):
