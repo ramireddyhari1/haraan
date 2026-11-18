@@ -49,7 +49,7 @@ final class SendChatPush implements ShouldQueue
         }
 
         $message = DirectMessage::query()->find($this->messageId);
-        if ($message === null || $message->deleted_at !== null || $message->kind !== null) {
+        if ($message === null || $message->deleted_at !== null || $message->kind === 'system') {
             return;
         }
         $conversation = Conversation::query()->find($message->conversation_id);
@@ -87,8 +87,38 @@ final class SendChatPush implements ShouldQueue
             'deep_link' => 'haraan://chat/'.$conversation->id,
         ];
 
+        // Someone answering a message REQUEST hasn't said yes yet: tell them a request
+        // arrived, never what it says (a stranger's words don't belong on a lock screen).
+        $pendingIds = DB::table('conversation_participants')
+            ->where('conversation_id', $conversation->id)
+            ->where('request_status', 'pending')
+            ->pluck('user_id')
+            ->map(fn ($id) => (int) $id)
+            ->all();
+        if ($pendingIds !== []) {
+            $already = DB::table('direct_messages')
+                ->where('conversation_id', $conversation->id)
+                ->where('sender_id', $sender->id)
+                ->where('id', '<', $message->id)
+                ->exists();
+            // One "wants to message you" per request, not one per line.
+            if (! $already) {
+                $this->sendTo($fcm, $pendingIds, 'Message request', $name.' wants to send you a message', $data);
+            }
+        }
+        $recipientIds = $recipientIds->reject(fn ($id) => in_array((int) $id, $pendingIds, true))->values();
+        if ($recipientIds->isEmpty()) {
+            return;
+        }
+
+        $this->sendTo($fcm, $recipientIds->all(), $title, $body, $data);
+    }
+
+    /** @param array<int, int> $userIds  @param array<string, string> $data */
+    private function sendTo(FcmClient $fcm, array $userIds, string $title, string $body, array $data): void
+    {
         DeviceToken::pushable()
-            ->whereIn('user_id', $recipientIds)
+            ->whereIn('user_id', $userIds)
             // A chat never goes to the partner console's browser tokens.
             ->where('platform', '!=', DeviceToken::PLATFORM_WEB)
             ->chunkById(200, function ($tokens) use ($fcm, $title, $body, $data): void {
@@ -104,6 +134,12 @@ final class SendChatPush implements ShouldQueue
     public static function preview(DirectMessage $message): string
     {
         $body = trim((string) $message->body);
+        if ($message->audio_path !== null) {
+            return '🎤 Voice message ('.\App\Services\DirectMessageService::clock((int) $message->audio_duration_ms).')';
+        }
+        if ($message->kind === 'poll') {
+            return '📊 '.mb_substr($body, 0, 150);
+        }
         if ($message->image_path !== null) {
             return $body !== '' ? '📷 '.mb_substr($body, 0, 140) : '📷 Photo';
         }

@@ -162,8 +162,9 @@ final class DirectMessageService
         ?string $shareRef = null,
         ?array $image = null,
         ?string $kind = null,
+        ?array $audio = null,
     ): DirectMessage {
-        return DB::transaction(function () use ($conversation, $sender, $body, $replyToId, $forwarded, $shareType, $shareRef, $image, $kind): DirectMessage {
+        return DB::transaction(function () use ($conversation, $sender, $body, $replyToId, $forwarded, $shareType, $shareRef, $image, $kind, $audio): DirectMessage {
             // A reply may only quote a message from THIS conversation. Quoting across threads
             // would put words from a conversation the reader isn't in onto their screen.
             $replyTo = null;
@@ -182,12 +183,18 @@ final class DirectMessageService
                 'image_width' => $image['width'] ?? null,
                 'image_height' => $image['height'] ?? null,
                 'kind' => $kind,
+                'audio_path' => $audio['path'] ?? null,
+                'audio_duration_ms' => $audio['duration_ms'] ?? null,
             ]);
 
             // A card with no words still needs a line in the thread list — "Shared a match:
             // Lions vs Tigers" — built for the sender, who has just been allowed to share it.
             $preview = $body;
-            if ($image !== null) {
+            if ($audio !== null) {
+                $preview = '🎤 Voice message ('.self::clock((int) ($audio['duration_ms'] ?? 0)).')';
+            } elseif ($kind === 'poll') {
+                $preview = '📊 '.$body;
+            } elseif ($image !== null) {
                 $preview = $body !== '' ? '📷 '.$body : '📷 Photo';
             } elseif ($preview === '' && $shareType !== null && $shareRef !== null) {
                 $preview = \App\Support\ChatShareCards::preview(
@@ -205,7 +212,7 @@ final class DirectMessageService
             // Everyone except the sender gains an unread; the sender is caught up by
             // definition. A system line ("Ravi added Kiran") is news, not a message — it
             // shows in the thread but doesn't light the badge.
-            if ($kind === null) {
+            if ($kind !== 'system') {
                 DB::table('conversation_participants')
                     ->where('conversation_id', $conversation->id)
                     ->where('user_id', '!=', $sender->id)
@@ -219,7 +226,7 @@ final class DirectMessageService
 
             // A new message brings an archived thread back to the inbox — unless the reader
             // muted it, which is exactly the "keep this out of my way" they asked for.
-            if ($kind === null) {
+            if ($kind !== 'system') {
                 DB::table('conversation_participants')
                     ->where('conversation_id', $conversation->id)
                     ->where('user_id', '!=', $sender->id)
@@ -249,15 +256,16 @@ final class DirectMessageService
         ?string $shareRef = null,
         ?array $image = null,
         ?string $kind = null,
+        ?array $audio = null,
     ): DirectMessage {
-        $message = $this->send($conversation, $sender, $body, $replyToId, $forwarded, $shareType, $shareRef, $image, $kind);
+        $message = $this->send($conversation, $sender, $body, $replyToId, $forwarded, $shareType, $shareRef, $image, $kind, $audio);
 
         \App\Events\ConversationUpdated::dispatch($conversation->id, $sender->id);
         $this->broadcastInbox($conversation);
 
         // The phone in a pocket. After the response, so the sender's tick never waits on FCM;
         // the job itself decides who is muted and whether push is on at all.
-        if ($kind === null) {
+        if ($kind !== 'system') {
             \App\Jobs\SendChatPush::dispatchAfterResponse((int) $message->id);
         }
 
@@ -384,6 +392,7 @@ final class DirectMessageService
             $message === null
             || (int) $message->sender_id !== (int) $user->id
             || $message->kind !== null
+            || $message->audio_path !== null
             || $message->is_forwarded
             || ($message->share_type !== null && trim((string) $message->body) === '')
             || $message->created_at === null
@@ -409,6 +418,377 @@ final class DirectMessageService
         $this->broadcastInbox($conversation);
 
         return true;
+    }
+
+    // ── Message requests ────────────────────────────────────────────────────────────
+
+    public function isMutual(User $a, User $b): bool
+    {
+        return $a->isFollowing($b) && $b->isFollowing($a);
+    }
+
+    /**
+     * May [$me] send [$them] a message REQUEST (they don't follow back)? Off unless /control
+     * allows it, never to or from a guest, never across a block, never to a private profile,
+     * and never again after they said no. /control can also require that the sender at least
+     * follows them.
+     */
+    public function requestAllowed(User $me, User $them): bool
+    {
+        if (! \App\Support\PlatformRules::bool('chat.requests')) {
+            return false;
+        }
+        if ($me->id === $them->id || $them->is_guest || $me->is_guest || User::blockExistsBetween($me, $them)) {
+            return false;
+        }
+        // A private profile has said "people I don't know shouldn't reach me".
+        if ($them->privacy_public_profile !== null && ! (bool) $them->privacy_public_profile) {
+            return false;
+        }
+        if (\App\Support\PlatformRules::bool('chat.requests_need_follow') && ! $me->isFollowing($them)) {
+            return false;
+        }
+
+        return ! DB::table('chat_request_declines')
+            ->where('requester_id', $me->id)
+            ->where('recipient_id', $them->id)
+            ->exists();
+    }
+
+    /** The 1:1 between two people if one exists, whatever its request state. */
+    public function existingOneToOne(User $a, User $b): ?Conversation
+    {
+        return Conversation::query()
+            ->where('is_group', false)
+            ->whereHas('participants', fn ($q) => $q->where('users.id', $a->id))
+            ->whereHas('participants', fn ($q) => $q->where('users.id', $b->id))
+            ->withCount('participants')
+            ->get()
+            ->firstWhere('participants_count', 2);
+    }
+
+    /**
+     * Open a chat with [$them]: the ordinary 1:1 for mutual follows, an existing thread if
+     * there is one, otherwise a new message REQUEST (their row 'pending'). Null = not allowed.
+     */
+    public function openOrRequest(User $me, User $them): ?Conversation
+    {
+        if (User::blockExistsBetween($me, $them)) {
+            return null;
+        }
+        if ($this->canMessage($me, $them)) {
+            return $this->conversationWith($me, $them);
+        }
+        $existing = $this->existingOneToOne($me, $them);
+        if ($existing !== null) {
+            return $existing;
+        }
+        if (! $this->requestAllowed($me, $them)) {
+            return null;
+        }
+
+        return DB::transaction(function () use ($me, $them): Conversation {
+            $conversation = Conversation::create([]);
+            $conversation->participants()->attach([$me->id]);
+            $conversation->participants()->attach([$them->id => ['request_status' => 'pending']]);
+
+            return $conversation;
+        });
+    }
+
+    /**
+     * May [$me] post into [$conversation] right now? Groups: membership is the permission.
+     * A 1:1: mutual follow, or an accepted request, or — while their side is still 'pending' —
+     * a few opening messages (the /control limit). The recipient of a pending request must
+     * accept before they can reply.
+     */
+    public function canSendIn(Conversation $conversation, User $me): bool
+    {
+        if ($conversation->is_group) {
+            return true;
+        }
+        $conversation->loadMissing('participants');
+        $them = $conversation->counterpart($me);
+        if ($them === null || User::blockExistsBetween($me, $them)) {
+            return false;
+        }
+        $rows = DB::table('conversation_participants')->where('conversation_id', $conversation->id)->get()->keyBy('user_id');
+        $mine = $rows->get($me->id)?->request_status;
+        $theirs = $rows->get($them->id)?->request_status;
+
+        if ($mine === 'pending') {
+            return false;
+        }
+        if ($mine === 'accepted' || $theirs === 'accepted') {
+            return true;
+        }
+        if ($theirs === 'pending') {
+            return $this->requestMessagesLeft($conversation, $me) > 0;
+        }
+
+        return $this->canMessage($me, $them);
+    }
+
+    /** How many more messages the requester may send before the request is answered. */
+    public function requestMessagesLeft(Conversation $conversation, User $requester): int
+    {
+        $sent = $conversation->messages()->where('sender_id', $requester->id)->whereNull('kind')->count()
+            + $conversation->messages()->where('sender_id', $requester->id)->where('kind', 'poll')->count();
+
+        return max(0, \App\Support\PlatformRules::int('chat.request_max_messages') - $sent);
+    }
+
+    /** This viewer's request state in a 1:1: 'incoming' (they must answer), 'outgoing' (waiting), or null. */
+    public function requestState(Conversation $conversation, User $me): ?string
+    {
+        if ($conversation->is_group) {
+            return null;
+        }
+        $rows = DB::table('conversation_participants')->where('conversation_id', $conversation->id)->get();
+        foreach ($rows as $row) {
+            if ($row->request_status === 'pending') {
+                return (int) $row->user_id === (int) $me->id ? 'incoming' : 'outgoing';
+            }
+        }
+
+        return null;
+    }
+
+    public function acceptRequest(Conversation $conversation, User $me): bool
+    {
+        $done = DB::table('conversation_participants')
+            ->where('conversation_id', $conversation->id)
+            ->where('user_id', $me->id)
+            ->where('request_status', 'pending')
+            ->update(['request_status' => 'accepted', 'unread_count' => 0, 'last_read_at' => now()]);
+        if ($done > 0) {
+            \App\Events\ConversationUpdated::dispatch($conversation->id, $me->id);
+            $this->broadcastInbox($conversation);
+        }
+
+        return $done > 0;
+    }
+
+    /** Say no: the thread is deleted for both, and this person can't ask again. */
+    public function declineRequest(Conversation $conversation, User $me): bool
+    {
+        $mine = $this->participantRow($conversation, $me);
+        if ($mine === null || $mine->request_status !== 'pending') {
+            return false;
+        }
+        $requester = $conversation->counterpart($me);
+        DB::transaction(function () use ($conversation, $me, $requester): void {
+            if ($requester !== null) {
+                DB::table('chat_request_declines')->insertOrIgnore([
+                    'requester_id' => $requester->id,
+                    'recipient_id' => $me->id,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+            foreach ($conversation->messages()->whereNotNull('image_path')->pluck('image_path') as $f) {
+                \Illuminate\Support\Facades\Storage::disk('public')->delete($f);
+            }
+            foreach ($conversation->messages()->whereNotNull('audio_path')->pluck('audio_path') as $f) {
+                \Illuminate\Support\Facades\Storage::disk('public')->delete($f);
+            }
+            $conversation->delete();
+        });
+
+        return true;
+    }
+
+    // ── Polls ───────────────────────────────────────────────────────────────────────
+
+    /** @param array<int, string> $options */
+    public function createPoll(Conversation $conversation, User $sender, string $question, array $options, bool $multiple): DirectMessage
+    {
+        $message = $this->sendAndBroadcast($conversation, $sender, mb_substr(trim($question), 0, 200), kind: 'poll');
+        $pollId = DB::table('chat_polls')->insertGetId([
+            'direct_message_id' => $message->id,
+            'question' => mb_substr(trim($question), 0, 200),
+            'allow_multiple' => $multiple,
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        foreach (array_values($options) as $i => $label) {
+            DB::table('chat_poll_options')->insert([
+                'chat_poll_id' => $pollId,
+                'label' => mb_substr(trim((string) $label), 0, 80),
+                'position' => $i,
+            ]);
+        }
+        // The thread was told before the options existed; tell it again now they do.
+        \App\Events\ConversationUpdated::dispatch($conversation->id, $sender->id);
+
+        return $message;
+    }
+
+    /**
+     * Replace this person's vote with [$optionIds] (empty = take it back). A single-choice
+     * poll takes the first id only. False when the poll isn't in this thread or was unsent.
+     *
+     * @param array<int, int> $optionIds
+     */
+    public function vote(Conversation $conversation, User $user, int $pollId, array $optionIds): bool
+    {
+        $poll = DB::table('chat_polls')
+            ->join('direct_messages', 'direct_messages.id', '=', 'chat_polls.direct_message_id')
+            ->where('chat_polls.id', $pollId)
+            ->where('direct_messages.conversation_id', $conversation->id)
+            ->whereNull('direct_messages.deleted_at')
+            ->select('chat_polls.*')
+            ->first();
+        if ($poll === null) {
+            return false;
+        }
+        $valid = DB::table('chat_poll_options')->where('chat_poll_id', $pollId)->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $chosen = array_values(array_unique(array_filter(array_map('intval', $optionIds), fn ($id) => in_array($id, $valid, true))));
+        if (! $poll->allow_multiple) {
+            $chosen = array_slice($chosen, 0, 1);
+        }
+
+        DB::transaction(function () use ($pollId, $user, $chosen): void {
+            DB::table('chat_poll_votes')->where('chat_poll_id', $pollId)->where('user_id', $user->id)->delete();
+            foreach ($chosen as $optionId) {
+                DB::table('chat_poll_votes')->insert([
+                    'chat_poll_id' => $pollId,
+                    'chat_poll_option_id' => $optionId,
+                    'user_id' => $user->id,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        });
+        \App\Events\ConversationUpdated::dispatch($conversation->id, $user->id);
+
+        return true;
+    }
+
+    /**
+     * The polls on these messages, built for [$viewer]: options with counts, whether each is
+     * the viewer's, and (in a group) who voted for what — a team poll is only useful if you
+     * can see who's in.
+     *
+     * @param array<int, int> $messageIds
+     * @return array<int, array<string, mixed>> keyed by message id
+     */
+    public function pollsFor(array $messageIds, User $viewer, bool $withNames): array
+    {
+        if ($messageIds === []) {
+            return [];
+        }
+        $polls = DB::table('chat_polls')->whereIn('direct_message_id', $messageIds)->get();
+        if ($polls->isEmpty()) {
+            return [];
+        }
+        $options = DB::table('chat_poll_options')->whereIn('chat_poll_id', $polls->pluck('id'))->orderBy('position')->get()->groupBy('chat_poll_id');
+        $votes = DB::table('chat_poll_votes')->whereIn('chat_poll_id', $polls->pluck('id'))->get();
+        $names = $withNames
+            ? User::query()->whereIn('id', $votes->pluck('user_id')->unique())->pluck('name', 'id')
+            : collect();
+
+        $out = [];
+        foreach ($polls as $poll) {
+            $pollVotes = $votes->where('chat_poll_id', $poll->id);
+            $out[(int) $poll->direct_message_id] = [
+                'id' => (int) $poll->id,
+                'question' => (string) $poll->question,
+                'multiple' => (bool) $poll->allow_multiple,
+                'voters' => $pollVotes->pluck('user_id')->unique()->count(),
+                'options' => collect($options->get($poll->id, []))->map(function ($o) use ($pollVotes, $viewer, $names) {
+                    $forThis = $pollVotes->where('chat_poll_option_id', $o->id);
+
+                    return [
+                        'id' => (int) $o->id,
+                        'label' => (string) $o->label,
+                        'votes' => $forThis->count(),
+                        'mine' => $forThis->contains(fn ($v) => (int) $v->user_id === (int) $viewer->id),
+                        'voter_names' => $names->isEmpty() ? [] : $forThis->map(fn ($v) => (string) ($names[$v->user_id] ?? 'Player'))->values()->all(),
+                    ];
+                })->values()->all(),
+            ];
+        }
+
+        return $out;
+    }
+
+    // ── Team groups ─────────────────────────────────────────────────────────────────
+
+    /**
+     * The team chat for a match the viewer created: the existing one, or a new group of the
+     * creator plus everyone they ACCEPTED into the match (those players asked to play, so
+     * being added to the team chat is no surprise). Squad entries that resolve to real
+     * accounts join only if they mutually follow the creator. Returns null when the match
+     * isn't theirs or there's nobody to talk to.
+     *
+     * @return array{0: Conversation, 1: bool}|null [conversation, created now]
+     */
+    public function teamGroup(User $creator, int $matchId): ?array
+    {
+        $match = DB::table('live_matches')->where('id', $matchId)->first();
+        if ($match === null || (int) $match->user_id !== (int) $creator->id) {
+            return null;
+        }
+
+        $existing = Conversation::query()->where('match_id', $matchId)->where('is_group', true)->first();
+        if ($existing !== null) {
+            if (! DB::table('conversation_participants')->where('conversation_id', $existing->id)->where('user_id', $creator->id)->exists()) {
+                $existing->participants()->attach([$creator->id]);
+            }
+
+            return [$existing, false];
+        }
+
+        $joined = DB::table('match_join_requests')
+            ->where('match_id', $matchId)
+            ->where('status', 'accepted')
+            ->pluck('requester_id')
+            ->map(fn ($id) => (int) $id);
+
+        $squadIds = collect(array_merge(
+            (array) (json_decode((string) ($match->home_squad ?? '[]'), true) ?: []),
+            (array) (json_decode((string) ($match->away_squad ?? '[]'), true) ?: []),
+        ))->pluck('id')->filter()->map(fn ($id) => (string) $id)->unique()->values();
+        $fromSquad = $squadIds->isEmpty()
+            ? collect()
+            : User::query()->whereIn('player_id', $squadIds)->where('is_guest', false)->get()
+                ->filter(fn (User $u) => $this->canMessage($creator, $u))
+                ->pluck('id');
+
+        $memberIds = $joined->merge($fromSquad)->unique()
+            ->reject(fn ($id) => (int) $id === (int) $creator->id)
+            ->values();
+        $members = User::query()->whereIn('id', $memberIds)->where('is_guest', false)->get()
+            ->reject(fn (User $u) => User::blockExistsBetween($creator, $u))
+            ->take(\App\Support\PlatformRules::int('chat.group_max_members') - 1);
+        if ($members->isEmpty()) {
+            return null;
+        }
+
+        $title = trim(((string) ($match->home_full ?: $match->home ?? 'Team')).' vs '.((string) ($match->away_full ?: $match->away ?? 'Team')));
+        $conversation = DB::transaction(function () use ($creator, $members, $title, $matchId): Conversation {
+            $c = Conversation::create([
+                'is_group' => true,
+                'title' => mb_substr($title !== 'vs' ? $title : 'Match chat', 0, 80),
+                'created_by' => $creator->id,
+                'match_id' => $matchId,
+            ]);
+            $c->participants()->attach(array_merge([$creator->id], $members->pluck('id')->all()));
+
+            return $c;
+        });
+        $this->systemLine($conversation, $creator, ($creator->name ?: 'The host').' made a team chat for this match');
+
+        return [$conversation, true];
+    }
+
+    /** "0:07", "1:42". */
+    public static function clock(int $ms): string
+    {
+        $s = (int) round($ms / 1000);
+
+        return intdiv($s, 60).':'.str_pad((string) ($s % 60), 2, '0', STR_PAD_LEFT);
     }
 
     // ── Groups ────────────────────────────────────────────────────────────────────────
@@ -585,6 +965,10 @@ final class DirectMessageService
             return false;
         }
 
+        if (DB::table('conversation_participants')->where('conversation_id', $conversation->id)->where('request_status', 'pending')->exists()) {
+            return false;
+        }
+
         $key = "dm-typing:{$conversation->id}:{$user->id}";
         if (! \Illuminate\Support\Facades\Cache::add($key, 1, now()->addSeconds(3))) {
             return false;
@@ -623,6 +1007,7 @@ final class DirectMessageService
     {
         DB::table('conversation_participants')
             ->where('user_id', $user->id)
+            ->where(fn ($q) => $q->whereNull('request_status')->orWhere('request_status', '!=', 'pending'))
             ->update(['last_delivered_at' => now()]);
     }
 
@@ -650,9 +1035,13 @@ final class DirectMessageService
         // An unsent photo is deleted from storage too — "unsent" means gone, not merely hidden.
         // Unless a forward still points at the same file.
         $image = $message->image_path;
-        $message->forceFill(['body' => '', 'deleted_at' => now(), 'image_path' => null])->save();
+        $audio = $message->audio_path;
+        $message->forceFill(['body' => '', 'deleted_at' => now(), 'image_path' => null, 'audio_path' => null])->save();
         if ($image !== null && ! DirectMessage::query()->where('image_path', $image)->exists()) {
             \Illuminate\Support\Facades\Storage::disk('public')->delete($image);
+        }
+        if ($audio !== null && ! DirectMessage::query()->where('audio_path', $audio)->exists()) {
+            \Illuminate\Support\Facades\Storage::disk('public')->delete($audio);
         }
 
         // The preview on the thread list quotes the last message; if that was this one, it
@@ -745,7 +1134,7 @@ final class DirectMessageService
             ->where('user_id', $sender->id)
             ->exists();
 
-        if (! $inSource || ! $inTarget) {
+        if (! $inSource || ! $inTarget || $source->kind === 'poll' || ! $this->canSendIn($target, $sender)) {
             return null;
         }
 
@@ -762,6 +1151,10 @@ final class DirectMessageService
             $source->image_path !== null
                 ? ['path' => $source->image_path, 'width' => $source->image_width, 'height' => $source->image_height]
                 : null,
+            null,
+            $source->audio_path !== null
+                ? ['path' => $source->audio_path, 'duration_ms' => $source->audio_duration_ms]
+                : null,
         );
     }
 
@@ -771,6 +1164,8 @@ final class DirectMessageService
         DB::table('conversation_participants')
             ->where('conversation_id', $conversation->id)
             ->where('user_id', $user->id)
+            // Reading a message REQUEST is private: the requester sees no "read" until it's accepted.
+            ->where(fn ($q) => $q->whereNull('request_status')->orWhere('request_status', '!=', 'pending'))
             ->update(['unread_count' => 0, 'last_read_at' => now()]);
     }
 
@@ -779,6 +1174,7 @@ final class DirectMessageService
     {
         return (int) DB::table('conversation_participants')
             ->where('user_id', $user->id)
+            ->where(fn ($q) => $q->whereNull('request_status')->orWhere('request_status', '!=', 'pending'))
             ->sum('unread_count');
     }
 }

@@ -99,10 +99,10 @@ final class PlayerChatController extends Controller
 
         // Same gate the app hits: you may only message someone you follow who follows you
         // back. Checked here too, because a conversation row can outlive the follow.
-        $other = $conversation->is_group ? null : $conversation->counterpart($me);
-        if ($other instanceof User && ! $this->dm->canMessage($me, $other)) {
+        // Same rule as the app: mutual follow, an accepted request, or a request's opening lines.
+        if (! $this->dm->canSendIn($conversation, $me)) {
             return response()->json([
-                'error' => 'You can only message players you follow who also follow you.',
+                'error' => 'You can\'t send a message here right now.',
             ], 403);
         }
 

@@ -70,9 +70,14 @@ class DirectMessageTest extends TestCase
             ->assertJsonPath('name', 'Ben');
     }
 
-    /** The rule. Following someone one-way must NOT open a channel to them. */
+    /**
+     * The strict rule. With message requests switched off in /control, following someone
+     * one-way must NOT open a channel to them. (With requests on, it opens a REQUEST that
+     * waits for their yes — see DirectMessageTier3Test.)
+     */
     public function test_a_one_way_follow_cannot_message(): void
     {
+        \App\Support\PlatformRules::save(['chat.requests' => false]);
         $a = $this->player('Ava');
         $b = $this->player('Ben');
         $a->follow($b); // b does not follow back

@@ -442,6 +442,13 @@ Route::middleware('auth.jwt')->prefix('dm')->group(function (): void {
     Route::post('/{id}/clear', [DirectMessageController::class, 'clear'])->whereNumber('id');
     Route::post('/{id}/messages/{message}/edit', [DirectMessageController::class, 'edit'])->whereNumber('id')->whereNumber('message');
     Route::get('/{id}/search', [DirectMessageController::class, 'search'])->whereNumber('id')->middleware('throttle:60,1');
+    // Tier 3: message requests, voice notes, polls, team chats.
+    Route::post('/{id}/request/accept', [DirectMessageController::class, 'acceptRequest'])->whereNumber('id');
+    Route::post('/{id}/request/decline', [DirectMessageController::class, 'declineRequest'])->whereNumber('id');
+    Route::post('/{id}/voice', [DirectMessageController::class, 'voice'])->whereNumber('id')->middleware('throttle:30,1');
+    Route::post('/{id}/poll', [DirectMessageController::class, 'poll'])->whereNumber('id')->middleware('throttle:20,1');
+    Route::post('/{id}/polls/{poll}/vote', [DirectMessageController::class, 'vote'])->whereNumber('id')->whereNumber('poll');
+    Route::post('/match/{matchId}/team', [DirectMessageController::class, 'teamGroup'])->whereNumber('matchId');
 });
 
 // Public (read-only): view any player's ActionBoard profile by Player ID (HRN…).

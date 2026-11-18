@@ -56,6 +56,11 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Poll
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.MarkEmailUnread
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.SpanStyle
@@ -192,6 +197,8 @@ fun ChatListScreen(
 
     // The archived view, the row a long press opened its menu on, and that menu's dialogs.
     var showArchived by remember { mutableStateOf(false) }
+    // Message requests from people who don't follow you back wait in their own folder.
+    var showRequests by remember { mutableStateOf(false) }
     var actionsFor by remember { mutableStateOf<ChatThread?>(null) }
     var muteFor by remember { mutableStateOf<ChatThread?>(null) }
     var deleteFor by remember { mutableStateOf<ChatThread?>(null) }
@@ -211,7 +218,13 @@ fun ChatListScreen(
         }
     }
 
-    BackHandler(enabled = true) { if (showArchived) showArchived = false else onClose() }
+    BackHandler(enabled = true) {
+        when {
+            showRequests -> showRequests = false
+            showArchived -> showArchived = false
+            else -> onClose()
+        }
+    }
     LaunchedEffect(reloadKey) { result = load() }
 
     // ── Live inbox ───────────────────────────────────────────────────────────────
@@ -283,9 +296,9 @@ fun ChatListScreen(
                 }
                 Spacer(Modifier.width(10.dp))
             }
-            if (showArchived) {
+            if (showArchived || showRequests) {
                 Box(
-                    Modifier.size(38.dp).pressable { showArchived = false }.clip(CircleShape)
+                    Modifier.size(38.dp).pressable { showArchived = false; showRequests = false }.clip(CircleShape)
                         .background(HaraanColors.Field),
                     contentAlignment = Alignment.Center,
                 ) {
@@ -293,7 +306,7 @@ fun ChatListScreen(
                 }
                 Spacer(Modifier.width(10.dp))
             }
-            Text(if (showArchived) "Archived" else "Messages", color = HaraanColors.TextPrimary, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold)
+            Text(if (showRequests) "Requests" else if (showArchived) "Archived" else "Messages", color = HaraanColors.TextPrimary, fontSize = 25.sp, fontWeight = FontWeight.ExtraBold)
             Spacer(Modifier.weight(1f))
             // New group — the one honest compose action here: 1:1s start from a profile
             // (mutual-follow rule), but a group is something only this screen can begin.
@@ -440,7 +453,7 @@ fun ChatListScreen(
                     Text("No messages yet", color = HaraanColors.TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(7.dp))
                     Text(
-                        "You can message players who follow you back — open their profile to start one.",
+                        "Open a player's profile to message them. If they don't follow you back, it reaches them as a request.",
                         color = HaraanColors.TextSecondary,
                         fontSize = 13.5.sp,
                         lineHeight = 19.sp,
@@ -462,17 +475,19 @@ fun ChatListScreen(
                 }
             } else {
                 val q = query.trim()
-                val archivedCount = r.threads.count { it.archived }
+                val archivedCount = r.threads.count { it.archived && it.request != "incoming" }
+                val requestCount = r.threads.count { it.request == "incoming" }
                 val filtered = r.threads.filter { t ->
-                    t.archived == showArchived &&
+                    (if (showRequests) t.request == "incoming" else t.request != "incoming" && t.archived == showArchived) &&
                     (!unreadOnly || t.unreadCount > 0) &&
                         (q.isEmpty() || t.name.contains(q, ignoreCase = true) ||
                             (t.lastMessage?.contains(q, ignoreCase = true) == true))
                 }
-                if (filtered.isEmpty() && (showArchived || archivedCount == 0)) {
+                if (filtered.isEmpty() && (showArchived || showRequests || (archivedCount == 0 && requestCount == 0))) {
                     PullableFill(Modifier.padding(horizontal = 40.dp)) {
                         Text(
                             when {
+                                showRequests -> "No message requests."
                                 showArchived -> "No archived chats."
                                 unreadOnly -> "You're all caught up."
                                 q.isEmpty() -> "No chats here."
@@ -485,8 +500,36 @@ fun ChatListScreen(
                     }
                 } else {
                     LazyColumn(Modifier.fillMaxSize()) {
+                        // People who don't follow you back can't land in your inbox: their first
+                        // messages wait here until you accept or delete them.
+                        if (!showArchived && !showRequests && requestCount > 0 && q.isEmpty()) {
+                            item(key = "requests") {
+                                Row(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .pressable { showRequests = true }
+                                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Box(
+                                        Modifier.size(54.dp).clip(CircleShape).background(HaraanColors.EventsBlue.copy(alpha = 0.10f)),
+                                        contentAlignment = Alignment.Center,
+                                    ) {
+                                        Icon(Icons.Filled.MarkEmailUnread, null, tint = HaraanColors.EventsBlue, modifier = Modifier.size(24.dp))
+                                    }
+                                    Spacer(Modifier.width(12.dp))
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Message requests", color = HaraanColors.TextPrimary, fontSize = 15.5.sp, fontWeight = FontWeight.Bold)
+                                        Text("From players who don't follow you back", color = HaraanColors.TextMuted, fontSize = 12.5.sp)
+                                    }
+                                    Box(
+                                        Modifier.clip(RoundedCornerShape(50)).background(HaraanColors.EventsBlue).padding(horizontal = 9.dp, vertical = 3.dp),
+                                    ) { Text("$requestCount", color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Bold) }
+                                }
+                            }
+                        }
                         // Archived chats wait one tap away, not mixed into the inbox.
-                        if (!showArchived && archivedCount > 0 && q.isEmpty() && !unreadOnly) {
+                        if (!showArchived && !showRequests && archivedCount > 0 && q.isEmpty() && !unreadOnly) {
                             item(key = "archived") {
                                 Row(
                                     Modifier
@@ -509,7 +552,7 @@ fun ChatListScreen(
                                 t,
                                 typing = typingIn.containsKey(t.id.toString()),
                                 draft = drafts[t.id],
-                                onLongClick = if (onAction != null) { { actionsFor = t } } else null,
+                                onLongClick = if (onAction != null && t.request != "incoming") { { actionsFor = t } } else null,
                             ) { onOpenThread(t) }
                             // Hairline inset to the text column — the premium messaging
                             // rhythm, and it keeps avatars from crowding the eye.
@@ -962,6 +1005,21 @@ fun ChatThreadScreen(
     /** 1:1: the other person's last activity, and whether that counts as online now. */
     theirLastSeenAt: String? = null,
     theirOnline: Boolean = false,
+    /** Send a recorded voice note. Null hides the microphone (switched off in /control). */
+    sendVoice: (suspend (bytes: ByteArray, durationMs: Int, replyToId: Long?) -> ChatMessage?)? = null,
+    voiceMaxSeconds: Int = 120,
+    /** Send a poll. Null hides Poll (switched off in /control). */
+    createPoll: (suspend (question: String, options: List<String>, multiple: Boolean) -> ChatMessage?)? = null,
+    /** Vote in a poll; returns the poll as it now stands. */
+    onVote: (suspend (pollId: Long, optionIds: List<Long>) -> com.haraan.app.data.ChatPoll?)? = null,
+    /** "incoming" (answer the request) / "outgoing" (waiting on them) / null. */
+    request: String? = null,
+    /** Outgoing request: messages left before they answer. */
+    requestMessagesLeft: Int? = null,
+    /** False when this viewer can't post here (the composer gives way to the reason). */
+    canSend: Boolean = true,
+    onAcceptRequest: (suspend () -> Boolean)? = null,
+    onDeclineRequest: (suspend () -> Boolean)? = null,
     modifier: Modifier = Modifier,
 ) {
     var messages by remember { mutableStateOf<List<ChatMessage>?>(null) }
@@ -1087,6 +1145,66 @@ fun ChatThreadScreen(
     // The message the composer is currently answering, and the one waiting for a target.
     var replyingTo by remember { mutableStateOf<ChatMessage?>(null) }
     var forwarding by remember { mutableStateOf<ChatMessage?>(null) }
+    // ── Tier 3: requests, voice, polls ────────────────────────────────────────────
+    var requestState by remember(conversationId, request) { mutableStateOf(request) }
+    var answeringRequest by remember { mutableStateOf(false) }
+    var showAttach by remember { mutableStateOf(false) }
+    var showPollComposer by remember { mutableStateOf(false) }
+    var recording by remember { mutableStateOf(false) }
+    var recordMs by remember { mutableStateOf(0) }
+    val recorder = remember { VoiceRecorder(draftContext.applicationContext) }
+    DisposableEffect(Unit) { onDispose { recorder.cancel() } }
+    StopVoiceOnLeave()
+    fun startRecording() {
+        if (recorder.start()) {
+            recordMs = 0
+            recording = true
+        } else {
+            android.widget.Toast.makeText(draftContext, "Couldn't start the microphone.", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+    val micPermission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) startRecording()
+        else android.widget.Toast.makeText(draftContext, "Allow the microphone to send voice messages.", android.widget.Toast.LENGTH_LONG).show()
+    }
+    // A tick while recording; it stops itself at the /control limit and sends.
+    fun finishRecording(send: Boolean) {
+        val result = if (send) recorder.finish() else { recorder.cancel(); null }
+        recording = false
+        if (send && result == null) {
+            android.widget.Toast.makeText(draftContext, "Hold on a little longer — that was too short.", android.widget.Toast.LENGTH_SHORT).show()
+        }
+        if (result != null) {
+            val quoted = replyingTo?.id
+            replyingTo = null
+            scope.launch {
+                sendWithOutbox("", quoted, null, { outbox }, { outbox = it }, send = { _, _, _ -> null },
+                    voice = PendingVoice(result.first, result.second), sendVoice = sendVoice) { update ->
+                    messages = update(messages)
+                }
+            }
+        }
+    }
+    LaunchedEffect(recording) {
+        while (recording) {
+            kotlinx.coroutines.delay(200)
+            recordMs = recorder.elapsedMs
+            if (recordMs >= voiceMaxSeconds * 1000) finishRecording(true)
+        }
+    }
+    fun vote(pollId: Long, ids: List<Long>) {
+        val handler = onVote ?: return
+        scope.launch {
+            val updated = handler(pollId, ids)
+            if (updated != null) {
+                messages = messages?.map { if (it.poll?.id == pollId) it.copy(poll = updated) else it }
+            } else {
+                android.widget.Toast.makeText(draftContext, "Couldn't save your vote. Try again.", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
     val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
     LaunchedEffect(messages != null) {
         val loaded = messages
@@ -1153,6 +1271,12 @@ fun ChatThreadScreen(
                         val known = current?.map { it.id }?.toSet() ?: emptySet()
                         messages = (current ?: emptyList()) + fresh.filterNot { it.id in known }
                         if (fresh.any { !it.mine && it.senderId.toString() == typingFrom }) typingFrom = null
+                    } else if (current != null && loadPage != null) {
+                        val page = loadPage(null)
+                        if (page.ok) {
+                            val byId = page.messages.associateBy { it.id }
+                            messages = messages?.map { byId[it.id] ?: it }
+                        }
                     }
                 }
             }
@@ -1625,6 +1749,7 @@ fun ChatThreadScreen(
                             onOpenShare = onOpenShare,
                             refreshCard = refreshCard,
                             onOpenPhoto = { url -> viewingPhoto = url },
+                            onVote = if (onVote != null && requestState != "incoming") { poll, ids -> vote(poll.id, ids) } else null,
                         )
                         }
                         }
@@ -1636,7 +1761,7 @@ fun ChatThreadScreen(
                             // Retry: drop it from the outbox and send it again.
                             outbox = outbox.filterNot { it.tempId == p.tempId }
                             scope.launch {
-                                sendWithOutbox(p.body, p.replyToId, p.share, { outbox }, { outbox = it }, send, photo = p.photo, sendPhoto = sendPhoto) {
+                                sendWithOutbox(p.body, p.replyToId, p.share, { outbox }, { outbox = it }, send, photo = p.photo, sendPhoto = sendPhoto, voice = p.voice, sendVoice = sendVoice, poll = p.poll, createPoll = createPoll) {
                                     messages = it(messages)
                                 }
                             }
@@ -1806,6 +1931,21 @@ fun ChatThreadScreen(
                     }
                 },
                 onDismiss = { forwarding = null },
+            )
+        }
+
+        if (showPollComposer) {
+            PollComposer(
+                onCreate = { q, options, multiple ->
+                    showPollComposer = false
+                    scope.launch {
+                        sendWithOutbox(q, null, null, { outbox }, { outbox = it }, send,
+                            poll = PendingPoll(q, options, multiple), createPoll = createPoll) { update ->
+                            messages = update(messages)
+                        }
+                    }
+                },
+                onDismiss = { showPollComposer = false },
             )
         }
 
@@ -2017,6 +2157,60 @@ fun ChatThreadScreen(
             Spacer(Modifier.height(8.dp))
         }
 
+        val requestLeft = if (requestState == "outgoing") requestMessagesLeft else null
+        val mayPost = requestState != "incoming" && canSend && (requestLeft == null || requestLeft > 0)
+        if (requestState == "incoming") {
+            RequestPanel(
+                name = title,
+                busy = answeringRequest,
+                onAccept = {
+                    answeringRequest = true
+                    scope.launch {
+                        val ok = onAcceptRequest?.invoke() ?: false
+                        answeringRequest = false
+                        if (ok) requestState = null
+                        else android.widget.Toast.makeText(draftContext, "Couldn't accept. Try again.", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onDelete = {
+                    answeringRequest = true
+                    scope.launch {
+                        val ok = onDeclineRequest?.invoke() ?: false
+                        answeringRequest = false
+                        if (ok) onClose()
+                        else android.widget.Toast.makeText(draftContext, "Couldn't delete. Try again.", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                },
+                onBlock = if (onBlock != null) { { confirmBlock = true } } else null,
+            )
+        } else if (recording) {
+            RecordingBar(
+                elapsedMs = recordMs,
+                maxMs = voiceMaxSeconds * 1000,
+                onCancel = { finishRecording(false) },
+                onSend = { finishRecording(true) },
+            )
+        } else if (!mayPost) {
+            Text(
+                when {
+                    requestState == "outgoing" -> "Waiting for $title to accept your request."
+                    else -> "You can't reply in this chat."
+                },
+                color = HaraanColors.TextSecondary,
+                fontSize = 13.5.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 24.dp, vertical = 18.dp),
+            )
+        } else {
+        if (requestLeft != null) {
+            Text(
+                "$title hasn't accepted yet · $requestLeft more ${if (requestLeft == 1) "message" else "messages"} until they do",
+                color = HaraanColors.TextMuted,
+                fontSize = 12.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 2.dp),
+            )
+        }
         Row(
             Modifier
                 .fillMaxWidth()
@@ -2062,7 +2256,7 @@ fun ChatThreadScreen(
                 }
             }
             androidx.compose.animation.AnimatedVisibility(
-                visible = shareEnabled && draft.isEmpty() && editing == null,
+                visible = (shareEnabled || createPoll != null) && draft.isEmpty() && editing == null,
                 enter = androidx.compose.animation.expandHorizontally(
                     androidx.compose.animation.core.spring(dampingRatio = 0.6f, stiffness = 500f),
                 ) + androidx.compose.animation.scaleIn(initialScale = 0.6f) + androidx.compose.animation.fadeIn(),
@@ -2070,15 +2264,32 @@ fun ChatThreadScreen(
                     androidx.compose.animation.scaleOut(targetScale = 0.6f) + androidx.compose.animation.fadeOut(),
             ) {
                 Row {
-                    Box(
-                        Modifier
-                            .size(46.dp)
-                            .pressable(haptic = Feel.SELECT) { showSharePicker = true }
-                            .clip(CircleShape)
-                            .background(HaraanColors.Field),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(Icons.Filled.Add, "Share a match, venue or player", tint = HaraanColors.EventsBlue, modifier = Modifier.size(22.dp))
+                    Box {
+                        Box(
+                            Modifier
+                                .size(46.dp)
+                                .pressable(haptic = Feel.SELECT) {
+                                    when {
+                                        shareEnabled && createPoll != null -> showAttach = true
+                                        createPoll != null -> showPollComposer = true
+                                        else -> showSharePicker = true
+                                    }
+                                }
+                                .clip(CircleShape)
+                                .background(HaraanColors.Field),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(Icons.Filled.Add, "Add a poll or share a match, venue or player", tint = HaraanColors.EventsBlue, modifier = Modifier.size(22.dp))
+                        }
+                        androidx.compose.material3.DropdownMenu(
+                            expanded = showAttach,
+                            onDismissRequest = { showAttach = false },
+                            containerColor = Color.White,
+                            shape = RoundedCornerShape(14.dp),
+                        ) {
+                            ThreadMenuItem("Poll", Icons.Filled.Poll) { showAttach = false; showPollComposer = true }
+                            ThreadMenuItem("Match, venue or player", Icons.Filled.Share) { showAttach = false; showSharePicker = true }
+                        }
                     }
                     Spacer(Modifier.width(8.dp))
                 }
@@ -2131,6 +2342,24 @@ fun ChatThreadScreen(
                 }
             }
             Spacer(Modifier.width(9.dp))
+            val showMic = sendVoice != null && draft.isEmpty() && editing == null
+            if (showMic) {
+                Box(
+                    Modifier
+                        .size(46.dp)
+                        .pressable(haptic = Feel.COMMIT) {
+                            val granted = androidx.core.content.ContextCompat.checkSelfPermission(
+                                draftContext, android.Manifest.permission.RECORD_AUDIO,
+                            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                            if (granted) startRecording() else micPermission.launch(android.Manifest.permission.RECORD_AUDIO)
+                        }
+                        .clip(CircleShape)
+                        .background(HaraanColors.EventsBlue),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Mic, "Record a voice message", tint = Color.White, modifier = Modifier.size(21.dp))
+                }
+            } else {
             val canSend = draft.trim().isNotEmpty()
             // Grows into place when there is something to send, so the control answers the
             // typing rather than sitting there greyed out.
@@ -2185,6 +2414,8 @@ fun ChatThreadScreen(
                     modifier = Modifier.size(19.dp),
                 )
             }
+            }
+        }
         }
     }
 }
@@ -2202,7 +2433,17 @@ data class PendingMessage(
     val share: SharedCard? = null,
     /** A photo being sent; [body] is its caption. Held as bytes so a retry re-uploads it. */
     val photo: PreparedPhoto? = null,
+    /** A voice note being sent. */
+    val voice: PendingVoice? = null,
+    /** A poll being sent; [body] is its question. */
+    val poll: PendingPoll? = null,
 )
+
+/** A recorded voice note waiting to upload. */
+class PendingVoice(val bytes: ByteArray, val durationMs: Int)
+
+/** A poll waiting to send. */
+data class PendingPoll(val question: String, val options: List<String>, val multiple: Boolean)
 
 /**
  * Send one message through the outbox: show it immediately, then either fold it into the
@@ -2219,17 +2460,22 @@ private suspend fun sendWithOutbox(
     send: suspend (String, Long?, SharedCard?) -> ChatMessage?,
     photo: PreparedPhoto? = null,
     sendPhoto: (suspend (ByteArray, String, Long?) -> ChatMessage?)? = null,
+    voice: PendingVoice? = null,
+    sendVoice: (suspend (ByteArray, Int, Long?) -> ChatMessage?)? = null,
+    poll: PendingPoll? = null,
+    createPoll: (suspend (String, List<String>, Boolean) -> ChatMessage?)? = null,
     updateMessages: ((List<ChatMessage>?) -> List<ChatMessage>) -> Unit,
 ) {
-    if (text.isBlank() && share == null && photo == null) return
+    if (text.isBlank() && share == null && photo == null && voice == null && poll == null) return
     val tempId = -System.currentTimeMillis()
     // The quote rides with the pending row, so a retry answers the same message rather than
     // quietly becoming a stray line.
-    setOutbox(outbox() + PendingMessage(tempId, text, replyToId = replyToId, share = share, photo = photo))
-    val sent = if (photo != null) {
-        sendPhoto?.invoke(photo.jpeg, text, replyToId)
-    } else {
-        send(text, replyToId, share)
+    setOutbox(outbox() + PendingMessage(tempId, text, replyToId = replyToId, share = share, photo = photo, voice = voice, poll = poll))
+    val sent = when {
+        voice != null -> sendVoice?.invoke(voice.bytes, voice.durationMs, replyToId)
+        poll != null -> createPoll?.invoke(poll.question, poll.options, poll.multiple)
+        photo != null -> sendPhoto?.invoke(photo.jpeg, text, replyToId)
+        else -> send(text, replyToId, share)
     }
     if (sent == null) {
         setOutbox(outbox().map { if (it.tempId == tempId) it.copy(failed = true) else it })
@@ -2252,6 +2498,7 @@ private fun Bubble(
     onOpenShare: (SharedCard) -> Unit = {},
     refreshCard: suspend (SharedCard) -> SharedCard? = { null },
     onOpenPhoto: (String) -> Unit = {},
+    onVote: ((com.haraan.app.data.ChatPoll, List<Long>) -> Unit)? = null,
 ) {
     Column(
         Modifier.fillMaxWidth(),
@@ -2359,8 +2606,11 @@ private fun Bubble(
                 ChatPhoto(url, m.imageWidth, m.imageHeight, onClick = { onOpenPhoto(url) }, onLongPress = onLongPress)
                 if (m.body.isNotBlank()) Spacer(Modifier.height(6.dp))
             }
-            // A card or photo sent on its own has no words; an empty Text would still take a line.
-            if (m.body.isNotBlank() || (m.share == null && m.image == null)) {
+            m.audio?.let { url -> VoiceNote(url, m.audioDurationMs ?: 0, m.mine) }
+            m.poll?.let { poll -> PollCard(poll, m.mine, onVote?.let { v -> { ids -> v(poll, ids) } }) }
+            // A card, photo, voice note or poll sent on its own has no words of its own;
+            // an empty Text would still take a line (and a poll's body IS its question).
+            if (m.poll == null && m.audio == null && (m.body.isNotBlank() || (m.share == null && m.image == null))) {
                 // Links open in the browser; the rest of the bubble still long-presses.
                 val annotated = remember(m.body, m.mine) { linkified(m.body, m.mine) }
                 Text(
@@ -2740,7 +2990,11 @@ private fun PendingBubble(p: PendingMessage, onRetry: () -> Unit) {
                 ChatPhoto(ph.uri, ph.width, ph.height, onClick = if (p.failed) onRetry else null)
                 if (p.body.isNotBlank()) Spacer(Modifier.height(6.dp))
             }
-            if (p.body.isNotBlank() || (p.share == null && p.photo == null)) {
+            p.voice?.let { v -> VoiceNote(null, v.durationMs, mine = true, pending = true) }
+            p.poll?.let { pl ->
+                Text("📊 Poll", color = Color.White.copy(alpha = 0.8f), fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            }
+            if (p.voice == null && (p.body.isNotBlank() || (p.share == null && p.photo == null))) {
                 Text(
                     p.body,
                     color = Color.White,
@@ -3293,5 +3547,106 @@ private fun presenceLabel(lastSeenIso: String?, online: Boolean): String? {
         "Yesterday" -> "last seen yesterday at $time"
         null -> null
         else -> "last seen $day"
+    }
+}
+
+/**
+ * What a message REQUEST shows instead of a composer: who it's from, the promise that they
+ * can't tell it was read, and the three answers.
+ */
+@Composable
+private fun RequestPanel(name: String, busy: Boolean, onAccept: () -> Unit, onDelete: () -> Unit, onBlock: (() -> Unit)?) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(HaraanColors.Field)
+            .navigationBarsPadding()
+            .padding(horizontal = 18.dp, vertical = 14.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("$name wants to message you", color = HaraanColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        Spacer(Modifier.height(4.dp))
+        Text(
+            "They don't follow you back. They won't know you've read this unless you accept.",
+            color = HaraanColors.TextSecondary,
+            fontSize = 12.5.sp,
+            textAlign = TextAlign.Center,
+        )
+        Spacer(Modifier.height(12.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+            if (onBlock != null) {
+                Text(
+                    "Block",
+                    color = HaraanColors.Danger,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color.White)
+                        .pressable(enabled = !busy, onClick = onBlock).padding(vertical = 12.dp),
+                )
+            }
+            Text(
+                "Delete",
+                color = HaraanColors.TextPrimary,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(Color.White)
+                    .pressable(enabled = !busy, haptic = Feel.REMOVE, onClick = onDelete).padding(vertical = 12.dp),
+            )
+            Text(
+                "Accept",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 14.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(HaraanColors.EventsBlue)
+                    .pressable(enabled = !busy, haptic = Feel.COMMIT, onClick = onAccept).padding(vertical = 12.dp),
+            )
+        }
+    }
+}
+
+/** Recording a voice note: a pulsing dot, the time against the limit, cancel and send. */
+@Composable
+private fun RecordingBar(elapsedMs: Int, maxMs: Int, onCancel: () -> Unit, onSend: () -> Unit) {
+    val pulse = androidx.compose.animation.core.rememberInfiniteTransition(label = "rec")
+    val alpha by pulse.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.25f,
+        animationSpec = androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(650),
+            androidx.compose.animation.core.RepeatMode.Reverse,
+        ),
+        label = "recDot",
+    )
+    Row(
+        Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            Modifier.size(46.dp).clip(CircleShape).background(HaraanColors.Field).pressable(haptic = Feel.REMOVE, onClick = onCancel),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Filled.Delete, "Cancel recording", tint = HaraanColors.Danger, modifier = Modifier.size(21.dp))
+        }
+        Spacer(Modifier.width(10.dp))
+        Row(
+            Modifier.weight(1f).clip(RoundedCornerShape(22.dp)).background(HaraanColors.Field).padding(horizontal = 16.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.size(10.dp).graphicsLayer { this.alpha = alpha }.clip(CircleShape).background(HaraanColors.Danger))
+            Spacer(Modifier.width(10.dp))
+            Text(voiceClock(elapsedMs), color = HaraanColors.TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            Text("max ${voiceClock(maxMs)}", color = HaraanColors.TextMuted, fontSize = 12.sp)
+        }
+        Spacer(Modifier.width(9.dp))
+        Box(
+            Modifier.size(46.dp).clip(CircleShape).background(HaraanColors.EventsBlue).pressable(haptic = Feel.COMMIT, onClick = onSend),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.AutoMirrored.Filled.Send, "Send voice message", tint = Color.White, modifier = Modifier.size(19.dp))
+        }
     }
 }

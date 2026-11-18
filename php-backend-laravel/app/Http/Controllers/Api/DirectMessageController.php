@@ -53,6 +53,11 @@ final class DirectMessageController extends Controller
             ->selectRaw('conversation_id, max(id) as max_id')
             ->pluck('max_id', 'conversation_id');
 
+        $this->pending = DB::table('conversation_participants')
+            ->whereIn('conversation_id', $conversations->pluck('id'))
+            ->where('request_status', 'pending')
+            ->pluck('user_id', 'conversation_id');
+
         $conversations = $conversations
             // A chat this viewer deleted stays gone until someone writes again.
             ->filter(function (Conversation $c) use ($rows, $latestIds): bool {
@@ -90,6 +95,10 @@ final class DirectMessageController extends Controller
             // Whether the photo button shows in a conversation.
             'photos' => PlatformRules::bool('chat.photos'),
             'max_pins' => PlatformRules::int('chat.max_pins'),
+            // Message requests waiting for THIS viewer to answer — they sit in their own folder.
+            'requests_count' => $conversations->filter(fn (Conversation $c) => ($rows->get($c->id)?->request_status) === 'pending')->count(),
+            'voice_notes' => PlatformRules::bool('chat.voice_notes'),
+            'polls' => PlatformRules::bool('chat.polls'),
             'results' => $conversations->map(fn (Conversation $c) => $this->card($c, $me, $rows->get($c->id)))->values(),
         ]);
     }
@@ -110,10 +119,14 @@ final class DirectMessageController extends Controller
             return response()->json(['error' => 'No player with that ID'], 404);
         }
 
-        $conversation = $this->dm->conversationWith($me, $them);
+        // Mutual follows get the ordinary chat; otherwise, where /control allows it, a message
+        // REQUEST that waits for them to accept.
+        $conversation = $this->dm->openOrRequest($me, $them);
         if ($conversation === null) {
             return response()->json([
-                'error' => 'You can only message players you follow who also follow you.',
+                'error' => PlatformRules::bool('chat.requests')
+                    ? 'You can\'t message this player right now.'
+                    : 'You can only message players you follow who also follow you.',
             ], 403);
         }
 
@@ -129,8 +142,9 @@ final class DirectMessageController extends Controller
             return $conversation ?? response()->json(['error' => 'Not found'], 404);
         }
 
-        // Opening the thread IS reading it.
+        // Opening the thread IS reading it (except a message request — see markRead).
         $this->dm->markRead($conversation, $me);
+        $requestState = $this->dm->requestState($conversation, $me);
         // "Delete chat" hid everything up to here, for this viewer only.
         $clearedUpto = (int) ($this->dm->participantRow($conversation, $me)?->cleared_upto_id ?? 0);
 
@@ -227,10 +241,21 @@ final class DirectMessageController extends Controller
             $lastSeen = $conversation->counterpart($me)?->last_seen_at;
         }
 
+        // Polls on this page, built for this reader (names of voters in a group).
+        $polls = $this->dm->pollsFor($messages->where('kind', 'poll')->pluck('id')->map(fn ($id) => (int) $id)->all(), $me, (bool) $conversation->is_group);
+
         return response()->json([
             'is_group' => (bool) $conversation->is_group,
-            'their_last_seen_at' => $lastSeen?->toIso8601String(),
-            'their_online' => $lastSeen !== null && $lastSeen->gt(now()->subMinutes(6)),
+            // 'incoming' = this viewer must accept or delete; 'outgoing' = waiting on them.
+            'request' => $requestState,
+            'request_messages_left' => $requestState === 'outgoing' ? $this->dm->requestMessagesLeft($conversation, $me) : null,
+            'can_send' => $this->dm->canSendIn($conversation, $me),
+            'voice_notes' => PlatformRules::bool('chat.voice_notes'),
+            'voice_max_seconds' => PlatformRules::int('chat.voice_max_seconds'),
+            'polls' => PlatformRules::bool('chat.polls'),
+            // A "last seen" would tell a requester their request was looked at.
+            'their_last_seen_at' => $requestState === null ? $lastSeen?->toIso8601String() : null,
+            'their_online' => $requestState === null && $lastSeen !== null && $lastSeen->gt(now()->subMinutes(6)),
             // How long after sending a message its author may still edit it (0 = never).
             'edit_window_minutes' => PlatformRules::int('chat.edit_window_minutes'),
             // Who is reading, so the client can ignore the echo of its own typing signal
@@ -257,7 +282,7 @@ final class DirectMessageController extends Controller
                 ? \Illuminate\Support\Carbon::parse($counterpart->last_read_at)->toIso8601String()
                 : null,
             'title' => $conversation->title,
-            'results' => $messages->map(function ($m) use ($me, $senders, $reactions, $quoted, $quotedSenders, $cards) {
+            'results' => $messages->map(function ($m) use ($me, $senders, $reactions, $quoted, $quotedSenders, $cards, $polls) {
                 $sender = $senders->get($m->sender_id);
 
                 return [
@@ -282,6 +307,12 @@ final class DirectMessageController extends Controller
                         : null,
                     'image_width' => $m->image_width !== null ? (int) $m->image_width : null,
                     'image_height' => $m->image_height !== null ? (int) $m->image_height : null,
+                    // A voice note: the file and its length, so "0:12" shows before it loads.
+                    'audio' => $m->deleted_at === null && $m->audio_path !== null
+                        ? \App\Support\MediaUrl::resolve(Storage::disk('public')->url($m->audio_path))
+                        : null,
+                    'audio_duration_ms' => $m->audio_duration_ms !== null ? (int) $m->audio_duration_ms : null,
+                    'poll' => $m->deleted_at === null ? ($polls[(int) $m->id] ?? null) : null,
                     // A shared match / venue / player, built for THIS reader at read time.
                     // Null for plain text, for an unsent message, and while sharing is off.
                     'share' => $m->deleted_at === null && $m->share_type !== null
@@ -525,13 +556,8 @@ final class DirectMessageController extends Controller
         // 1:1, otherwise a thread opened while mutual stays open forever. A GROUP is
         // governed by membership instead — being in it (verified above) is the
         // permission, so unfollowing one member doesn't mute the room.
-        if (! $conversation->is_group) {
-            $other = $conversation->counterpart($me);
-            if ($other !== null && ! $this->dm->canMessage($me, $other)) {
-                return response()->json([
-                    'error' => 'You can no longer message this player.',
-                ], 403);
-            }
+        if (($refusal = $this->sendRefusal($conversation, $me)) !== null) {
+            return $refusal;
         }
 
         $message = $this->dm->sendAndBroadcast(
@@ -661,6 +687,205 @@ final class DirectMessageController extends Controller
         ]);
     }
 
+    /** Message requests waiting, by conversation id → the user who must answer. Set by index(). */
+    private ?\Illuminate\Support\Collection $pending = null;
+
+    private function requestStateFor(Conversation $c, User $me): ?string
+    {
+        if ($c->is_group) {
+            return null;
+        }
+        if ($this->pending === null) {
+            return $this->dm->requestState($c, $me);
+        }
+        $who = $this->pending->get($c->id);
+        if ($who === null) {
+            return null;
+        }
+
+        return (int) $who === (int) $me->id ? 'incoming' : 'outgoing';
+    }
+
+    /** Null when [$me] may post here; otherwise the response that says why not. */
+    private function sendRefusal(Conversation $conversation, User $me): ?JsonResponse
+    {
+        if ($this->dm->canSendIn($conversation, $me)) {
+            return null;
+        }
+        $state = $this->dm->requestState($conversation, $me);
+
+        return response()->json([
+            'error' => match ($state) {
+                'incoming' => 'Accept the request to reply.',
+                'outgoing' => 'Wait for them to accept your request before sending more.',
+                default => 'You can no longer message this player.',
+            },
+        ], 403);
+    }
+
+    /** POST /api/dm/{id}/request/accept — say yes to a message request. */
+    public function acceptRequest(Request $request, int $id): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+        if (! $this->dm->acceptRequest($conversation, $me)) {
+            return response()->json(['error' => 'There is no request to accept.'], 422);
+        }
+
+        return response()->json(['accepted' => true]);
+    }
+
+    /** POST /api/dm/{id}/request/decline — say no: the thread goes, and they can't ask again. */
+    public function declineRequest(Request $request, int $id): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+        if (! $this->dm->declineRequest($conversation, $me)) {
+            return response()->json(['error' => 'There is no request to delete.'], 422);
+        }
+
+        return response()->json(['declined' => true]);
+    }
+
+    /**
+     * POST /api/dm/{id}/voice — multipart `audio` (+ `duration_ms`, `reply_to_id?`).
+     * The app records AAC in an .m4a; the length is capped by /control.
+     */
+    public function voice(Request $request, int $id): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+        if (! PlatformRules::bool('chat.voice_notes')) {
+            return response()->json(['error' => 'Voice messages are switched off right now.'], 403);
+        }
+        $maxMs = PlatformRules::int('chat.voice_max_seconds') * 1000;
+        $data = $request->validate([
+            // finfo reports an .m4a as audio/mp4 or video/mp4 depending on the build — both fine.
+            'audio' => ['required', 'file', 'max:10240', 'mimetypes:audio/mp4,audio/x-m4a,audio/m4a,audio/aac,audio/mpeg,audio/ogg,audio/webm,audio/3gpp,video/mp4,video/3gpp,application/octet-stream'],
+            'duration_ms' => ['required', 'integer', 'min:300', 'max:'.($maxMs + 1500)],
+            'reply_to_id' => ['nullable', 'integer'],
+        ]);
+        if (($refusal = $this->sendRefusal($conversation, $me)) !== null) {
+            return $refusal;
+        }
+
+        $path = $request->file('audio')->storeAs('chat-voice/'.$conversation->id, Str::random(40).'.m4a', 'public');
+        if ($path === false) {
+            return response()->json(['error' => 'Could not save the voice message.'], 500);
+        }
+        $duration = min((int) $data['duration_ms'], $maxMs);
+        $message = $this->dm->sendAndBroadcast(
+            $conversation,
+            $me,
+            '',
+            isset($data['reply_to_id']) ? (int) $data['reply_to_id'] : null,
+            audio: ['path' => $path, 'duration_ms' => $duration],
+        );
+
+        return response()->json([
+            'id' => (int) $message->id,
+            'body' => '',
+            'sender_id' => (int) $me->id,
+            'mine' => true,
+            'sent_at' => $message->created_at?->toIso8601String(),
+            'audio' => \App\Support\MediaUrl::resolve(Storage::disk('public')->url($path)),
+            'audio_duration_ms' => $duration,
+        ], 201);
+    }
+
+    /** POST /api/dm/{id}/poll — `{ question, options: [2..6], multiple }`. */
+    public function poll(Request $request, int $id): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+        if (! PlatformRules::bool('chat.polls')) {
+            return response()->json(['error' => 'Polls are switched off right now.'], 403);
+        }
+        $data = $request->validate([
+            'question' => ['required', 'string', 'max:200'],
+            'options' => ['required', 'array', 'min:2', 'max:6'],
+            'options.*' => ['required', 'string', 'max:80'],
+            'multiple' => ['nullable', 'boolean'],
+        ]);
+        $options = array_values(array_unique(array_filter(array_map(fn ($o) => trim((string) $o), $data['options']), fn ($o) => $o !== '')));
+        if (trim($data['question']) === '' || count($options) < 2) {
+            return response()->json(['error' => 'A poll needs a question and at least two different answers.'], 422);
+        }
+        if (($refusal = $this->sendRefusal($conversation, $me)) !== null) {
+            return $refusal;
+        }
+
+        $message = $this->dm->createPoll($conversation, $me, $data['question'], $options, (bool) ($data['multiple'] ?? false));
+        $poll = $this->dm->pollsFor([(int) $message->id], $me, (bool) $conversation->is_group)[(int) $message->id] ?? null;
+
+        return response()->json([
+            'id' => (int) $message->id,
+            'body' => $message->body,
+            'sender_id' => (int) $me->id,
+            'mine' => true,
+            'sent_at' => $message->created_at?->toIso8601String(),
+            'poll' => $poll,
+        ], 201);
+    }
+
+    /** POST /api/dm/{id}/polls/{poll}/vote — `{ options: [ids] }`; empty takes your vote back. */
+    public function vote(Request $request, int $id, int $poll): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        $conversation = $this->memberConversation($me, $id);
+        if (! $conversation instanceof Conversation) {
+            return $conversation ?? response()->json(['error' => 'Not found'], 404);
+        }
+        $data = $request->validate(['options' => ['present', 'array', 'max:6'], 'options.*' => ['integer']]);
+        if ($this->dm->requestState($conversation, $me) === 'incoming') {
+            return response()->json(['error' => 'Accept the request first.'], 403);
+        }
+        if (! $this->dm->vote($conversation, $me, $poll, $data['options'])) {
+            return response()->json(['error' => 'That poll is gone.'], 422);
+        }
+        $messageId = (int) DB::table('chat_polls')->where('id', $poll)->value('direct_message_id');
+
+        return response()->json([
+            'poll' => $this->dm->pollsFor([$messageId], $me, (bool) $conversation->is_group)[$messageId] ?? null,
+        ]);
+    }
+
+    /**
+     * POST /api/dm/match/{matchId}/team — the team chat for a match you created: opened if it
+     * exists, made from the players you accepted otherwise.
+     */
+    public function teamGroup(Request $request, int $matchId): JsonResponse
+    {
+        $me = $request->attributes->get('auth_user');
+        if (! $me instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+        if (! PlatformRules::bool('chat.team_groups')) {
+            return response()->json(['error' => 'Team chats are switched off right now.'], 403);
+        }
+        $result = $this->dm->teamGroup($me, $matchId);
+        if ($result === null) {
+            return response()->json([
+                'error' => 'Nobody to chat with yet — accept players into this match first.',
+            ], 422);
+        }
+        [$conversation, $created] = $result;
+
+        return response()->json($this->card($conversation->load('participants'), $me), $created ? 201 : 200);
+    }
+
     /**
      * POST /api/dm/{id}/photo — a photo, with an optional caption and reply.
      *
@@ -686,11 +911,8 @@ final class DirectMessageController extends Controller
             'reply_to_id' => ['nullable', 'integer'],
         ]);
 
-        if (! $conversation->is_group) {
-            $other = $conversation->counterpart($me);
-            if ($other !== null && ! $this->dm->canMessage($me, $other)) {
-                return response()->json(['error' => 'You can no longer message this player.'], 403);
-            }
+        if (($refusal = $this->sendRefusal($conversation, $me)) !== null) {
+            return $refusal;
         }
 
         $file = $request->file('image');
@@ -1021,6 +1243,10 @@ final class DirectMessageController extends Controller
             // This viewer's own list housekeeping; nobody else is told.
             'pinned' => $row?->pinned_at !== null,
             'archived' => $row?->archived_at !== null,
+            // 'incoming' (answer it) / 'outgoing' (waiting on them) / null.
+            'request' => $this->requestStateFor($c, $me),
+            // A team chat made for a match.
+            'match_id' => $c->match_id !== null ? (string) $c->match_id : null,
         ];
 
         if ($c->is_group) {

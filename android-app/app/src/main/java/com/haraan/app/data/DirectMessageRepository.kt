@@ -31,6 +31,29 @@ data class ChatThread(
   val pinned: Boolean = false,
   /** Moved out of the main list by this viewer; a new message brings it back. */
   val archived: Boolean = false,
+  /** "incoming" = a message request this viewer must answer; "outgoing" = waiting on them. */
+  val request: String? = null,
+  /** Set when this is a team chat made for a match. */
+  val matchId: String? = null,
+)
+
+/** One answer in a poll, with its votes as this viewer sees them. */
+data class ChatPollOption(
+  val id: Long,
+  val label: String,
+  val votes: Int,
+  val mine: Boolean,
+  /** In a group: who picked it. Empty in a 1:1. */
+  val voterNames: List<String> = emptyList(),
+)
+
+data class ChatPoll(
+  val id: Long,
+  val question: String,
+  val multiple: Boolean,
+  /** People who have voted at all. */
+  val voters: Int,
+  val options: List<ChatPollOption>,
 )
 
 /** One message found by searching inside a thread. */
@@ -89,6 +112,11 @@ data class ChatMessage(
   val system: Boolean = false,
   /** Corrected by its author after sending. */
   val edited: Boolean = false,
+  /** A voice note (absolute URL) and its length. */
+  val audio: String? = null,
+  val audioDurationMs: Int? = null,
+  /** A poll, built for this viewer. */
+  val poll: ChatPoll? = null,
 )
 
 /** One person in a conversation, as the info screen lists them. */
@@ -179,6 +207,10 @@ class DirectMessageRepository(
       val photos: Boolean = false,
       /** How many chats a player may pin — a /control setting. */
       val maxPins: Int = 3,
+      /** Message requests waiting for this viewer. */
+      val requestsCount: Int = 0,
+      val voiceNotes: Boolean = false,
+      val polls: Boolean = false,
     ) : ThreadsResult
     data object Failed : ThreadsResult
   }
@@ -195,6 +227,8 @@ class DirectMessageRepository(
     data class Ready(val thread: ChatThread) : GroupResult
     /** A chosen member is not a mutual follow. */
     data object NotAllowed : GroupResult
+    /** Refused with the server's own sentence (e.g. a team chat with nobody accepted yet). */
+    data class Refused(val message: String) : GroupResult
     data object Failed : GroupResult
   }
 
@@ -231,6 +265,9 @@ class DirectMessageRepository(
         shareCards = json.optBoolean("share_cards", false),
         photos = json.optBoolean("photos", false),
         maxPins = json.optInt("max_pins", 3),
+        requestsCount = json.optInt("requests_count", 0),
+        voiceNotes = json.optBoolean("voice_notes", false),
+        polls = json.optBoolean("polls", false),
       )
     } catch (_: Exception) {
       ThreadsResult.Failed
@@ -291,6 +328,15 @@ class DirectMessageRepository(
     val theirOnline: Boolean = false,
     /** Minutes after sending that a message may be edited; 0 = editing off. */
     val editWindowMinutes: Int = 0,
+    /** "incoming" / "outgoing" while a message request waits; null otherwise. */
+    val request: String? = null,
+    /** For an outgoing request: how many more messages may go before they answer. */
+    val requestMessagesLeft: Int? = null,
+    /** Whether this viewer may post here right now (false = the composer is replaced). */
+    val canSend: Boolean = true,
+    val voiceNotes: Boolean = false,
+    val voiceMaxSeconds: Int = 120,
+    val polls: Boolean = false,
   )
 
   /** Kept for callers that only want the lines. */
@@ -364,6 +410,9 @@ class DirectMessageRepository(
               imageHeight = o.optInt("image_height", 0).takeIf { it > 0 },
               system = o.optString("kind", "") == "system",
               edited = o.optBoolean("edited", false),
+              audio = ApiConfig.mediaUrl(o.optString("audio", null).cleanNull()),
+              audioDurationMs = o.optInt("audio_duration_ms", 0).takeIf { it > 0 },
+              poll = o.optJSONObject("poll")?.let(::parsePoll),
             )
           )
         }
@@ -378,6 +427,12 @@ class DirectMessageRepository(
         theirLastSeenAt = root.optString("their_last_seen_at", null).cleanNull(),
         theirOnline = root.optBoolean("their_online", false),
         editWindowMinutes = root.optInt("edit_window_minutes", 0),
+        request = root.optString("request", null).cleanNull(),
+        requestMessagesLeft = if (root.isNull("request_messages_left")) null else root.optInt("request_messages_left"),
+        canSend = root.optBoolean("can_send", true),
+        voiceNotes = root.optBoolean("voice_notes", false),
+        voiceMaxSeconds = root.optInt("voice_max_seconds", 120),
+        polls = root.optBoolean("polls", false),
       )
     } catch (_: Exception) {
       ThreadPage(emptyList(), ok = false)
@@ -635,7 +690,142 @@ class DirectMessageRepository(
       muted = o.optBoolean("muted", false),
       pinned = o.optBoolean("pinned", false),
       archived = o.optBoolean("archived", false),
+      request = o.optString("request", null).cleanNull(),
+      matchId = o.optString("match_id", null).cleanNull(),
     )
+  }
+
+  // ── Tier 3: polls, voice notes, message requests, team chats ──────────────────────
+
+  private fun parsePoll(o: JSONObject): ChatPoll {
+    val arr = o.optJSONArray("options") ?: org.json.JSONArray()
+    return ChatPoll(
+      id = o.optLong("id"),
+      question = o.optString("question", ""),
+      multiple = o.optBoolean("multiple", false),
+      voters = o.optInt("voters", 0),
+      options = buildList {
+        for (i in 0 until arr.length()) {
+          val op = arr.optJSONObject(i) ?: continue
+          val names = op.optJSONArray("voter_names")
+          add(
+            ChatPollOption(
+              id = op.optLong("id"),
+              label = op.optString("label", ""),
+              votes = op.optInt("votes", 0),
+              mine = op.optBoolean("mine", false),
+              voterNames = buildList { if (names != null) for (j in 0 until names.length()) add(names.optString(j)) },
+            )
+          )
+        }
+      },
+    )
+  }
+
+  /** Send a poll. Null means it did not send. */
+  suspend fun createPoll(token: String, conversationId: Long, question: String, options: List<String>, multiple: Boolean): ChatMessage? =
+    withContext(Dispatchers.IO) {
+      val c = conn("/api/dm/$conversationId/poll", "POST", token)
+      try {
+        val payload = JSONObject()
+          .put("question", question.trim())
+          .put("options", org.json.JSONArray(options.map { it.trim() }.filter { it.isNotEmpty() }))
+          .put("multiple", multiple)
+        c.outputStream.use { it.write(payload.toString().toByteArray()) }
+        if (c.responseCode !in 200..299) return@withContext null
+        val o = JSONObject(BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() })
+        ChatMessage(
+          id = o.optLong("id"),
+          body = o.optString("body", question),
+          mine = true,
+          sentAt = o.optString("sent_at", null).cleanNull(),
+          poll = o.optJSONObject("poll")?.let(::parsePoll),
+        )
+      } catch (_: Exception) {
+        null
+      } finally {
+        c.disconnect()
+      }
+    }
+
+  /** Replace this viewer's vote (empty = take it back). Returns the poll as it now stands. */
+  suspend fun vote(token: String, conversationId: Long, pollId: Long, optionIds: List<Long>): ChatPoll? =
+    withContext(Dispatchers.IO) {
+      val c = conn("/api/dm/$conversationId/polls/$pollId/vote", "POST", token)
+      try {
+        c.outputStream.use { it.write(JSONObject().put("options", org.json.JSONArray(optionIds)).toString().toByteArray()) }
+        if (c.responseCode !in 200..299) return@withContext null
+        JSONObject(BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() })
+          .optJSONObject("poll")?.let(::parsePoll)
+      } catch (_: Exception) {
+        null
+      } finally {
+        c.disconnect()
+      }
+    }
+
+  /** Upload a recorded voice note (AAC in .m4a). Null means it did not send. */
+  suspend fun sendVoice(token: String, conversationId: Long, audio: ByteArray, durationMs: Int, replyToId: Long?): ChatMessage? =
+    withContext(Dispatchers.IO) {
+      val boundary = "----HaraanVoice${System.currentTimeMillis()}"
+      val c = (URL("${baseUrl.trimEnd('/')}/api/dm/$conversationId/voice").openConnection() as HttpURLConnection).apply {
+        requestMethod = "POST"
+        doOutput = true
+        connectTimeout = 20000
+        readTimeout = 60000
+        setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+        setRequestProperty("Accept", "application/json")
+        setRequestProperty("Authorization", "Bearer $token")
+      }
+      try {
+        c.outputStream.use { out ->
+          fun field(k: String, v: String) {
+            out.write("--$boundary\r\nContent-Disposition: form-data; name=\"$k\"\r\n\r\n$v\r\n".toByteArray())
+          }
+          field("duration_ms", durationMs.toString())
+          if (replyToId != null && replyToId > 0) field("reply_to_id", replyToId.toString())
+          out.write("--$boundary\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"voice.m4a\"\r\nContent-Type: audio/mp4\r\n\r\n".toByteArray())
+          out.write(audio)
+          out.write("\r\n--$boundary--\r\n".toByteArray())
+        }
+        if (c.responseCode !in 200..299) return@withContext null
+        val o = JSONObject(BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() })
+        ChatMessage(
+          id = o.optLong("id"),
+          body = "",
+          mine = true,
+          sentAt = o.optString("sent_at", null).cleanNull(),
+          audio = ApiConfig.mediaUrl(o.optString("audio", null).cleanNull()),
+          audioDurationMs = o.optInt("audio_duration_ms", durationMs),
+        )
+      } catch (_: Exception) {
+        null
+      } finally {
+        c.disconnect()
+      }
+    }
+
+  suspend fun acceptRequest(token: String, conversationId: Long): Outcome =
+    postOutcome("/api/dm/$conversationId/request/accept", token, JSONObject())
+
+  suspend fun declineRequest(token: String, conversationId: Long): Outcome =
+    postOutcome("/api/dm/$conversationId/request/decline", token, JSONObject())
+
+  /** Open (or make) the team chat for a match this viewer hosts. */
+  suspend fun teamGroup(token: String, matchId: String): GroupResult = withContext(Dispatchers.IO) {
+    val c = conn("/api/dm/match/${URLEncoder.encode(matchId, "UTF-8")}/team", "POST", token)
+    try {
+      c.outputStream.use { it.write("{}".toByteArray()) }
+      when (c.responseCode) {
+        in 200..299 -> GroupResult.Ready(parseThread(JSONObject(BufferedReader(InputStreamReader(c.inputStream)).use { it.readText() })))
+        in 400..499 -> GroupResult.Refused(readError(c) ?: "Couldn't open the team chat.")
+        else -> GroupResult.Failed
+      }
+    } catch (_: Exception) {
+      GroupResult.Failed
+    } finally {
+      c.disconnect()
+    }
   }
 
   // ── Tier 2: list housekeeping, edits, search ───────────────────────────────────────

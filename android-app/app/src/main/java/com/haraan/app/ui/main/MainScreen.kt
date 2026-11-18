@@ -74,6 +74,7 @@ import androidx.compose.material.icons.filled.Login
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Add
@@ -5298,6 +5299,21 @@ private fun CrexMatchesScreen(
                       match = m,
                       onStart = { startScheduledMatch(m) },
                       onOpen = { onMatchClick(m.id) },
+                      onTeamChat = {
+                        scope.launch {
+                          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+                          when (val r = if (token == null) null else dmRepository.teamGroup(token, m.id)) {
+                            is com.haraan.app.data.DirectMessageRepository.GroupResult.Ready -> {
+                              chatReload++
+                              showChatList = true
+                              openThread = r.thread
+                            }
+                            is com.haraan.app.data.DirectMessageRepository.GroupResult.Refused ->
+                              Toast.makeText(context, r.message, Toast.LENGTH_LONG).show()
+                            else -> Toast.makeText(context, "Couldn't open the team chat. Try again.", Toast.LENGTH_SHORT).show()
+                          }
+                        }
+                      },
                     )
                   }
                 }
@@ -5583,7 +5599,7 @@ private fun CrexMatchesScreen(
                     lastMessageAt = null, unreadCount = 0,
                   )
                 is com.haraan.app.data.DirectMessageRepository.OpenChatResult.NotAllowed ->
-                  Toast.makeText(context, "You can message players who follow you back.", Toast.LENGTH_LONG).show()
+                  Toast.makeText(context, "You can't message this player. Follow them first — if they don't follow back, your message goes to them as a request.", Toast.LENGTH_LONG).show()
                 else ->
                   Toast.makeText(context, "Couldn't open the chat. Try again.", Toast.LENGTH_SHORT).show()
               }
@@ -5967,7 +5983,7 @@ private fun CrexMatchesScreen(
                 )
               // Say WHY rather than doing nothing — the rule is not obvious.
               is com.haraan.app.data.DirectMessageRepository.OpenChatResult.NotAllowed ->
-                Toast.makeText(context, "You can message players who follow you back.", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "You can't message this player. Follow them first — if they don't follow back, your message goes to them as a request.", Toast.LENGTH_LONG).show()
               else ->
                 Toast.makeText(context, "Couldn't open the chat. Try again.", Toast.LENGTH_SHORT).show()
             }
@@ -6185,7 +6201,7 @@ private fun CrexMatchesScreen(
                 )
               // Say WHY rather than doing nothing — the rule is not obvious.
               is com.haraan.app.data.DirectMessageRepository.OpenChatResult.NotAllowed ->
-                Toast.makeText(context, "You can message players who follow you back.", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "You can't message this player. Follow them first — if they don't follow back, your message goes to them as a request.", Toast.LENGTH_LONG).show()
               else ->
                 Toast.makeText(context, "Couldn't open the chat. Try again.", Toast.LENGTH_SHORT).show()
             }
@@ -6210,6 +6226,21 @@ private fun CrexMatchesScreen(
       var threadLastSeen by remember(thread.id) { mutableStateOf<String?>(null) }
       var threadOnline by remember(thread.id) { mutableStateOf(false) }
       var threadEditWindow by remember(thread.id) { mutableStateOf(0) }
+      // Message-request state and the /control switches for voice and polls, from the page.
+      var threadRequest by remember(thread.id) { mutableStateOf(thread.request) }
+      var threadRequestLeft by remember(thread.id) { mutableStateOf<Int?>(null) }
+      var threadCanSend by remember(thread.id) { mutableStateOf(true) }
+      var threadVoice by remember(thread.id) { mutableStateOf(false) }
+      var threadVoiceMax by remember(thread.id) { mutableStateOf(120) }
+      var threadPolls by remember(thread.id) { mutableStateOf(false) }
+      fun takeRules(page: com.haraan.app.data.DirectMessageRepository.ThreadPage) {
+        threadRequest = page.request
+        threadRequestLeft = page.requestMessagesLeft
+        threadCanSend = page.canSend
+        threadVoice = page.voiceNotes
+        threadVoiceMax = page.voiceMaxSeconds
+        threadPolls = page.polls
+      }
       // Where a message can be forwarded: the viewer own threads, fetched once when this
       // one opens. Empty on failure, which simply hides the Forward action rather than
       // offering a picker that cannot deliver.
@@ -6245,6 +6276,7 @@ private fun CrexMatchesScreen(
             if (page.ok) {
               threadLastSeen = page.theirLastSeenAt
               threadOnline = page.theirOnline
+              takeRules(page)
             }
             page.messages
           }
@@ -6265,6 +6297,7 @@ private fun CrexMatchesScreen(
               threadLastSeen = page.theirLastSeenAt
               threadOnline = page.theirOnline
               threadEditWindow = page.editWindowMinutes
+              takeRules(page)
             }
             page
           }
@@ -6335,6 +6368,42 @@ private fun CrexMatchesScreen(
         searchMessages = { q ->
           val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
           if (token == null) emptyList() else dmRepository.search(token, thread.id, q)
+        },
+        sendVoice = if (threadVoice) {
+          { bytes, ms, replyTo ->
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            if (token == null) null else dmRepository.sendVoice(token, thread.id, bytes, ms, replyTo)
+          }
+        } else null,
+        voiceMaxSeconds = threadVoiceMax,
+        createPoll = if (threadPolls) {
+          { q, options, multiple ->
+            val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+            if (token == null) null else dmRepository.createPoll(token, thread.id, q, options, multiple)
+          }
+        } else null,
+        onVote = { pollId, ids ->
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          if (token == null) null else dmRepository.vote(token, thread.id, pollId, ids)
+        },
+        request = threadRequest,
+        requestMessagesLeft = threadRequestLeft,
+        canSend = threadCanSend,
+        onAcceptRequest = {
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          val ok = token != null && dmRepository.acceptRequest(token, thread.id) == com.haraan.app.data.DirectMessageRepository.Outcome.Ok
+          if (ok) {
+            threadRequest = null
+            threadCanSend = true
+            chatReload++
+          }
+          ok
+        },
+        onDeclineRequest = {
+          val token = com.haraan.app.data.TokenStore.getSignedInToken(context)
+          val ok = token != null && dmRepository.declineRequest(token, thread.id) == com.haraan.app.data.DirectMessageRepository.Outcome.Ok
+          if (ok) chatReload++
+          ok
         },
         theirLastSeenAt = if (thread.isGroup) null else threadLastSeen,
         theirOnline = !thread.isGroup && threadOnline,
@@ -6483,7 +6552,7 @@ private fun CrexMatchesScreen(
                 )
               }
               is com.haraan.app.data.DirectMessageRepository.OpenChatResult.NotAllowed ->
-                Toast.makeText(context, "You can message players who follow you back.", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "You can't message this player. Follow them first — if they don't follow back, your message goes to them as a request.", Toast.LENGTH_LONG).show()
               else ->
                 Toast.makeText(context, "Couldn't open the chat. Try again.", Toast.LENGTH_SHORT).show()
             }
@@ -9776,6 +9845,8 @@ private fun ScheduledMatchCard(
   match: com.haraan.app.data.ScheduledMatch,
   onStart: () -> Unit,
   onOpen: () -> Unit,
+  /** Open (or make) the team chat with everyone accepted into this match. */
+  onTeamChat: (() -> Unit)? = null,
 ) {
   // Re-read the clock every 30s so "In 12 min" counts down and a missed kick-off turns
   // into "Was due" on its own, without a refresh. Play-now matches have no clock.
@@ -9850,6 +9921,20 @@ private fun ScheduledMatchCard(
         Spacer(Modifier.width(10.dp))
       } else {
         Spacer(Modifier.weight(1f))
+      }
+      if (onTeamChat != null) {
+        // The team chat sits beside Start: "who's bringing the stumps" happens before kick-off.
+        Box(
+          Modifier
+            .pressable(onClick = onTeamChat)
+            .size(40.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(HaraanColors.EventsBlue.copy(alpha = 0.10f)),
+          contentAlignment = Alignment.Center,
+        ) {
+          Icon(Icons.Default.Forum, "Team chat", tint = HaraanColors.EventsBlue, modifier = Modifier.size(19.dp))
+        }
+        Spacer(Modifier.width(8.dp))
       }
       ScheduledStartButton(onStart)
     }
