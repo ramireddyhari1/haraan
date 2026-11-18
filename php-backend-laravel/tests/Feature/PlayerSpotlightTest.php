@@ -25,6 +25,8 @@ class PlayerSpotlightTest extends TestCase
     {
         parent::setUp();
         $this->configureRazorpay();
+        // Photos are checked on disk now, so each test player's photo has to really exist.
+        \Illuminate\Support\Facades\Storage::fake('public');
     }
 
     private function player(string $username, int $runs = 0, int $wickets = 0, array $overrides = []): User
@@ -41,6 +43,9 @@ class PlayerSpotlightTest extends TestCase
             'avatar' => '/storage/avatars/'.$username.'.jpg',
         ], $overrides));
         $u->forceFill(['career_runs' => $runs, 'career_wickets' => $wickets, 'career_matches' => 5])->save();
+        if (is_string($u->avatar) && str_starts_with($u->avatar, '/storage/')) {
+            \Illuminate\Support\Facades\Storage::disk('public')->put(substr($u->avatar, strlen('/storage/')), 'jpg');
+        }
 
         return $u;
     }
@@ -92,6 +97,44 @@ class PlayerSpotlightTest extends TestCase
 
         PlatformRules::save(['player_cards.photo_only' => false]);
         $this->assertSame(['pinned', 'star', 'nophoto'], $this->ids($this->getJson('/api/players/spotlight')));
+    }
+
+    /**
+     * A photo path whose file is gone (deleted, never synced) is not a photo: the player drops
+     * out of a photo-only row, and when they still show their card carries no avatar, so the
+     * app draws its default picture instead of a broken tile.
+     */
+    public function test_a_photo_whose_file_is_missing_counts_as_no_photo(): void
+    {
+        $this->player('real', runs: 50);
+        $ghost = $this->player('ghost', runs: 900);
+        \Illuminate\Support\Facades\Storage::disk('public')->delete('avatars/ghost.jpg');
+
+        $this->assertSame(['real'], $this->ids($this->getJson('/api/players/spotlight')));
+
+        PlatformRules::save(['player_cards.photo_only' => false]);
+        $res = $this->getJson('/api/players/spotlight')->assertOk();
+        $this->assertSame(['ghost', 'real'], $this->ids($res));
+        $this->assertNull($res->json('players.0.avatar'));
+        $this->assertSame('/storage/avatars/real.jpg', $res->json('players.1.avatar'));
+        $this->assertSame($ghost->player_id, $res->json('players.0.player_id'));
+    }
+
+    /** The two numbers under the name speak the player's own sport. */
+    public function test_card_stats_follow_the_players_sport(): void
+    {
+        PlatformRules::save(['player_cards.photo_only' => false, 'player_cards.min_matches' => 0, 'player_cards.order' => 'matches']);
+        $this->player('bat', runs: 120, wickets: 3, overrides: ['primary_sport' => 'Cricket']);
+        $striker = $this->player('striker', overrides: ['primary_sport' => 'Football']);
+        $shuttler = $this->player('shuttler', overrides: ['primary_sport' => 'Badminton']);
+        \App\Models\PlayerSportCareer::create(['player_id' => $striker->player_id, 'sport' => 'football', 'matches' => 4, 'wins' => 2, 'losses' => 2, 'draws' => 0, 'totals' => ['goals' => 5, 'assists' => 2], 'bests' => []]);
+        \App\Models\PlayerSportCareer::create(['player_id' => $shuttler->player_id, 'sport' => 'badminton', 'matches' => 3, 'wins' => 1, 'losses' => 2, 'draws' => 0, 'totals' => [], 'bests' => []]);
+
+        $byName = collect($this->getJson('/api/players/spotlight')->assertOk()->json('players'))->keyBy('username');
+
+        $this->assertSame([['label' => 'R', 'value' => 120], ['label' => 'W', 'value' => 3]], $byName['bat']['stats']);
+        $this->assertSame([['label' => 'G', 'value' => 5], ['label' => 'A', 'value' => 2]], $byName['striker']['stats']);
+        $this->assertSame([['label' => 'Won', 'value' => 1], ['label' => 'Lost', 'value' => 2]], $byName['shuttler']['stats']);
     }
 
     public function test_viewer_never_sees_self_or_players_already_followed(): void

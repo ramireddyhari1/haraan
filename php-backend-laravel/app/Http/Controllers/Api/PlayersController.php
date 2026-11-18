@@ -1417,16 +1417,32 @@ final class PlayersController extends Controller
             ->when($order === 'xp', fn ($q) => $q->orderByDesc('ranked_xp'))
             ->when($order === 'matches', fn ($q) => $q->orderByDesc('career_matches'))
             ->orderByDesc('ranked_xp')
-            ->limit(max(0, $limit - $pinned->count()))
+            // Over-fetch a little: some rows point at photo files that no longer exist, and
+            // those are dropped below when the row is photo-only.
+            ->limit(max(0, $limit - $pinned->count()) + 10)
             ->get();
+        if (PlatformRules::bool('player_cards.photo_only')) {
+            $rest = $rest->filter(fn (User $u) => self::avatarFileExists($u->avatar))->values();
+        }
 
         $players = $pinned->concat($rest)->take($limit)->values();
         $entitlements = app(MemberEntitlements::class);
+        // Each player's career in their own main sport, read once for the whole row.
+        $careers = PlayerSportCareer::query()
+            ->whereIn('player_id', $players->pluck('player_id')->filter()->all())
+            ->get()
+            ->keyBy(fn (PlayerSportCareer $c) => $c->player_id.'|'.$c->sport);
         $cards = collect($this->playerCards($players, $viewer))
-            ->map(fn (array $card, int $i) => [
+            ->map(fn (array $card, int $i) => array_merge([
                 // A guest has no follow state; null is what the app reads as "sign in to follow".
                 'is_following' => $viewer === null ? null : $card['is_following'],
-            ] + $card + [
+            ], $card, [
+                'is_following' => $viewer === null ? null : $card['is_following'],
+                // The two numbers under the name, in the language of the player's own sport.
+                'stats' => self::spotlightStats($players[$i], $careers),
+                // A photo whose file is gone is no photo: the app then draws its default
+                // player picture instead of an empty tile with a letter on it.
+                'avatar' => self::avatarFileExists($card['avatar'] ?? null) ? $card['avatar'] : null,
                 'runs' => (int) ($players[$i]->career_runs ?? 0),
                 'wickets' => (int) ($players[$i]->career_wickets ?? 0),
                 // Pro / Hero mark — the same rule as the profile's member_badge: the plan code
@@ -1434,7 +1450,7 @@ final class PlayersController extends Controller
                 'member_badge' => $entitlements->allows($players[$i], MemberFeature::PROFILE_MEMBER_BADGE)
                     ? $entitlements->for($players[$i])->plan->code
                     : null,
-            ])
+            ]))
             ->all();
 
         return response()->json([
@@ -1443,6 +1459,58 @@ final class PlayersController extends Controller
             'home_enabled' => PlatformRules::bool('player_cards.home_enabled'),
             'players' => $cards,
         ]);
+    }
+
+    /**
+     * The two numbers a "Players to follow" card shows, chosen by the player's main sport:
+     * cricket R/W, football G/A, basketball PTS/REB, kabaddi PTS/TKL, and for every other sport
+     * (badminton, tennis, volleyball…) matches Won/Lost. Zeros are shown as zeros.
+     *
+     * @param  \Illuminate\Support\Collection<string, PlayerSportCareer>  $careers  keyed "player_id|sport"
+     * @return array<int, array{label: string, value: int}>
+     */
+    private static function spotlightStats(User $player, \Illuminate\Support\Collection $careers): array
+    {
+        $sport = str_replace(' ', '_', strtolower(trim((string) $player->primary_sport))) ?: 'cricket';
+        if ($sport === 'cricket') {
+            return [
+                ['label' => 'R', 'value' => (int) ($player->career_runs ?? 0)],
+                ['label' => 'W', 'value' => (int) ($player->career_wickets ?? 0)],
+            ];
+        }
+
+        $career = $careers->get($player->player_id.'|'.$sport);
+        $t = is_array($career?->totals) ? $career->totals : [];
+        $n = static fn (string $k): int => (int) ($t[$k] ?? 0);
+
+        return match ($sport) {
+            'football' => [['label' => 'G', 'value' => $n('goals')], ['label' => 'A', 'value' => $n('assists')]],
+            'basketball' => [['label' => 'PTS', 'value' => $n('points')], ['label' => 'REB', 'value' => $n('rebounds')]],
+            'kabaddi' => [['label' => 'PTS', 'value' => $n('points')], ['label' => 'TKL', 'value' => $n('tackle_points')]],
+            default => [
+                ['label' => 'Won', 'value' => (int) ($career?->wins ?? 0)],
+                ['label' => 'Lost', 'value' => (int) ($career?->losses ?? 0)],
+            ],
+        };
+    }
+
+    /**
+     * Whether an avatar value points at something that can actually be shown. A remote URL is
+     * trusted; an uploaded one ("/storage/avatars/x.png" or "avatars/x.png") must still exist
+     * on the public disk — a deleted or never-synced file otherwise shows as a broken tile.
+     */
+    private static function avatarFileExists(?string $avatar): bool
+    {
+        $avatar = trim((string) $avatar);
+        if ($avatar === '') {
+            return false;
+        }
+        if (preg_match('#^https?://#i', $avatar) === 1 && ! str_contains($avatar, '/storage/')) {
+            return true;
+        }
+        $path = ltrim((string) preg_replace('#^(https?://[^/]+)?/?storage/#i', '', $avatar), '/');
+
+        return $path !== '' && \Illuminate\Support\Facades\Storage::disk('public')->exists($path);
     }
 
     /**

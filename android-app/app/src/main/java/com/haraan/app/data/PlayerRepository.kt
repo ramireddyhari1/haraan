@@ -55,6 +55,11 @@ data class SpotlightPlayer(
   val wickets: Int,
   /** "pro" / "hero" while their plan includes the badge, else null — same rule as the profile. */
   val memberBadge: String? = null,
+  /**
+   * The two numbers under the name, in the player's own sport (R/W, G/A, PTS/REB, Won/Lost),
+   * as the server chose them. Empty from an older server — the card then falls back.
+   */
+  val stats: List<Pair<String, Int>> = emptyList(),
 )
 
 /** The /api/players/spotlight answer — the row's heading, where it shows, and its cards. */
@@ -775,6 +780,15 @@ class PlayerRepository(
                   runs = json.optInt("runs", 0),
                   wickets = json.optInt("wickets", 0),
                   memberBadge = json.optString("member_badge", null).clean(),
+                  stats = json.optJSONArray("stats")?.let { s ->
+                    buildList {
+                      for (j in 0 until s.length()) {
+                        val o = s.optJSONObject(j) ?: continue
+                        val label = o.optString("label", "").trim()
+                        if (label.isNotEmpty()) add(label to o.optInt("value", 0))
+                      }
+                    }
+                  }.orEmpty(),
                 )
               )
             }

@@ -1,5 +1,7 @@
 package com.haraan.app.ui.social
 
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,6 +25,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -141,8 +146,6 @@ private fun PlayerSpotlightCard(
       .padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 12.dp),
     horizontalAlignment = Alignment.CenterHorizontally,
   ) {
-    // The initial sits UNDER the photo: a failed or missing image draws nothing, so the
-    // card falls back to the letter instead of an empty grey block.
     Box(
       modifier = Modifier
         .fillMaxWidth()
@@ -151,19 +154,28 @@ private fun PlayerSpotlightCard(
         .background(HaraanColors.Field),
       contentAlignment = Alignment.Center,
     ) {
-      Text(
-        text = player.name.take(1).uppercase(),
-        color = HaraanColors.TextMuted,
-        fontSize = 44.sp,
-        fontWeight = FontWeight.Bold,
-      )
-      ApiConfig.mediaUrl(player.avatar)?.let { url ->
+      // No photo, or one that won't load: the default player, filling the tile like a real
+      // photo. It's a rectangular cut from INSIDE the profile's round artwork
+      // (ic_default_player_card), because the round original has white corners that showed
+      // when stretched over a square tile.
+      val url = ApiConfig.mediaUrl(player.avatar)
+      var photoFailed by remember(url) { mutableStateOf(false) }
+      if (url == null || photoFailed) {
+        Image(
+          painter = painterResource(com.haraan.app.R.drawable.ic_default_player_card),
+          contentDescription = player.name,
+          contentScale = ContentScale.Crop,
+          alignment = Alignment.TopCenter,
+          modifier = Modifier.fillMaxSize(),
+        )
+      } else {
         AsyncImage(
           model = url,
           contentDescription = player.name,
           contentScale = ContentScale.Crop,
           // Faces sit high in a portrait; keep the head, crop the legs.
           alignment = Alignment.TopCenter,
+          onError = { photoFailed = true },
           modifier = Modifier.fillMaxSize(),
         )
       }
@@ -189,16 +201,22 @@ private fun PlayerSpotlightCard(
       textAlign = TextAlign.Center,
     )
     Spacer(Modifier.height(3.dp))
-    // Runs and wickets are cricket's numbers; any other sport's player gets their match count.
     val sport = sportKey(player.primarySport)
-    if (sport == null || sport == "cricket") {
+    // Two numbers in the player's own sport, zeros included: cricket R/W, football G/A,
+    // basketball PTS/REB, kabaddi PTS/TKL, anything else matches Won/Lost. The server picks
+    // them; an older server that doesn't send them falls back to the old R/W or match count.
+    if (card.stats.isNotEmpty()) {
+      Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        card.stats.take(2).forEach { (label, value) -> StatText(label, value) }
+      }
+    } else if (sport == null || sport == "cricket") {
       Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         StatText("R", card.runs)
         StatText("W", card.wickets)
       }
     } else {
       Text(
-        text = "${player.matches} ${if (player.matches == 1) "match" else "matches"}",
+        text = if (player.matches <= 0) "New player" else "${player.matches} ${if (player.matches == 1) "match" else "matches"}",
         color = HaraanColors.TextSecondary,
         fontSize = 13.sp,
         fontWeight = FontWeight.Medium,
@@ -218,19 +236,22 @@ private fun sportKey(raw: String?): String? =
 private fun SportBadge(sport: String, modifier: Modifier = Modifier) {
   Row(
     modifier = modifier
+      // Same size as the compact PRO / HERO chip beside it (MemberTierChip compact), so the
+      // two tags read as a matched pair rather than one shouting over the other.
       .clip(CircleShape)
       .background(Color.White.copy(alpha = 0.94f))
-      .padding(start = 6.dp, end = 9.dp, top = 4.dp, bottom = 4.dp),
+      .padding(start = 4.dp, end = 7.dp, top = 1.dp, bottom = 1.dp),
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(4.dp),
   ) {
-    SportGlyph(sport = sport, tint = HaraanColors.EventsBlue, size = 14.dp)
+    SportGlyph(sport = sport, tint = HaraanColors.EventsBlue, size = 13.dp)
     Text(
       text = sport.replace('_', ' ').uppercase(),
       color = HaraanColors.TextPrimary,
-      fontSize = 10.sp,
-      fontWeight = FontWeight.Bold,
-      letterSpacing = 0.4.sp,
+      fontSize = 9.sp,
+      lineHeight = 12.sp,
+      fontWeight = FontWeight.ExtraBold,
+      letterSpacing = 0.6.sp,
       maxLines = 1,
     )
   }
