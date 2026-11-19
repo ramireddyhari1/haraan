@@ -136,6 +136,8 @@ class AdminPanelProvider extends PanelProvider
                 \App\Filament\Pages\CommentaryRulesPage::class,
                 // Platform → Pulse desktop page: the `pulse_web` sections under the /gamehub grid.
                 \App\Filament\Pages\PulseWebPage::class,
+                // Platform → Ball tracking page: every word on haraan.app/ball-tracking.
+                \App\Filament\Pages\BallTrackingWebPage::class,
                 // Workforce & HR → Today: who's in, who's off, what's waiting on a manager.
                 \App\Filament\Pages\WorkforceToday::class,
             ])

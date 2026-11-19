@@ -99,20 +99,19 @@ final class PublicWebController extends Controller
 
         return view('site.events', [
             'title' => $isHome
-                ? 'Haraan — Events, Turf Booking & Live Sports'
+                ? 'Haraan — Events, Turf Booking, Live Scores & Ball Tracking'
                 : ($seoCity ? 'Events in '.$seoCity : 'Events near you'),
             'seo' => [
                 'title' => $isHome
-                    ? 'Haraan — Book Events, Sports Turfs & Live Scores'
+                    ? 'Haraan — Events, Turf Booking, Live Scores & Ball Tracking'
                     : ($seoCity
                         ? 'Events in '.$seoCity.' — book tickets'
                         : 'Events near you — book tickets'),
                 // Keep this under the partial's 158-char cap: at 164 it used to be
                 // cut mid-word, so results ended "...live gully-cricket s...".
                 'description' => $isHome
-                    ? 'Haraan — book concerts, comedy, workshops and sports events near you, '
-                        .'reserve cricket turfs and badminton courts, and follow live '
-                        .'gully-cricket scores.'
+                    ? 'Haraan — book events and sports turfs, score cricket live, and track every '
+                        .'ball with your phone camera: bowling speed, LBW, swing, turn and 3D replay.'
                     : 'Concerts, comedy nights, workshops, sports and festivals'
                         .($seoCity ? ' in '.$seoCity : '')
                         .'. Browse what\'s on, pick your tickets and pay in seconds on Haraan.',
@@ -1801,7 +1800,7 @@ final class PublicWebController extends Controller
             'abFeedAdsense' => NetworkAds::webSlot('feed', $viewer instanceof User ? $viewer : null),
             'seo' => [
                 'title' => 'ActionBoard — Live Cricket Scores & Grassroots Matches',
-                'description' => 'Follow live gully cricket scores, ball-by-ball commentary, local match scorecards, and district leaderboards on Haraan ActionBoard.',
+                'description' => 'Live gully cricket scores, ball-by-ball commentary and district leaderboards on Haraan ActionBoard, plus camera ball tracking: speed, LBW and 3D replay.',
                 'canonical' => route('site.gamehub.actionboard'),
                 'breadcrumbs' => [
                     ['name' => 'Haraan', 'url' => url('/')],

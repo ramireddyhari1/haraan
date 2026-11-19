@@ -566,6 +566,9 @@
                     <a href="{{ url('/gamehub?sport=Badminton') }}">Badminton Courts</a>
                     <a href="{{ url('/gamehub?sport=Football') }}">Football Grounds</a>
                     <a href="{{ url('/gamehub/actionboard') }}">Live Matches</a>
+                    @if(\App\Support\PlatformRules::bool('ball_tracking_web.enabled'))
+                        <a href="{{ url('/ball-tracking') }}">Ball Tracking</a>
+                    @endif
                 </nav>
                 <nav class="mfoot__col" aria-label="Your account">
                     <h4>Your Account</h4>

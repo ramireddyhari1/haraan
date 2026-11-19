@@ -28,7 +28,7 @@
     ) || preg_match('#/(book|pass|control|create)$#', $seoPath);
 
     $seoDefaultDesc = 'Haraan — book concerts, comedy, workshops and sports events near you, '
-        . 'find turfs and courts to play, and follow live gully cricket scores.';
+        . 'find turfs and courts to play, follow live gully cricket scores and track the ball with Haraan ball tracking.';
 
     // The default share image is a purpose-built 1200x630 card. The bare wordmark
     // that used to sit here was 1680x445 and transparent, so every client that
@@ -104,11 +104,14 @@
                 ],
                 'image' => asset('images/haraan-logo-square.png'),
                 'description' => 'Haraan — book concerts, comedy, workshops and sports events, '
-                    . 'reserve cricket turfs and courts, and follow live gully-cricket scores.',
+                    . 'reserve cricket turfs and courts, follow live gully-cricket scores, and track every '
+                    . 'ball — speed, LBW, swing and 3D replay — with Haraan ball tracking.',
+                'knowsAbout' => ['Cricket ball tracking', 'Live cricket scoring', 'Turf booking', 'Event ticketing'],
                 // sameAs is the brand-verification signal: it links this entity to
                 // its known profiles so Google resolves "haraan" to this brand.
                 'sameAs' => [
                     'https://www.instagram.com/haraan_official/',
+                    'https://play.google.com/store/apps/details?id=com.haraan.app',
                 ],
             ],
             [

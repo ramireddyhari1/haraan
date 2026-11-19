@@ -90,6 +90,9 @@ foreach (['/ads.txt' => 'web', '/app-ads.txt' => 'app'] as $adsTxtPath => $adsTx
         ]);
 }
 
+// Haraan ball tracking — public SEO page; copy lives in /control → Platform → Ball tracking page.
+Route::get('/ball-tracking', [\App\Http\Controllers\Web\BallTrackingController::class, 'show'])->name('site.ball-tracking');
+
 Route::controller(PublicWebController::class)->group(function (): void {
     Route::get('/', 'events');
     Route::get('/home', 'home');

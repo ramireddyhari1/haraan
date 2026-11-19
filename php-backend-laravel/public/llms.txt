@@ -1,0 +1,21 @@
+# Haraan
+
+> Haraan (haraan.app) is an Indian sports and events app for Android and the web. It sells event tickets, books cricket turfs and sports courts, scores matches live, and tracks the cricket ball with the phone camera.
+
+Haraan scores a cricket match and tracks the ball in the same app. The two work together:
+
+- **ActionBoard** is live ball-by-ball scoring. The scorer taps runs and wickets on a phone, and anyone with the link follows the score, commentary and scorecard live.
+- **Haraan ball tracking** is automatic and camera-based. A second Android phone on a stand, side-on to the pitch, follows the ball itself. It starts when the scorer taps Ball on ActionBoard, or by itself in Auto mode, with no taps on the camera phone. For every delivery it shows the bowling speed in km/h, where the ball pitched, swing and turn, an LBW projection (hitting, missing or too close to call), and a 3D replay. Each tracked ball is saved as a video in the phone's Gallery. It works with three stumps or with the stone used as a wicket in gully cricket, and with leather or tennis balls. It comes with the Haraan Pro and Hero plans, and with any slot booked at a Haraan venue.
+
+## Main pages
+
+- [Haraan ball tracking](https://haraan.app/ball-tracking): what camera ball tracking measures, how to set it up, and FAQs
+- [ActionBoard](https://haraan.app/gamehub/actionboard): live cricket and multi-sport scores, commentary and scorecards
+- [Pulse](https://haraan.app/gamehub): book cricket turfs, box cricket, badminton, football, pickleball and other courts
+- [Events](https://haraan.app/events): concerts, comedy, workshops and sports events
+- [Leaderboard](https://haraan.app/gamehub/leaderboard): player rankings by district, state and country
+- [Become a partner](https://haraan.app/become-a-partner): venue owners and event hosts list on Haraan
+
+## App
+
+- [Haraan on Google Play](https://play.google.com/store/apps/details?id=com.haraan.app)

@@ -30,7 +30,7 @@ class SitemapController extends Controller
 
     public function index(): Response
     {
-        $xml = Cache::remember('sitemap.xml.v5', now()->addHour(), fn (): string => $this->build());
+        $xml = Cache::remember('sitemap.xml.v6', now()->addHour(), fn (): string => $this->build());
 
         // Anonymous, identical for everyone — let crawlers and any CDN cache it for
         // an hour (matches the app-cache TTL above).
@@ -59,6 +59,9 @@ class SitemapController extends Controller
         $add('/gamehub', null, '0.9', 'daily');
         $add('/gamehub/actionboard', null, '0.8', 'daily');
         $add('/gamehub/leaderboard', null, '0.5', 'daily');
+        if (\App\Support\PlatformRules::bool('ball_tracking_web.enabled')) {
+            $add('/ball-tracking', null, '0.8', 'monthly');
+        }
         // The partner console door — public + indexable (the console itself is not).
         $add('/partner/login', null, '0.4', 'monthly');
 
