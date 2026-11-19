@@ -195,6 +195,8 @@ class HomeActivity : ComponentActivity(), PaymentResultWithDataListener {
           } else {
             // /control → App updates. After the splash, so the sheet never lands on it.
             com.haraan.app.appupdate.AppUpdateHost()
+            // /control → Operations → Maintenance mode. Above everything, update sheet included.
+            com.haraan.app.maintenance.MaintenanceHost()
           }
         }
       }

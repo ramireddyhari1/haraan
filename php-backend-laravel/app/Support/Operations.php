@@ -161,6 +161,7 @@ final class Operations
         return [
             'maintenance' => [
                 'enabled' => self::maintenance(),
+                'title' => PlatformRules::string('ops.maintenance_title'),
                 'message' => PlatformRules::string('ops.maintenance_message'),
             ],
             'update' => [

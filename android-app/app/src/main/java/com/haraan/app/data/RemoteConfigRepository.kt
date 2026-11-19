@@ -41,12 +41,20 @@ data class NetworkAdsConfig(
     val matchUnitId: String? = null,
 )
 
+/** /control → Platform → Operations → Maintenance mode. */
+data class MaintenanceConfig(
+    val enabled: Boolean = false,
+    val title: String = "",
+    val message: String = "",
+)
+
 /** Resolved remote config: feature flags + theme + realtime endpoint. */
 data class RemoteConfig(
     val features: Map<String, Boolean> = emptyMap(),
     val theme: AppTheme = AppTheme(),
     val realtime: RealtimeConfig = RealtimeConfig(),
     val ads: NetworkAdsConfig = NetworkAdsConfig(),
+    val maintenance: MaintenanceConfig = MaintenanceConfig(),
 )
 
 /**
@@ -87,6 +95,9 @@ class RemoteConfigRepository(private val baseUrl: String = ApiConfig.BASE_URL) {
             val ads = root.optJSONObject("ads")
             val adsFeed = ads?.optJSONObject("feed")
             val adsMatch = ads?.optJSONObject("match")
+            val mt = root.optJSONObject("operations")?.optJSONObject("maintenance")
+            fun mtStr(k: String) = mt?.optString(k)?.takeIf { it.isNotBlank() && it != "null" } ?: ""
+
             fun unit(o: JSONObject?) = o?.optString("unit_id")?.takeIf { it.startsWith("ca-app-pub-") }
 
             RemoteConfig(
@@ -111,6 +122,11 @@ class RemoteConfigRepository(private val baseUrl: String = ApiConfig.BASE_URL) {
                     feedUnitId = unit(adsFeed),
                     feedEvery = (adsFeed?.optInt("every", 5) ?: 5).coerceAtLeast(2),
                     matchUnitId = unit(adsMatch),
+                ),
+                maintenance = MaintenanceConfig(
+                    enabled = mt?.optBoolean("enabled", false) ?: false,
+                    title = mtStr("title"),
+                    message = mtStr("message"),
                 ),
             )
         } catch (_: Exception) {

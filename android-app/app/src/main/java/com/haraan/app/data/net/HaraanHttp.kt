@@ -41,6 +41,8 @@ object HaraanHttp {
                 )
                 // Below /control's minimum version: bring up the update screen now.
                 if (response.code == 426) com.haraan.app.appupdate.AppUpdater.requestCheck()
+                // /control → Operations → Maintenance mode switched on mid-session.
+                if (response.code == 503) com.haraan.app.maintenance.MaintenanceState.from503(response.peekBody(4096).string())
                 response
             }
             .build()

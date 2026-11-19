@@ -16,6 +16,7 @@ object RemoteConfigStore {
 
     fun update(value: RemoteConfig) {
         config = value
+        com.haraan.app.maintenance.MaintenanceState.fromConfig(value.maintenance)
     }
 
     /** True only when the flag exists and is enabled for this viewer. */

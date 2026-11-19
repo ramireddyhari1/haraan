@@ -58,10 +58,10 @@ final class EnforcePlatformOperations
             $message = PlatformRules::string('ops.maintenance_message');
 
             if ($isApi || $request->expectsJson()) {
-                return response()->json(['error' => 'maintenance', 'message' => $message], 503, ['Retry-After' => '300']);
+                return response()->json(['error' => 'maintenance', 'title' => PlatformRules::string('ops.maintenance_title'), 'message' => $message], 503, ['Retry-After' => '300']);
             }
 
-            return response()->view('site.maintenance', ['message' => $message], 503, ['Retry-After' => '300']);
+            return response()->view('site.maintenance', ['title' => PlatformRules::string('ops.maintenance_title'), 'message' => $message], 503, ['Retry-After' => '300']);
         }
 
         if ($isApi) {

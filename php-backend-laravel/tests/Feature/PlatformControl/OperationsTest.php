@@ -67,6 +67,15 @@ class OperationsTest extends TestCase
         $this->postJson('/api/webhooks/razorpay', [])->assertDontSee('Back at 6am.');
     }
 
+    public function test_maintenance_heading_is_set_from_control_on_web_api_and_config(): void
+    {
+        PlatformRules::save(['ops.maintenance_mode' => true, 'ops.maintenance_title' => 'New pitch going in']);
+
+        $this->get('/events')->assertStatus(503)->assertSee('New pitch going in');
+        $this->getJson('/api/events')->assertStatus(503)->assertJsonPath('title', 'New pitch going in');
+        $this->getJson('/api/config')->assertOk()->assertJsonPath('operations.maintenance.title', 'New pitch going in');
+    }
+
     public function test_maintenance_off_changes_nothing(): void
     {
         $this->getJson('/api/events')->assertOk();

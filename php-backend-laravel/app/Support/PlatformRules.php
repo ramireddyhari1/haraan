@@ -87,6 +87,7 @@ final class PlatformRules
     private const RULES = [
         // ── Emergency ───────────────────────────────────────────────────────────────
         'ops.maintenance_mode' => ['section' => 'ops', 'type' => self::TYPE_BOOL, 'default' => false, 'label' => 'Maintenance mode', 'help' => 'The app and website show the message below and refuse requests. /control, /partner and payment webhooks keep working.', 'danger' => true],
+        'ops.maintenance_title' => ['section' => 'ops', 'type' => self::TYPE_TEXT, 'default' => 'We’re making Haraan better', 'max' => 80, 'label' => 'Maintenance heading', 'help' => 'The big line on the maintenance screen, on the website and in the app.'],
         'ops.maintenance_message' => ['section' => 'ops', 'type' => self::TYPE_TEXT, 'default' => 'Haraan is down for scheduled maintenance. We’ll be back shortly.', 'max' => 200, 'label' => 'Maintenance message', 'help' => ''],
         'ops.pause_all_bookings' => ['section' => 'ops', 'type' => self::TYPE_BOOL, 'default' => false, 'label' => 'Pause all bookings', 'help' => 'No new event tickets or venue slots, on the app or the website. Orders already paying can still finish.', 'danger' => true],
         'ops.pause_event_bookings' => ['section' => 'ops', 'type' => self::TYPE_BOOL, 'default' => false, 'label' => 'Pause event ticket sales', 'help' => 'Events only.', 'danger' => true],
