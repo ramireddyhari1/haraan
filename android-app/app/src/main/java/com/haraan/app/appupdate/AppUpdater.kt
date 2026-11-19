@@ -106,6 +106,19 @@ object AppUpdater {
     private var receiverRegistered = false
     private var apk: File? = null
 
+    /**
+     * "Later" with /control's remind-hours at 0: put off for this launch only. Cleared by
+     * [newSession] on the next fresh open of the app, so the sheet comes back every launch
+     * until the member updates.
+     */
+    private var sessionSnoozed: String? = null
+
+    /** A fresh launch of the app (not a rotation or a return from the background). */
+    fun newSession() {
+        sessionSnoozed = null
+        lastCheckAt = 0L
+    }
+
     @Volatile private var appContext: Context? = null
 
     /** Look for an update. Throttled unless [force]; never interrupts one in progress. */
@@ -143,7 +156,7 @@ object AppUpdater {
                 _state.value = current.copy(info = info)
                 return@launch
             }
-            if (!info.required && snoozed(app, info.latestVersion)) return@launch
+            if (!info.required && (sessionSnoozed == info.latestVersion.orEmpty() || snoozed(app, info.latestVersion))) return@launch
             val cached = withContext(Dispatchers.IO) { cachedApk(app, info)?.takeIf { verify(app, it) == null } }
             apk = cached
             _state.value = UpdateState(info, phase = if (cached != null) UpdatePhase.READY else UpdatePhase.OFFER)
@@ -161,6 +174,11 @@ object AppUpdater {
         if (s.info.required) return
         if (s.phase == UpdatePhase.DOWNLOADING || s.phase == UpdatePhase.CHECKING) {
             _state.value = s.copy(minimized = true)
+            return
+        }
+        if (s.info.remindAfterHours <= 0) {
+            sessionSnoozed = s.info.latestVersion.orEmpty()
+            _state.value = null
             return
         }
         prefs(context).edit()
@@ -295,7 +313,7 @@ object AppUpdater {
                 whatsNew = if (notes == null) emptyList() else (0 until notes.length()).map { notes.optString(it) }.filter { it.isNotBlank() },
                 apkUrl = text("apk_url").orEmpty(),
                 storeUrl = text("store_url"),
-                remindAfterHours = root.optInt("remind_after_hours", 24).coerceAtLeast(1),
+                remindAfterHours = root.optInt("remind_after_hours", 24).coerceAtLeast(0),
             )
         } finally {
             conn.disconnect()

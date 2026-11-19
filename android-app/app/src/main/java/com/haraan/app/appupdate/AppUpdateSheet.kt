@@ -82,6 +82,12 @@ private const val DOTS = 14
 fun AppUpdateHost() {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
+    // Survives rotation but not a fresh open, so "Later" (at 0 hours) lasts one launch.
+    val launched = androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    if (!launched.value) {
+        AppUpdater.newSession()
+        launched.value = true
+    }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, activity) {
         val observer = LifecycleEventObserver { _, event ->
@@ -144,7 +150,9 @@ private fun OfferSheet(s: UpdateState, activity: Activity?) {
                     .size(width = 36.dp, height = 4.dp)
                     .background(Track, CircleShape),
             )
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(10.dp))
+            UpdatePhoneArt(s, Modifier.fillMaxWidth().height(150.dp))
+            Spacer(Modifier.height(14.dp))
             UpdateBody(s, activity)
         }
     }
@@ -171,6 +179,8 @@ private fun RequiredScreen(s: UpdateState, activity: Activity?) {
             fontWeight = FontWeight.SemiBold,
         )
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+            UpdatePhoneArt(s, Modifier.fillMaxWidth().height(210.dp))
+            Spacer(Modifier.height(28.dp))
             UpdateBody(s, activity)
         }
     }
