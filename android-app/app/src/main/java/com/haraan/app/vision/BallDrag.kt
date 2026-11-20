@@ -25,12 +25,18 @@ import kotlin.math.sqrt
  * Estimates, not measurements: a worn tennis ball or a damp one drags differently, which is
  * why the ball is a choice the person filming can correct.
  */
-enum class BallDrag(val serverValue: String, val label: String, val perMetre: Double) {
-    LEATHER("leather", "Leather", 0.0068),
-    TENNIS("tennis", "Tennis", 0.022),
-    TAPE("tape", "Tape", 0.012),
-    RUBBER("rubber", "Rubber", 0.0095),
-    SYNTHETIC("synthetic", "Synthetic", 0.0082),
+enum class BallDrag(
+    val serverValue: String,
+    val label: String,
+    val perMetre: Double,
+    /** Its diameter, metres: the ruler [BallSizer] reads distance with. */
+    val diameterM: Double,
+) {
+    LEATHER("leather", "Leather", 0.0068, 0.072),
+    TENNIS("tennis", "Tennis", 0.022, 0.067),
+    TAPE("tape", "Tape", 0.012, 0.068),
+    RUBBER("rubber", "Rubber", 0.0095, 0.070),
+    SYNTHETIC("synthetic", "Synthetic", 0.0082, 0.071),
     ;
 
     /**

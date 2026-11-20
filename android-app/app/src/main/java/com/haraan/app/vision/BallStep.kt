@@ -30,6 +30,12 @@ class BallStep(
         private set
     private var lastCorridorMs = Long.MIN_VALUE / 2
 
+    /** The ball's width at full resolution, per sighting: see [BallSizer]. */
+    private val sizer = BallSizer()
+
+    /** [track] with the ball's measured widths attached. Safe from any thread. */
+    fun sized(track: List<BallSighting>): List<BallSighting> = sizer.sized(track)
+
     /** The flight called and still held, while [keepLooking]; a fresh tracker holds nothing. */
     var called: List<BallSighting>? = null
         private set
@@ -82,6 +88,7 @@ class BallStep(
         aspect: Float,
     ): Result {
         val sighting = tracker.onFrame(luma, width, height, rowStride, rotationDegrees, timestampMs)
+        runCatching { sizer.frame(luma, width, height, rowStride, rotationDegrees, timestampMs, sighting, tracker.lastCandidates) }
         lock ?: return Result(sighting, null, false)
 
         // Asked on every frame, sighting or not: going quiet IS the signal. A flight a newer
@@ -123,7 +130,7 @@ class BallStep(
             // A fresh start for the next ball, as an Auto segment does.
             reset()
         }
-        return Result(sighting, newly, false)
+        return Result(sighting, sizer.sized(newly), false)
     }
 
     companion object {

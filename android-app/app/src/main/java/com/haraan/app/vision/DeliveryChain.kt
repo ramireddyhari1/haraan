@@ -173,7 +173,7 @@ class DeliveryChain(
                 "trimmed=${FlightTrim.receding(TrailGeometry.runs(track).lastOrNull().orEmpty(), aspect, lock.anchor.base).size} " +
                 "atStumps=${FlightMetrics.reachedStumps(FlightTrim.receding(track, aspect, lock.anchor.base), lock, aspect)} span=${"%.4f".format(lock.anchor.span(aspect))} measurable=${lock.isMeasurable} " +
                 // BENCH_TRACK (scoreboard only) prints every sighting, not just the last eight.
-                "tail=" + (if (System.getenv("BENCH_TRACK") != null) track else track.takeLast(8)).joinToString(";") { "%d,%.3f,%.3f,%d".format(it.timestampMs, it.x, it.y, it.areaPx) },
+                "tail=" + (if (System.getenv("BENCH_TRACK") != null) track else track.takeLast(8)).joinToString(";") { "%d,%.3f,%.3f,%d,%s".format(it.timestampMs, it.x, it.y, it.areaPx, it.diameterFw?.let { d -> "%.4f".format(d) } ?: "-") },
         )
         val path = if (f != null && ground != null) ArPath.fromFlight(f, ground)?.takeIf { !it.isEmpty } else null
         return CalledDelivery(calledMs, track, lock, f, path)

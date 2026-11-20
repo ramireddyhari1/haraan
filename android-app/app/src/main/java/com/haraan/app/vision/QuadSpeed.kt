@@ -66,6 +66,16 @@ class PitchCamera private constructor(
         return Point2(focal * cx / cz / aspect + 0.5, focal * cy / cz + 0.5)
     }
 
+    /** Focal length in frame WIDTHS: how a size in the picture turns into an angle across it. */
+    val focalFw: Double get() = focal / aspect
+
+    /** The cosine of how far the picture point ([x], [y]) is off the lens axis. */
+    fun cosOffAxis(x: Double, y: Double): Double {
+        val cx = (x - 0.5) * aspect / focal
+        val cy = (y - 0.5) / focal
+        return 1.0 / sqrt(1 + cx * cx + cy * cy)
+    }
+
     /** Unit direction in the world through the picture point ([x], [y]). */
     fun ray(x: Double, y: Double): DoubleArray {
         val cx = (x - 0.5) * aspect / focal
@@ -302,6 +312,7 @@ object QuadSpeed {
          * projected into the stumps when the ball had bounced over them.
          */
         val dragK = ball?.perMetre ?: 0.0
+        val ranges = ball?.let { sizeRanges(run, camera, it) }.orEmpty()
         val turn = if (bounce?.atMs == null) pictureBounceMs(run) else null
         /*
          * ...AND NOT AMONG THE SIGHTINGS WHEN THE PICTURE SAYS IT HAS NOT PITCHED. A ball that
@@ -330,7 +341,7 @@ object QuadSpeed {
             var tb = a
             while (tb <= b) {
                 val near = run.filter { abs(it.timestampMs - tb) <= MAX_LOOKBACK_MS }
-                val fit = fitDragged(near, camera, tb, reachedStumpsMs, Bends.NONE, dragK)
+                val fit = fitDragged(near, camera, tb, reachedStumpsMs, Bends.NONE, dragK, ranges)
                     ?.takeIf { physical(it.v) }
                     // A fragment whose best answer is impossible is refused, not given its runner-up:
                     // three 5-6 point scraps after a 4K ball came back as 115-180 km/h "balls".
@@ -352,13 +363,13 @@ object QuadSpeed {
         val straight = best ?: return FitResult.Refused("the sightings around the bounce are too few or too close together to fit")
         if (run.size < FALLING_MIN_POINTS && behindSeen) {
             val near0 = run.filter { abs(it.timestampMs - bestTb) <= MAX_LOOKBACK_MS }
-            val bestSolved = fitDragged(near0, camera, bestTb, reachedStumpsMs, Bends.NONE, dragK)
+            val bestSolved = fitDragged(near0, camera, bestTb, reachedStumpsMs, Bends.NONE, dragK, ranges)
             if (bestSolved != null && !inFrontOfTheBowler(bestSolved, near0.first().timestampMs - bestTb, dragK)) {
                 return FitResult.Refused("the fit put the ball behind the bowler's stumps when first seen")
             }
         }
         val near = run.filter { abs(it.timestampMs - bestTb) <= MAX_LOOKBACK_MS }
-        val bent = bend(near, camera, bestTb, reachedStumpsMs, straight, dragK)
+        val bent = bend(near, camera, bestTb, reachedStumpsMs, straight, dragK, ranges)
         val v = bent.v
         val swingAccel = bent.swingAccel
 
@@ -435,8 +446,8 @@ object QuadSpeed {
      */
     private class Bent(val v: DoubleArray, val swingAccel: Double, val turned: Boolean)
 
-    private fun bend(points: List<BallSighting>, camera: PitchCamera, tb: Double, reachedStumpsMs: Double?, straight: DoubleArray, dragK: Double): Bent {
-        val base = fitDragged(points, camera, tb, reachedStumpsMs, Bends.NONE, dragK) ?: return Bent(straight, 0.0, false)
+    private fun bend(points: List<BallSighting>, camera: PitchCamera, tb: Double, reachedStumpsMs: Double?, straight: DoubleArray, dragK: Double, ranges: Map<Long, Ranged>): Bent {
+        val base = fitDragged(points, camera, tb, reachedStumpsMs, Bends.NONE, dragK, ranges) ?: return Bent(straight, 0.0, false)
         val beforeSeen = points.filter { it.timestampMs <= tb }
         val afterSeen = points.filter { it.timestampMs > tb }
         val canTurn = afterSeen.size >= TURN_MIN_AFTER &&
@@ -451,7 +462,7 @@ object QuadSpeed {
          * is judged as a pair, and a single is kept only if it still holds up on its own.
          */
         fun candidate(bends: Bends, over: Solved): Solved? {
-            val fit = fitDragged(points, camera, tb, reachedStumpsMs, bends, dragK) ?: return null
+            val fit = fitDragged(points, camera, tb, reachedStumpsMs, bends, dragK, ranges) ?: return null
             if (!physical(fit.v) || fit.v[3] >= 0) return null
             if (!significant(over, fit, points.size)) return null
             if (bends.turn && !turnWorthKeeping(fit.v, afterSeen, tb)) return null
@@ -645,6 +656,8 @@ object QuadSpeed {
         val rows: Int,
         val unknowns: Int,
         val extraRows: Int,
+        /** Each width row's miss, as a share of the distance it gave (+ = fitted farther). */
+        val sizeMisses: Map<Long, Double> = emptyMap(),
     ) {
         val error: Double get() = rss / rows
     }
@@ -661,20 +674,99 @@ object QuadSpeed {
      * fit seeds it and a few rounds settle it (each moves the pace by well under 1% after the
      * second on the simulated balls). [dragK] 0 is the steady fit, once.
      */
-    private fun fitDragged(points: List<BallSighting>, camera: PitchCamera, tb: Double, reachedStumpsMs: Double?, bends: Bends, dragK: Double): Solved? {
-        var fit = fitFlight(points, camera, tb, reachedStumpsMs, bends, 0.0) ?: return null
-        if (dragK <= 0.0) return fit
-        repeat(DRAG_ROUNDS) {
-            val pace = hypot(fit.v[2], fit.v[3])
-            if (!pace.isFinite() || pace <= 0.0) return fit
-            fit = fitFlight(points, camera, tb, reachedStumpsMs, bends, dragK * pace) ?: return null
+    private fun fitDragged(
+        points: List<BallSighting>,
+        camera: PitchCamera,
+        tb: Double,
+        reachedStumpsMs: Double?,
+        bends: Bends,
+        dragK: Double,
+        ranges: Map<Long, Ranged> = emptyMap(),
+    ): Solved? {
+        fun once(used: Map<Long, Ranged>): Solved? {
+            var fit = fitFlight(points, camera, tb, reachedStumpsMs, bends, 0.0, used) ?: return null
+            if (dragK <= 0.0) return fit
+            repeat(DRAG_ROUNDS) {
+                val pace = hypot(fit.v[2], fit.v[3])
+                if (!pace.isFinite() || pace <= 0.0) return fit
+                fit = fitFlight(points, camera, tb, reachedStumpsMs, bends, dragK * pace, used) ?: return null
+            }
+            return fit
+        }
+        /*
+         * A width that disagrees with the flight the rest make is a ball still in the hand, a
+         * ball against a moving arm, a patch of net: the worst one goes and the flight is fitted
+         * again, while it is out by more than [SIZE_OUTLIER] and enough widths are left.
+         */
+        var used = ranges.filterKeys { k -> points.any { it.timestampMs == k } }
+        var fit = once(used) ?: return null
+        while (used.size > SIZE_MIN_KEPT) {
+            // Out against the OTHER widths, not against the fit: a flight gravity placed wrong
+            // disagrees with every width alike, and that is what the widths are there to fix.
+            val misses = fit.sizeMisses.values.sorted()
+            val middle = misses.getOrNull(misses.size / 2) ?: break
+            val worst = fit.sizeMisses.maxByOrNull { abs(it.value - middle) } ?: break
+            if (abs(worst.value - middle) <= SIZE_OUTLIER) break
+            used = used - worst.key
+            fit = once(used) ?: return null
         }
         return fit
     }
 
+    /*
+     * THE BALL'S WIDTH NEAR THE LENS, AS A DISTANCE. [BallSizer] measures it at full resolution;
+     * through the lens and the ball's real size it is how far from the lens the ball was, the
+     * one thing the picture cannot otherwise say along a flat line of sight. Only widths big
+     * enough to be a measurement are used: under ~8 px a pixel is more than an eighth of it.
+     */
+    /** A distance from the ball's width, and its own error as a share of it. */
+    internal class Ranged(val rangeM: Double, val sigma: Double)
+
+    private fun sizeRanges(run: List<BallSighting>, camera: PitchCamera, ball: BallDrag): Map<Long, Ranged> {
+        val f = camera.focalFw
+        if (f <= 0) return emptyMap()
+        return run.mapNotNull { s ->
+            val d = s.diameterFw?.toDouble()?.takeIf { it >= SIZE_MIN_FW } ?: return@mapNotNull null
+            // Off the axis the ball's width across the line of sight is seen through 1/cos.
+            val r = BallSizer.rangeM(d, f, ball.diameterM) / camera.cosOffAxis(s.x.toDouble(), s.y.toDouble())
+            /*
+             * NEAR AND FAR BOTH COUNT. The far end is where depth is lost (a flat line of sight),
+             * so a 5 px width there matters as much as a 15 px one near the lens — it just carries
+             * a pixel's error, which is a bigger share of a small ball.
+             */
+            val px = d * SIZE_FRAME_PX
+            s.timestampMs to Ranged(r, maxOf(SIZE_SIGMA, SIZE_PX_ERR / px))
+        }.toMap()
+    }
+
+    /** Narrowest width used, in frame widths (~3.5 px at 720 wide, the ball at the far stumps). */
+    internal const val SIZE_MIN_FW = 0.0048
+    /** Frame widths in pixels where widths are measured (the 720-wide upright analysis frame). */
+    private const val SIZE_FRAME_PX = 720.0
+    /** A width's error at best, as a share of the distance, and in pixels for small balls. */
+    private const val SIZE_SIGMA = 0.06
+    private const val SIZE_PX_ERR = 1.2
+    /*
+     * A sighting's miss in the cross-product rows is metres off its ray: a pixel at a few
+     * metres is ~5 mm. A width row's miss is relative; dividing by its own error puts the two
+     * on one footing.
+     */
+    private const val SIZE_RAY_M = 0.005
+    private const val SIZE_OUTLIER = 0.35
+
+    private const val SIZE_MIN_KEPT = 2
+
     private const val DRAG_ROUNDS = 4
 
-    private fun fitFlight(points: List<BallSighting>, camera: PitchCamera, tb: Double, reachedStumpsMs: Double?, bends: Bends, kappa: Double): Solved? {
+    private fun fitFlight(
+        points: List<BallSighting>,
+        camera: PitchCamera,
+        tb: Double,
+        reachedStumpsMs: Double?,
+        bends: Bends,
+        kappa: Double,
+        ranges: Map<Long, Ranged> = emptyMap(),
+    ): Solved? {
         val kappaOut = kappa * PACE_KEPT_OFF_PITCH
         val before = points.count { it.timestampMs <= tb }
         val after = points.size - before
@@ -699,6 +791,9 @@ object QuadSpeed {
         val ata = Array(n) { DoubleArray(n) }
         val atb = DoubleArray(n)
         val rows = ArrayList<Pair<DoubleArray, Double>>()
+        // Width rows, kept apart to report how far each is out once solved.
+        val sizeRows = ArrayList<Triple<Long, DoubleArray, Double>>()
+        val sizeWeights = ArrayList<Double>()
         for (sighting in points) {
             val s = (sighting.timestampMs - tb) / 1000.0
             if (s > 0 && !hasAfter) continue
@@ -733,6 +828,25 @@ object QuadSpeed {
                     for (q in 0 until n) ata[p][q] += coeff[p] * coeff[q]
                 }
             }
+            // How far along its ray it was, from its width: d.(a + J u) = r, as a share of r.
+            ranges[sighting.timestampMs]?.let { g ->
+                val r = g.rangeM
+                val coeff = DoubleArray(n) { k -> (d[0] * j[0][k] + d[1] * j[1][k] + d[2] * j[2][k]) / r }
+                val rhsR = (r - (d[0] * a[0] + d[1] * a[1] + d[2] * a[2])) / r
+                sizeRows += Triple(sighting.timestampMs, coeff, rhsR)
+                sizeWeights += SIZE_RAY_M / g.sigma
+            }
+        }
+        for ((i, row) in sizeRows.withIndex()) {
+            val (_, coeff0, rhs0) = row
+            val weight = sizeWeights[i]
+            val coeff = DoubleArray(n) { coeff0[it] * weight }
+            val rhs = rhs0 * weight
+            rows.add(coeff to rhs)
+            for (p in 0 until n) {
+                atb[p] += coeff[p] * rhs
+                for (q in 0 until n) ata[p][q] += coeff[p] * coeff[q]
+            }
         }
         /*
          * THE BALL WAS AT THE STUMPS WHEN IT REACHED THEM. From behind the bowler the far end
@@ -743,7 +857,7 @@ object QuadSpeed {
          * ball was on their line (0 m) at that moment — one strong equation that pins the
          * distance against the time, and with it both the speed and where it pitched.
          */
-        var extraRows = 0
+        var extraRows = sizeRows.size
         if (reachedStumpsMs != null) {
             val s = (reachedStumpsMs - tb) / 1000.0
             val coeff = DoubleArray(n)
@@ -770,7 +884,12 @@ object QuadSpeed {
         } else {
             u.copyOf(5)
         }
-        return Solved(full, if (swingCol >= 0) u[swingCol] else 0.0, rss, rows.size, n, extraRows)
+        val misses = sizeRows.associate { (ts, coeff, rhs) ->
+            var r = -rhs
+            for (k in 0 until n) r += coeff[k] * u[k]
+            ts to r
+        }
+        return Solved(full, if (swingCol >= 0) u[swingCol] else 0.0, rss, rows.size, n, extraRows, misses)
     }
 
     /** Gaussian elimination with partial pivoting; null when singular. */

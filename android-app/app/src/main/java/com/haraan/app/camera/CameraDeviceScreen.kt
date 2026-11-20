@@ -3043,7 +3043,9 @@ private fun CameraMode(
          */
         // [replay]: play the after-ball replay for it — false when a result is only refined.
         // A flight's measurements and its path on the picture, against the pitch as calibrated now.
-        val measureFlight: (List<com.haraan.app.vision.BallSighting>) -> Pair<com.haraan.app.vision.FlightMetrics, com.haraan.app.vision.ArPath> = { flight ->
+        val measureFlight: (List<com.haraan.app.vision.BallSighting>) -> Pair<com.haraan.app.vision.FlightMetrics, com.haraan.app.vision.ArPath> = { unsized ->
+            // The ball's full-resolution widths, for its distance near the lens (BallSizer).
+            val flight = ballStep.sized(unsized)
             val measureLock = steadyWicket.value() ?: wicketLock
             val (quadFor3d, groundCamera) = flightCameras(found, measureLock, cameraIntrinsics, uprightWidthPx, uprightAspect, bowlersEndBase)
             val metrics = com.haraan.app.vision.FlightMetrics.of(flight, uprightAspect, quadFor3d, measureLock, groundCamera, ball)

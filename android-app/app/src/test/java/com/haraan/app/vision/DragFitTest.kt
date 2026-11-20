@@ -24,6 +24,8 @@ class DragFitTest {
         private val right = unit(cross(doubleArrayOf(0.0, 0.0, 1.0), forward))
         private val down = cross(right, forward)
 
+        fun depth(p: DoubleArray): Double = dot(DoubleArray(3) { p[it] - centre[it] }, forward)
+
         fun project(p: DoubleArray): Point2 {
             val rel = DoubleArray(3) { p[it] - centre[it] }
             val z = dot(rel, forward)
@@ -63,7 +65,16 @@ class DragFitTest {
      * quadratic drag k per metre, pitching [lengthM] from the striker. 30 fps; seen until it is
      * [lostBeforeStumpsM] short of the stumps or it bounces, whichever is first.
      */
-    private fun fly(kmh: Double, lengthM: Double, k: Double, lostBeforeStumpsM: Double = 0.0): Flown {
+    private fun fly(
+        kmh: Double,
+        lengthM: Double,
+        k: Double,
+        lostBeforeStumpsM: Double = 0.0,
+        /** Backspin's lift, m/s² upward: a tennis ball floats, and falls slower than gravity alone. */
+        lift: Double = 0.0,
+        /** Measure the ball's width at each sighting, with this share of error (alternating sign); null = none. */
+        sizeError: Double? = null,
+    ): Flown {
         val g = 9.81
         val releaseY = 18.4
         val releaseH = 2.1
@@ -74,12 +85,12 @@ class DragFitTest {
             while (z > 0) {
                 val v = hypot(vy, vz)
                 vy += -k * v * vy * dt
-                vz += (-g - k * v * vz) * dt
+                vz += (-g + lift - k * v * vz) * dt
                 y += vy * dt; z += vz * dt
             }
             return y
         }
-        var lo = -15.0; var hi = 5.0
+        var lo = -25.0; var hi = 10.0
         repeat(60) { val mid = (lo + hi) / 2; if (landY(mid) > lengthM) lo = mid else hi = mid }
         val vz0 = (lo + hi) / 2
 
@@ -97,7 +108,14 @@ class DragFitTest {
             if (t >= nextShot) {
                 if (y > lostBeforeStumpsM) {
                     val img = lens.project(doubleArrayOf(0.02, y, z))
-                    out += BallSighting((t * 1000).toLong(), img.x.toFloat(), img.y.toFloat(), 0.8f, 30)
+                    val diameter = sizeError?.let { e ->
+                        val rel = doubleArrayOf(0.02 - lens.centre[0], y - lens.centre[1], z - lens.centre[2])
+                        val range = sqrt(rel[0] * rel[0] + rel[1] * rel[1] + rel[2] * rel[2])
+                        val cos = lens.depth(doubleArrayOf(0.02, y, z)) / range
+                        val sign = if (out.size % 2 == 0) 1 else -1
+                        (lens.focal / aspect * BallDrag.TENNIS.diameterM / (range * cos) * (1 + sign * e)).toFloat()
+                    }
+                    out += BallSighting((t * 1000).toLong(), img.x.toFloat(), img.y.toFloat(), 0.8f, 30, diameter)
                 }
                 nextShot += 1.0 / 30
             }
@@ -133,6 +151,22 @@ class DragFitTest {
             println("tennis-lost $kmh km/h (avg ${"%.0f".format(flown.avgGroundKmh)}), lost ${lost} m out, ${flown.sightings.size} pts: fit pitched ${"%.2f".format(f.bounceY)}, ground ${"%.1f".format(f.groundKmh)}, release ${"%.1f".format(f.speedKmh)}")
             assertEquals("release speed of a full $kmh km/h ball lost $lost m out", kmh, f.speedKmh, kmh * 0.08)
             assertEquals("length of a full $kmh km/h ball lost $lost m out", flown.bounceY, f.bounceY, 1.5)
+        }
+    }
+
+    /*
+     * THE CASE THAT FOOLED THE SESSION: a floating tennis ball, lost before it pitches. Gravity
+     * alone takes its slow fall for a nearer, slower ball; its width near the lens says how far
+     * it really was.
+     */
+    @Test
+    fun `a floating tennis ball is read at its speed from its width`() {
+        for ((kmh, lift) in listOf(85.0 to 3.0, 85.0 to 4.5, 100.0 to 3.0, 70.0 to 3.0)) {
+            val blind = fit(fly(kmh, 0.3, BallDrag.TENNIS.perMetre, lostBeforeStumpsM = 2.5, lift = lift), BallDrag.TENNIS, roughBounce = false)
+            val flown = fly(kmh, 0.3, BallDrag.TENNIS.perMetre, lostBeforeStumpsM = 2.5, lift = lift, sizeError = 0.08)
+            val f = fit(flown, BallDrag.TENNIS, roughBounce = false)
+            println("floating $kmh km/h lift $lift: without width ${"%.1f".format(blind.speedKmh)} pitched ${"%.2f".format(blind.bounceY)} | with width ${"%.1f".format(f.speedKmh)} pitched ${"%.2f".format(f.bounceY)} (truth ${"%.2f".format(flown.bounceY)})")
+            assertEquals("release speed of a floating $kmh km/h ball", kmh, f.speedKmh, kmh * 0.08)
         }
     }
 

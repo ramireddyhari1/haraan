@@ -43,6 +43,7 @@ class ClipFlightAnalyzer {
     ): Result? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P || !clip.isFile) return null
         val tracker = OpenCvBallTracker()
+        val sizer = BallSizer()
         if (!tracker.available) return null
         val retriever = MediaMetadataRetriever()
         try {
@@ -72,9 +73,10 @@ class ClipFlightAnalyzer {
                     raw.recycle()
                     ClipFrames.toSensorYuv(pixels, y, u)
                     val ts = (clipStartSensorMs + (at + k) * 1000.0 / fps).toLong()
-                    tracker.onFrame(y, ClipFrames.SENSOR_W, ClipFrames.SENSOR_H, ClipFrames.SENSOR_W, 90, ts)
+                    val sighting = tracker.onFrame(y, ClipFrames.SENSOR_W, ClipFrames.SENSOR_H, ClipFrames.SENSOR_W, 90, ts)
+                    runCatching { sizer.frame(y, ClipFrames.SENSOR_W, ClipFrames.SENSOR_H, ClipFrames.SENSOR_W, 90, ts, sighting, tracker.lastCandidates) }
                     analysed++
-                    val track = tracker.track()
+                    val track = sizer.sized(tracker.track())
                     // Done as soon as the flight is: what follows is the batter and the bat.
                     if (wicket != null && FlightEnd.check(track, ts, uprightAspect, wicket) != null) {
                         return track.takeIf { it.size >= FlightEnd.MIN_FLIGHT_POINTS }?.let { Result(it, fps, analysed) }
@@ -82,7 +84,7 @@ class ClipFlightAnalyzer {
                 }
                 at += n
             }
-            return tracker.track().takeIf { it.size >= FlightEnd.MIN_FLIGHT_POINTS }?.let { Result(it, fps, analysed) }
+            return sizer.sized(tracker.track()).takeIf { it.size >= FlightEnd.MIN_FLIGHT_POINTS }?.let { Result(it, fps, analysed) }
         } catch (t: Throwable) {
             runCatching { Log.w(TAG, "clip analysis failed", t) }
             return null

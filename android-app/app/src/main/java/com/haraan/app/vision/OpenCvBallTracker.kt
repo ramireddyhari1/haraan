@@ -148,6 +148,14 @@ class OpenCvBallTracker(
     /** Test hook: told each frame's surviving candidates. Null in the app. */
     internal var debug: ((String) -> Unit)? = null
 
+    /**
+     * Every ball-like thing the last frame held, upright and normalised — the ball among them,
+     * whichever the tracker settles on later. [BallSizer] measures each.
+     */
+    @Volatile
+    var lastCandidates: List<Point2> = emptyList()
+        private set
+
     /** True while analysing a corridor rather than the whole frame. */
     fun corridorActive(): Boolean = corridor != null
     private var scratchLuma: Mat? = null
@@ -727,6 +735,7 @@ class OpenCvBallTracker(
             contour.release()
         }
 
+        lastCandidates = candidates.map { Point2(it.x.toDouble(), it.y.toDouble()) }
         if (candidates.isEmpty()) {
             handleMissOnNoCandidate(timestampMs)
             return null

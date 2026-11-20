@@ -83,6 +83,11 @@ data class BallSighting(
     val trackingConfidence: Float,
     /** Candidate area in analysis pixels. Kept for tuning the size filters against real footage. */
     val areaPx: Int,
+    /**
+     * The ball's width in upright frame widths, measured at full resolution ([BallSizer]);
+     * null where it could not be. Near the lens it says how far away the ball was.
+     */
+    val diameterFw: Float? = null,
 )
 
 /**
