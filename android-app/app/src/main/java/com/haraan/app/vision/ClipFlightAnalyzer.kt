@@ -52,6 +52,10 @@ class ClipFlightAnalyzer {
             val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: return null
             if (count <= 0 || durationMs <= 0) return null
             val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
+            // Each frame comes back full size: 33 MB at 4K, so a 4K clip is read two at a time.
+            val vw = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
+            val vh = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
+            val batch = if (vw.toLong() * vh > BIG_FRAME_PIXELS) BIG_BATCH else BATCH
             val fps = count * 1000.0 / durationMs
             val first = ((fromSensorMs - clipStartSensorMs) * fps / 1000.0).toInt().coerceIn(0, count - 1)
             val last = ((toSensorMs - clipStartSensorMs) * fps / 1000.0).toInt().coerceIn(first, count - 1)
@@ -64,7 +68,7 @@ class ClipFlightAnalyzer {
             var analysed = 0
             var at = first
             while (at <= last) {
-                val n = minOf(BATCH, last - at + 1)
+                val n = minOf(batch, last - at + 1)
                 val frames = retriever.getFramesAtIndex(at, n)
                 for ((k, raw) in frames.withIndex()) {
                     val up = ClipFrames.upright(raw, rotation, uprightAspect)
@@ -99,6 +103,9 @@ class ClipFlightAnalyzer {
 
         /** Frames decoded per call: one sequential decode instead of a seek per frame. */
         private const val BATCH = 16
+        /** Past 1080p's pixels a frame is big enough that sixteen of them can run the app out of memory. */
+        private const val BIG_FRAME_PIXELS = 1920L * 1088
+        private const val BIG_BATCH = 2
 
         /** Decoded from this long before the live flight's first sighting... */
         const val LEAD_MS = 250L

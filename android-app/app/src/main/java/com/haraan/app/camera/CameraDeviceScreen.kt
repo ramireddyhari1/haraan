@@ -818,6 +818,10 @@ private fun CameraMode(
     var pendingQuality by remember { mutableStateOf<String?>(null) }
     // The frame rate the camera actually agreed to, not the one asked for — shown on REC.
     var recordingFps by remember { mutableStateOf<Int?>(null) }
+    /** The size the camera actually bound ("4K", "1080p", "720p"), for the quality chip. */
+    var recordingSize by remember { mutableStateOf<String?>(null) }
+    /** Picked on this screen and kept on this phone; Auto follows /control. See CameraQualityPick. */
+    var qualityPick by remember { mutableStateOf(CameraQualityPick.load(ctx)) }
     var previewView by remember { mutableStateOf<PreviewView?>(null) }
     // Held only so its target rotation can be corrected on a turn — see below.
     var analysisUseCase by remember { mutableStateOf<ImageAnalysis?>(null) }
@@ -1967,20 +1971,24 @@ private fun CameraMode(
             }
             // Bound here rather than in the view's factory, so a new quality from /control
             // rebinds the same view instead of needing a new screen.
-            LaunchedEffect(previewView, videoQuality) {
+            // A pick on this screen wins over /control's setting; Auto leaves it to /control.
+            val boundQuality = if (qualityPick == CameraQualityPick.AUTO) videoQuality else qualityPick.key
+            LaunchedEffect(previewView, boundQuality) {
                 val target = previewView ?: return@LaunchedEffect
+                recordingSize = null
                 bindCamera(
                     ctx,
                     target,
                     lifecycleOwner,
                     analysisExecutor,
                     if (feed != null) ImageAnalysis.Analyzer { it.close() } else analyzer,
-                    videoQuality,
+                    boundQuality,
                     shutter,
-                ) { capture, analysis, fps ->
+                ) { capture, analysis, fps, size ->
                     videoCapture = capture
                     analysisUseCase = analysis
                     recordingFps = fps
+                    recordingSize = size
                 }
             }
         } else {
@@ -2663,6 +2671,21 @@ private fun CameraMode(
                 }
                 }
                 Spacer(Modifier.width(10.dp))
+                QualityChip(
+                    pick = qualityPick,
+                    size = recordingSize,
+                    fps = recordingFps,
+                    // Not mid-ball: a rebind would cut the clip being filmed.
+                    enabled = !recording,
+                    onPick = { next ->
+                        if (next != qualityPick) {
+                            view.performHapticFeedback(Feel.SELECT)
+                            qualityPick = next
+                            CameraQualityPick.save(ctx, next)
+                        }
+                    },
+                )
+                Spacer(Modifier.width(8.dp))
                 AutoChip(
                     on = autoMode,
                     onToggle = {
@@ -5169,6 +5192,64 @@ private fun CalibrateGlyph(modifier: Modifier = Modifier, tint: Color = Color.Wh
 }
 
 /**
+ * WHAT THE CAMERA IS FILMING AT, AND A CHOICE OF IT. Shows the size and rate the phone really
+ * delivers (the ladder steps down from a pick it cannot keep), "Auto" ahead of it when the app
+ * chose. Tap: Auto, or a size and rate to start from.
+ */
+@Composable
+private fun QualityChip(
+    pick: CameraQualityPick,
+    size: String?,
+    fps: Int?,
+    enabled: Boolean,
+    onPick: (CameraQualityPick) -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val running = if (size != null && fps != null) "$size $fps" else "…"
+    Box {
+        Row(
+            Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .background(Color.White.copy(alpha = if (enabled) 0.12f else 0.06f))
+                .clickableCapture(enabled = enabled, onClick = { open = true })
+                .padding(horizontal = 11.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (pick == CameraQualityPick.AUTO) {
+                Text("Auto · ", color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Text(running, color = Color.White.copy(alpha = if (enabled) 1f else 0.5f), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+        androidx.compose.material3.DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            containerColor = Color(0xFF111827),
+        ) {
+            CameraQualityPick.entries.forEach { q ->
+                val on = q == pick
+                androidx.compose.material3.DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(q.label, color = Color.White, fontSize = 14.sp, fontWeight = if (on) FontWeight.Bold else FontWeight.SemiBold)
+                            Text(q.blurb, color = Color.White.copy(alpha = 0.6f), fontSize = 12.sp)
+                        }
+                    },
+                    trailingIcon = if (on) {
+                        { Box(Modifier.size(8.dp).clip(CircleShape).background(Color(0xFF2563EB))) }
+                    } else {
+                        null
+                    },
+                    onClick = {
+                        open = false
+                        onPick(q)
+                    },
+                )
+            }
+        }
+    }
+}
+
+/**
  * Auto, on and off. Red-dotted while on, because on means the phone is filming.
  */
 @Composable
@@ -5759,6 +5840,81 @@ private fun <T> lockFrameRate(builder: androidx.camera.core.ExtendableBuilder<T>
 
 private const val TARGET_FPS = 30
 
+/**
+ * The quality picked on the live camera screen, kept on this phone. AUTO films the best this
+ * phone really delivers — 60 first, at the biggest size (see the ladder in bindCamera) — from
+ * /control's setting; the others start there and step down only if the phone cannot do them.
+ */
+internal enum class CameraQualityPick(val key: String, val label: String, val blurb: String) {
+    AUTO("auto", "Auto", "Best this phone films — 60 fps first"),
+    P4K_60("pick:4k60", "4K · 60", "Sharpest, biggest files"),
+    P1080_60("pick:1080p60", "1080p · 60", "Best for ball tracking"),
+    P720_60("pick:720p60", "720p · 60", "Smaller files, still 60"),
+    P1080_30("pick:1080p30", "1080p · 30", "For phones that run hot"),
+    P4K_30("pick:4k30", "4K · 30", "Sharp, fewer frames");
+
+    companion object {
+        private const val PREFS = "camera_quality"
+        private const val KEY = "pick"
+        fun load(context: Context): CameraQualityPick =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(KEY, null)
+                ?.let { k -> entries.firstOrNull { it.key == k } } ?: AUTO
+        fun save(context: Context, pick: CameraQualityPick) =
+            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(KEY, pick.key).apply()
+    }
+}
+
+private fun sizeName(q: Quality) = when (q) {
+    Quality.UHD -> "4K"
+    Quality.FHD -> "1080p"
+    Quality.HD -> "720p"
+    else -> q.toString()
+}
+
+/**
+ * Times the first frames after a bind, to know the rate the camera really delivers — the
+ * phone's list of rates is not the truth on every handset. Calls [onMeasured] once, from the
+ * analysis thread, with frames per second over about [SPAN_NS] after a short settle.
+ */
+internal class FrameRateMeter {
+    @Volatile var onMeasured: ((Double) -> Unit)? = null
+    private var first = -1L
+    private var last = -1L
+    private val gaps = ArrayList<Long>()
+    private var done = false
+
+    /*
+     * THE CAMERA'S RATE, NOT THE ANALYSER'S. The analyser keeps only the latest frame while it
+     * is busy, so it is handed fewer than the camera makes: on the Motorola (2026-11-20) a
+     * camera running 60 handed it 40 a second, and counting those stepped a working 60 down to
+     * 30. The gap between two frames handed over back to back is still one camera frame, so
+     * the rate is read off the SHORT gaps (a low percentile): at 30 no gap is under 33 ms.
+     */
+    fun note(timestampNs: Long) {
+        if (done) return
+        if (first < 0) { first = timestampNs + SETTLE_NS; return }
+        if (timestampNs < first) return
+        if (last >= 0 && timestampNs > last) gaps += timestampNs - last
+        last = timestampNs
+        if (timestampNs - first >= SPAN_NS && gaps.size >= MIN_GAPS) {
+            done = true
+            val sorted = gaps.sorted()
+            val short = sorted[(sorted.size * SHORT_GAP_SHARE).toInt().coerceIn(0, sorted.size - 1)]
+            onMeasured?.invoke(1e9 / short)
+        }
+    }
+
+    companion object {
+        private const val SETTLE_NS = 500_000_000L
+        private const val SPAN_NS = 1_500_000_000L
+        private const val MIN_GAPS = 12
+        /** The gap at this share of the sorted gaps: the shortest few, past a stray early frame. */
+        private const val SHORT_GAP_SHARE = 0.2
+        /** Kept when at least this share of the asked rate arrives (60 asked: 45). */
+        const val KEEP_SHARE = 0.75
+    }
+}
+
 /** "Highest" never asks above this: what a session with preview, analysis and video can run. */
 private const val HIGHEST_MAX_FPS = 60
 
@@ -6088,7 +6244,7 @@ private fun bindCamera(
     onFrame: ImageAnalysis.Analyzer,
     videoQuality: String,
     shutter: ShutterControl,
-    onReady: (VideoCapture<Recorder>, ImageAnalysis, Int) -> Unit,
+    onReady: (VideoCapture<Recorder>, ImageAnalysis, Int, String) -> Unit,
 ) {
     val future = ProcessCameraProvider.getInstance(context)
     future.addListener({
@@ -6157,14 +6313,22 @@ private fun bindCamera(
          * delays the recording. Filming is the product; vision is bolted to the side of
          * it, and it yields.
          */
-        fun analysisAt(fps: Int) = ImageAnalysis.Builder()
+        fun analysisAt(fps: Int, meter: FrameRateMeter? = null) = ImageAnalysis.Builder()
             .setResolutionSelector(sizedFor(android.util.Size(1280, 720)))
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
             .also { lockFrameRate(it, fps) }
             .also { watchExposure(it, shutter) }
             .build()
-            .also { it.setAnalyzer(analysisExecutor, onFrame) }
+            .also { a ->
+                a.setAnalyzer(
+                    analysisExecutor,
+                    if (meter == null) onFrame else ImageAnalysis.Analyzer { image ->
+                        meter.note(image.imageInfo.timestamp)
+                        onFrame.analyze(image)
+                    },
+                )
+            }
         /*
          * FRAME RATE BEFORE PIXELS.
          *
@@ -6177,15 +6341,13 @@ private fun bindCamera(
          * rather than refusing to film — and reports the rate it actually got, so REC never
          * claims 60 on a phone doing 30.
          */
-        val resolution = if (videoQuality == "720p60") Quality.HD else Quality.FHD
-        val wantFps = if (videoQuality == "1080p30") 30 else 60
         val highest = videoQuality == com.haraan.app.data.VIDEO_QUALITY_HIGHEST
 
-        fun buildCapture(fps: Int?, quality: Quality = resolution): VideoCapture<Recorder> {
+        /** [exact]: this size or nothing (a step of the ladder); else step down to SD rather than refuse. */
+        fun buildCapture(fps: Int?, quality: Quality, exact: Boolean, withTarget: Boolean): VideoCapture<Recorder> {
             val recorder = Recorder.Builder()
                 .setQualitySelector(
-                    if (highest) {
-                        // Exactly the size being tried: the search below steps down itself.
+                    if (exact) {
                         QualitySelector.from(quality)
                     } else {
                         QualitySelector.from(
@@ -6196,11 +6358,11 @@ private fun bindCamera(
                         )
                     },
                 )
-                // The biggest size a phone offers would overrun the 50 MB a review accepts.
-                .apply { if (highest) setTargetVideoEncodingBitRate(HIGHEST_BITRATE) }
+                // 4K at the phone's own bit rate would overrun the 50 MB a review accepts.
+                .apply { if (highest || quality == Quality.UHD) setTargetVideoEncodingBitRate(HIGHEST_BITRATE) }
                 .build()
             return VideoCapture.Builder(recorder)
-                .apply { if (fps != null) setTargetFrameRate(android.util.Range(fps, fps)) }
+                .apply { if (fps != null && withTarget) setTargetFrameRate(android.util.Range(fps, fps)) }
                 .build()
         }
 
@@ -6214,87 +6376,94 @@ private fun bindCamera(
          * is only ever seen at the higher rate.
          */
         var analysis: ImageAnalysis? = null
-        fun bindWith(fps: Int?, quality: Quality = resolution): Pair<VideoCapture<Recorder>, androidx.camera.core.Camera>? = runCatching {
-            val capture = buildCapture(fps, quality)
-            val rate = fps ?: TARGET_FPS
-            val a = analysisAt(rate)
-            provider.unbindAll()
-            analysis = a
-            capture to provider.bindToLifecycle(
-                lifecycleOwner,
-                CameraSelector.DEFAULT_BACK_CAMERA,
-                previewAt(rate),
-                capture,
-                a,
-            )
-        }.getOrNull()
+        fun bindWith(fps: Int?, quality: Quality, exact: Boolean, meter: FrameRateMeter? = null): Pair<VideoCapture<Recorder>, androidx.camera.core.Camera>? {
+            fun attempt(withTarget: Boolean) = runCatching {
+                val capture = buildCapture(fps, quality, exact, withTarget)
+                val rate = fps ?: TARGET_FPS
+                val a = analysisAt(rate, meter)
+                provider.unbindAll()
+                analysis = a
+                capture to provider.bindToLifecycle(
+                    lifecycleOwner,
+                    CameraSelector.DEFAULT_BACK_CAMERA,
+                    previewAt(rate),
+                    capture,
+                    a,
+                )
+            }.getOrNull()
+            // A rate the phone does not list may be refused as the VIDEO's target while the
+            // session still runs it when every stream's exposure range asks (see lockFrameRate).
+            return attempt(withTarget = true) ?: if (fps != null && fps > 30) attempt(withTarget = false) else null
+        }
 
         fun supports(b: Pair<VideoCapture<Recorder>, androidx.camera.core.Camera>?, fps: Int) =
             b?.second?.cameraInfo?.supportedFrameRateRanges?.any { it.lower <= fps && it.upper >= fps } == true
 
         /*
-         * 60 if the phone can, then a FIXED 30, and only then whatever the camera picks.
+         * 60 FIRST, AT THE BIGGEST SIZE THE PHONE REALLY DELIVERS IT — THEN 30.
          *
-         * The fallback used to go straight from 60 to "no preference", and a Realme RMX3933
-         * (which offers 30 but not 60) then ran the whole session at a fixed 20 fps, in
-         * bright sun — a third of every delivery's ball sightings gone, bigger jumps between
-         * the rest, and a REC chip that said 30 regardless. A fixed 30 is asked for by name.
+         * Frame rate before pixels: at 30 fps a delivery moves a metre between frames and the
+         * bounce and the arrival at the stumps fall between them; 4K adds nothing the tracker
+         * reads (it analyses 720p) but the clip. So the ladder is 4K60, 1080p60, 720p60, and only
+         * then 1080p30 — each step bound, then TIMED (FrameRateMeter): a phone's list of rates is
+         * not the truth on every handset. A Motorola Edge 70 Pro lists nothing above 30 and films
+         * 60 on every stream when asked (probe, 2026-11-20). A step that binds but delivers less
+         * hands over to the next one down. "1080p30" in /control still means 30.
+         *
+         * (History: a Realme RMX3933 left to "no preference" ran a fixed 20 fps in bright sun,
+         * so the last rung is a FIXED 30 by name, and only after it whatever the camera picks.)
          */
-        /*
-         * "HIGHEST THIS PHONE CAN FILM" (/control). Every rate the back camera offers, the
-         * fastest first - no faster than the 60 an ordinary session can run beside preview and
-         * analysis - and at each, the biggest size it records, 4K down to 720p. The first pair
-         * that binds AND keeps its rate wins: frame rate before pixels, as everywhere else here.
-         */
-        var chosenSize: Quality = resolution
-        val best: Pair<Pair<VideoCapture<Recorder>, androidx.camera.core.Camera>, Int>? = if (!highest) null else run {
-            val info = runCatching { CameraSelector.DEFAULT_BACK_CAMERA.filter(provider.availableCameraInfos).firstOrNull() }.getOrNull()
-                ?: return@run null
-            val rates = (info.supportedFrameRateRanges.map { it.upper }.filter { it in 24..HIGHEST_MAX_FPS } + 30)
-                .distinct().sortedDescending()
-            val offered = runCatching {
-                Recorder.getVideoCapabilities(info).getSupportedQualities(androidx.camera.core.DynamicRange.SDR).toSet()
-            }.getOrDefault(emptySet())
-            val sizes = listOf(Quality.UHD, Quality.FHD, Quality.HD).filter { it in offered }.ifEmpty { listOf(Quality.FHD) }
-            android.util.Log.i(ANALYSIS_TAG, "highest: rates $rates, sizes offered $offered")
-            for (fps in rates) for (q in sizes) {
-                val b = bindWith(fps, q)
-                if (b != null && supports(b, fps)) {
-                    chosenSize = q
-                    return@run b to fps
+        class Rung(val quality: Quality, val fps: Int)
+        val info = runCatching { CameraSelector.DEFAULT_BACK_CAMERA.filter(provider.availableCameraInfos).firstOrNull() }.getOrNull()
+        val offered = info?.let {
+            runCatching { Recorder.getVideoCapabilities(it).getSupportedQualities(androidx.camera.core.DynamicRange.SDR).toSet() }.getOrNull()
+        }.orEmpty()
+        fun offers(q: Quality) = offered.isEmpty() || q in offered
+        val sixty = listOf(Quality.UHD, Quality.FHD, Quality.HD).filter(::offers).map { Rung(it, HIGHEST_MAX_FPS) }
+        // A size picked on the camera screen (CameraQualityPick) starts the ladder there and
+        // only steps DOWN from it; the rest come from /control.
+        val ladder: List<Rung> = when (videoQuality) {
+            "1080p30", CameraQualityPick.P1080_30.key -> listOf(Rung(Quality.FHD, 30))
+            "720p60", CameraQualityPick.P720_60.key -> listOf(Rung(Quality.HD, HIGHEST_MAX_FPS), Rung(Quality.HD, 30))
+            CameraQualityPick.P1080_60.key -> sixty.filter { it.quality != Quality.UHD } + Rung(Quality.FHD, 30)
+            CameraQualityPick.P4K_30.key -> listOf(Rung(Quality.UHD, 30), Rung(Quality.FHD, 30))
+            else -> sixty + Rung(Quality.FHD, 30)
+        }
+        android.util.Log.i(ANALYSIS_TAG, "camera ladder ($videoQuality): ${ladder.joinToString { "${sizeName(it.quality)}${it.fps}" }}, sizes offered $offered")
+
+        fun climb(from: Int) {
+            for (i in from until ladder.size) {
+                val rung = ladder[i]
+                val meter = if (rung.fps > 30) FrameRateMeter() else null
+                // The 30 rung may step down in size; the 60 rungs are that size or nothing.
+                val b = bindWith(rung.fps, rung.quality, exact = rung.fps > 30, meter = meter) ?: continue
+                if (rung.fps <= 30 && !supports(b, rung.fps)) continue
+                val listed = supports(b, rung.fps)
+                android.util.Log.i(
+                    ANALYSIS_TAG,
+                    "camera bound ($videoQuality): ${sizeName(rung.quality)} at ${rung.fps} fps (${if (listed) "listed" else "not listed — timing it"}), supported " +
+                        b.second.cameraInfo.supportedFrameRateRanges.joinToString(),
+                )
+                shutter.attach(b.second)
+                analysis?.let { onReady(b.first, it, rung.fps, sizeName(rung.quality)) }
+                meter?.onMeasured = { measured ->
+                    ContextCompat.getMainExecutor(context).execute {
+                        android.util.Log.i(ANALYSIS_TAG, "frame rate measured: %.1f fps for %s%d".format(measured, sizeName(rung.quality), rung.fps))
+                        if (measured < rung.fps * FrameRateMeter.KEEP_SHARE) {
+                            android.util.Log.i(ANALYSIS_TAG, "camera stepping down: ${sizeName(rung.quality)}${rung.fps} was not delivered")
+                            climb(i + 1)
+                        }
+                    }
                 }
+                return
             }
-            null
+            // Nothing on the ladder bound: whatever the camera will do, rather than no camera.
+            val any = bindWith(null, Quality.FHD, exact = false) ?: return
+            android.util.Log.i(ANALYSIS_TAG, "camera bound ($videoQuality): no ladder step bound; camera's own default")
+            shutter.attach(any.second)
+            analysis?.let { onReady(any.first, it, 30, "1080p") }
         }
-        val high = if (best == null && wantFps > 30) bindWith(wantFps) else null
-        val bound: Pair<VideoCapture<Recorder>, androidx.camera.core.Camera>?
-        val gotFps: Int
-        if (best != null) {
-            bound = best.first
-            gotFps = best.second
-        } else if (high != null && supports(high, wantFps)) {
-            bound = high
-            gotFps = wantFps
-        } else {
-            val thirty = bindWith(30)
-            if (thirty != null && supports(thirty, 30)) {
-                bound = thirty
-                gotFps = 30
-            } else {
-                bound = bindWith(null)
-                gotFps = 30
-            }
-        }
-        if (bound != null) {
-            android.util.Log.i(
-                ANALYSIS_TAG,
-                "camera bound ($videoQuality): asked ${if (highest) "highest" else wantFps}, got $gotFps fps at " +
-                    "${if (chosenSize == Quality.UHD) "4K" else if (chosenSize == Quality.HD) "720p" else "1080p"}, supported " +
-                    bound.second.cameraInfo.supportedFrameRateRanges.joinToString(),
-            )
-            shutter.attach(bound.second)
-            analysis?.let { onReady(bound.first, it, gotFps) }
-        }
+        climb(0)
     }, ContextCompat.getMainExecutor(context))
 }
 
