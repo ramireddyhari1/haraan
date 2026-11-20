@@ -38,6 +38,12 @@ class DeliveryChain(
     ballDetail: Double = 1.0,
     /** A fresh ball tracker after each call, as the clip screen does; the live screen keeps looking. */
     private val resetAfterCall: Boolean = true,
+    /** The ball bowled, for its drag in the 3D fit; null fits a steady pace. */
+    private val ballType: BallDrag? = null,
+    /** The phone's own lens, as the live screen reads it from Camera2; null assumes one. */
+    focalFw: Double? = null,
+    /** The phone's attitude from gravity, as the live screen has it; null solves without. */
+    private val tilt: DeviceTilt.Reading? = null,
 ) {
     val aspect = ClipFrames.UPRIGHT_W.toFloat() / ClipFrames.UPRIGHT_H
 
@@ -45,7 +51,7 @@ class DeliveryChain(
     private val wickets = WicketTracker()
     private val ball = OpenCvBallTracker().also { it.setDetail(ballDetail) }
     private val ballStep = BallStep(ball, keepLooking = !resetAfterCall)
-    private val camera = CameraIntrinsics(ASSUMED_FOCAL_FW, "assumed")
+    private val camera = focalFw?.let { CameraIntrinsics(it, "lens calibration") } ?: CameraIntrinsics(ASSUMED_FOCAL_FW, "assumed")
     private val still = FrameMotion(0f, 0f, 1f, 0f, 30, 32)
     private val nearEnd = BowlersEndFilter()
     private val steadyLock = SteadyWicket()
@@ -155,9 +161,9 @@ class DeliveryChain(
     /** A called delivery, fitted in 3D through the ground the stumps give; null when too short. */
     private fun call(track: List<BallSighting>, lock: WicketLock, calledMs: Long): CalledDelivery? {
         if (track.size < FlightEnd.MIN_FLIGHT_POINTS) return null
-        val ground = PitchGround.best(lock, camera, ClipFrames.UPRIGHT_W, ClipFrames.UPRIGHT_H, tilt = null, bowlersEnd = bowlersEnd)
+        val ground = PitchGround.best(lock, camera, ClipFrames.UPRIGHT_W, ClipFrames.UPRIGHT_H, tilt = tilt, bowlersEnd = bowlersEnd)
             ?.pitchCamera(ClipFrames.UPRIGHT_W, ClipFrames.UPRIGHT_H)
-        val m = ground?.let { FlightMetrics.of(track, aspect, quad = null, wicket = lock, ground = it) }
+        val m = ground?.let { FlightMetrics.of(track, aspect, quad = null, wicket = lock, ground = it, ball = ballType ?: BallDrag.LEATHER) }
         val f = m?.flight3d
         log(
             "called ${track.size} pts ${track.first().timestampMs}..${track.last().timestampMs}ms y ${"%.3f".format(track.first().y)}..${"%.3f".format(track.maxOf { it.y })} " +
@@ -167,7 +173,7 @@ class DeliveryChain(
                 "trimmed=${FlightTrim.receding(TrailGeometry.runs(track).lastOrNull().orEmpty(), aspect, lock.anchor.base).size} " +
                 "atStumps=${FlightMetrics.reachedStumps(FlightTrim.receding(track, aspect, lock.anchor.base), lock, aspect)} span=${"%.4f".format(lock.anchor.span(aspect))} measurable=${lock.isMeasurable} " +
                 // BENCH_TRACK (scoreboard only) prints every sighting, not just the last eight.
-                "tail=" + (if (System.getenv("BENCH_TRACK") != null) track else track.takeLast(8)).joinToString(";") { "%d,%.3f,%.3f".format(it.timestampMs, it.x, it.y) },
+                "tail=" + (if (System.getenv("BENCH_TRACK") != null) track else track.takeLast(8)).joinToString(";") { "%d,%.3f,%.3f,%d".format(it.timestampMs, it.x, it.y, it.areaPx) },
         )
         val path = if (f != null && ground != null) ArPath.fromFlight(f, ground)?.takeIf { !it.isEmpty } else null
         return CalledDelivery(calledMs, track, lock, f, path)
@@ -177,7 +183,7 @@ class DeliveryChain(
     private fun refusal(track: List<BallSighting>, lock: WicketLock, ground: PitchCamera?): String {
         ground ?: return "no ground"
         val run = FlightTrim.receding(TrailGeometry.runs(track).lastOrNull().orEmpty(), aspect, lock.anchor.base)
-        return when (val r = QuadSpeed.fit(run, ground, null, aspect, FlightMetrics.reachedStumps(run, lock, aspect))) {
+        return when (val r = QuadSpeed.fit(run, ground, null, aspect, FlightMetrics.reachedStumps(run, lock, aspect), ball = ballType)) {
             is QuadSpeed.FitResult.Refused -> r.reason
             is QuadSpeed.FitResult.Ok -> "fitted alone but not through FlightMetrics"
         }

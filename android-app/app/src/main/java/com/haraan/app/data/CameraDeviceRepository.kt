@@ -35,6 +35,11 @@ data class CameraSession(
     val saveTrackingVideos: Boolean = true,
     /** The ball set when the match was made ("tennis", "leather"…), for release speed. */
     val ballType: String? = null,
+    /**
+     * Stumps to stumps in metres when it is not a full pitch — a practice net, set on a bowling
+     * session. Null is the Laws' 20.12. See [com.haraan.app.vision.PitchGround.pitchLengthM].
+     */
+    val pitchLengthM: Double? = null,
 )
 
 /**

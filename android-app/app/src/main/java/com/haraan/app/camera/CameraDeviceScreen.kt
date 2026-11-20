@@ -288,6 +288,8 @@ private fun practiceCameraSession(p: BowlingSessionStore.Session) = CameraSessio
     matchTitle = p.name,
     venue = "Bowling session",
     saveTrackingVideos = true,
+    ballType = p.ball,
+    pitchLengthM = p.pitchM,
 )
 
 /** Why this phone is not filming yet, in words written for the person holding it. */
@@ -722,6 +724,23 @@ private fun CameraMode(
     val ctx = LocalContext.current
     /** Set when this camera films a Hero bowling session rather than a match. */
     val practiceId = remember(session.sessionToken) { practiceSessionIdOf(session) }
+    /*
+     * THE PITCH BEING FILMED. Every ground solved from the two sets of stumps is scaled by how
+     * far apart they are; a practice net set shorter than the Laws' 20.12 m is told here, and
+     * any other camera goes back to a full pitch (the setting is process-wide).
+     */
+    DisposableEffect(session.sessionToken, session.pitchLengthM) {
+        com.haraan.app.vision.PitchGround.pitchLengthM = session.pitchLengthM ?: com.haraan.app.vision.PitchGeometry.STUMPS_TO_STUMPS_M
+        onDispose { com.haraan.app.vision.PitchGround.pitchLengthM = com.haraan.app.vision.PitchGeometry.STUMPS_TO_STUMPS_M }
+    }
+    /*
+     * The session's next ball number, counted here as each ball is filmed: the store's count
+     * only rises once a video has finished saving, so balls filmed while one was saving all
+     * read the same number ("Ball 1, 1, 1, 2, 4, 6" on 2026-11-19).
+     */
+    val practiceBallsNumbered = remember(session.sessionToken) {
+        java.util.concurrent.atomic.AtomicInteger(practiceSessionIdOf(session)?.let { BowlingSessionStore.get(ctx, it)?.balls } ?: 0)
+    }
     val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     /*
@@ -1155,6 +1174,8 @@ private fun CameraMode(
     // The debug video feed, when one stands in for the lens: its own file is the "clip".
     val feedRef = remember { java.util.concurrent.atomic.AtomicReference<VideoCameraFeed?>(null) }
     val refineSettled = remember { java.util.concurrent.ConcurrentHashMap.newKeySet<Int>() }
+    /** A clip's start on the camera clock as measured from its ball (ClipClock), by generation. */
+    val clipStartFixed = remember { java.util.concurrent.ConcurrentHashMap<Int, Double>() }
     // Admin-set in /control; re-read every heartbeat.
     var saveTrackingVideos by remember { mutableStateOf(session.saveTrackingVideos) }
     // The ball whose after-ball replay last played itself, so it plays once.
@@ -3329,7 +3350,7 @@ private fun CameraMode(
                             null
                         }
                         val label = if (practiceId != null) {
-                            "Ball ${(BowlingSessionStore.get(ctx, practiceId)?.balls ?: 0) + 1}"
+                            "Ball ${practiceBallsNumbered.incrementAndGet()}"
                         } else {
                             overs.takeIf { it.isNotBlank() }?.let { "Over $it" } ?: ballSeq?.let { "Ball $it" }.orEmpty()
                         }
@@ -3353,7 +3374,7 @@ private fun CameraMode(
                                 TrackingVideoSaver.Job(
                                     clip = saveClip ?: feedClip?.takeIf { feedStart != null },
                                     ownsClip = saveClip != null,
-                                    clipStartSensorMs = if (saveClip != null) startMs else feedStart,
+                                    clipStartSensorMs = if (saveClip != null) (clipStartFixed.remove(generation) ?: startMs) else feedStart,
                                     frames = result.frames,
                                     path = result.path,
                                     flight = result.flight,
@@ -3392,22 +3413,32 @@ private fun CameraMode(
                                 ANALYSIS_TAG,
                                 "clip re-analysis: live ${live.size} pts, clip ${refined?.track?.size} pts at ${refined?.fps?.let { "%.0f".format(it) }} fps over ${refined?.framesAnalysed} frames",
                             )
-                            if (refined == null || refined.track.size <= live.size) return@launch
+                            /*
+                             * Where the clip really sits on the camera clock, from the ball seen in
+                             * both (see ClipClock): its track and the saved video are put right.
+                             */
+                            val clockFix = refined?.track?.let { com.haraan.app.vision.ClipClock.offsetMs(live, it) }
+                            if (clockFix != null) {
+                                clipStartFixed[generation] = startMs - clockFix
+                                android.util.Log.i(ANALYSIS_TAG, "clip clock: placed %+.0f ms off, corrected".format(clockFix))
+                            }
+                            val refinedTrack0 = refined?.track?.let { t -> clockFix?.let { com.haraan.app.vision.ClipClock.shifted(t, -it) } ?: t }
+                            if (refined == null || refinedTrack0 == null || refinedTrack0.size <= live.size) return@launch
                             // The next ball is already filming: too late for the screen, not for
                             // this ball's saved video.
                             if (generation != clipGeneration || recording) {
-                                val (metrics, path) = measureFlight(refined.track)
+                                val (metrics, path) = measureFlight(refinedTrack0)
                                 ballResults[generation] = BallResult(path, metrics.flight3d, ballResults[generation]?.frames.orEmpty())
                                 return@launch
                             }
                             refinedFps = refined.fps
                             // Still being read: handed to the reading, which shows it.
                             if (analysingSince != null) {
-                                refinedTrack = refined.track
+                                refinedTrack = refinedTrack0
                                 return@launch
                             }
-                            showFlight(refined.track, false)
-                            arPath?.takeIf { !it.isEmpty }?.let { replayClip = ReplayClip(replayFile, startMs, it) }
+                            showFlight(refinedTrack0, false)
+                            arPath?.takeIf { !it.isEmpty }?.let { replayClip = ReplayClip(replayFile, clipStartFixed[generation] ?: startMs, it) }
                           } finally {
                             refineSettled += generation
                           }
@@ -3634,6 +3665,23 @@ private fun CameraMode(
         // The last ball's result stays until the next ball is seen in flight.
         LaunchedEffect(trackedPoints, recording, calledFlight) {
             if (recording && trackedPoints > 0 && calledFlight == null) liveResult = null
+        }
+        /*
+         * ...EXCEPT IN A BOWLING SESSION, where the bowler walks back to his mark between
+         * balls with the last path, its cards and its line still drawn over the picture
+         * ("unwanted lines between balls", 2026-11-19). Once its replay has played and it
+         * has been read, the screen goes back to the clean viewfinder. The ball is in Clips.
+         */
+        LaunchedEffect(liveResult?.ballMs, liveSequence == null, recording, analysingSince == null) {
+            if (practiceId == null || recording || liveSequence != null || analysingSince != null) return@LaunchedEffect
+            val shown = liveResult?.ballMs ?: lastMetrics?.let { -1L } ?: return@LaunchedEffect
+            delay(PRACTICE_RESULT_HOLD_MS)
+            if (!recording && liveSequence == null && (liveResult?.ballMs ?: -1L) == shown) {
+                liveResult = null
+                lastMetrics = null
+                arPath = null
+                showAr = false
+            }
         }
         // A ball being filmed takes the screen back: the person holding the phone must see
         // that it is recording, and the viewfinder is what they aim with.
@@ -5219,6 +5267,9 @@ private const val AUTO_REARM_MS = 400L
 
 /** How long a 3D replay stays up in Auto once it has played. */
 private const val AUTO_REPLAY_HOLD_MS = 2_500L
+
+/** How long a bowling session keeps the last ball drawn once its replay has played. */
+private const val PRACTICE_RESULT_HOLD_MS = 6_000L
 
 @Composable
 private fun ToolButton(

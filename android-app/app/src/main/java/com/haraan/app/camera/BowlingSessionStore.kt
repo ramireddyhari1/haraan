@@ -31,6 +31,10 @@ object BowlingSessionStore {
         val lastActiveAtMs: Long,
         val endedAtMs: Long?,
         val balls: Int,
+        /** The ball bowled, as [com.haraan.app.vision.BallDrag.serverValue]: a tennis ball slows three times as fast. */
+        val ball: String = DEFAULT_BALL,
+        /** Stumps to stumps, metres; null for a full pitch. A practice net is often shorter. */
+        val pitchM: Double? = null,
     ) {
         fun isLive(nowMs: Long = System.currentTimeMillis()): Boolean =
             endedAtMs == null && nowMs - lastActiveAtMs <= LIVE_WINDOW_MS
@@ -40,6 +44,9 @@ object BowlingSessionStore {
     }
 
     const val LIVE_WINDOW_MS = 90_000L
+
+    /** Most practice in nets here is with a tennis ball. */
+    const val DEFAULT_BALL = "tennis"
     const val MAX_NAME = 40
 
     /** Root Gallery folder, under Movies. */
@@ -61,7 +68,7 @@ object BowlingSessionStore {
 
     fun get(context: Context, id: String): Session? = all(context).firstOrNull { it.id == id }
 
-    fun create(context: Context, name: String, camera: Camera): Session = synchronized(lock) {
+    fun create(context: Context, name: String, camera: Camera, ball: String = DEFAULT_BALL, pitchM: Double? = null): Session = synchronized(lock) {
         val now = System.currentTimeMillis()
         val session = Session(
             id = UUID.randomUUID().toString(),
@@ -71,6 +78,8 @@ object BowlingSessionStore {
             lastActiveAtMs = now,
             endedAtMs = null,
             balls = 0,
+            ball = ball,
+            pitchM = pitchM,
         )
         write(context, read(context) + session)
         session
@@ -88,6 +97,9 @@ object BowlingSessionStore {
     fun end(context: Context, id: String) = update(context, id) {
         it.copy(endedAtMs = System.currentTimeMillis())
     }
+
+    /** The ball and the net's length, changed after the session was made (measured later). Null pitch = full. */
+    fun setSetup(context: Context, id: String, ball: String, pitchM: Double?) = update(context, id) { it.copy(ball = ball, pitchM = pitchM) }
 
     fun rename(context: Context, id: String, name: String) = update(context, id) {
         it.copy(name = name.trim().take(MAX_NAME).ifBlank { it.name })
@@ -126,6 +138,8 @@ object BowlingSessionStore {
         put("lastActiveAt", s.lastActiveAtMs)
         if (s.endedAtMs != null) put("endedAt", s.endedAtMs)
         put("balls", s.balls)
+        put("ball", s.ball)
+        if (s.pitchM != null) put("pitchM", s.pitchM)
     }
 
     private fun fromJson(o: JSONObject): Session? = runCatching {
@@ -137,6 +151,8 @@ object BowlingSessionStore {
             lastActiveAtMs = o.optLong("lastActiveAt", o.getLong("createdAt")),
             endedAtMs = if (o.has("endedAt")) o.getLong("endedAt") else null,
             balls = o.optInt("balls", 0),
+            ball = o.optString("ball").ifBlank { DEFAULT_BALL },
+            pitchM = if (o.has("pitchM")) o.getDouble("pitchM") else null,
         )
     }.getOrNull()
 }

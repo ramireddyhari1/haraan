@@ -1,6 +1,7 @@
 package com.haraan.app.vision
 
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.exp
 import kotlin.math.sqrt
 
@@ -72,6 +73,21 @@ enum class BallDrag(val serverValue: String, val label: String, val perMetre: Do
  * through [Flight3d.ball]'s drag, with the vertical speed it was let go at.
  */
 internal fun releaseKmh(f: Flight3d): Double {
+    /*
+     * FITTED WITH DRAG: the flight already slows as the ball does, so its speed at the hand is
+     * read straight off it — the pace at the bounce carried back to the release, and the
+     * vertical speed it was let go with.
+     */
+    if (f.dragK > 0.0 && f.inVy < 0.0) {
+        val s = (f.releaseMs - f.bounceMs) / 1000.0
+        val v = hypot(f.inVx, f.inVy)
+        val kappa = f.dragK * v
+        val horizontal = v * Drag.paceShare(s, kappa)
+        // Up-positive vertical speed at the bounce is −inVzDown; see [Drag.fall]'s derivation.
+        val vz = (-f.inVzDown - Flight3d.G * (s + kappa * s * s / 2)) * Drag.paceShare(s, kappa)
+        val withVertical = if (abs(vz) < 0.5 * horizontal) sqrt(horizontal * horizontal + vz * vz) else horizontal
+        return withVertical * 3.6
+    }
     val ground = f.groundKmh / 3.6
     if (ground <= 0.0 || f.inVy >= 0.0) return f.groundKmh
 
@@ -81,7 +97,7 @@ internal fun releaseKmh(f: Flight3d): Double {
     val yFirst = f.at(firstMs).y
     val yLast = f.at(lastMs).y
     // The hand is at the release point, or further back if the ball was first seen beyond it.
-    val releaseY = maxOf(Flight3d.RELEASE_Y_M, yFirst)
+    val releaseY = maxOf(Flight3d.releaseY, yFirst)
     val horizontal = f.ball.releaseFrom(ground, releaseY - yFirst, releaseY - yLast)
 
     // Down at the bounce is [inVzDown]; gravity added that much over the flight, so less of it

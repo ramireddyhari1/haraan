@@ -274,6 +274,22 @@ class PitchGround private constructor(
     }
 
     companion object {
+        /**
+         * HOW FAR APART THE TWO SETS OF STUMPS ARE, metres: the Laws' 20.12 unless the person
+         * filming said otherwise. Practice nets are often shorter — the bowling session of
+         * 2026-11-19 was ~14 m — and every ground solved from two sets of stumps is scaled by
+         * it: taken as 20.12 there, the ball's fall could not match gravity and every full ball
+         * came out short and slow. Set by the camera screen from the session.
+         */
+        @Volatile
+        var pitchLengthM: Double = PitchGeometry.STUMPS_TO_STUMPS_M
+            set(value) {
+                field = value.takeIf { it in MIN_PITCH_M..MAX_PITCH_M } ?: PitchGeometry.STUMPS_TO_STUMPS_M
+            }
+
+        const val MIN_PITCH_M = 8.0
+        const val MAX_PITCH_M = 24.0
+
         /** A camera on a stand, or held at chest height. */
         const val DEFAULT_CAMERA_HEIGHT_M = 1.4
 
@@ -431,7 +447,7 @@ class PitchGround private constructor(
             val far = lock.anchor.span(lock.aspect)
             val near = bowlersEnd.spanFw
             if (far <= 0.0 || near <= far * 2) return null
-            val focal = PitchGeometry.STUMPS_TO_STUMPS_M / (PitchGeometry.STUMP_CENTRES_SPAN_M * (1.0 / far - 1.0 / near))
+            val focal = pitchLengthM / (PitchGeometry.STUMP_CENTRES_SPAN_M * (1.0 / far - 1.0 / near))
             if (focal < MIN_FOCAL_FW || focal > MAX_FOCAL_FW) return null
             return CameraIntrinsics(focal, "from the two sets of stumps")
         }
@@ -452,7 +468,7 @@ class PitchGround private constructor(
             var hi = MAX_SOLVED_HEIGHT_M
             val low = at(lo)?.second ?: return null
             val high = at(hi)?.second ?: return null
-            val target = PitchGeometry.STUMPS_TO_STUMPS_M
+            val target = pitchLengthM
             if (low < target || high > target) return null
             repeat(24) {
                 val mid = (lo + hi) / 2
@@ -513,7 +529,7 @@ class PitchGround private constructor(
             val near = ground(bowlersEnd.base) ?: return null
             val apart = hypot(near[0] - far[0], near[1] - far[1])
             if (apart < 1e-6) return null
-            val h = PitchGeometry.STUMPS_TO_STUMPS_M / apart
+            val h = pitchLengthM / apart
             if (h < MIN_MEASURED_HEIGHT_M || h > MAX_MEASURED_HEIGHT_M) return null
             val sX = h * far[0]
             val sY = h * far[1]
@@ -572,7 +588,7 @@ class PitchGround private constructor(
                 listOf(
                     q(a.baseLeft.x, 1e4), q(a.baseLeft.y, 1e4), q(a.baseRight.x, 1e4), q(a.baseRight.y, 1e4),
                     a.top?.let { q(it.x, 1e4) } ?: -1, a.top?.let { q(it.y, 1e4) } ?: -1,
-                    lock.kind.ordinal.toLong(), q(camera.focalFw, 1e4), widthPx.toLong(), heightPx.toLong(),
+                    lock.kind.ordinal.toLong(), q(camera.focalFw, 1e4), widthPx.toLong(), heightPx.toLong(), q(pitchLengthM, 1e3),
                     tilt?.let { q(it.pitchRad, 1e3) } ?: Long.MIN_VALUE, tilt?.let { q(it.rollRad, 1e3) } ?: Long.MIN_VALUE,
                     bowlersEnd?.let { q(it.base.x, 1e4) } ?: -1, bowlersEnd?.let { q(it.base.y, 1e4) } ?: -1,
                     bowlersEnd?.let { q(it.spanFw, 1e4) } ?: -1,

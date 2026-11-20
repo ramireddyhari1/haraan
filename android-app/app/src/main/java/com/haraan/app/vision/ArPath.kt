@@ -72,7 +72,7 @@ data class ArPath(
              * fraction of how fast it came down — to the stumps' line, drawn dashed as the
              * projection it is.
              */
-            val towardsStumps = if (flight.inVy < 0) flight.bounceMs + (0.0 - flight.bounceY) / flight.inVy * 1000.0 else null
+            val towardsStumps = if (flight.inVy < 0) flight.msAt(0.0) else null
             /*
              * A BALL THAT MISSES IS DRAWN MISSING. Ended exactly on the stumps' line, a flight
              * seen from behind the bowler stops ON the stumps in the picture whether it passed
@@ -125,25 +125,19 @@ data class ArPath(
              * against the real net picture.)
              */
             fun passesMs(along: Double): Double {
-                val inVy = flight.inVy
-                val outVy = flight.outVy ?: inVy * 0.88
-                val t = if (along >= flight.bounceY || inVy >= 0) {
-                    if (inVy < 0) flight.bounceMs + (along - flight.bounceY) / inVy * 1000.0 else start
-                } else {
-                    if (outVy < 0) flight.bounceMs + (along - flight.bounceY) / outVy * 1000.0 else end
-                }
+                val t = flight.msAt(along) ?: if (along >= flight.bounceY) start else end
                 return t.coerceIn(start, end)
             }
             val channelHalf = PitchGeometry.STUMP_SET_WIDTH_M / 2.0
             val shadow = (0..SAMPLES).mapNotNull { i ->
-                val along = PitchGeometry.STUMPS_TO_STUMPS_M * (1.0 - i.toDouble() / SAMPLES)
+                val along = PitchGround.pitchLengthM * (1.0 - i.toDouble() / SAMPLES)
                 val l = camera.project(Point3(-channelHalf, along, 0.0)) ?: return@mapNotNull null
                 val r = camera.project(Point3(channelHalf, along, 0.0)) ?: return@mapNotNull null
                 ShadowSlice(passesMs(along), l, r)
             }
             val bowlerStumps = listOf(-stumpX, 0.0, stumpX).mapNotNull { x ->
-                val foot = camera.project(Point3(x, PitchGeometry.STUMPS_TO_STUMPS_M, 0.0)) ?: return@mapNotNull null
-                val top = camera.project(Point3(x, PitchGeometry.STUMPS_TO_STUMPS_M, PitchGeometry.STUMP_HEIGHT_M)) ?: return@mapNotNull null
+                val foot = camera.project(Point3(x, PitchGround.pitchLengthM, 0.0)) ?: return@mapNotNull null
+                val top = camera.project(Point3(x, PitchGround.pitchLengthM, PitchGeometry.STUMP_HEIGHT_M)) ?: return@mapNotNull null
                 foot to top
             }
             return ArPath(

@@ -220,3 +220,32 @@ delivery somewhere
 clip net10 raw=net120.raw from=6640 to=6879 fps=119.946 source=WhatsApp Video 2026-10-11 at 11.46.06 AM.mp4  (464x832 120 fps net session)
 delivery somewhere
 
+
+# s1119b6: a short practice net. The far stumps are ~16.5 m from the phone and the release ~2.8 m
+# from it, measured 2026-11-20 from the phone's own lens (Camera2: 5.56 mm on 8.19 mm, 1.21 frame
+# widths upright) and the tennis ball's 6.7 cm in the picture frame by frame (4.3 m at frame 91,
+# ~15.5 m at 107) — so 14.1 +/- 1.0 m release to stumps, not the 18.5 of a full pitch. The bowler's
+# stumps are ~2.1 m from the phone (their feet, the same lens and gravity's tilt): pitchM 14.3.
+# Lens and tilt are the phone's own: Camera2 (focal) and its 1 Hz log at 15:30 ("down 1.5° roll +2.9°").
+clip s1119b6 raw=s1119b6.raw ball=tennis releaseM=14.1 releaseTolM=1.0 pitchM=14.3 focal=1.207 tilt=1.5,2.9 source=Motorola Edge 70 Pro bowling session 2026-11-19 ball 6 (1080p 30 fps, behind the bowler, tennis ball, full: passes the stumps at stump height, no batter)
+delivery release=89 stumps=110 stumpsTol=1
+quiet 0 60
+ball 91 0.2861 0.3078
+ball 92 0.3167 0.3255
+ball 93 0.3435 0.3411
+ball 95 0.3778 0.3688
+ball 96 0.3926 0.3807
+ball 97 0.4028 0.3927
+ball 98 0.4130 0.4036
+ball 99 0.4204 0.4135
+ball 100 0.4287 0.4250
+ball 101 0.4352 0.4354
+ball 102 0.4398 0.4448
+ball 103 0.4454 0.4542
+ball 104 0.4500 0.4635
+ball 105 0.4546 0.4724
+ball 106 0.4574 0.4813
+ball 107 0.4602 0.4906
+ball 108 0.4630 0.5000
+ball 109 0.4667 0.5083
+ball 110 0.4676 0.5167

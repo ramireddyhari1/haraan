@@ -47,6 +47,16 @@ class TrackingScoreboardTest {
         val balls: Map<Int, Pair<Float, Float>>,
         /** A wait between balls: both sets standing, the bowler's clear. */
         val quiet: IntRange? = null,
+        /** The ball bowled (truth `ball=`), for the fit's drag; null = a steady-pace fit as before. */
+        val ball: BallDrag? = null,
+        /** Release to the batter's stumps, metres, where it is not a full pitch (`releaseM=`, `releaseTolM=`). */
+        val releaseM: Double = RELEASE_TO_STUMPS_M,
+        val releaseTolM: Double = RELEASE_TO_STUMPS_TOL_M,
+        /** Stumps to stumps where the net is not a full pitch (`pitchM=`): see [PitchGround.pitchLengthM]. */
+        val pitchM: Double = PitchGeometry.STUMPS_TO_STUMPS_M,
+        /** The filming phone's lens (`focal=`, frame widths) and gravity tilt (`tilt=down°,roll°`), when known. */
+        val focal: Double? = null,
+        val tilt: DeviceTilt.Reading? = null,
     )
 
     private class Row(
@@ -258,10 +268,14 @@ class TrackingScoreboardTest {
         val u = ByteArray(sw / 2 * (sh / 2))
         val frameBytes = (y.size + u.size).toLong()
         val f = RandomAccessFile(raw, "r")
+        PitchGround.pitchLengthM = clip.pitchM
         val chain = DeliveryChain(
             log = if (System.getenv("BENCH_LOG") != null) { line -> println("[${clip.id} $rate] $line") } else { _ -> },
             ballDetail = live?.detail ?: 1.0,
             resetAfterCall = live?.resetAfterCall ?: true,
+            ballType = clip.ball,
+            focalFw = clip.focal,
+            tilt = clip.tilt,
         )
         // BENCH_DEBUG: every candidate and track the ball tracker holds, frame by frame.
         if (System.getenv("BENCH_DEBUG") != null) chain.ballDebug = { line -> println("[${clip.id} $rate] ball $line") }
@@ -354,13 +368,13 @@ class TrackingScoreboardTest {
 
             val truthKmh = if (truth.releaseFrame != null && truth.stumpsFrame != null) {
                 val sec = (msOf[truth.stumpsFrame]!! - msOf[truth.releaseFrame]!!) / 1000.0
-                RELEASE_TO_STUMPS_M / sec * 3.6
+                clip.releaseM / sec * 3.6
             } else {
                 null
             }
             val tolPct = if (truth.releaseFrame != null && truth.stumpsFrame != null) {
                 val frameCount = (truth.stumpsFrame - truth.releaseFrame).toDouble()
-                (RELEASE_TO_STUMPS_TOL_M / RELEASE_TO_STUMPS_M + (truth.stumpsTol + RELEASE_TOL_FRAMES) / frameCount) * 100
+                (clip.releaseTolM / clip.releaseM + (truth.stumpsTol + RELEASE_TOL_FRAMES) / frameCount) * 100
             } else {
                 null
             }
@@ -500,6 +514,12 @@ class TrackingScoreboardTest {
             clips += Clip(
                 id, h.getValue("raw"), h["from"]?.toInt() ?: 0, h["to"]?.toInt() ?: Int.MAX_VALUE, h["fps"]?.toDouble(),
                 deliveries.toList(), cut, balls.toMap(), quiet,
+                BallDrag.fromServer(h["ball"]),
+                h["releaseM"]?.toDouble() ?: RELEASE_TO_STUMPS_M,
+                h["releaseTolM"]?.toDouble() ?: RELEASE_TO_STUMPS_TOL_M,
+                h["pitchM"]?.toDouble() ?: PitchGeometry.STUMPS_TO_STUMPS_M,
+                h["focal"]?.toDouble(),
+                h["tilt"]?.split(',')?.let { (p, r) -> DeviceTilt.Reading(Math.toRadians(p.toDouble()), Math.toRadians(r.toDouble())) },
             )
             deliveries.clear(); balls.clear(); cut = null; quiet = null
         }

@@ -320,7 +320,7 @@ internal class TrackingVideoSaver private constructor(private val context: Conte
     }
 
     /** The result card the camera screen shows: speed, where it pitched, the verdict. */
-    private inner class Card(val speedKmh: Double?, val pitched: String?, val verdict: Pair<String, Int>?) {
+    private inner class Card(val speedKmh: Double?, val pitched: String?, val verdict: Pair<String, Int>?, val bend: String? = null) {
         fun draw(c: android.graphics.Canvas) {
             if (speedKmh == null && pitched == null && verdict == null) return
             val left = 28f
@@ -329,6 +329,7 @@ internal class TrackingVideoSaver private constructor(private val context: Conte
             var height = 32f
             if (speedKmh != null) height += 64f
             if (pitched != null) height += 36f
+            if (bend != null) height += 34f
             if (verdict != null) height += 50f
             c.drawRoundRect(RectF(left, top, left + width, top + height), 24f, 24f, shade)
             var y = top + 20f
@@ -346,6 +347,12 @@ internal class TrackingVideoSaver private constructor(private val context: Conte
                 plain.alpha = 225
                 c.drawText(pitched, left + 24f, y + 28f, plain)
                 y += 36f
+            }
+            if (bend != null) {
+                plain.textSize = 22f
+                plain.alpha = 205
+                c.drawText(bend, left + 24f, y + 26f, plain)
+                y += 34f
             }
             if (verdict != null) {
                 bold.textSize = 20f
@@ -374,6 +381,12 @@ internal class TrackingVideoSaver private constructor(private val context: Conte
                 LbwVerdict.MISSING -> "MISSING" to 0xFF16A34A.toInt()
                 LbwVerdict.UMPIRES_CALL -> "UMPIRE'S CALL" to 0xFFD97706.toInt()
                 else -> null
+            },
+            bend = flight?.let { f ->
+                listOfNotNull(
+                    f.turnDeg.takeIf { f.turnFitted && kotlin.math.abs(it) >= 0.05 }?.let { "Turn %.1f°".format(kotlin.math.abs(it)) },
+                    f.swingM.takeIf { f.inAx != 0.0 }?.let { "Swing %.0f cm".format(kotlin.math.abs(it) * 100) },
+                ).takeIf { it.isNotEmpty() }?.joinToString(" · ")
             },
         )
     }

@@ -189,7 +189,7 @@ data class FlightMetrics(
              * is lowest on the screen where it meets them. On a 4K yorker the first sighting in
              * the outline put the line 80 ms early — a tenth off the speed.
              */
-            val at = inside.maxByOrNull { it.y } ?: return null
+            val at = inside.maxByOrNull { it.y } ?: return arrivingAt(run, base, span, base.y - tall - ballMargin * frameAspect)
             /*
              * ...AND IT CAME DOWN TO THERE. A ball rising off a good length comes into the
              * outline from BELOW it in the picture, metres short of the line: pinned there, a
@@ -200,6 +200,45 @@ data class FlightMetrics(
             if (before.y > at.y) return null
             return at.timestampMs.toDouble()
         }
+
+        /*
+         * LOST A FRAME OR TWO SHORT OF THEM. A yellow tennis ball over yellow stumps, a ball
+         * behind the batter's pads: the tracker loses it just before it gets there, and with
+         * no arrival the far end of the flight is depth one camera cannot see — a full ball in
+         * the bowling session of 2026-11-19 was lost three frames short and fitted as 48-60
+         * km/h pitching mid-pitch, for ~67 pitching at the stumps. When its last sightings
+         * come steadily down the picture onto the stumps' line, the moment it reaches their
+         * top is carried forward from them — a few frames at most.
+         */
+        private fun arrivingAt(run: List<BallSighting>, base: Point2, span: Double, topY: Double): Double? {
+            if (run.size < ARRIVE_FIT_POINTS) return null
+            val tail = run.takeLast(ARRIVE_FIT_POINTS)
+            // Coming steadily down the picture, every step.
+            if (tail.zipWithNext().any { (a, b) -> b.y <= a.y || b.timestampMs <= a.timestampMs }) return null
+            val t0 = tail.first().timestampMs.toDouble()
+            fun slope(v: (BallSighting) -> Double): Pair<Double, Double> {
+                val n = tail.size
+                val mt = tail.sumOf { it.timestampMs - t0 } / n
+                val mv = tail.sumOf(v) / n
+                val k = tail.sumOf { (it.timestampMs - t0 - mt) * (v(it) - mv) } / tail.sumOf { (it.timestampMs - t0 - mt).let { d -> d * d } }
+                return k to (mv - k * mt)
+            }
+            val (ky, cy) = slope { it.y.toDouble() }
+            val (kx, cx) = slope { it.x.toDouble() }
+            if (ky <= 0) return null
+            val last = tail.last()
+            if (last.y >= topY) return null
+            val atMs = (topY - cy) / ky
+            val ahead = atMs - (last.timestampMs - t0)
+            if (ahead <= 0 || ahead > MAX_ARRIVE_AHEAD_MS) return null
+            // ...and on their line when it gets there.
+            if (kotlin.math.abs(kx * atMs + cx - base.x) > span * 1.1) return null
+            return t0 + atMs
+        }
+
+        private const val ARRIVE_FIT_POINTS = 4
+        /** About three frames at 30 a second: past that it is a guess, not a carry. */
+        private const val MAX_ARRIVE_AHEAD_MS = 110.0
 
         private const val STUMPS_TALL_OVER_WIDE = 0.711 / 0.2286
 
@@ -248,8 +287,13 @@ data class FlightMetrics(
             val roughBounce = quad?.let { locateBounce(run, it) }
             val fromGround = quad == null && ground != null
             val fit = when {
-                quad != null -> QuadSpeed.fit(run, quad, roughBounce, frameAspect)
-                ground != null -> QuadSpeed.fit(run, ground, null, frameAspect, reachedStumps(run, wicket, frameAspect))
+                quad != null -> QuadSpeed.fit(run, quad, roughBounce, frameAspect, ball = ball)
+                ground != null -> {
+                    val arrived = reachedStumps(run, wicket, frameAspect)
+                    val pinned = QuadSpeed.fit(run, ground, null, frameAspect, arrived, ball = ball)
+                    // An arrival that cannot be fitted (a carried one, a little off) must not cost the ball.
+                    if (pinned is QuadSpeed.FitResult.Refused && arrived != null) QuadSpeed.fit(run, ground, null, frameAspect, null, ball = ball) else pinned
+                }
                 else -> null
             }?.let { r -> if (r is QuadSpeed.FitResult.Ok) QuadSpeed.FitResult.Ok(r.flight.copy(ball = ball)) else r }
             val flight3d = (fit as? QuadSpeed.FitResult.Ok)?.flight

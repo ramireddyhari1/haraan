@@ -2,6 +2,9 @@ package com.haraan.app.vision
 
 import kotlin.math.abs
 import kotlin.math.atan2
+import kotlin.math.exp
+import kotlin.math.ln
+import kotlin.math.max
 import kotlin.math.hypot
 import kotlin.math.sqrt
 
@@ -47,6 +50,8 @@ class PitchCamera private constructor(
 ) {
     /** How high the lens is above the pitch, in metres. */
     val heightM: Double get() = up * centre[2]
+
+
 
     /**
      * A point over the pitch ([Point3], z UP) back into the picture, in normalised upright
@@ -214,6 +219,9 @@ object QuadSpeed {
      */
     const val MAX_BOUNCE_ALONG_M = 15.0
 
+    /** [MAX_BOUNCE_ALONG_M] for the pitch being filmed: a short net's bouncer pitches nearer too. */
+    internal fun maxBounceAlongM(): Double = MAX_BOUNCE_ALONG_M * PitchGround.pitchLengthM / PitchGeometry.STUMPS_TO_STUMPS_M
+
     /** A best fit this close to [MAX_BOUNCE_ALONG_M] was pushed there by the limit. */
     const val EDGE_MARGIN_M = 0.6
 
@@ -231,10 +239,11 @@ object QuadSpeed {
         quad: PitchQuad,
         bounce: Bounce?,
         frameAspect: Float,
+        ball: BallDrag? = null,
     ): FitResult {
         val camera = PitchCamera.from(quad, frameAspect)
             ?: return FitResult.Refused("the pitch corners do not describe a camera — re-mark them")
-        return fit(run, camera, bounce, frameAspect)
+        return fit(run, camera, bounce, frameAspect, ball = ball)
     }
 
     /**
@@ -251,6 +260,8 @@ object QuadSpeed {
          * picture): it was on the stumps' line then. Null when it was not seen there.
          */
         reachedStumpsMs: Double? = null,
+        /** The ball, for how fast it slows in the air; null fits it at a steady pace. */
+        ball: BallDrag? = null,
     ): FitResult {
         if (run.size < MIN_PRE_BOUNCE + 2) {
             return FitResult.Refused("needs ${MIN_PRE_BOUNCE + 2} sightings in one flight, have ${run.size}")
@@ -290,11 +301,28 @@ object QuadSpeed {
          * rising points taken alone as a ball coming down — with no out leg, so the path was
          * projected into the stumps when the ball had bounced over them.
          */
+        val dragK = ball?.perMetre ?: 0.0
         val turn = if (bounce?.atMs == null) pictureBounceMs(run) else null
+        /*
+         * ...AND NOT AMONG THE SIGHTINGS WHEN THE PICTURE SAYS IT HAS NOT PITCHED. A ball that
+         * pitched climbs back up the picture after ([pictureBounceMs]); with no climb, a bounce
+         * with more than a few sightings after it is the fit trading the fall for a low skid
+         * off the pitch. A full tennis ball lost short of the stumps (session, 2026-11-19) was
+         * fitted that way — "pitched 12-15 m" — for a ball that pitched at the stumps. So the
+         * open search starts at the last few sightings: at most [TURN_MIN_AFTER] - 1 after it,
+         * which a yorker hidden by the batter may still have.
+         */
+        // Behind the bowler only: from the batter's end a ball coming in goes down the picture after it pitches too.
+        val behindBowler = camera.centre[1] > PitchGround.pitchLengthM / 2
+        // A delivery, not a fragment: a 5-6 point scrap after the ball fitted as a 150 km/h "ball" with it.
+        val stillFalling = behindBowler && bounce?.atMs == null && turn == null && run.size >= FALLING_MIN_POINTS &&
+            run.takeLast(TURN_MIN_AFTER).maxOf { it.y } >= run.maxOf { it.y } - FALLING_TOL
+        val openFrom = if (stillFalling) run[run.size - TURN_MIN_AFTER].timestampMs.toDouble() else first
         val (from, to, step) = bounce?.atMs?.let { Triple(it - TB_SEARCH_MS, it + TB_SEARCH_MS, TB_STEP_MS) }
             ?: turn?.let { Triple(it - TURN_SEARCH_MS, it + TURN_SEARCH_MS, TB_STEP_MS) }
-            ?: Triple(first, last + EXTRAPOLATE_BOUNCE_MS, TB_SCAN_STEP_MS)
+            ?: Triple(openFrom, last + EXTRAPOLATE_BOUNCE_MS, TB_SCAN_STEP_MS)
 
+        var behindSeen = false
         var best: DoubleArray? = null
         var bestTb = from
         var bestError = Double.MAX_VALUE
@@ -302,7 +330,11 @@ object QuadSpeed {
             var tb = a
             while (tb <= b) {
                 val near = run.filter { abs(it.timestampMs - tb) <= MAX_LOOKBACK_MS }
-                val fit = fitFlight(near, camera, tb, reachedStumpsMs, Bends.NONE)?.takeIf { physical(it.v) }
+                val fit = fitDragged(near, camera, tb, reachedStumpsMs, Bends.NONE, dragK)
+                    ?.takeIf { physical(it.v) }
+                    // A fragment whose best answer is impossible is refused, not given its runner-up:
+                    // three 5-6 point scraps after a 4K ball came back as 115-180 km/h "balls".
+                    ?.let { f -> if (inFrontOfTheBowler(f, near.first().timestampMs - tb, dragK)) f else if (run.size >= FALLING_MIN_POINTS) null else f.also { behindSeen = true } }
                 if (fit != null && fit.error < bestError) {
                     bestError = fit.error
                     best = fit.v
@@ -318,8 +350,15 @@ object QuadSpeed {
             scan(coarse - TB_SCAN_STEP_MS, coarse + TB_SCAN_STEP_MS, TB_STEP_MS)
         }
         val straight = best ?: return FitResult.Refused("the sightings around the bounce are too few or too close together to fit")
+        if (run.size < FALLING_MIN_POINTS && behindSeen) {
+            val near0 = run.filter { abs(it.timestampMs - bestTb) <= MAX_LOOKBACK_MS }
+            val bestSolved = fitDragged(near0, camera, bestTb, reachedStumpsMs, Bends.NONE, dragK)
+            if (bestSolved != null && !inFrontOfTheBowler(bestSolved, near0.first().timestampMs - bestTb, dragK)) {
+                return FitResult.Refused("the fit put the ball behind the bowler's stumps when first seen")
+            }
+        }
         val near = run.filter { abs(it.timestampMs - bestTb) <= MAX_LOOKBACK_MS }
-        val bent = bend(near, camera, bestTb, reachedStumpsMs, straight)
+        val bent = bend(near, camera, bestTb, reachedStumpsMs, straight, dragK)
         val v = bent.v
         val swingAccel = bent.swingAccel
 
@@ -351,7 +390,7 @@ object QuadSpeed {
         }
         // At the very edge of where a delivery can pitch, the search found nothing in range
         // and stopped against the limit: that is not a fit (a fielder walking, a follow-through).
-        if (v[1] > MAX_BOUNCE_ALONG_M - EDGE_MARGIN_M) {
+        if (v[1] > maxBounceAlongM() - EDGE_MARGIN_M) {
             return FitResult.Refused("the fit pitched the ball %.1f m up, nearer the bowler than any delivery".format(v[1]))
         }
         val hasAfter = v.size == 8 && v[6] < 0
@@ -371,6 +410,8 @@ object QuadSpeed {
                 cameraHeightM = camera.heightM,
                 inAx = swingAccel,
                 turnFitted = hasAfter && bent.turned,
+                ball = ball ?: BallDrag.LEATHER,
+                dragK = dragK,
             ),
         )
     }
@@ -394,8 +435,8 @@ object QuadSpeed {
      */
     private class Bent(val v: DoubleArray, val swingAccel: Double, val turned: Boolean)
 
-    private fun bend(points: List<BallSighting>, camera: PitchCamera, tb: Double, reachedStumpsMs: Double?, straight: DoubleArray): Bent {
-        val base = fitFlight(points, camera, tb, reachedStumpsMs, Bends.NONE) ?: return Bent(straight, 0.0, false)
+    private fun bend(points: List<BallSighting>, camera: PitchCamera, tb: Double, reachedStumpsMs: Double?, straight: DoubleArray, dragK: Double): Bent {
+        val base = fitDragged(points, camera, tb, reachedStumpsMs, Bends.NONE, dragK) ?: return Bent(straight, 0.0, false)
         val beforeSeen = points.filter { it.timestampMs <= tb }
         val afterSeen = points.filter { it.timestampMs > tb }
         val canTurn = afterSeen.size >= TURN_MIN_AFTER &&
@@ -410,7 +451,7 @@ object QuadSpeed {
          * is judged as a pair, and a single is kept only if it still holds up on its own.
          */
         fun candidate(bends: Bends, over: Solved): Solved? {
-            val fit = fitFlight(points, camera, tb, reachedStumpsMs, bends) ?: return null
+            val fit = fitDragged(points, camera, tb, reachedStumpsMs, bends, dragK) ?: return null
             if (!physical(fit.v) || fit.v[3] >= 0) return null
             if (!significant(over, fit, points.size)) return null
             if (bends.turn && !turnWorthKeeping(fit.v, afterSeen, tb)) return null
@@ -448,8 +489,13 @@ object QuadSpeed {
     private fun swingWorthKeeping(ax: Double, before: List<BallSighting>, tb: Double): Boolean {
         if (abs(ax) > MAX_SWING_ACCEL) return false
         val seenS = (tb - before.first().timestampMs) / 1000.0
-        return abs(ax) * seenS * seenS / 2.0 >= MIN_SWING_M
+        val moved = abs(ax) * seenS * seenS / 2.0
+        // Big swing is under a metre by the bounce; past that the "swing" is the fit bending
+        // a straight ball to absorb something else (4 m on a full tennis ball, 2026-11-20).
+        return moved >= MIN_SWING_M && moved <= MAX_SWING_M
     }
+
+    internal const val MAX_SWING_M = 1.0
 
     /** Signed degrees from the line into the bounce to the line out of it; positive = towards +x. */
     internal fun turnDegrees(inVx: Double, inVy: Double, outVx: Double, outVy: Double): Double {
@@ -518,9 +564,28 @@ object QuadSpeed {
         if (v.size < 5 || v[4] <= 0.0) return false
         // ...and lands where a delivery can: the refusal below used to see only the single
         // best candidate, so one out of range threw away every one that was not.
-        if (v[1] < MIN_BOUNCE_ALONG_M || v[1] > MAX_BOUNCE_ALONG_M) return false
+        if (v[1] < MIN_BOUNCE_ALONG_M || v[1] > maxBounceAlongM()) return false
         return v.size < 8 || v[7] > 0.0
     }
+
+    /*
+     * A BOWLED BALL IS NEVER BEHIND THE BOWLER'S STUMPS. Filmed from behind the bowler, a ball
+     * lost before it pitches fits two ways nearly as well: the delivery it was, and a slow lob
+     * near the lens pitching under the bowler. In a simulated full tennis ball (2026-11-20)
+     * the lob fitted the sightings better by a hair — and put the ball 30 m from the striker,
+     * ten metres behind the bowler, when it was first seen. Where it was at its first
+     * sighting has to be in front of the bowler's stumps.
+     */
+    private fun inFrontOfTheBowler(fit: Solved, firstFromBounceMs: Double, dragK: Double): Boolean {
+        val v = fit.v
+        val s = firstFromBounceMs / 1000.0
+        if (s > 0) return true
+        val y = v[1] + v[3] * Drag.tau(s, dragK * hypot(v[2], v[3]))
+        return y <= PitchGround.pitchLengthM + BEHIND_BOWLER_SLACK_M
+    }
+
+    /** A ball first seen just as it leaves a hand reaching back over the stumps. */
+    private const val BEHIND_BOWLER_SLACK_M = 0.6
 
     /** The share of its pace along and across the pitch a ball keeps off the bounce. */
     internal const val PACE_KEPT_OFF_PITCH = 0.88
@@ -547,6 +612,11 @@ object QuadSpeed {
     }
 
     private const val TURN_MIN_AFTER = 4
+
+    private const val FALLING_MIN_POINTS = 8
+
+    /** "Still coming down at the end": its last sightings within this of its lowest (frame heights). */
+    private const val FALLING_TOL = 0.004f
     private const val TURN_MIN_RISE = 0.01f
     private const val TB_STEP_MS = 2.0
 
@@ -586,7 +656,26 @@ object QuadSpeed {
      * the bounce (swing) and the ball's own sideways speed after it (turn). Null when the
      * before or after side is too thin to fit.
      */
-    private fun fitFlight(points: List<BallSighting>, camera: PitchCamera, tb: Double, reachedStumpsMs: Double?, bends: Bends): Solved? {
+    /**
+     * [fitFlight] with air drag: its rate depends on the speed being solved for, so the steady
+     * fit seeds it and a few rounds settle it (each moves the pace by well under 1% after the
+     * second on the simulated balls). [dragK] 0 is the steady fit, once.
+     */
+    private fun fitDragged(points: List<BallSighting>, camera: PitchCamera, tb: Double, reachedStumpsMs: Double?, bends: Bends, dragK: Double): Solved? {
+        var fit = fitFlight(points, camera, tb, reachedStumpsMs, bends, 0.0) ?: return null
+        if (dragK <= 0.0) return fit
+        repeat(DRAG_ROUNDS) {
+            val pace = hypot(fit.v[2], fit.v[3])
+            if (!pace.isFinite() || pace <= 0.0) return fit
+            fit = fitFlight(points, camera, tb, reachedStumpsMs, bends, dragK * pace) ?: return null
+        }
+        return fit
+    }
+
+    private const val DRAG_ROUNDS = 4
+
+    private fun fitFlight(points: List<BallSighting>, camera: PitchCamera, tb: Double, reachedStumpsMs: Double?, bends: Bends, kappa: Double): Solved? {
+        val kappaOut = kappa * PACE_KEPT_OFF_PITCH
         val before = points.count { it.timestampMs <= tb }
         val after = points.size - before
         if (before < MIN_PRE_BOUNCE) return null
@@ -614,17 +703,20 @@ object QuadSpeed {
             val s = (sighting.timestampMs - tb) / 1000.0
             if (s > 0 && !hasAfter) continue
             val d = camera.ray(sighting.x.toDouble(), sighting.y.toDouble())
+            // With drag the ball's own clock runs slower than the steady one: see [Drag].
+            val k = if (s <= 0) kappa else kappaOut
+            val t = Drag.tau(s, k)
             // P - C = a + J u, J is 3 x n.
-            val a = doubleArrayOf(-c[0], -c[1], up * (-G * s * s / 2.0) - c[2])
+            val a = doubleArrayOf(-c[0], -c[1], up * (-G * Drag.fall(s, k)) - c[2])
             val j = Array(3) { DoubleArray(n) }
             j[0][0] = 1.0
             j[1][1] = 1.0
             if (s <= 0) {
-                j[0][2] = s; j[1][3] = s; j[2][4] = -up * s
+                j[0][2] = t; j[1][3] = t; j[2][4] = -up * t
                 if (swingCol >= 0) j[0][swingCol] = s * s / 2.0
             } else {
-                if (turnCol >= 0) j[0][turnCol] = s else j[0][2] = PACE_KEPT_OFF_PITCH * s
-                j[1][3] = PACE_KEPT_OFF_PITCH * s; j[2][5] = up * s
+                if (turnCol >= 0) j[0][turnCol] = t else j[0][2] = PACE_KEPT_OFF_PITCH * t
+                j[1][3] = PACE_KEPT_OFF_PITCH * t; j[2][5] = up * t
             }
             // cross(a + J u, d) = 0  →  ([d]x J) u = cross(a, d)
             val rhs = PitchCamera.cross(a, d)
@@ -656,7 +748,7 @@ object QuadSpeed {
             val s = (reachedStumpsMs - tb) / 1000.0
             val coeff = DoubleArray(n)
             coeff[1] = STUMPS_WEIGHT
-            coeff[3] = STUMPS_WEIGHT * (if (s <= 0) s else PACE_KEPT_OFF_PITCH * s)
+            coeff[3] = STUMPS_WEIGHT * (if (s <= 0) Drag.tau(s, kappa) else PACE_KEPT_OFF_PITCH * Drag.tau(s, kappaOut))
             val rhs = 0.0
             rows.add(coeff to rhs)
             extraRows++
@@ -735,9 +827,45 @@ data class Flight3d(
     val inAx: Double = 0.0,
     /** Whether [outVx] was solved on its own (the ball turned) rather than kept on the line in. */
     val turnFitted: Boolean = false,
+    /**
+     * Air drag the flight was FITTED with, per metre ([BallDrag.perMetre]); 0 for a steady pace.
+     * With drag, [inVx]/[inVy]/[inVzDown] are the ball's speeds AT the bounce — its slowest in
+     * the air — and the path before it is the slowing one (see [Drag]).
+     */
+    val dragK: Double = 0.0,
 ) {
-    /** The fitted steady speed over the ground before the bounce: the average, not the release. */
-    val groundKmh: Double get() = hypot(inVx, inVy) * 3.6
+    /** How fast drag bites into the leg in and the leg out, per second: k × speed at the bounce. */
+    private val kIn: Double get() = dragK * hypot(inVx, inVy)
+    private val kOut: Double get() = dragK * hypot(legVx, legVy)
+
+    /**
+     * The average speed over the ground from the hand to the bounce. For a steady-pace fit that
+     * is just its pace; with drag, the ground covered over the time it took.
+     */
+    val groundKmh: Double
+        get() {
+            if (dragK <= 0.0 || inVy >= 0.0) return hypot(inVx, inVy) * 3.6
+            val s = (releaseMs - bounceMs) / 1000.0
+            if (s >= -1e-3) return hypot(inVx, inVy) * 3.6
+            val p = at(releaseMs)
+            return hypot(p.x - bounceX, p.y - bounceY) / -s * 3.6
+        }
+
+    /**
+     * When the ball was [along] metres from the striker's stumps — on the leg in when that is
+     * at or before the bounce, else on the leg out (seen or projected); null when it never is.
+     */
+    fun msAt(along: Double): Double? {
+        val tau = if (along >= bounceY) {
+            if (inVy >= 0) return null
+            (along - bounceY) / inVy
+        } else {
+            if (legVy >= 0) return null
+            (along - bounceY) / legVy
+        }
+        val s = if (along >= bounceY) Drag.sOf(tau, kIn) else Drag.sOf(tau, kOut)
+        return if (s.isFinite()) bounceMs + s * 1000.0 else null
+    }
 
     /** Release speed — what a speed gun reads — for [ball]. Every readout shows this one. */
     val speedKmh: Double get() = releaseKmh(this)
@@ -752,17 +880,19 @@ data class Flight3d(
      * flight is carried on as a ball comes off a pitch: same line, [QuadSpeed.PACE_KEPT_OFF_PITCH]
      * of the pace, rising at [RESTITUTION] of the speed it came down at.
      */
-    private val legVx: Double get() = outVx ?: QuadSpeed.PACE_KEPT_OFF_PITCH * inVx
-    private val legVy: Double get() = outVy ?: QuadSpeed.PACE_KEPT_OFF_PITCH * inVy
+    internal val legVx: Double get() = outVx ?: QuadSpeed.PACE_KEPT_OFF_PITCH * inVx
+    internal val legVy: Double get() = outVy ?: QuadSpeed.PACE_KEPT_OFF_PITCH * inVy
     private val legVzUp: Double get() = outVzUp ?: RESTITUTION * inVzDown
 
     /** Where the ball was at [ms] on the sightings' clock. Height never below the grass. */
     fun at(ms: Double): Point3 {
         val s = (ms - bounceMs) / 1000.0
         return if (s <= 0) {
-            Point3(bounceX + inVx * s + inAx * s * s / 2, bounceY + inVy * s, (-inVzDown * s - G * s * s / 2).coerceAtLeast(0.0))
+            val t = Drag.tau(s, kIn)
+            Point3(bounceX + inVx * t + inAx * s * s / 2, bounceY + inVy * t, (-inVzDown * t - G * Drag.fall(s, kIn)).coerceAtLeast(0.0))
         } else {
-            Point3(bounceX + legVx * s, bounceY + legVy * s, (legVzUp * s - G * s * s / 2).coerceAtLeast(0.0))
+            val t = Drag.tau(s, kOut)
+            Point3(bounceX + legVx * t, bounceY + legVy * t, (legVzUp * t - G * Drag.fall(s, kOut)).coerceAtLeast(0.0))
         }
     }
 
@@ -772,18 +902,15 @@ data class Flight3d(
      */
     val releaseMs: Double
         get() {
-            val back = if (inVy < 0) (bounceY - RELEASE_Y_M) / inVy * 1000.0 else 0.0
-            return maxOf(bounceMs + back, firstSeenMs - MAX_BACKFILL_MS).coerceAtMost(firstSeenMs)
+            val back = msAt(releaseY) ?: bounceMs
+            return maxOf(back, firstSeenMs - MAX_BACKFILL_MS).coerceAtMost(firstSeenMs)
         }
 
     /** When it reaches the stumps' line — on the seen leg, or the projected one. */
     val stumpsMs: Double?
         get() {
             // Pitched at or behind the line: it got there on the way down.
-            if (bounceY <= 0.0) return if (inVy < 0) bounceMs + (0.0 - bounceY) / inVy * 1000.0 else null
-            val vy = legVy
-            if (vy >= 0) return null
-            return bounceMs + (0.0 - bounceY) / vy * 1000.0
+            return msAt(0.0)
         }
 
     /**
@@ -811,8 +938,58 @@ data class Flight3d(
     internal companion object {
         const val G = 9.81
         const val RELEASE_Y_M = 18.4
+
+        /** Where the hand lets go on the pitch being filmed: as far in front of the bowler's stumps as on a full one. */
+        val releaseY: Double get() = PitchGround.pitchLengthM - (PitchGeometry.STUMPS_TO_STUMPS_M - RELEASE_Y_M)
         const val MAX_BACKFILL_MS = 400.0
         /** How fast a ball climbs off a pitch, as a share of how fast it came down. */
         const val RESTITUTION = 0.5
     }
+}
+
+
+/**
+ * A BALL THAT SLOWS IN THE AIR, IN CLOSED FORM.
+ *
+ * Quadratic drag slows a ball along its path as dv/dt = −k·v²: with v_b its speed at the
+ * bounce and κ = k·v_b, its speed s seconds from the bounce is v_b / (1 + κs), and the ground
+ * it covers is v_b·[tau]. The same drag holds the fall back — dv_z/dt = −g − k·v·v_z — and its
+ * integrating factor is (1 + κs) again, so the height carries gravity through [fall] instead
+ * of s²/2. Both are exact for that law with v taken as the speed along the ground, and both
+ * become the steady-pace parabola as κ → 0.
+ *
+ * Why it is in the fit (bowling session, 2026-11-19): a tennis ball loses ~30% of its pace
+ * over a pitch. Filmed from behind the bowler and lost before it pitched, a steady-pace fit
+ * read that slowing as a ball dropping short — full balls at the stumps came out "pitched
+ * 12-14 m" in simulation and "short" on every ball of the session.
+ */
+internal object Drag {
+    /** The "steady-pace seconds" s seconds from the bounce stand for: ln(1 + κs)/κ. */
+    fun tau(s: Double, kappa: Double): Double {
+        if (kappa <= 1e-9) return s
+        val x = kappa * s
+        if (abs(x) < 1e-4) return s * (1 - x / 2 + x * x / 3)
+        return ln(max(1 + x, MIN_ARG)) / kappa
+    }
+
+    /** Inverse of [tau]: the real seconds from the bounce for steady-pace seconds [t]. */
+    fun sOf(t: Double, kappa: Double): Double {
+        if (kappa <= 1e-9) return t
+        val x = kappa * t
+        if (abs(x) < 1e-4) return t * (1 + x / 2 + x * x / 6)
+        return (exp(x) - 1) / kappa
+    }
+
+    /** Gravity's share of the height s seconds from the bounce, in place of s²/2. */
+    fun fall(s: Double, kappa: Double): Double {
+        if (kappa <= 1e-9) return s * s / 2
+        val x = kappa * s
+        if (abs(x) < 1e-3) return s * s / 2 - kappa * s * s * s / 6
+        return s * s / 4 + (s / kappa - ln(max(1 + x, MIN_ARG)) / (kappa * kappa)) / 2
+    }
+
+    /** The ball's speed (along the ground) s seconds from the bounce, as a share of it there. */
+    fun paceShare(s: Double, kappa: Double): Double = 1.0 / max(1 + kappa * s, MIN_ARG)
+
+    private const val MIN_ARG = 0.05
 }

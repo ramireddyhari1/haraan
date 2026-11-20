@@ -29,6 +29,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -212,6 +214,11 @@ private fun BowlingSessionsScreen(onExit: () -> Unit) {
                             sessions = BowlingSessionStore.all(context)
                             openId = null
                         },
+                        onSetup = { ball, pitchM ->
+                            view.confirm()
+                            BowlingSessionStore.setSetup(context, session.id, ball, pitchM)
+                            sessions = BowlingSessionStore.all(context)
+                        },
                     )
                 }
             }
@@ -229,9 +236,9 @@ private fun BowlingSessionsScreen(onExit: () -> Unit) {
     if (creating) {
         NewSessionSheet(
             onDismiss = { creating = false },
-            onStart = { name, camera ->
+            onStart = { name, camera, ball, pitchM ->
                 creating = false
-                val made = BowlingSessionStore.create(context, name, camera)
+                val made = BowlingSessionStore.create(context, name, camera, ball, pitchM)
                 sessions = BowlingSessionStore.all(context)
                 startCamera(made.id)
             },
@@ -426,9 +433,11 @@ private fun SessionDetail(
     onBack: () -> Unit,
     onCamera: () -> Unit,
     onDelete: () -> Unit,
+    onSetup: (ball: String, pitchM: Double?) -> Unit,
 ) {
     val context = LocalContext.current
     val view = LocalView.current
+    var editing by remember { mutableStateOf(false) }
     // Re-listed as balls are saved, so a live session fills in while you watch.
     val videos by produceState<List<SessionVideo>?>(null, session.album, session.balls) {
         value = withContext(Dispatchers.IO) { runCatching { videosOf(context, session.album) }.getOrDefault(emptyList()) }
@@ -465,7 +474,28 @@ private fun SessionDetail(
                         fontSize = 13.sp,
                     )
                 }
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(10.dp))
+                // What the speed and length are worked out from: worth seeing, and fixing after.
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White)
+                        .border(1.dp, Hairline, RoundedCornerShape(14.dp))
+                        .clickable { view.tick(); editing = true }
+                        .padding(horizontal = 14.dp, vertical = 11.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "${ballLabel(session.ball)} ball  ·  ${pitchLabel(session.pitchM)}",
+                        color = Ink,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Text("Change", color = Brand, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(10.dp))
                 PrimaryButton(
                     if (live) "Back to the camera" else "Film more balls",
                     leading = { Icon(Icons.Outlined.PlayArrow, null, tint = Color.White, modifier = Modifier.size(20.dp)) },
@@ -508,6 +538,30 @@ private fun SessionDetail(
                 }
             }
         }
+    }
+
+    if (editing) {
+        var ball by remember { mutableStateOf(session.ball) }
+        var pitchM by remember { mutableStateOf(session.pitchM) }
+        AlertDialog(
+            onDismissRequest = { editing = false },
+            containerColor = Color.White,
+            title = { Text("Ball and pitch") },
+            text = {
+                Column {
+                    Text(
+                        "Used for this session's speed and length from the next ball. Saved videos keep their numbers.",
+                        color = Muted,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    BallAndPitch(ball = ball, onBall = { ball = it }, pitchM = pitchM, onPitch = { pitchM = it })
+                }
+            },
+            confirmButton = { TextButton(onClick = { editing = false; onSetup(ball, pitchM) }) { Text("Save", color = Brand) } },
+            dismissButton = { TextButton(onClick = { editing = false }) { Text("Cancel", color = Muted) } },
+        )
     }
 
     if (confirmDelete) {
@@ -642,17 +696,19 @@ private fun thumbnailOf(context: Context, uri: Uri): Bitmap? =
 @Composable
 private fun NewSessionSheet(
     onDismiss: () -> Unit,
-    onStart: (String, BowlingSessionStore.Camera) -> Unit,
+    onStart: (String, BowlingSessionStore.Camera, String, Double?) -> Unit,
 ) {
     val view = LocalView.current
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var name by remember { mutableStateOf("") }
     var camera by remember { mutableStateOf(BowlingSessionStore.Camera.LBW) }
+    var ball by remember { mutableStateOf(BowlingSessionStore.DEFAULT_BALL) }
+    var pitchM by remember { mutableStateOf<Double?>(null) }
     var tries by remember { mutableIntStateOf(0) }
     val error = tries > 0 && name.isBlank()
     fun start() {
         if (name.isBlank()) { tries++; view.tick(); return }
-        onStart(name, camera)
+        onStart(name, camera, ball, pitchM)
     }
 
     ModalBottomSheet(
@@ -727,10 +783,102 @@ private fun NewSessionSheet(
                     }
                 }
             }
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
+            BallAndPitch(ball = ball, onBall = { ball = it }, pitchM = pitchM, onPitch = { pitchM = it })
+            Spacer(Modifier.height(16.dp))
             PrimaryButton("Start filming", onClick = { start() })
         }
     }
+}
+
+// ── Ball and pitch ───────────────────────────────────────────────────────────────
+
+private fun ballLabel(serverValue: String) =
+    com.haraan.app.vision.BallDrag.fromServer(serverValue)?.label ?: "Tennis"
+
+private fun pitchLabel(pitchM: Double?) =
+    pitchM?.let { "net %.1f m".format(it) } ?: "full pitch"
+
+private val PITCH_RANGE = com.haraan.app.vision.PitchGround.MIN_PITCH_M..com.haraan.app.vision.PitchGround.MAX_PITCH_M
+
+/**
+ * THE BALL AND THE PITCH, what the speed and length are worked out from. A tennis ball read
+ * as leather came out ~10 km/h slow, and a short practice net read as a full 22 yards put
+ * every full ball "short" (session, 2026-11-19).
+ */
+@Composable
+private fun BallAndPitch(ball: String, onBall: (String) -> Unit, pitchM: Double?, onPitch: (Double?) -> Unit) {
+    var text by remember { mutableStateOf(pitchM?.let { "%.1f".format(it) } ?: "") }
+    Column {
+        Text("BALL", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            com.haraan.app.vision.BallDrag.CHOICES.forEach { b ->
+                SetupChip(b.label, b.serverValue == ball) { onBall(b.serverValue) }
+            }
+        }
+        Spacer(Modifier.height(16.dp))
+        Text("PITCH", color = Muted, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            SetupChip("Full · 22 yards", pitchM == null) { onPitch(null) }
+            SetupChip("Shorter net", pitchM != null) {
+                if (text.toDoubleOrNull()?.let { it in PITCH_RANGE } != true) text = "16.0"
+                onPitch(text.toDouble())
+            }
+        }
+        if (pitchM != null) {
+            Spacer(Modifier.height(10.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .width(96.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Page)
+                        .border(1.dp, Hairline, RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                ) {
+                    BasicTextField(
+                        value = text,
+                        onValueChange = { v ->
+                            text = v.filter { it.isDigit() || it == '.' }.take(5)
+                            text.toDoubleOrNull()?.takeIf { it in PITCH_RANGE }?.let(onPitch)
+                        },
+                        singleLine = true,
+                        textStyle = TextStyle(color = Ink, fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
+                        cursorBrush = SolidColor(Brand),
+                        keyboardOptions = KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Decimal),
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Text("metres, stumps to stumps", color = Muted, fontSize = 13.sp)
+            }
+            val bad = text.toDoubleOrNull()?.let { it !in PITCH_RANGE } ?: true
+            Text(
+                if (bad) "Between 8 and 24 m." else "Tape it from one set of stumps to the other.",
+                color = if (bad) Rec else Muted,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 6.dp, start = 2.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SetupChip(label: String, on: Boolean, onClick: () -> Unit) {
+    val view = LocalView.current
+    Text(
+        label,
+        color = if (on) Color.White else Ink,
+        fontSize = 14.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(if (on) Brand else Color.White)
+            .border(1.dp, if (on) Brand else Hairline, RoundedCornerShape(50))
+            .clickable { if (!on) { view.tick(); onClick() } }
+            .padding(horizontal = 16.dp, vertical = 9.dp),
+    )
 }
 
 // ── Not on Hero ──────────────────────────────────────────────────────────────────
