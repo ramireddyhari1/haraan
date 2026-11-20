@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -65,15 +66,19 @@ internal fun MarkingsAdjust(
     onReset: () -> Unit,
     /** Both sets as they stand on screen, moved or not: Done holds what the person sees. */
     onDone: (far: WicketAnchor, near: BowlersEnd) -> Unit,
+    /** The live preview as shown, for the magnifier (PreviewView.bitmap); null shows none. */
+    picture: () -> android.graphics.Bitmap? = { null },
 ) {
     val view = LocalView.current
     var farNow by remember { mutableStateOf(far) }
     var nearNow by remember { mutableStateOf(near) }
     var held by remember { mutableStateOf<Handle?>(null) }
+    var overlaySize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
 
     Box(
         Modifier
             .fillMaxSize()
+            .onSizeChanged { overlaySize = it }
             .pointerInput(uprightAspect) {
                 detectDragGestures(
                     onDragStart = { at ->
@@ -116,6 +121,14 @@ internal fun MarkingsAdjust(
             ring(box.toView(farNow.base), held == Handle.FAR)
             ring(box.toView(nearNow.base), held == Handle.NEAR)
         }
+
+        // The magnifier, on the ring being dragged: its cross is the stumps' feet.
+        val frameNow = FrameBox.letterbox(overlaySize.width.toFloat(), overlaySize.height.toFloat(), uprightAspect)
+        StumpLoupe(
+            focus = held?.takeIf { frameNow.width > 0f }?.let { if (it == Handle.FAR) frameNow.toView(farNow.base) else frameNow.toView(nearNow.base) },
+            picture = picture,
+            frame = frameNow,
+        )
 
         Column(
             Modifier

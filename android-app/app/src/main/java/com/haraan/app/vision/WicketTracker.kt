@@ -466,6 +466,16 @@ class WicketTracker {
     /** Consecutive frames whose camera motion could not be resolved. */
     private var blindFrames = 0
 
+    /*
+     * WHERE THE HAND PUT IT. A hand-placed lock is the operator's word, and on a tripod the
+     * wicket does not move in the picture: the camera-motion chain used to carry it anyway,
+     * and every bowler and batter crossing the frame fooled that estimate a little, so the
+     * stumps crept off delivery after delivery (bowling session, 2026-11-20). Now a manual
+     * lock stays put, and the detector may only nudge it within [MANUAL_MAX_DRIFT_SPANS] of
+     * this — never onto a pad beside it.
+     */
+    private var placed: WicketAnchor? = null
+
     /** Residuals of observed-minus-predicted, newest last, for the jitter figure. */
     private val residuals = ArrayDeque<Float>()
 
@@ -568,7 +578,8 @@ class WicketTracker {
     private fun applyMotion(motion: FrameMotion) {
         if (motion.isUsable) {
             blindFrames = 0
-            anchor = anchor?.map { motion.apply(it, aspect) }
+            // A hand-placed wicket is fixed in the picture: the phone is on its tripod.
+            if (source != WicketLockSource.MANUAL) anchor = anchor?.map { motion.apply(it, aspect) }
             memory?.let { it.anchor = it.anchor.map { p -> motion.apply(p, aspect) } }
             for (h in hypotheses) h.anchor = h.anchor.map { motion.apply(it, aspect) }
         } else {
@@ -599,8 +610,11 @@ class WicketTracker {
             val observed = WicketAnchor.of(nearest)
             val gate = gateFor(held, MANUAL_NUDGE_GATE_SPANS)
             val error = distance(observed.base, held.base)
-            if (error <= gate && spanAgrees(held, observed, kind)) {
-                anchor = held.blend(observed, MANUAL_NUDGE_WEIGHT)
+            val nudged = held.blend(observed, MANUAL_NUDGE_WEIGHT)
+            val home = placed
+            val withinReach = home == null || distance(nudged.base, home.base) <= home.span(aspect) * MANUAL_MAX_DRIFT_SPANS
+            if (error <= gate && spanAgrees(held, observed, kind) && withinReach) {
+                anchor = nudged
                 pushResidual(residuals, error)
                 scoreEma = scoreEma + (nearest.score - scoreEma) * SCORE_SMOOTHING
                 noteRoll(nearest)
@@ -630,11 +644,8 @@ class WicketTracker {
          * it is just sitting there. TEMPORARILY_LOST is what a screen needs to see so it
          * can stop drawing this like a fact.
          */
-        state = if (blindFrames > MAX_BLIND_FRAMES) {
-            WicketTrackState.TEMPORARILY_LOST
-        } else {
-            WicketTrackState.CONFIRMED
-        }
+        // Fixed in the picture, it does not depend on the camera's motion being followed.
+        state = WicketTrackState.CONFIRMED
         return currentLock()
     }
 
@@ -1028,6 +1039,7 @@ class WicketTracker {
 
     private fun clearLock() {
         anchor = null
+        placed = null
         kind = null
         source = WicketLockSource.DETECTED
         state = WicketTrackState.LOST
@@ -1173,6 +1185,7 @@ class WicketTracker {
         }
         anchor = WicketAnchor(l, r, top)
         holdAsManual(kind)
+        placed = anchor
     }
 
     /**
@@ -1184,6 +1197,7 @@ class WicketTracker {
         if (frameAspect > 0f) aspect = frameAspect
         anchor = to
         holdAsManual(WicketKind.STUMPS)
+        placed = anchor
     }
 
     private fun holdAsManual(kind: WicketKind) {
@@ -1232,6 +1246,7 @@ class WicketTracker {
         hypotheses.clear()
         memory = null
         note = "set up: held where the detector saw it"
+        placed = anchor
         return true
     }
 
@@ -1239,6 +1254,7 @@ class WicketTracker {
     @Synchronized
     fun clearManualLock() {
         if (source != WicketLockSource.MANUAL) return
+        placed = null
         clearLock()
         hypotheses.clear()
         memory = null
@@ -1661,6 +1677,9 @@ class WicketTracker {
         const val REACQUIRE_BLEND = 0.3f
         const val CONFIRMED_BLEND = 0.18f
         const val MANUAL_NUDGE_WEIGHT = 0.02f
+
+        /** How far the detector may nudge a hand-placed wicket from where it was put, in spans. */
+        const val MANUAL_MAX_DRIFT_SPANS = 0.15f
 
         /** How fast the detector's score is followed. */
         const val SCORE_SMOOTHING = 0.25f

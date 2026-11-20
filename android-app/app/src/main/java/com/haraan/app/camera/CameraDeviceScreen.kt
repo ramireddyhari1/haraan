@@ -1217,6 +1217,13 @@ private fun CameraMode(
      * frame after the recorder reports it has started: right to within a frame.
      */
     val pendingClipStart = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    /*
+     * THE MAGNIFIER'S PICTURE, from the analyser, upright. Grabbing the preview instead
+     * (PreviewView.bitmap) copied the screen on the main thread, ~100 ms each time, and the
+     * drag it was meant to help stuttered (2026-11-20). Only made while Setup or Adjust is open.
+     */
+    val loupeWanted = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    val loupeFrame = remember { java.util.concurrent.atomic.AtomicReference<android.graphics.Bitmap?>(null) }
     // Developer: write the next analysed frame's raw planes to disk, for desk replay.
     // A burst of consecutive frames: the ball tracker works on frame DIFFERENCES, so one
     // frame alone cannot replay it.
@@ -1320,6 +1327,7 @@ private fun CameraMode(
         var lastGateLogMs = 0L
         var idleAnalysisFrame = 0
         var lastLiveFrameMs = Long.MIN_VALUE / 2
+        var lastLoupeMs = 0L
 
         ImageAnalysis.Analyzer { image ->
             try {
@@ -1332,6 +1340,21 @@ private fun CameraMode(
                     // A quarter turn swaps the picture's width and height. Both engines
                     // report inside the upright frame, so that is the shape to draw into.
                     // Free: read off the frame's metadata, not its pixels.
+                    if (loupeWanted.get() && image !is VideoFeedFrame) {
+                        val nowMs = android.os.SystemClock.uptimeMillis()
+                        if (nowMs - lastLoupeMs >= LOUPE_FRAME_MS) {
+                            lastLoupeMs = nowMs
+                            runCatching {
+                                val raw = image.toBitmap()
+                                val turn = image.imageInfo.rotationDegrees
+                                val upright = if (turn == 0) raw else android.graphics.Bitmap.createBitmap(
+                                    raw, 0, 0, raw.width, raw.height,
+                                    android.graphics.Matrix().apply { postRotate(turn.toFloat()) }, false,
+                                ).also { if (it !== raw) raw.recycle() }
+                                loupeFrame.set(upright)
+                            }
+                        }
+                    }
                     if (pendingClipStart.compareAndSet(true, false)) {
                         clipStartSensorMs = image.imageInfo.timestamp / 1_000_000.0
                     }
@@ -3722,6 +3745,10 @@ private fun CameraMode(
                 onDone = { showAr = false },
             )
         }
+        LaunchedEffect(setupAligning, adjusting) {
+            loupeWanted.set(setupAligning || adjusting)
+            if (!setupAligning && !adjusting) loupeFrame.set(null)
+        }
         if (setupAligning && granted && !recording) {
             val guide = com.haraan.app.vision.StumpAlignGuide.guide(cameraIntrinsics?.focalFw ?: 1.4, uprightAspect)
             val far = wicketLock?.takeIf {
@@ -3752,7 +3779,6 @@ private fun CameraMode(
                     wicketDiagnostics = wicketTracker.diagnostics()
                     setupTilt = com.haraan.app.vision.DeviceTilt.steady()
                     setupNote = null
-                    bowlersEndPinned = false
                     if (!nearFound) {
                         val k = com.haraan.app.vision.PitchGeometry.STUMP_CENTRES_SPAN_M / com.haraan.app.vision.PitchGeometry.STUMP_SET_WIDTH_M
                         bowlersEndBase = com.haraan.app.vision.BowlersEnd(
@@ -3760,13 +3786,15 @@ private fun CameraMode(
                             nearBox.width * k,
                             nearBox.baseY - nearBox.topY,
                         )
-                        // Placed by hand: held where it was put, as Adjust's are.
-                        bowlersEndPinned = true
                     }
+                    // HELD EITHER WAY: the detector's reading inside the box, or the box. Left to
+                    // follow the detector, the bowler's set wandered with every ball (2026-11-20).
+                    bowlersEndPinned = bowlersEndBase != null
                     view.performHapticFeedback(Feel.COMMIT)
                     setupAligning = false
                 },
                 onCancel = { setupAligning = false },
+                picture = { loupeFrame.get() },
             )
         }
         if (adjusting && granted && !recording) {
@@ -3806,9 +3834,9 @@ private fun CameraMode(
                     adjusting = false
                 },
                 onDone = { far, near ->
-                    // Held from here, and let go if the phone is moved — as Setup's are. Both
-                    // sets, dragged or not: a detected lock left alone would still be let go
-                    // the next time the batter hid it.
+                    // Held from here — as Setup's are, and kept even if the phone is knocked
+                    // (it says so). Both sets, dragged or not: a detected lock left alone would
+                    // still be let go the next time the batter hid it.
                     wicketTracker.placeManually(far, uprightAspect)
                     wicketLock = wicketTracker.lock()
                     wicketDiagnostics = wicketTracker.diagnostics()
@@ -3819,18 +3847,18 @@ private fun CameraMode(
                     view.performHapticFeedback(Feel.COMMIT)
                     adjusting = false
                 },
+                picture = { loupeFrame.get() },
             )
         }
         SetupMovedWatch(setupTilt) {
-            // Only a lock Setup (or a hand) placed is let go: the detector's own keeps re-deciding.
-            if (wicketTracker.diagnostics().lockSource == com.haraan.app.vision.WicketLockSource.MANUAL) {
-                wicketTracker.clearManualLock()
-                wicketLock = wicketTracker.lock()
-                wicketDiagnostics = wicketTracker.diagnostics()
-            }
-            bowlersEndPinned = false
+            /*
+             * HAND-PLACED STUMPS ARE KEPT, AND THE PERSON IS TOLD. They used to be let go here,
+             * which handed the wicket back to a detector that was failing too, ball after ball
+             * (2026-11-20). A phone knocked a little is still mostly right; Adjust puts it right
+             * in a moment, and nothing is lost meanwhile.
+             */
             setupTilt = null
-            setupNote = "The phone moved since Setup · tap Setup again"
+            setupNote = "The phone moved since Setup · check the stumps with Adjust"
             scope.launch { com.haraan.app.ui.matches.cricketThud(ctx, com.haraan.app.ui.matches.Thud.UNDO) }
         }
         val result = liveResult
@@ -5839,6 +5867,9 @@ private fun <T> lockFrameRate(builder: androidx.camera.core.ExtendableBuilder<T>
 }
 
 private const val TARGET_FPS = 30
+
+/** The magnifier's picture is refreshed about this often while Setup or Adjust is open. */
+private const val LOUPE_FRAME_MS = 60L
 
 /**
  * The quality picked on the live camera screen, kept on this phone. AUTO films the best this

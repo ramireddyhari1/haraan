@@ -27,6 +27,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -70,14 +71,19 @@ internal fun StumpAlignSetup(
     /** Where the boxes were left: the batter's set, then the bowler's. */
     onDone: (farFound: Boolean, nearFound: Boolean, far: StumpAlignGuide.Box, near: StumpAlignGuide.Box) -> Unit,
     onCancel: () -> Unit,
+    /** The live preview as shown, for the magnifier (PreviewView.bitmap); null shows none. */
+    picture: () -> android.graphics.Bitmap? = { null },
 ) {
     var far by remember(guide) { mutableStateOf(guide.far) }
     var near by remember(guide) { mutableStateOf(guide.near) }
     var farMoved by remember(guide) { mutableStateOf(false) }
     var nearMoved by remember(guide) { mutableStateOf(false) }
+    // What a finger holds now, for the magnifier; and the overlay's size, to place it.
+    var holding by remember { mutableStateOf<Grab?>(null) }
+    var overlaySize by remember { mutableStateOf(androidx.compose.ui.unit.IntSize.Zero) }
     val farOk = farSeen != null && far.contains(farSeen, FAR_PAD_ACROSS, FAR_PAD_DOWN)
     val nearOk = nearSeen != null && near.contains(nearSeen, NEAR_PAD_ACROSS, NEAR_PAD_DOWN)
-    Box(Modifier.fillMaxSize()) {
+    Box(Modifier.fillMaxSize().onSizeChanged { overlaySize = it }) {
         Canvas(
             Modifier
                 .fillMaxSize()
@@ -101,6 +107,7 @@ internal fun StumpAlignSetup(
                             else -> null
                         } ?: return@awaitEachGesture
                         down.consume()
+                        holding = grabbed
                         drag(down.id) { change ->
                             val moved = change.positionChange()
                             change.consume()
@@ -113,6 +120,7 @@ internal fun StumpAlignSetup(
                                 Grab.NEAR_SIZE -> { near = near.sized(dx, uprightAspect); nearMoved = true }
                             }
                         }
+                        holding = null
                     }
                 },
         ) {
@@ -159,6 +167,43 @@ internal fun StumpAlignSetup(
                 drawRect(Color.White.copy(alpha = 0.8f), topLeft = tl, size = Size(br.x - tl.x, br.y - tl.y), style = Stroke(1.dp.toPx()))
             }
             drawGuide(near, NEAR_PAD_ACROSS, NEAR_PAD_DOWN, nearOk || nearMoved)
+        }
+
+        /*
+         * THE MAGNIFIER, on the feet of the set being placed: the batter's stumps are a few
+         * pixels twenty metres off, and under the finger. The three lines are drawn at the
+         * lens's scale, to lay on the three stumps.
+         */
+        val held = holding
+        val frameNow = FrameBox.letterbox(overlaySize.width.toFloat(), overlaySize.height.toFloat(), uprightAspect)
+        val placing = when (held) {
+            Grab.FAR_MOVE, Grab.FAR_SIZE -> far
+            Grab.NEAR_MOVE, Grab.NEAR_SIZE -> near
+            null -> null
+        }
+        StumpLoupe(
+            focus = placing?.takeIf { frameNow.width > 0f }?.let { frameNow.toView(Point2(it.centreX, it.baseY)) },
+            picture = picture,
+            frame = frameNow,
+        ) { toLens ->
+            val b = placing ?: return@StumpLoupe
+            for (k in 0..2) {
+                val x = b.baseLeft.x + (b.baseRight.x - b.baseLeft.x) * k / 2.0
+                drawLine(
+                    Brand,
+                    toLens(frameNow.toView(Point2(x, b.baseY))),
+                    toLens(frameNow.toView(Point2(x, b.topY))),
+                    2.dp.toPx(),
+                    StrokeCap.Round,
+                )
+            }
+            drawLine(
+                Color.White,
+                toLens(frameNow.toView(Point2(b.baseLeft.x, b.baseY))),
+                toLens(frameNow.toView(Point2(b.baseRight.x, b.baseY))),
+                1.5.dp.toPx(),
+                StrokeCap.Round,
+            )
         }
 
         Column(

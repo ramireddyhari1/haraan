@@ -550,19 +550,53 @@ class WicketTrackerTest {
         assertTrue("but nowhere near all the way", x < 0.51)
     }
 
+    /*
+     * MANUAL FIRST (2026-11-20). A hand-placed wicket is fixed in the picture: the phone is on
+     * its tripod, and the camera-motion chain carrying it let bowlers and batters crossing the
+     * frame walk the stumps off, ball after ball. It is neither moved by motion nor marked lost
+     * when motion cannot be followed.
+     */
     @Test
-    fun `losing track of the camera degrades a hand-placed lock rather than hiding it`() {
+    fun `a hand-placed lock stays put and confirmed when the camera cannot be followed`() {
         val tracker = WicketTracker()
         tracker.lockManually(Point2(0.45, 0.7), Point2(0.55, 0.7), frameAspect = aspect)
+        val placed = tracker.lock()!!.anchor.base
 
         var last: WicketLock? = null
         repeat(WicketTracker.MAX_BLIND_FRAMES + 2) { i ->
             last = tracker.onFrame(null, FrameMotion.STILL, aspect, i * 33L)
         }
 
-        assertEquals(WicketTrackState.TEMPORARILY_LOST, last!!.state)
-        assertFalse("a lock that is only a memory must not be measured from", last!!.isMeasurable)
-        assertNotNull("and it is still drawn, so the operator can see it is stale", last!!.anchor)
+        assertEquals(WicketTrackState.CONFIRMED, last!!.state)
+        assertTrue("still measured from", last!!.isMeasurable)
+        assertEquals(placed.x, last!!.anchor.base.x, 1e-9)
+        assertEquals(placed.y, last!!.anchor.base.y, 1e-9)
+    }
+
+    @Test
+    fun `a hand-placed lock is not walked off by estimated camera motion`() {
+        val tracker = WicketTracker()
+        tracker.lockManually(Point2(0.45, 0.7), Point2(0.55, 0.7), frameAspect = aspect)
+        val placed = tracker.lock()!!.anchor.base
+        // A bowler running through: motion estimates a little off, frame after frame.
+        val fooled = FrameMotion(0.004f, 0.002f, 1f, 0f, inliers = 30, total = 32)
+        var last: WicketLock? = null
+        repeat(300) { i -> last = tracker.onFrame(null, fooled, aspect, i * 33L) }
+        assertEquals(placed.x, last!!.anchor.base.x, 1e-9)
+        assertEquals(placed.y, last!!.anchor.base.y, 1e-9)
+    }
+
+    @Test
+    fun `the detector may only nudge a hand-placed lock a little way`() {
+        val tracker = WicketTracker()
+        tracker.lockManually(Point2(0.45, 0.7), Point2(0.55, 0.7), frameAspect = aspect)
+        val placed = tracker.lock()!!
+        val span = placed.anchor.span(aspect)
+        // A pad-like "wicket" just beside the stumps, seen every frame for ten seconds.
+        var last: WicketLock? = null
+        repeat(300) { i -> last = tracker.onFrame(stumps(x = 0.535f, span = 0.08f), steady(), aspect, i * 33L) }
+        val drift = kotlin.math.abs(last!!.anchor.base.x - placed.anchor.base.x)
+        assertTrue("drifted $drift, more than ${WicketTracker.MANUAL_MAX_DRIFT_SPANS} spans of $span", drift <= span * WicketTracker.MANUAL_MAX_DRIFT_SPANS + 1e-3)
     }
 
     /**
