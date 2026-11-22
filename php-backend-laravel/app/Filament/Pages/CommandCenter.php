@@ -560,6 +560,14 @@ class CommandCenter extends Page
                     ? trim(($b->slot_date ? Carbon::parse($b->slot_date)->format('D j M') : '').($b->start_time ? ', '.$this->clock($b->start_time) : ''), ', ')
                     : ((int) $b->quantity).' '.((int) $b->quantity === 1 ? 'ticket' : 'tickets');
 
+                // An advance-paid booking took only part of the money online; the rest is
+                // settled at the venue. Show what was actually received, with the total
+                // and the balance beside it, not the full price as if it were all paid.
+                $paid = round((float) $b->amount_paid, 2);
+                $charged = $b->amountCharged();
+                $partial = $paid > 0 && $paid < $charged
+                    && ! in_array(strtolower((string) $b->payment_status), ['refunded', 'part_refunded'], true);
+
                 return [
                     // The guest first: desk walk-ins are booked under the venue owner's
                     // account, so the account name made every walk-in look like the owner.
@@ -567,7 +575,10 @@ class CommandCenter extends Page
                     'what' => $what,
                     'detail' => $detail,
                     'kind' => $isVenue ? 'venue' : 'event',
-                    'amount' => $this->inr((float) $b->total_amount),
+                    'amount' => $this->inr($partial ? $paid : (float) $b->total_amount),
+                    'amountNote' => $partial
+                        ? 'Advance · '.$this->inr($charged - $paid).' due at venue'
+                        : null,
                     'status' => $this->statusTone((string) $b->status),
                     'statusLabel' => ucwords(str_replace('_', ' ', strtolower((string) $b->status))),
                     'ago' => $b->created_at?->diffForHumans(short: true) ?? '',

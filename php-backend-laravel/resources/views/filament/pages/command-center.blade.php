@@ -293,6 +293,7 @@
                                 </span>
                                 <span class="r">
                                     <span class="amt cc-num" style="display:block">{{ $f['amount'] }}</span>
+                                    @if ($f['amountNote'])<span class="adv cc-num" style="display:block">{{ $f['amountNote'] }}</span>@endif
                                     <span class="cc-pill {{ $f['status'] }}"><i></i>{{ $f['statusLabel'] }}</span>
                                 </span>
                             </a>

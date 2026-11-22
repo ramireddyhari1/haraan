@@ -204,6 +204,7 @@
         .cc-feed .s { font-size: 12px; color: var(--cc-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .cc-feed .r { text-align: right; }
         .cc-feed .amt { font-size: 13.5px; font-weight: 650; }
+        .cc-feed .adv { font-size: 11px; color: var(--cc-ink-3); margin: 1px 0 2px; white-space: nowrap; }
         .cc-pill { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; color: var(--cc-ink-3); }
         .cc-pill i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
         .cc-pill.ok { color: var(--cc-green); } .cc-pill.warn { color: var(--cc-amber); } .cc-pill.down { color: var(--cc-red); }
