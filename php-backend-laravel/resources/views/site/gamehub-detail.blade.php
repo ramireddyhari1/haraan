@@ -571,7 +571,7 @@
                     </span>
                     <span class="mven__sport-copy">
                         <strong>{{ ucfirst($mvSport) }}</strong>
-                        <small>View pricing &amp; slots</small>
+                        <small>Pricing &amp; slots</small>
                     </span>
                     <svg class="mven__chev" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
                 </button>

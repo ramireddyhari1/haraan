@@ -2516,21 +2516,28 @@
     .mven__rate svg { color: #2563EB; }
 
     /* --- 4. Available Sports -------------------------------------------- */
+    /* Square tiles, three to a row: icon on top, the sport under it. Tapping one opens
+       the booking sheet on that sport, as the old full-width rows did. */
+    .mven__sports { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
     .mven__sport {
         display: flex;
+        flex-direction: column;
         align-items: center;
-        gap: 14px;
-        width: 100%;
-        padding: 16px;
+        justify-content: center;
+        gap: 6px;
+        aspect-ratio: 1 / 1;
+        min-width: 0;
+        padding: 10px 6px;
         border: 1px solid #E2E8F0;
+        border-bottom-width: 2px;
         border-radius: 14px;
-        background: none;
-        text-align: left;
+        background: #fff;
+        font: inherit;
+        text-align: center;
         cursor: pointer;
+        transition: border-color .15s ease, transform .08s ease;
+        -webkit-tap-highlight-color: transparent;
     }
-    .mven__sports { display: grid; gap: 10px; }
-    .mven__sport { font: inherit; }
-    .mven__sport { border-bottom-width: 2px; transition: border-color .15s ease, transform .08s ease; -webkit-tap-highlight-color: transparent; }
     .mven__sport:active { transform: translateY(1px); border-bottom-width: 1px; }
     /* Same tinted tile as the amenities below, a size up: the sport is the headline. */
     .mven__sport-ico {
@@ -2544,10 +2551,10 @@
         background: #EEF4FF;
         color: #1D4ED8;
     }
-    .mven__sport-copy { flex: 1; min-width: 0; }
-    .mven__sport-copy strong { display: block; font-size: 15px; font-weight: 700; color: #0F172A; }
-    .mven__sport-copy small { display: block; margin-top: 2px; font-size: 12px; color: #64748B; }
-    .mven__chev { flex-shrink: 0; color: #94A3B8; }
+    .mven__sport-copy { min-width: 0; max-width: 100%; }
+    .mven__sport-copy strong { display: block; font-size: 13.5px; font-weight: 700; line-height: 1.25; color: #0F172A; overflow-wrap: anywhere; }
+    .mven__sport-copy small { display: block; margin-top: 2px; font-size: 11px; color: #64748B; }
+    .mven__chev { display: none; }
 
     /* --- 5. Amenities ---------------------------------------------------- */
     /* Two per row, each with its own icon, so the list reads as a real feature
