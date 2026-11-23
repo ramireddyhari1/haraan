@@ -2420,7 +2420,9 @@ body.vco-locked { overflow: hidden; }
 .vco__h4 { margin: 0 0 6px; font-size: 14px; font-weight: 800; color: #0F172A; }
 .vco__h4:not(:first-child) { margin-top: 16px; }
 .vco__policy { margin: 0; font-size: 13.5px; line-height: 1.55; color: #475569; }
-.vco__rules { margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.6; color: #475569; }
+.vco__rules { margin: 0; padding: 0; list-style: none; font-size: 13.5px; line-height: 1.6; color: #475569; }
+.vco__rules li { display: flex; gap: 8px; align-items: flex-start; }
+.vco__rules svg { flex: none; margin-top: 3px; }
 .vco__rules li + li { margin-top: 4px; }
 
 @media (prefers-reduced-motion: reduce) {

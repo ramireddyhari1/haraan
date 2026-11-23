@@ -40,6 +40,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.ReportProblem
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.filled.Air
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CalendarMonth
@@ -448,11 +452,12 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
               SectionCard(title = "Good to know") {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                   goodToKnow.forEach { rule ->
+                    val (glyph, tone) = knowIcon(rule, d.cancellation)
                     Row(verticalAlignment = Alignment.Top) {
                       Icon(
-                        Icons.Default.Check, null,
-                        tint = HaraanColors.EventsBlue,
-                        modifier = Modifier.size(16.dp).padding(top = 2.dp)
+                        glyph, null,
+                        tint = tone,
+                        modifier = Modifier.size(17.dp).padding(top = 2.dp)
                       )
                       Spacer(Modifier.width(8.dp))
                       Text(rule, color = HaraanColors.TextSecondary, fontSize = 13.sp, lineHeight = 19.sp)
@@ -875,6 +880,23 @@ private fun VenueFaqList(faqs: List<VenueFaq>) {
       }
       SectionDivider()
     }
+  }
+}
+
+/**
+ * The mark each "Good to know" line calls for — same rule as the web venue page
+ * (gamehub-detail `$mvKnowIcon`). A tick on every line read "No smoking" as a perk: a
+ * prohibition is a red no-entry sign, a must is an amber alert, the cancellation policy is
+ * a clock, anything else is plain blue info.
+ */
+private fun knowIcon(rule: String, cancellation: String): Pair<androidx.compose.ui.graphics.vector.ImageVector, Color> {
+  val r = rule.trim().lowercase()
+  fun has(vararg n: String) = n.any { it in r }
+  return when {
+    rule == cancellation || has("cancel", "refund") -> Icons.Outlined.Schedule to Color(0xFF2563EB)
+    r.startsWith("no ") || has("not allowed", "prohibited", "banned", "don't", "do not") -> Icons.Outlined.Block to Color(0xFFDC2626)
+    has("mandatory", "required", "must", "compulsory") -> Icons.Outlined.ReportProblem to Color(0xFFB45309)
+    else -> Icons.Outlined.Info to Color(0xFF2563EB)
   }
 }
 
@@ -2385,8 +2407,10 @@ private fun VenueReviewPage(
             Text("Venue rules", color = BookInk.Ink, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp)
             Spacer(Modifier.height(6.dp))
             rules.forEach { rule ->
-              Row(Modifier.padding(vertical = 2.dp)) {
-                Text("•", color = BookInk.Faint, fontSize = 13.5.sp, modifier = Modifier.padding(end = 8.dp))
+              val (glyph, tone) = knowIcon(rule, venue.cancellation)
+              Row(Modifier.padding(vertical = 2.dp), verticalAlignment = Alignment.Top) {
+                Icon(glyph, null, tint = tone, modifier = Modifier.size(16.dp).padding(top = 2.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(rule, color = BookInk.Slate, fontSize = 13.5.sp, lineHeight = 20.sp)
               }
             }
