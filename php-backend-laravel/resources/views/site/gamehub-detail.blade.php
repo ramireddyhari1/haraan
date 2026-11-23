@@ -73,6 +73,77 @@
     $mvSports = $mvList === [] ? array_filter([$venue->category]) : $mvList;
     usort($mvSports, fn ($a, $b) => (strcasecmp($b, (string) $venue->category) === 0) <=> (strcasecmp($a, (string) $venue->category) === 0));
     $mvSports = array_values(array_intersect_key($mvSports, array_unique(array_map('strtolower', $mvSports))));
+
+    // Court helpers shared by the phone tiles and the desktop sport cards.
+    $vdCourts = (array) $venue->courts;
+    $vdCourtPrices = (array) ($venue->court_prices ?? []);
+
+    // "from ₹X/hr" per sport: the cheapest court that sport is sold on.
+    $vdFrom = function (string $sport) use ($vdCourts, $vdCourtPrices, $venue): int {
+        $prices = array_map(fn ($c) => (int) ($vdCourtPrices[$c] ?? $venue->from_price), (array) ($vdCourts[$sport] ?? []));
+        $prices = array_filter($prices, fn ($p) => $p > 0);
+        return $prices ? min($prices) : (int) $venue->from_price;
+    };
+
+    // A top-down drawing of the sport's own playing surface, landscape, 160×100.
+    $vdCourtArt = function (string $sport): string {
+        $s = strtolower($sport);
+        $w = 'fill="none" stroke="#fff" stroke-width="1.6"';
+        $bg = fn (string $outer, string $inner) => '<rect width="160" height="100" rx="10" fill="'.$outer.'"/><rect x="14" y="12" width="132" height="76" rx="2" fill="'.$inner.'"/>';
+        $net = '<path d="M80 6v88" stroke="#0F172A" stroke-opacity=".55" stroke-width="2"/><circle cx="80" cy="6" r="2.2" fill="#0F172A" fill-opacity=".6"/><circle cx="80" cy="94" r="2.2" fill="#0F172A" fill-opacity=".6"/>';
+
+        return match (true) {
+            str_contains($s, 'net') && str_contains($s, 'cricket') =>
+                '<rect width="160" height="100" rx="10" fill="#2F8F55"/>'
+                .implode('', array_map(fn ($y) => '<rect x="10" y="'.$y.'" width="140" height="22" rx="2" fill="#3FA466"/>'
+                    .'<rect x="22" y="'.($y + 7).'" width="116" height="8" rx="1" fill="#D8BF8A"/>'
+                    .'<path d="M30 '.($y + 5).'v12M130 '.($y + 5).'v12" stroke="#fff" stroke-width="1.4"/>'
+                    .'<path d="M10 '.$y.'h140M10 '.($y + 22).'h140" stroke="#E2E8F0" stroke-opacity=".7" stroke-dasharray="2 2"/>', [8, 39, 70])),
+            str_contains($s, 'cricket') =>
+                '<rect width="160" height="100" rx="10" fill="#2F8F55"/>'
+                .implode('', array_map(fn ($x) => '<rect x="'.$x.'" y="8" width="12" height="84" fill="#36A060"/>', [8, 32, 56, 80, 104, 128]))
+                .'<rect x="8" y="8" width="144" height="84" rx="4" fill="none" stroke="#E2E8F0" stroke-opacity=".8" stroke-dasharray="3 2.5"/>'
+                .'<rect x="44" y="42" width="72" height="16" rx="1.5" fill="#D8BF8A"/>'
+                .'<path d="M52 40v20M108 40v20" stroke="#fff" stroke-width="1.6"/>'
+                .'<path d="M47 46v8M113 46v8" stroke="#7C2D12" stroke-width="2" stroke-linecap="round"/>',
+            str_contains($s, 'football') || str_contains($s, 'soccer') || str_contains($s, 'futsal') =>
+                '<rect width="160" height="100" rx="10" fill="#2F8F55"/>'
+                .implode('', array_map(fn ($x) => '<rect x="'.$x.'" y="10" width="11" height="80" fill="#36A060"/>', [12, 34, 56, 78, 100, 122, 144 - 11]))
+                .'<rect x="12" y="10" width="136" height="80" rx="1" '.$w.'/><path d="M80 10v80" '.$w.'/><circle cx="80" cy="50" r="12" '.$w.'/>'
+                .'<path d="M12 30h20v40H12M148 30h-20v40h20M12 40h8v20h-8M148 40h-8v20h8" '.$w.'/>'
+                .'<path d="M12 44H8v12h4M148 44h4v12h-4" stroke="#fff" stroke-width="1.6" fill="none"/>',
+            str_contains($s, 'basket') =>
+                $bg('#C9874F', '#E7B07A')
+                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><path d="M80 12v76" '.$w.'/><circle cx="80" cy="50" r="10" '.$w.'/>'
+                .'<path d="M14 38h26v24H14M146 38h-26v24h26" '.$w.' fill="#C2410C" fill-opacity=".25"/>'
+                .'<path d="M14 20a36 36 0 0 1 0 60M146 20a36 36 0 0 0 0 60" '.$w.'/>'
+                .'<circle cx="20" cy="50" r="2.5" stroke="#EA580C" stroke-width="1.6" fill="none"/><circle cx="140" cy="50" r="2.5" stroke="#EA580C" stroke-width="1.6" fill="none"/>',
+            str_contains($s, 'volley') =>
+                $bg('#3B82C4', '#E8834A')
+                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><path d="M58 12v76M102 12v76" '.$w.'/>'.$net,
+            str_contains($s, 'swim') || str_contains($s, 'pool') =>
+                '<rect width="160" height="100" rx="10" fill="#CBD5E1"/><rect x="10" y="10" width="140" height="80" rx="4" fill="#38A3D6"/>'
+                .implode('', array_map(fn ($y) => '<path d="M14 '.$y.'h132" stroke="#fff" stroke-width="1.3" stroke-dasharray="3 3"/>', [26, 42, 58, 74]))
+                .'<path d="M22 18c6 3 10 3 16 0s10-3 16 0" stroke="#fff" stroke-opacity=".5" fill="none"/>',
+            str_contains($s, 'pickle') =>
+                $bg('#7FA0C8', '#2F6FD0')
+                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><rect x="66" y="12" width="28" height="76" fill="#1E5BB8"/>'
+                .'<path d="M66 12v76M94 12v76M14 50h52M94 50h52" '.$w.'/>'.$net,
+            str_contains($s, 'tennis') && ! str_contains($s, 'table') =>
+                $bg('#4E9A6B', '#3E6FB5')
+                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><path d="M14 22h132M14 78h132M46 22v56M114 22v56M46 50h68" '.$w.'/>'.$net,
+            str_contains($s, 'table') =>
+                '<rect width="160" height="100" rx="10" fill="#E2E8F0"/><rect x="22" y="20" width="116" height="60" rx="2" fill="#1E4E8C"/>'
+                .'<rect x="22" y="20" width="116" height="60" rx="2" '.$w.'/><path d="M22 50h116" stroke="#fff" stroke-width=".8"/>'
+                .'<path d="M80 14v72" stroke="#0F172A" stroke-opacity=".55" stroke-width="2"/>',
+            str_contains($s, 'badminton') || str_contains($s, 'squash') || str_contains($s, 'padel') =>
+                $bg('#1F6E4E', '#2E8B57')
+                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><path d="M14 18h132M14 82h132M20 12v76M140 12v76M64 12v76M96 12v76M14 50h50M96 50h50" '.$w.'/>'.$net,
+            default =>
+                $bg('#94A3B8', '#64748B')
+                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><path d="M80 12v76" '.$w.'/><circle cx="80" cy="50" r="12" '.$w.'/>',
+        };
+    };
     $mvSportGlyph = match (true) {
         str_contains($mvCat, 'cricket') => \App\Support\SportGlyph::CRICKET,
         str_contains($mvCat, 'football'), str_contains($mvCat, 'soccer') => '<circle cx="12" cy="12" r="9"></circle><path d="M12 7.5 8.5 10l1.3 4h4.4l1.3-4z"></path><path d="M12 3v4.5M4 9.5 8.5 10M20 9.5 15.5 10M7 20l2.8-6M17 20l-2.8-6"></path>',
@@ -565,13 +636,21 @@
         <h2 class="mven__h2">Available Sports</h2>
         <div class="mven__sports">
             @foreach($mvSports as $mvSport)
-                <button type="button" class="mven__sport" data-mven-book data-mven-sport="{{ $mvSport }}">
-                    <span class="mven__sport-ico">
-                        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! \App\Support\SportGlyph::for($mvSport) !!}</svg>
-                    </span>
+                {{-- The sport's own ground, drawn from above (the desktop cards use the same art),
+                     then what this venue really has: its lowest rate and how many courts. --}}
+                @php
+                    $mvFrom = $vdFrom($mvSport);
+                    $mvN = count((array) ($vdCourts[$mvSport] ?? []));
+                    $mvUnit = str_contains(strtolower($mvSport), 'net') ? 'nets' : 'courts';
+                @endphp
+                <button type="button" class="mven__sport" data-mven-book data-mven-sport="{{ $mvSport }}" aria-label="{{ ucfirst($mvSport) }}: see prices and open slots">
+                    <svg class="mven__sport-art" viewBox="0 0 160 100" aria-hidden="true">{!! $vdCourtArt($mvSport) !!}</svg>
                     <span class="mven__sport-copy">
                         <strong>{{ ucfirst($mvSport) }}</strong>
-                        <small>Pricing &amp; slots</small>
+                        <small>
+                            @if($mvFrom > 0)from <b>₹{{ number_format($mvFrom) }}</b>@endif
+                            @if($mvN > 1)<span>{{ $mvFrom > 0 ? '· ' : '' }}{{ $mvN }} {{ $mvUnit }}</span>@elseif($mvFrom <= 0)<span>See slots</span>@endif
+                        </small>
                     </span>
                     <svg class="mven__chev" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 18 15 12 9 6"></polyline></svg>
                 </button>
@@ -938,75 +1017,6 @@
 @php
     $vdCrumbs = array_values(array_filter((array) ($seo['breadcrumbs'] ?? [])));
     $vdSports = array_values(array_filter((array) $venue->sports)) ?: array_filter([$venue->category]);
-    $vdCourts = (array) $venue->courts;
-    $vdCourtPrices = (array) ($venue->court_prices ?? []);
-
-    // "from ₹X/hr" per sport: the cheapest court that sport is sold on.
-    $vdFrom = function (string $sport) use ($vdCourts, $vdCourtPrices, $venue): int {
-        $prices = array_map(fn ($c) => (int) ($vdCourtPrices[$c] ?? $venue->from_price), (array) ($vdCourts[$sport] ?? []));
-        $prices = array_filter($prices, fn ($p) => $p > 0);
-        return $prices ? min($prices) : (int) $venue->from_price;
-    };
-
-    // A top-down drawing of the sport's own playing surface, landscape, 160×100.
-    $vdCourtArt = function (string $sport): string {
-        $s = strtolower($sport);
-        $w = 'fill="none" stroke="#fff" stroke-width="1.6"';
-        $bg = fn (string $outer, string $inner) => '<rect width="160" height="100" rx="10" fill="'.$outer.'"/><rect x="14" y="12" width="132" height="76" rx="2" fill="'.$inner.'"/>';
-        $net = '<path d="M80 6v88" stroke="#0F172A" stroke-opacity=".55" stroke-width="2"/><circle cx="80" cy="6" r="2.2" fill="#0F172A" fill-opacity=".6"/><circle cx="80" cy="94" r="2.2" fill="#0F172A" fill-opacity=".6"/>';
-
-        return match (true) {
-            str_contains($s, 'net') && str_contains($s, 'cricket') =>
-                '<rect width="160" height="100" rx="10" fill="#2F8F55"/>'
-                .implode('', array_map(fn ($y) => '<rect x="10" y="'.$y.'" width="140" height="22" rx="2" fill="#3FA466"/>'
-                    .'<rect x="22" y="'.($y + 7).'" width="116" height="8" rx="1" fill="#D8BF8A"/>'
-                    .'<path d="M30 '.($y + 5).'v12M130 '.($y + 5).'v12" stroke="#fff" stroke-width="1.4"/>'
-                    .'<path d="M10 '.$y.'h140M10 '.($y + 22).'h140" stroke="#E2E8F0" stroke-opacity=".7" stroke-dasharray="2 2"/>', [8, 39, 70])),
-            str_contains($s, 'cricket') =>
-                '<rect width="160" height="100" rx="10" fill="#2F8F55"/>'
-                .implode('', array_map(fn ($x) => '<rect x="'.$x.'" y="8" width="12" height="84" fill="#36A060"/>', [8, 32, 56, 80, 104, 128]))
-                .'<rect x="8" y="8" width="144" height="84" rx="4" fill="none" stroke="#E2E8F0" stroke-opacity=".8" stroke-dasharray="3 2.5"/>'
-                .'<rect x="44" y="42" width="72" height="16" rx="1.5" fill="#D8BF8A"/>'
-                .'<path d="M52 40v20M108 40v20" stroke="#fff" stroke-width="1.6"/>'
-                .'<path d="M47 46v8M113 46v8" stroke="#7C2D12" stroke-width="2" stroke-linecap="round"/>',
-            str_contains($s, 'football') || str_contains($s, 'soccer') || str_contains($s, 'futsal') =>
-                '<rect width="160" height="100" rx="10" fill="#2F8F55"/>'
-                .implode('', array_map(fn ($x) => '<rect x="'.$x.'" y="10" width="11" height="80" fill="#36A060"/>', [12, 34, 56, 78, 100, 122, 144 - 11]))
-                .'<rect x="12" y="10" width="136" height="80" rx="1" '.$w.'/><path d="M80 10v80" '.$w.'/><circle cx="80" cy="50" r="12" '.$w.'/>'
-                .'<path d="M12 30h20v40H12M148 30h-20v40h20M12 40h8v20h-8M148 40h-8v20h8" '.$w.'/>'
-                .'<path d="M12 44H8v12h4M148 44h4v12h-4" stroke="#fff" stroke-width="1.6" fill="none"/>',
-            str_contains($s, 'basket') =>
-                $bg('#C9874F', '#E7B07A')
-                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><path d="M80 12v76" '.$w.'/><circle cx="80" cy="50" r="10" '.$w.'/>'
-                .'<path d="M14 38h26v24H14M146 38h-26v24h26" '.$w.' fill="#C2410C" fill-opacity=".25"/>'
-                .'<path d="M14 20a36 36 0 0 1 0 60M146 20a36 36 0 0 0 0 60" '.$w.'/>'
-                .'<circle cx="20" cy="50" r="2.5" stroke="#EA580C" stroke-width="1.6" fill="none"/><circle cx="140" cy="50" r="2.5" stroke="#EA580C" stroke-width="1.6" fill="none"/>',
-            str_contains($s, 'volley') =>
-                $bg('#3B82C4', '#E8834A')
-                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><path d="M58 12v76M102 12v76" '.$w.'/>'.$net,
-            str_contains($s, 'swim') || str_contains($s, 'pool') =>
-                '<rect width="160" height="100" rx="10" fill="#CBD5E1"/><rect x="10" y="10" width="140" height="80" rx="4" fill="#38A3D6"/>'
-                .implode('', array_map(fn ($y) => '<path d="M14 '.$y.'h132" stroke="#fff" stroke-width="1.3" stroke-dasharray="3 3"/>', [26, 42, 58, 74]))
-                .'<path d="M22 18c6 3 10 3 16 0s10-3 16 0" stroke="#fff" stroke-opacity=".5" fill="none"/>',
-            str_contains($s, 'pickle') =>
-                $bg('#7FA0C8', '#2F6FD0')
-                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><rect x="66" y="12" width="28" height="76" fill="#1E5BB8"/>'
-                .'<path d="M66 12v76M94 12v76M14 50h52M94 50h52" '.$w.'/>'.$net,
-            str_contains($s, 'tennis') && ! str_contains($s, 'table') =>
-                $bg('#4E9A6B', '#3E6FB5')
-                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><path d="M14 22h132M14 78h132M46 22v56M114 22v56M46 50h68" '.$w.'/>'.$net,
-            str_contains($s, 'table') =>
-                '<rect width="160" height="100" rx="10" fill="#E2E8F0"/><rect x="22" y="20" width="116" height="60" rx="2" fill="#1E4E8C"/>'
-                .'<rect x="22" y="20" width="116" height="60" rx="2" '.$w.'/><path d="M22 50h116" stroke="#fff" stroke-width=".8"/>'
-                .'<path d="M80 14v72" stroke="#0F172A" stroke-opacity=".55" stroke-width="2"/>',
-            str_contains($s, 'badminton') || str_contains($s, 'squash') || str_contains($s, 'padel') =>
-                $bg('#1F6E4E', '#2E8B57')
-                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><path d="M14 18h132M14 82h132M20 12v76M140 12v76M64 12v76M96 12v76M14 50h50M96 50h50" '.$w.'/>'.$net,
-            default =>
-                $bg('#94A3B8', '#64748B')
-                .'<rect x="14" y="12" width="132" height="76" '.$w.'/><path d="M80 12v76" '.$w.'/><circle cx="80" cy="50" r="12" '.$w.'/>',
-        };
-    };
 
     // Week of hours. publicWeek() gives Mon…Sun [open, close] in minutes, or null.
     // Close at/before open means it runs past midnight; the bar stops at 24:00.
