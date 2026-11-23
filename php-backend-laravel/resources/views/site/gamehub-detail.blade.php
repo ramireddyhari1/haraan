@@ -186,27 +186,42 @@
         default => \App\Support\SportGlyph::BADMINTON,
     };
 
-    // The app's amenityIcon(): free-text label → the closest glyph, falling back to a
-    // check. Same keyword buckets and same order, so a label resolves identically here.
-    $mvAmenityIcon = function (string $amenity): string {
+    // Amenities drawn as the signs people see at a ground: the blue P, the man and woman,
+    // a CCTV camera, a stadium chair, a floodlight tower, a glass of water. Solid shapes in
+    // ink with the real sign's colour where it has one. Same keyword buckets and the same
+    // paths as the app (AmenitySign.kt) — keep the two in step.
+    $amF = fn (string $d, string $c = '#1E3A8A', bool $eo = false) => '<path d="'.$d.'" fill="'.$c.'" stroke="none"'.($eo ? ' fill-rule="evenodd"' : '').'></path>';
+    $amS = fn (string $d, string $w, string $c = '#1E3A8A') => '<path d="'.$d.'" fill="none" stroke="'.$c.'" stroke-width="'.$w.'"></path>';
+    $amC = fn (float $cx, float $cy, float $r, string $c = '#1E3A8A') => '<circle cx="'.$cx.'" cy="'.$cy.'" r="'.$r.'" fill="'.$c.'" stroke="none"></circle>';
+    $mvAmenityIcon = function (string $amenity) use ($amF, $amS, $amC): string {
         $a = strtolower($amenity);
         $has = fn (string ...$needles) => array_reduce($needles, fn ($c, $n) => $c || str_contains($a, $n), false);
+        $blue = '#2563EB';
 
         return match (true) {
-            $has('wifi', 'wi-fi', 'internet') => '<path d="M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M2 9a14 14 0 0 1 20 0"></path><circle cx="12" cy="19.5" r="1"></circle>',
-            $has('park') => '<path d="M5 17h14M6 17v-4.5L7.5 8h9l1.5 4.5V17"></path><circle cx="8" cy="17" r="1.5"></circle><circle cx="16" cy="17" r="1.5"></circle>',
-            $has('wash', 'toilet', 'restroom', 'rest room') => '<circle cx="8" cy="4.5" r="2"></circle><path d="M6 21v-5H4.5l2-6.5h3L11 16H9.5v5z"></path><circle cx="17" cy="4.5" r="2"></circle><path d="M14 21 17 9l3 12M15 15h4"></path>',
-            $has('shower') => '<path d="M4 21V6a3 3 0 0 1 6 0v1M9 9h11M12 12v.01M16 12v.01M20 12v.01M14 16v.01M18 16v.01"></path>',
-            $has('chang', 'locker') => '<path d="M12 4a2 2 0 1 0-2 2c0 1 2 1.5 2 2.5L3.5 15c-1 .7-.5 2.5 1 2.5h15c1.5 0 2-1.8 1-2.5L12 8.5"></path>',
-            $has('cafe', 'coffee', 'canteen') => '<path d="M4 8h13v6a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z"></path><path d="M17 9h2a2.5 2.5 0 0 1 0 5h-2M6 3v2M10 3v2M14 3v2"></path>',
-            $has('food', 'restaurant', 'kitchen') => '<path d="M5 3v8a2 2 0 0 0 4 0V3M7 11v10M17 3c-1.5 1-2.5 3-2.5 5.5S15.5 13 17 13v8"></path>',
-            $has('water', 'drink') => '<path d="M12 3s6 6.5 6 10.5A6 6 0 0 1 6 13.5C6 9.5 12 3 12 3z"></path>',
-            $has('light', 'flood') => '<path d="M9 18h6M10 21h4M12 3a6 6 0 0 1 4 10.5c-.6.6-1 1.4-1 2.2H9c0-.8-.4-1.6-1-2.2A6 6 0 0 1 12 3z"></path>',
-            $has('a/c', 'air', 'cool') => '<path d="M4 8h16M4 12h16M4 16h16"></path>',
-            $has('cctv', 'secur', 'guard', 'safe') => '<path d="M12 3l8 3.5v5c0 5-3.4 8.7-8 9.5-4.6-.8-8-4.5-8-9.5v-5z"></path>',
-            $has('seat', 'gallery') => '<path d="M5 18v-6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v6M3 18h18M7 10V6a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v4"></path>',
-            $has('equip', 'gear', 'gym', 'kit') => '<path d="M4 9v6M7 7v10M17 7v10M20 9v6M7 12h10"></path>',
-            default => '<polyline points="20 6 9 17 4 12"></polyline>',
+            $has('wifi', 'wi-fi', 'internet') => $amS('M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M2 9a14 14 0 0 1 20 0', '2').$amC(12, 19.5, 1.6),
+            $has('park') => $amF('M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z', $blue)
+                .$amF('M9 6.5h4.2a3.7 3.7 0 0 1 0 7.4h-1.7v3.6H9zM11.5 8.8v2.8h1.6a1.4 1.4 0 0 0 0-2.8z', '#FFFFFF', true),
+            $has('wash', 'toilet', 'restroom', 'rest room') => $amC(6.8, 4.4, 1.9).$amF('M4.8 7.8h4a1.1 1.1 0 0 1 1.1 1.1v5.4H8.8v6.2H7.4v-5H6.2v5H4.8v-6.2H3.7V8.9a1.1 1.1 0 0 1 1.1-1.1z')
+                .$amC(17.2, 4.4, 1.9).$amF('M15.8 7.8h2.8l2.5 7.2h-2.1v5.5h-1.4v-5.5h-.8v5.5h-1.4v-5.5h-2.1z').$amS('M12 3v18', '1.2'),
+            $has('shower') => $amS('M5 21V7a3 3 0 0 1 6 0v.5', '1.8').$amF('M8 9.5a5 5 0 0 1 10 0z')
+                .$amC(10, 13, 1, $blue).$amC(13, 14, 1, $blue).$amC(16, 13, 1, $blue).$amC(11.5, 17, 1, $blue).$amC(14.5, 17, 1, $blue),
+            $has('chang', 'locker') => $amS('M12 6.8a1.8 1.8 0 1 0-1.8-1.8M12 6.8v1.4L3.4 14.6c-.9.7-.4 2.1.7 2.1h15.8c1.1 0 1.6-1.4.7-2.1L12 8.2', '1.8'),
+            $has('cafe', 'coffee', 'canteen') => $amF('M4 9h12v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z').$amS('M16 10.5h1.5a2.5 2.5 0 0 1 0 5H16M7 3.5c-.8 1 .8 1.8 0 3M11 3.5c-.8 1 .8 1.8 0 3', '1.6').$amF('M3 20.5h14v1.2H3z'),
+            $has('food', 'restaurant', 'kitchen') => $amS('M7 3v5a2 2 0 0 0 4 0V3M9 3v18', '1.8').$amF('M17.5 3c-2 .8-3.3 3.3-3.3 7.2h2v10.8h1.8V3z'),
+            $has('water', 'drink') => $amF('M12 2.2s2.7 3 2.7 4.8a2.7 2.7 0 0 1-5.4 0c0-1.8 2.7-4.8 2.7-4.8z', $blue)
+                .$amF('M7.7 14h8.6l-.6 6.1H8.3z', $blue).$amS('M6.5 10h11l-1.2 10.6a1 1 0 0 1-1 .9H8.7a1 1 0 0 1-1-.9z', '1.6'),
+            $has('light', 'flood') => $amF('M5 2.5h14a1 1 0 0 1 1 1V8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1z')
+                .$amC(8, 5.75, 1.4, '#FDE68A').$amC(12, 5.75, 1.4, '#FDE68A').$amC(16, 5.75, 1.4, '#FDE68A')
+                .$amS('M12 9v12M8.5 21h7', '1.8').$amS('M7.5 11 5.5 14M16.5 11l2 3', '1.4', '#F59E0B'),
+            $has('seat', 'gallery', 'chair', 'bench', 'stand') => $amF('M7 3h10a1 1 0 0 1 1 1v8H6V4a1 1 0 0 1 1-1z').$amF('M4.5 13h15a1 1 0 0 1 1 1v1.6h-17V14a1 1 0 0 1 1-1z').$amS('M6.5 15.6V21M17.5 15.6V21', '1.8'),
+            $a === 'ac' || $has('a/c', 'air con', 'aircon', 'air-con', 'air condition', 'cool') => $amS('M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9M9.5 4.5 12 7l2.5-2.5M9.5 19.5 12 17l2.5 2.5', '1.7', $blue),
+            $has('first aid', 'first-aid', 'medical', 'medic') => $amF('M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z', '#FFFFFF').$amS('M6 3.8h12A2.2 2.2 0 0 1 20.2 6v12a2.2 2.2 0 0 1-2.2 2.2H6A2.2 2.2 0 0 1 3.8 18V6A2.2 2.2 0 0 1 6 3.8z', '1.2', '#DC2626')
+                .$amF('M10 6.5h4v3.5h3.5v4H14v3.5h-4V14H6.5v-4H10z', '#DC2626'),
+            $has('cctv', 'secur', 'guard', 'safe') => $amF('M3 7.6 15.6 4.2l1.4 5.2L4.4 12.8z').$amF('M17.4 5.6l2.8-.8 1 3.6-2.8.8z')
+                .$amC(6.3, 9.2, .9, '#EF4444').$amS('M9 11.6l1.1 4H5.5V21', '1.8'),
+            $has('equip', 'gear', 'gym', 'kit') => $amF('M2 10h2v4H2zM4.8 7h3v10h-3zM16.2 7h3v10h-3zM20 10h2v4h-2zM7.8 11h8.4v2H7.8z'),
+            default => $amS('M20 6 9 17l-5-5', '2'),
         };
     };
 @endphp
@@ -696,7 +711,7 @@
                 @foreach($venue->amenities as $amenity)
                     <span class="mven__amenity">
                         <span class="mven__amenity-ico">
-                            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $mvAmenityIcon($amenity) !!}</svg>
+                            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $mvAmenityIcon($amenity) !!}</svg>
                         </span>
                         {{ $amenity }}
                     </span>
@@ -1260,7 +1275,7 @@
                         @foreach($venue->amenities as $amenity)
                             <span class="vdk-amen__item">
                                 <span class="vdk-amen__ico">
-                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $mvAmenityIcon($amenity) !!}</svg>
+                                    <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $mvAmenityIcon($amenity) !!}</svg>
                                 </span>
                                 {{ $amenity }}
                             </span>
