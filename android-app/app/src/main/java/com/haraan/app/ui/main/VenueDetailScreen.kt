@@ -5,6 +5,7 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -107,7 +108,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -421,8 +425,21 @@ fun VenueDetailScreen(venue: VenueDetail, onBack: () -> Unit, onOpenPriceChart: 
             val sports = d.sports.filter { it.isNotBlank() }.ifEmpty { listOfNotNull(d.category.takeIf { it.isNotBlank() }) }
             if (sports.isNotEmpty()) {
               SectionCard(title = "Available Sports") {
+                // Three to a row, like the website: each sport's ground drawn from above, then
+                // what this venue really has — its lowest rate and how many courts.
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                  sports.forEach { sport -> SportTile(sport, onClick = onOpenPriceChart) }
+                  sports.chunked(3).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                      row.forEach { sport ->
+                        val courts = d.courts.filter { c -> c.sports.any { it.equals(sport, ignoreCase = true) } }
+                        val from = courts
+                          .map { c -> c.fromPrice.takeIf { it > 0 } ?: c.price.takeIf { it > 0 } ?: d.price }
+                          .filter { it > 0 }.minOrNull() ?: d.price
+                        SportTile(sport, from, courts.size, Modifier.weight(1f), onClick = onOpenPriceChart)
+                      }
+                      repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                  }
                 }
               }
             }
@@ -726,26 +743,44 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
   }
 }
 
-/** One "Available Sports" tile — the web's `.mven__sport`: glyph, sport, "View pricing", chevron. */
+/**
+ * One "Available Sports" tile — the web's `.mven__sport`: the sport's ground drawn from above,
+ * its name, then "from ₹399 · 3 nets" (the count only when there's more than one).
+ */
 @Composable
-private fun SportTile(sport: String, onClick: () -> Unit) {
-  Row(
-    modifier = Modifier
-      .fillMaxWidth()
+private fun SportTile(sport: String, fromPrice: Int, courtCount: Int, modifier: Modifier = Modifier, onClick: () -> Unit) {
+  val unit = if ("net" in sport.lowercase()) "nets" else "courts"
+  Column(
+    modifier = modifier
       .clip(RoundedCornerShape(14.dp))
       .border(1.dp, HaraanColors.BorderLight, RoundedCornerShape(14.dp))
+      .background(Color.White)
       .pressable { onClick() }
-      .padding(16.dp),
-    verticalAlignment = Alignment.CenterVertically,
+      .padding(start = 5.dp, top = 5.dp, end = 5.dp, bottom = 9.dp),
   ) {
-    Icon(sportIcon(sport), null, tint = HaraanColors.GameHubDeep, modifier = Modifier.size(28.dp))
-    Spacer(Modifier.width(14.dp))
-    Column(Modifier.weight(1f)) {
-      Text(sport, color = HaraanColors.TextPrimary, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-      Spacer(Modifier.height(2.dp))
-      Text("View pricing", color = HaraanColors.TextSecondary, fontSize = 12.sp)
+    SportCourtArt(
+      sport,
+      Modifier.fillMaxWidth().aspectRatio(1.6f).clip(RoundedCornerShape(10.dp)),
+    )
+    Spacer(Modifier.height(8.dp))
+    Column(Modifier.padding(horizontal = 4.dp)) {
+      Text(
+        sport, color = HaraanColors.TextPrimary, fontWeight = FontWeight.ExtraBold, fontSize = 13.5.sp,
+        lineHeight = 16.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+      )
+      Spacer(Modifier.height(3.dp))
+      Text(
+        buildAnnotatedString {
+          if (fromPrice > 0) {
+            append("from ")
+            withStyle(SpanStyle(color = HaraanColors.TextPrimary, fontWeight = FontWeight.Bold)) { append("₹${inr(fromPrice)}") }
+          }
+          if (courtCount > 1) append(if (fromPrice > 0) " · $courtCount $unit" else "$courtCount $unit")
+          if (fromPrice <= 0 && courtCount <= 1) append("See slots")
+        },
+        color = HaraanColors.TextSecondary, fontSize = 11.5.sp, lineHeight = 15.sp,
+      )
     }
-    Icon(Icons.Default.KeyboardArrowRight, null, tint = HaraanColors.TextMuted, modifier = Modifier.size(22.dp))
   }
 }
 

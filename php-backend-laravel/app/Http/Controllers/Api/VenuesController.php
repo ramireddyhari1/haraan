@@ -89,6 +89,9 @@ final class VenuesController extends Controller
                 'name' => $c->name,
                 'sports' => $c->sportsList() ?: $venue->sportsList(),
                 'price' => $c->price ?? $venue->price,
+                // The cheapest this court really sells at, slot prices included — the "from ₹…"
+                // on the sport tiles, the same figure the website shows (Venue::fromPriceFor).
+                'from_price' => $venue->fromPriceFor($c),
                 // Optional peak pricing (null price = none). Days are 3-letter names; the window
                 // is "HH:MM". Clients apply the peak rate when the picked day/time matches.
                 // Only a real peak rate (> 0); a mistyped 0 or negative one is no peak at all.
