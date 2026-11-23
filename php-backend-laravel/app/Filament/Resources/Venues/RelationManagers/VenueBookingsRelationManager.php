@@ -83,7 +83,11 @@ class VenueBookingsRelationManager extends RelationManager
         return $table
             ->recordTitleAttribute('ticket_code')
             ->defaultSort('slot_date', 'desc')
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['user']))
+            // Paid bookings only. Expired holds, abandoned checkouts and pending rows never
+            // took money, so they are noise to the venue partner reading this list.
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query
+                ->whereIn(DB::raw('lower(status)'), self::PAID)
+                ->with(['user']))
             ->description(fn (): string => 'Advance payment: ' . ($this->venue()->advanceLabel() ?? 'off — customers pay the full amount online'))
             ->headerActions([
                 // Haraan's call, not the partner's: the share of the court price a customer may
@@ -130,7 +134,7 @@ class VenueBookingsRelationManager extends RelationManager
                     })
                     ->visible(fn (): bool => Filament::getCurrentPanel()?->getId() !== 'partner'),
             ])
-            ->emptyStateHeading('No bookings yet')
+            ->emptyStateHeading('No confirmed bookings yet')
             ->emptyStateIcon('heroicon-o-calendar-days')
             ->columns([
                 TextColumn::make('slot_date')
@@ -215,10 +219,9 @@ class VenueBookingsRelationManager extends RelationManager
             ->filters([
                 SelectFilter::make('status')
                     ->options([
-                        'CONFIRMED' => 'Confirmed',
-                        'PENDING'   => 'Pending',
-                        'CANCELLED' => 'Cancelled',
-                        'REFUNDED'  => 'Refunded',
+                        'CONFIRMED'  => 'Confirmed',
+                        'COMPLETED'  => 'Completed',
+                        'CHECKED_IN' => 'Checked in',
                     ])
                     ->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
                         ? $query->whereRaw('lower(status) = ?', [strtolower((string) $data['value'])])
