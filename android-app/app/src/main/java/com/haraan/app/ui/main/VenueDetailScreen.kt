@@ -1389,8 +1389,18 @@ internal fun BookingSheet(
     }
   }
   // The venue's slot length (30 or 60 min): the smallest gap between two cards of the day.
-  val slotLenMin = remember(dayTiles) {
-    dayTiles.zipWithNext { a, b -> b.startMin - a.startMin }.filter { it > 0 }.minOrNull()?.coerceAtMost(60) ?: 60
+  val slotLenMin = remember(dayTiles, venue.slotMinutes) {
+    venue.slotMinutes.takeIf { it > 0 }
+      ?: dayTiles.zipWithNext { a, b -> b.startMin - a.startMin }.filter { it > 0 }.minOrNull()?.coerceAtMost(60) ?: 60
+  }
+  // The venue's shortest booking in slots: 2 = "1 hour first, then 30-min steps" on 30-minute
+  // slots. A first tap picks that many; ends shrink only down to it. The server refuses less.
+  val minSlots = remember(slotLenMin, venue.minBookingMinutes) {
+    if (venue.minBookingMinutes <= slotLenMin) 1 else (venue.minBookingMinutes + slotLenMin - 1) / slotLenMin
+  }
+  val minLabel = remember(minSlots, slotLenMin) {
+    val m = minSlots * slotLenMin
+    if (m < 60) "$m min" else (m / 60.0).let { h -> if (h % 1.0 == 0.0) "${h.toInt()} hour${if (h > 1) "s" else ""}" else "$h hours" }
   }
   // The booking is ONE run of back-to-back open slots: [selectedSlot] for [duration] slots
   // (what the server's `duration` means — VenueSlot lengths, not hours).
@@ -1414,7 +1424,8 @@ internal fun BookingSheet(
         dayTiles[si + run].state == SlotTileState.OPEN &&
         dayTiles[si + run].startMin - dayTiles[si + run - 1].startMin == slotLenMin
       ) run++
-      if (run != duration) duration = run
+      // Half of a minimum run can't be bought alone.
+      if (run < minSlots) { selectedSlot = null; duration = 1 } else if (run != duration) duration = run
     }
   }
   // Tap rules for the grid, so a range is built the way people expect: the first tap picks
@@ -1426,15 +1437,27 @@ internal fun BookingSheet(
     fun joined(a: Int, b: Int) = a in dayTiles.indices && b in dayTiles.indices &&
       dayTiles[a].state == SlotTileState.OPEN && dayTiles[b].state == SlotTileState.OPEN &&
       dayTiles[b].startMin - dayTiles[a].startMin == slotLenMin
-    if (si < 0) { selectedSlot = t.slot; duration = 1; return@tap }
+    // A fresh start: [minSlots] back-to-back open slots from here, or say why not.
+    fun startAt(i: Int) {
+      if ((i until i + minSlots - 1).all { joined(it, it + 1) }) {
+        selectedSlot = dayTiles[i].slot; duration = minSlots
+      } else {
+        android.widget.Toast.makeText(
+          ctx, "This venue books at least $minLabel, and the time right after isn't free. Pick an earlier start.",
+          android.widget.Toast.LENGTH_LONG,
+        ).show()
+      }
+    }
+    if (si < 0) { startAt(ti); return@tap }
     val ei = si + duration - 1
     when {
       ti == ei + 1 && joined(ei, ti) && duration < 12 -> duration += 1
       ti == si - 1 && joined(ti, si) && duration < 12 -> { selectedSlot = t.slot; duration += 1 }
-      ti == si && duration == 1 -> { selectedSlot = null; duration = 1 }
+      // At the minimum, tapping either end lets the whole run go.
+      (ti == si || ti == ei) && duration <= minSlots -> { selectedSlot = null; duration = 1 }
       ti == si -> { selectedSlot = dayTiles[si + 1].slot; duration -= 1 }
       ti == ei -> duration -= 1
-      else -> { selectedSlot = t.slot; duration = 1 }
+      else -> startAt(ti)
     }
   }
   // Which part of the day the grid shows. Follows the pick; else the first part with an
@@ -1924,6 +1947,13 @@ internal fun BookingSheet(
                     color = BookInk.Amber, fontWeight = FontWeight.SemiBold, fontSize = 12.sp,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 2.dp),
+                  )
+                }
+                if (minSlots > 1) {
+                  Text(
+                    "Book at least $minLabel, then add $slotLenMin min at a time",
+                    color = BookInk.Muted, fontWeight = FontWeight.SemiBold, fontSize = 12.sp,
+                    maxLines = 2, modifier = Modifier.padding(top = 2.dp),
                   )
                 }
               }

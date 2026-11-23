@@ -2981,6 +2981,9 @@ final class PublicWebController extends Controller
             // Every fee (convenience + the admin's named ones), for the same estimate.
             'fee_rules' => $v->feeRules(),
             'advance_percent' => $v->advancePercent(),
+            // Shortest booking, in slots: the picker grows a first tap to this many.
+            'min_booking_slots' => $v->minBookingSlots(),
+            'min_booking_minutes' => $v->minBookingMinutes(),
             // Falls back to the slot times when the weekly hours aren't set.
             'hours' => $v->publicHours(),
             // Mon…Sun [open, close] minutes — drawn as the desktop page's week of hours.

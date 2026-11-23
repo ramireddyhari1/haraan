@@ -158,6 +158,10 @@ data class VenueDetailData(
     // Advance payment, set by Haraan per venue in /control: the % of the court value a
     // customer may pay online now, the rest at the venue. 0 = full payment only.
     val advancePercent: Double = 0.0,
+    // The venue's slot length and shortest booking, in minutes (/control → Hours & slots).
+    // 0 on servers that predate them: the grid then infers the length and allows one slot.
+    val slotMinutes: Int = 0,
+    val minBookingMinutes: Int = 0,
 ) {
     val offersAdvance: Boolean get() = advancePercent > 0.0 && advancePercent < 100.0
 
@@ -418,6 +422,8 @@ class VenueRepository {
             taxValue = d.optDouble("tax_value", 0.0).let { if (it.isNaN()) 0.0 else it },
             taxLabel = s("tax_label").ifBlank { "GST" },
             advancePercent = d.optDouble("advance_percent", 0.0).let { if (it.isNaN()) 0.0 else it },
+            slotMinutes = d.optInt("slot_minutes", 0),
+            minBookingMinutes = d.optInt("min_booking_minutes", 0),
         )
     }
 

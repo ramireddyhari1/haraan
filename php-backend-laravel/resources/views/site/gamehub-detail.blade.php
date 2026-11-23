@@ -2624,6 +2624,11 @@
     let availabilitySeq = 0;
     let selectedSlots = [];
     let currentFormRating = 0;
+    // The venue's shortest booking, in slots (/control → Hours & slots). 2 = "1 hour first,
+    // then 30-min steps" on 30-minute slots: a first tap picks the hour, later taps add 30 min,
+    // and un-picking never leaves a run shorter than this. Checkout refuses one anyway.
+    const minSlots = {{ max(1, (int) ($venue->min_booking_slots ?? 1)) }};
+    const minLabel = @json(\App\Models\Venue::minutesLabel((int) ($venue->min_booking_minutes ?? 60)));
 
     function toggleFavorite(btn) {
         const svg = document.getElementById('fav-icon');
@@ -2925,6 +2930,8 @@
         const before = selectedSlots.length;
         const lost = selectedSlots.filter(s => slotState(s.slotId) !== 'open');
         selectedSlots = selectedSlots.filter(s => slotState(s.slotId) === 'open');
+        // Half of a minimum run can't be bought alone: let the rest of it go too.
+        if (selectedSlots.length !== before) pruneShortRuns();
         if (selectedSlots.length !== before) updatePriceBreakdown();
         const flips = slotFlips; // renderSlots spends them on the flash
         renderSlots(!quiet);
@@ -3188,10 +3195,81 @@
         slotFlips = {};
     }
 
+    // "6:00 AM - 6:30 AM" → [360, 390]; an end at or before the start is past midnight.
+    function slotSpan(time) {
+        const [a, b] = String(time).split(' - ');
+        const s = timeMin(a);
+        let e = timeMin(b);
+        if (s != null && e != null && e <= s) e += 1440;
+        return [s, e];
+    }
+    const pickKey = (slot) => `${selectedDate}_${selectedSport}_${selectedCourt}_${slot.id}`;
+    function pickOf(slot) {
+        return { key: pickKey(slot), date: selectedDate, sport: selectedSport, court: selectedCourt,
+            slotId: slot.id, time: slot.time, price: slotRate(slot) };
+    }
+
+    // Drops every back-to-back run (per day, sport and court) shorter than the venue's
+    // minimum. True when something went.
+    function pruneShortRuns() {
+        if (minSlots <= 1) return false;
+        const lanes = {};
+        selectedSlots.forEach(p => (lanes[p.date + '|' + p.sport + '|' + p.court] ||= []).push(p));
+        const drop = new Set();
+        Object.values(lanes).forEach(lane => {
+            lane.sort((x, y) => slotSpan(x.time)[0] - slotSpan(y.time)[0]);
+            let run = [];
+            const flush = () => { if (run.length && run.length < minSlots) run.forEach(p => drop.add(p.key)); run = []; };
+            lane.forEach(p => {
+                const prev = run[run.length - 1];
+                if (prev && slotSpan(prev.time)[1] !== slotSpan(p.time)[0]) flush();
+                run.push(p);
+            });
+            flush();
+        });
+        if (!drop.size) return false;
+        selectedSlots = selectedSlots.filter(p => !drop.has(p.key));
+        return true;
+    }
+
+    // A first pick on a "1 hour first" venue: this slot plus the ones right after it, up to
+    // the minimum. Null when the time after it isn't free.
+    function minRunFrom(slot) {
+        const pool = visibleSlots().filter(x => slotState(x.id) === 'open');
+        const run = [slot];
+        let end = slotSpan(slot.time)[1];
+        while (run.length < minSlots) {
+            const next = pool.find(x => slotSpan(x.time)[0] === end && !selectedSlots.some(p => p.key === pickKey(x)));
+            if (!next) return null;
+            run.push(next);
+            end = slotSpan(next.time)[1];
+        }
+        return run;
+    }
+
     function toggleSlot(element, slotId, rate) {
         const slot = daySlots(selectedDate).find(s => s.id === slotId);
         if (!slot) return;
         const slotKey = `${selectedDate}_${selectedSport}_${selectedCourt}_${slot.id}`;
+        if (minSlots > 1) {
+            if (selectedSlots.some(s => s.key === slotKey)) {
+                selectedSlots = selectedSlots.filter(s => s.key !== slotKey);
+                if (pruneShortRuns()) slotToast(`This venue books at least ${minLabel} — that time was let go.`, 'taken');
+            } else {
+                const [s0, e0] = slotSpan(slot.time);
+                const touches = selectedSlots.some(p => p.date === selectedDate && p.sport === selectedSport
+                    && p.court === selectedCourt && (slotSpan(p.time)[1] === s0 || slotSpan(p.time)[0] === e0));
+                const run = touches ? [slot] : minRunFrom(slot);
+                if (!run) {
+                    slotToast(`This venue books at least ${minLabel}, and the time right after ${slot.time.split(' - ')[0]} isn't free. Pick an earlier start.`, 'taken');
+                    return;
+                }
+                run.forEach(x => selectedSlots.push(pickOf(x)));
+            }
+            updatePriceBreakdown();
+            renderSlots();
+            return;
+        }
         const seg = document.querySelector(`[data-seg="${slotKey}"]`);
         element.classList.remove('is-enter', 'is-pop');
         if (element.classList.contains('is-selected')) {
@@ -3222,6 +3300,7 @@
 
     function removeSelectedSlot(key) {
         selectedSlots = selectedSlots.filter(s => s.key !== key);
+        pruneShortRuns();
         updatePriceBreakdown();
         renderSlots();
     }

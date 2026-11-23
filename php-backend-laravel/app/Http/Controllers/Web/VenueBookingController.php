@@ -92,6 +92,11 @@ final class VenueBookingController extends Controller
             $lines[] = ['time' => trim($range), 'rate' => $rate];
         }
 
+        $starts = array_map(static fn (array $l): string => trim(explode('-', $l['time'])[0]), $lines);
+        if (($short = self::shortRun($venue, $starts, $venue->slotLength())) !== null) {
+            return response()->json(['error' => $short], 422);
+        }
+
         $subtotal = round(array_sum(array_column($lines, 'rate')), 2);
         $fee = $venue->convenienceFeeFor($subtotal);
 
@@ -138,6 +143,40 @@ final class VenueBookingController extends Controller
             'coupon'    => $coupon,
             'hold_minutes' => BookingService::holdMinutes(),
         ]);
+    }
+
+    /**
+     * The venue's shortest booking, checked on the picked slots: each back-to-back run must be
+     * at least {@see Venue::minBookingSlots()} slots ("first hour, then 30-minute steps").
+     * Null when every run is long enough, else the message to show.
+     *
+     * @param  list<string>  $starts  start times ("6:00 AM" or "06:00")
+     */
+    private static function shortRun(Venue $venue, array $starts, int $step): ?string
+    {
+        $need = $venue->minBookingSlots();
+        if ($need <= 1) {
+            return null;
+        }
+        $mins = array_values(array_unique(array_filter(
+            array_map(static fn (string $t): ?int => BookingService::timeToMinutes(trim($t)), $starts),
+            static fn (?int $m): bool => $m !== null,
+        )));
+        sort($mins);
+        $run = 0;
+        foreach ($mins as $i => $m) {
+            $run = ($i > 0 && $m - $mins[$i - 1] === $step) ? $run + 1 : 1;
+            $last = $i === count($mins) - 1 || $mins[$i + 1] - $m !== $step;
+            if ($last && $run < $need) {
+                return sprintf(
+                    'This venue books at least %s at a time — pick %d back-to-back slots.',
+                    Venue::minutesLabel($venue->minBookingMinutes()),
+                    $need,
+                );
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -330,6 +369,9 @@ final class VenueBookingController extends Controller
 
         if (empty($slotsToReserve)) {
             return response()->json(['error' => 'Please select at least one valid slot.'], 422);
+        }
+        if (($short = self::shortRun($venue, array_column($slotsToReserve, 'start_hm'), $step)) !== null) {
+            return response()->json(['error' => $short], 422);
         }
 
         // Same pricing as the app (BookingService::reserveVenue): subtotal → the venue's own

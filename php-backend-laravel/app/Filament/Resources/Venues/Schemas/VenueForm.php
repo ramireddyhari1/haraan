@@ -12,6 +12,7 @@ use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
@@ -20,6 +21,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TimePicker;
 use Filament\Forms\Components\Toggle;
+use Filament\Forms\Components\ToggleButtons;
 use Filament\Forms\Components\ViewField;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
@@ -219,6 +221,36 @@ class VenueForm
                     ->extraAttributes(fn (?Venue $record): array => self::stepAttributes('hours', $record))
                     ->description('This is the ONE place slot times come from: saving creates a slot every "slot length" inside these hours, for every court. Prices per slot are set in the Courts & slots tab. Days you don\'t list are closed. Open past midnight? Set the real closing time (e.g. Mon 6:00 PM → 1:00 AM): the hours after 12 AM are sold on the next day\'s date.')
                     ->schema([
+                        // Slot length leads the step: it decides every time the hours below create.
+                        ToggleButtons::make('slot_minutes')
+                            ->label('Slot length')
+                            ->options([30 => '30 minutes', 60 => '1 hour', 90 => '1.5 hours', 120 => '2 hours'])
+                            ->icons([30 => 'heroicon-o-clock', 60 => 'heroicon-o-clock', 90 => 'heroicon-o-clock', 120 => 'heroicon-o-clock'])
+                            ->default(60)
+                            ->inline()
+                            ->live()
+                            ->afterStateUpdated(function ($state, $set): void {
+                                // "1 hour first" only means something on 30-minute slots.
+                                if ((int) $state !== 30) {
+                                    $set('min_booking_minutes', null);
+                                }
+                            })
+                            ->helperText('A slot starts every this-many minutes between open and close. Changing it rebuilds the slot times on save; prices on times that stay are kept.'),
+                        Radio::make('min_booking_minutes')
+                            ->label('How customers book 30-minute slots')
+                            ->options([
+                                30 => '30 min from the start',
+                                60 => '1 hour first, then 30-min steps',
+                            ])
+                            ->descriptions([
+                                30 => 'A single 30-minute slot can be booked: 30 min, 1 hr, 1.5 hrs…',
+                                60 => 'The first booking is at least 1 hour, then it grows 30 min at a time: 1 hr, 1.5 hrs, 2 hrs…',
+                            ])
+                            ->default(30)
+                            ->visible(fn ($get): bool => (int) $get('slot_minutes') === 30)
+                            ->formatStateUsing(fn ($state): int => (int) $state >= 60 ? 60 : 30)
+                            ->dehydrateStateUsing(fn ($state, $get): ?int => (int) $get('slot_minutes') === 30 && (int) $state >= 60 ? 60 : null)
+                            ->dehydratedWhenHidden(),
                         Placeholder::make('hours_week')
                             ->hiddenLabel()
                             ->content(fn ($get): HtmlString => new HtmlString(view('filament.venue.hours-week', [
@@ -286,13 +318,6 @@ class VenueForm
                             ->live(debounce: 600)
                             ->reorderable(false)
                             ->defaultItems(0),
-                        Select::make('slot_minutes')
-                            ->label('Slot length')
-                            ->options([30 => '30 minutes', 60 => '1 hour', 90 => '1.5 hours', 120 => '2 hours'])
-                            ->default(60)
-                            ->live()
-                            ->native(false)
-                            ->helperText('A slot starts every this-many minutes between open and close.'),
                     ]),
 
                 Section::make('Cancellation policy')

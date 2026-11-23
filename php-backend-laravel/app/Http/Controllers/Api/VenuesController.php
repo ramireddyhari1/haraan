@@ -76,6 +76,9 @@ final class VenuesController extends Controller
             // may pay this % of the court value (after discount, rounded UP to the rupee) plus
             // every fee and tax online, and the rest at the venue (payMode: advance).
             'advance_percent' => $venue->advancePercent(),
+            // Shortest booking in minutes (one slot, or e.g. 60 = "first hour, then 30-min steps").
+            'slot_minutes' => $venue->slotLength(),
+            'min_booking_minutes' => $venue->minBookingMinutes(),
             'about' => $venue->about,
             'amenities' => $venue->amenities ?? [],
             // Courts are physical bookable units, each carrying the sports it can host and its
