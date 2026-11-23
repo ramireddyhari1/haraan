@@ -48,14 +48,45 @@
     // Each line gets the mark its meaning calls for. A green tick on every line read
     // "No smoking" and "No alcohol" as perks; a prohibition is a no-entry sign, a must
     // is an alert, the cancellation policy is a clock, anything else is plain info.
-    $mvKnowIcon = function (string $rule) use ($venue): array {
+    // A prohibition is drawn as the real sign: the thing itself in ink (a cigarette, a bottle
+    // and glass, a fork and knife, a paw, a shoe) under a red ring and slash. The app draws
+    // the same paths (RuleSign.kt) — keep the two in step.
+    $mvInkF = fn (string $d) => '<path d="'.$d.'" fill="#0F172A" stroke="none"></path>';
+    $mvInkS = fn (string $d, string $w) => '<path d="'.$d.'" stroke="#0F172A" stroke-width="'.$w.'"></path>';
+    $mvDot = fn (float $cx, float $cy) => $mvInkF('M'.($cx - 1.35).' '.$cy.'a1.35 1.35 0 1 0 2.7 0a1.35 1.35 0 1 0-2.7 0z');
+    $mvPicto = [
+        'smoke' => $mvInkF('M4.5 13.2h10.3v2.6H4.5z').$mvInkF('M15.5 13.2h1.3v2.6h-1.3z').$mvInkF('M17.5 13.2h1.1v2.6h-1.1z')
+            .$mvInkS('M16.4 11.8c0-1.4 1.6-1.4 1.6-2.8s-1.6-1.4-1.6-2.8', '1.3'),
+        'alcohol' => $mvInkF('M8.3 5.5h1.8v2.7c.9.5 1.4 1.3 1.4 2.3v7.7H6.9v-7.7c0-1 .5-1.8 1.4-2.3z')
+            .$mvInkF('M13.4 10h4.6l-.4 2.6a1.9 1.9 0 0 1-3.8 0z').$mvInkS('M15.7 14.5v3.4M14.3 18h2.8', '1.2'),
+        'food' => $mvInkS('M8 6v3.6a1.6 1.6 0 0 0 3.2 0V6M9.6 6v12.5', '1.4').$mvInkF('M16.2 6c-1.6.6-2.6 2.6-2.6 5.6h1.6v6.9h1.4V6z'),
+        'pet' => $mvInkF('M12 11.6c-2.2 0-4 2.6-4 4.3 0 1.3 1 1.9 2.1 1.9.8 0 1.2-.4 1.9-.4s1.1.4 1.9.4c1.1 0 2.1-.6 2.1-1.9 0-1.7-1.8-4.3-4-4.3z')
+            .$mvDot(8.35, 10.6).$mvDot(10.6, 8).$mvDot(13.4, 8).$mvDot(15.65, 10.6),
+        'shoe' => $mvInkF('M5.2 15.6V9.8h2.9l1.3 1.9c1.7.4 4.6.8 6.6 1.4 1.4.4 2.1 1.2 2.1 2.2v.3z').$mvInkS('M5.2 17.3h13', '1.3'),
+        'none' => '',
+    ];
+    $mvKnowIcon = function (string $rule) use ($venue, $mvPicto): array {
         $r = strtolower(trim($rule));
         $has = fn (string ...$n) => array_reduce($n, fn ($c, $x) => $c || str_contains($r, $x), false);
 
+        if ($rule !== $venue->cancellation && ! $has('cancel', 'refund')
+            && (str_starts_with($r, 'no ') || $has('not allowed', 'prohibited', 'banned', "don't", 'do not'))) {
+            $kind = match (true) {
+                $has('smok', 'cigar', 'tobacco', 'gutka', 'gutkha', 'pan masala', 'vap', 'beedi', 'bidi') => 'smoke',
+                $has('food', 'eat', 'snack', 'meal', 'chew') => 'food',
+                $has('alcohol', 'liquor', 'beer', 'wine', 'drink', 'booze', 'drunk') => 'alcohol',
+                $has('pet', 'dog', 'animal') => 'pet',
+                $has('shoe', 'footwear', 'spike', 'stud', 'boot', 'chappal', 'slipper', 'heel') => 'shoe',
+                default => 'none',
+            };
+
+            return ['#DC2626', $mvPicto[$kind].'<path d="M4.9 4.9l14.2 14.2" stroke="#fff" stroke-width="3.6" stroke-linecap="butt"></path><circle cx="12" cy="12" r="10" stroke-width="2.2"></circle><path d="M4.9 4.9l14.2 14.2" stroke-width="2.2" stroke-linecap="butt"></path>'];
+        }
+
         return match (true) {
             $rule === $venue->cancellation || $has('cancel', 'refund') => ['#2563EB', '<circle cx="12" cy="13" r="8"></circle><path d="M12 9v4l2.5 2M9.5 2.5h5"></path>'],
-            str_starts_with($r, 'no ') || $has('not allowed', 'prohibited', 'banned', "don't", 'do not') => ['#DC2626', '<circle cx="12" cy="12" r="9"></circle><path d="M5.7 5.7l12.6 12.6"></path>'],
             $has('mandatory', 'required', 'must', 'compulsory') => ['#B45309', '<path d="M12 3.5 21.5 20h-19z"></path><path d="M12 10v4.2M12 17.2v.01"></path>'],
+            $has('book', 'reserv') => ['#2563EB', '<path d="M6.5 5.5h11A1.5 1.5 0 0 1 19 7v11a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 18V7a1.5 1.5 0 0 1 1.5-1.5zM5 10h14M9 3.5v4M15 3.5v4"></path>'],
             default => ['#2563EB', '<circle cx="12" cy="12" r="9"></circle><path d="M12 11v5.5M12 7.8v.01"></path>'],
         };
     };
@@ -622,7 +653,7 @@
                 @foreach($mvGoodToKnow as $rule)
                     @php [$mvTone, $mvGlyph] = $mvKnowIcon($rule); @endphp
                     <li>
-                        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: {{ $mvTone }}">{!! $mvGlyph !!}</svg>
+                        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: {{ $mvTone }}">{!! $mvGlyph !!}</svg>
                         {{ $rule }}
                     </li>
                 @endforeach
@@ -906,7 +937,7 @@
                                 @foreach($vcoRules as $rule)
                                     @php [$mvTone, $mvGlyph] = $mvKnowIcon($rule); @endphp
                                     <li>
-                                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: {{ $mvTone }}">{!! $mvGlyph !!}</svg>
+                                        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: {{ $mvTone }}">{!! $mvGlyph !!}</svg>
                                         <span>{{ $rule }}</span>
                                     </li>
                                 @endforeach
@@ -1250,7 +1281,7 @@
                         @foreach($mvGoodToKnow as $rule)
                             @php [$mvTone, $mvGlyph] = $mvKnowIcon($rule); @endphp
                             <li>
-                                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: {{ $mvTone }}">{!! $mvGlyph !!}</svg>
+                                <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: {{ $mvTone }}">{!! $mvGlyph !!}</svg>
                                 {{ $rule }}
                             </li>
                         @endforeach
