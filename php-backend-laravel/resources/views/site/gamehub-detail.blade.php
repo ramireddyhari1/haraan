@@ -845,30 +845,23 @@
     <div class="mven__bar">
         <span class="mven__bar-price">
             @if($venue->from_price > 0)
-                {{-- Priced the way Indian booking apps say it: "₹400/hr onwards". --}}
-                <span class="mven__bar-amt"><span class="mven__bar-rs">₹</span><b>{{ number_format($venue->from_price) }}</b><i>/hr onwards</i></span>
+                {{-- Plain shop pricing: the figure, then the unit. No raised ₹, no "onwards". --}}
+                <span class="mven__bar-amt"><b>₹{{ number_format($venue->from_price) }}</b><i>/ hour</i></span>
             @else
                 {{-- The app guards this so the bar never shows a bare "₹0 /hr". --}}
                 <span class="mven__bar-noprice">Tap to see slots</span>
             @endif
             {{-- The one thing a player wants before tapping: when can I play. Read from
-                 real bookings; falls back to the venue's hours. --}}
+                 real bookings; falls back to the venue's hours. Plain text, no clock. --}}
             @if(!empty($venue->next_free))
-                <span class="mven__bar-next">
-                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7.5V12l3 2"></path></svg>
-                    Next free <b>{{ $venue->next_free }}</b>
-                </span>
+                <span class="mven__bar-next">Next slot {{ $venue->next_free }}</span>
             @elseif(!empty($venue->open_state))
-                <span class="mven__bar-next">
-                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7.5V12l3 2"></path></svg>
-                    <b>{{ $venue->open_state }}</b>
-                </span>
+                <span class="mven__bar-next mven__bar-next--muted">{{ $venue->open_state }}</span>
             @endif
         </span>
         <button type="button" class="mven__book" data-mven-book @unless($venue->is_bookable) disabled @endunless>
             @if($venue->is_bookable)
-                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="3"></rect><path d="M3.5 10h17M8 3v4M16 3v4"></path><path d="m9.5 15 1.8 1.8 3.4-3.6"></path></svg>
-                Book a slot
+                Book now
             @else
                 Not bookable online
             @endif
