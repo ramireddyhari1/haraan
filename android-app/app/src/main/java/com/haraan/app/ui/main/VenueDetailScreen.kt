@@ -797,10 +797,10 @@ private fun AmenityGrid(amenities: List<String>) {
               modifier = Modifier
                 .size(34.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(HaraanColors.EventsBlue.copy(alpha = 0.10f)),
+                .background(Color(0xFFF1F5FB)),
               contentAlignment = Alignment.Center,
             ) {
-              Icon(amenityIcon(a), null, tint = HaraanColors.GameHubDeep, modifier = Modifier.size(18.dp))
+              AmenitySign(a, Modifier.size(22.dp))
             }
             Spacer(Modifier.width(10.dp))
             Text(
@@ -1206,27 +1206,6 @@ private fun RatingDialog(venue: VenueDetailData, onDismiss: () -> Unit, onSubmit
         }
       }
     }
-  }
-}
-
-/** Map a free-text amenity label to the closest Material glyph; falls back to a check. */
-private fun amenityIcon(amenity: String): androidx.compose.ui.graphics.vector.ImageVector {
-  val a = amenity.lowercase()
-  return when {
-    "wifi" in a || "wi-fi" in a || "internet" in a -> Icons.Default.Wifi
-    "park" in a -> Icons.Default.DirectionsCar
-    "wash" in a || "toilet" in a || "restroom" in a || "rest room" in a -> Icons.Default.Wc
-    "shower" in a -> Icons.Default.Shower
-    "chang" in a || "locker" in a -> Icons.Default.Checkroom
-    "cafe" in a || "coffee" in a || "canteen" in a -> Icons.Default.LocalCafe
-    "food" in a || "restaurant" in a || "kitchen" in a -> Icons.Default.Restaurant
-    "water" in a || "drink" in a -> Icons.Default.LocalDrink
-    "light" in a || "flood" in a -> Icons.Default.Lightbulb
-    "ac" == a || "a/c" in a || "air" in a || "cool" in a -> Icons.Default.Air
-    "cctv" in a || "secur" in a || "guard" in a || "safe" in a -> Icons.Default.Security
-    "seat" in a || "seating" in a || "gallery" in a -> Icons.Default.EventSeat
-    "equip" in a || "gear" in a || "gym" in a || "kit" in a -> Icons.Default.FitnessCenter
-    else -> Icons.Default.Check
   }
 }
 
