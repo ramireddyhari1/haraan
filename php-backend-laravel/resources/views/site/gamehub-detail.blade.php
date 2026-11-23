@@ -904,7 +904,11 @@
                             <h4 class="vco__h4">Venue rules</h4>
                             <ul class="vco__rules">
                                 @foreach($vcoRules as $rule)
-                                    <li>{{ $rule }}</li>
+                                    @php [$mvTone, $mvGlyph] = $mvKnowIcon($rule); @endphp
+                                    <li>
+                                        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: {{ $mvTone }}">{!! $mvGlyph !!}</svg>
+                                        <span>{{ $rule }}</span>
+                                    </li>
                                 @endforeach
                             </ul>
                         @endif
