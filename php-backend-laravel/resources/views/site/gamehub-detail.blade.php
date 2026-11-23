@@ -255,23 +255,22 @@
        Physical: a hairline + contact shadow at rest, a press sinks 1px and the
        shadow closes; a pick fills blue and a tick draws itself. */
     #slots-grid-container .sb-keys { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+    /* 2026-11-23 de-AI pass: flat cards. No glow, no corner tick, no dashed
+       outline, no strike-through - a hairline, the time, and one word or price. */
     #slots-grid-container .sb-key {
-        position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px;
-        min-height: 52px; padding: 8px 6px; margin: 0;
-        background: #FFFFFF; border: 1px solid #DFE5EE; border-radius: 12px;
-        box-shadow: 0 1px 2px rgba(15, 23, 42, .05);
+        position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+        min-height: 54px; padding: 8px 6px; margin: 0;
+        background: #FFFFFF; border: 1px solid #D9E0EA; border-radius: 10px;
+        box-shadow: none;
         color: #0F172A; cursor: pointer; text-align: center; overflow: hidden;
-        transform: none; transition: transform .09s ease, box-shadow .12s ease, border-color .15s ease, background-color .18s ease;
+        transform: none; transition: border-color .15s ease, background-color .15s ease;
         -webkit-tap-highlight-color: transparent; user-select: none;
     }
     #slots-grid-container .sb-key::before, #slots-grid-container .sb-key::after { content: none; }
-    #slots-grid-container .sb-key:hover:not(.is-booked):not(.is-selected) { border-color: #C9D4E3; }
-    #slots-grid-container .sb-key:active:not(.is-booked) {
-        transform: translateY(1px) scale(.985);
-        box-shadow: 0 0 0 rgba(15, 23, 42, 0), 0 1px 1px rgba(15, 23, 42, .08);
-    }
-    #slots-grid-container .sb-key__time { display: flex; align-items: baseline; font-size: 17px; font-weight: 800; letter-spacing: -.02em; line-height: 1.1; }
-    #slots-grid-container .sb-key__time small { margin-left: 3px; font-size: 10.5px; font-weight: 700; color: #94A3B8; letter-spacing: .03em; }
+    #slots-grid-container .sb-key:hover:not(.is-booked):not(.is-selected) { border-color: #94A3B8; }
+    #slots-grid-container .sb-key:active:not(.is-booked):not(.is-selected) { background: #F1F5F9; }
+    #slots-grid-container .sb-key__time { display: flex; align-items: baseline; gap: 3px; font-size: 15.5px; font-weight: 700; letter-spacing: -.01em; line-height: 1.15; }
+    #slots-grid-container .sb-key__time small { font-size: 11px; font-weight: 600; color: #64748B; letter-spacing: 0; }
     #slots-grid-container .sb-key__sub,
     #slots-grid-container .sb-key__len { font-size: 11.5px; font-weight: 600; color: #94A3B8; line-height: 1.2; }
     #slots-grid-container .sb-key__soon { font-size: 11px; font-weight: 700; color: #2563EB; line-height: 1.2; }
@@ -279,34 +278,26 @@
     /* Peak: costs more, says how much, in a warm ink. */
     #slots-grid-container .sb-key.is-peak .sb-key__sub { color: #B45309; font-weight: 700; }
 
-    /* Picked: blue card, tick in the corner drawn on the pick. */
+    /* Picked: a solid blue card, nothing more. */
     /* !important only here: site-theme-overrides.css forces a pale selected tile with
        !important on desktop, which turned white text invisible. */
     #slots-grid-container .sb-key.is-selected {
         background: #2563EB !important; border-color: #2563EB !important; color: #fff;
-        box-shadow: 0 1px 0 rgba(255, 255, 255, .25) inset, 0 8px 16px -8px rgba(37, 99, 235, .75), 0 0 0 3px rgba(37, 99, 235, .14) !important;
+        box-shadow: none !important;
     }
     #slots-grid-container .sb-key.is-selected .sb-key__time { color: #fff !important; }
     #slots-grid-container .sb-key.is-selected .sb-key__time small,
     #slots-grid-container .sb-key.is-selected .sb-key__sub,
     #slots-grid-container .sb-key.is-selected .sb-key__len,
     #slots-grid-container .sb-key.is-selected .sb-key__soon { color: rgba(255, 255, 255, .8); }
-    #slots-grid-container .sb-key__tick { display: none; position: absolute; top: 7px; right: 7px; width: 16px; height: 16px; border-radius: 50%; background: #fff; color: #2563EB; }
-    #slots-grid-container .sb-key.is-selected .sb-key__tick { display: block; }
-    #slots-grid-container .sb-key__tick path { stroke-dasharray: 12; stroke-dashoffset: 0; }
-    #slots-grid-container .sb-key.is-pop .sb-key__tick { animation: sb-tick-in .32s cubic-bezier(.2, .9, .3, 1.3) both; }
-    #slots-grid-container .sb-key.is-pop .sb-key__tick path { animation: sb-tick-draw .3s .08s ease-out both; }
-    #slots-grid-container .sb-key.is-pop { animation: sb-pick .28s cubic-bezier(.2, .9, .3, 1.2); }
-    @keyframes sb-tick-in { from { transform: scale(0); } to { transform: scale(1); } }
-    @keyframes sb-tick-draw { from { stroke-dashoffset: 12; } to { stroke-dashoffset: 0; } }
-    @keyframes sb-pick { 0% { transform: scale(.96); } 60% { transform: scale(1.02); } 100% { transform: scale(1); } }
+    #slots-grid-container .sb-key.is-pop { animation: none; }
 
-    /* Taken: a dashed outline on the sheet, time struck through - nothing to press. */
+    /* Taken: greyed out on a grey card - nothing to press. */
     #slots-grid-container .sb-key.is-booked {
-        background: #F6F8FB; border: 1px dashed #D5DDE8; box-shadow: none; color: #A3AFC0; cursor: not-allowed;
+        background: #F1F5F9; border: 1px solid #F1F5F9; box-shadow: none; color: #A3AFC0; cursor: not-allowed;
     }
-    #slots-grid-container .sb-key.is-booked .sb-key__clock { text-decoration: line-through; text-decoration-thickness: 1.5px; text-decoration-color: #B8C3D2; }
-    #slots-grid-container .sb-key.is-booked .sb-key__sub { color: #94A3B8; }
+    #slots-grid-container .sb-key.is-booked .sb-key__time small,
+    #slots-grid-container .sb-key.is-booked .sb-key__sub { color: #A3AFC0; }
 
     /* A slot that just changed under the viewer: one brief cue, then calm. */
     #slots-grid-container .sb-key.is-just-taken { animation: sb-gone .9s ease; }
@@ -321,10 +312,11 @@
     #slots-grid-container .sb-key--skel { cursor: default; border-color: #E8EDF4; border-bottom-color: #E1E7F0; background: linear-gradient(90deg, #F4F7FB 25%, #EAF0F7 50%, #F4F7FB 75%) 0 0 / 200% 100%; animation: sb-shimmer 1.2s linear infinite; }
     @keyframes sb-shimmer { to { background-position: -200% 0; } }
 
-    /* ── Phone dock: ticket stub + Checkout key (2026-10-21) ───────────────
-       Replaces the pill / subtotal / "Continue · ₹" stack in the sheet foot. The
-       stub is a real pass shape: a date tear-off, a perforation with two punched
-       notches, and the picked times. No money - checkout shows the bill. */
+    /* ── Phone dock: summary row + Checkout key ─────────────────────────────
+       2026-11-23: the "ticket stub" (tear-off date, perforation, punched notches,
+       a tilted court drawing) read as costume. Now a plain row: day and court on
+       top, the picked time under it, a Clear text button. No money - checkout
+       shows the bill. */
     .co-dock { display: none; }
     .mven__modal-foot .sticky-booking-card > .mb-24,
     .mven__modal-foot .price-calculator-panel,
@@ -332,69 +324,37 @@
     .mven__modal-foot .booking-notice-text { display: none !important; }
     .mven__modal-foot .co-dock { display: block; }
 
-    .co-stub {
-        position: relative; display: flex; align-items: stretch; margin-bottom: 12px;
-        background: #F7F9FD; border: 1px solid #E1E8F4; border-radius: 16px;
-        box-shadow: 0 1px 0 #fff inset;
-        transition: background-color .2s ease, border-color .2s ease;
+    .co-sum {
+        display: flex; align-items: center; gap: 12px; margin-bottom: 10px; padding: 0 2px;
+        min-height: 40px;
     }
-    .co-dock:not(.is-empty) .co-stub { background: #fff; border-color: #CFDCF3; box-shadow: 0 1px 0 #fff inset, 0 6px 14px -10px rgba(37, 99, 235, .45); }
-    /* Punched notches top and bottom of the perforation, cut from the sheet colour. */
-    .co-stub::before, .co-stub::after {
-        content: ""; position: absolute; left: 63px; width: 14px; height: 14px; border-radius: 50%;
-        background: #fff; border: 1px solid #E1E8F4;
-    }
-    .co-stub::before { top: -8px; clip-path: inset(50% 0 0 0); }
-    .co-stub::after { bottom: -8px; clip-path: inset(0 0 50% 0); }
-    .co-dock:not(.is-empty) .co-stub::before, .co-dock:not(.is-empty) .co-stub::after { border-color: #CFDCF3; }
-    .co-stub__date {
-        flex: none; width: 70px; display: flex; flex-direction: column; align-items: center; justify-content: center;
-        padding: 10px 0; border-right: 1.5px dashed #D5DEEC; color: #64748B;
-        font-size: 10px; font-weight: 800; letter-spacing: .12em; line-height: 1.25;
-    }
-    .co-stub__date b { font-size: 24px; font-weight: 800; letter-spacing: -.03em; color: #0F172A; line-height: 1.05; font-variant-numeric: tabular-nums; }
-    .co-dock:not(.is-empty) .co-stub__date span:first-child { color: #2563EB; }
-    .co-stub__body { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 3px; padding: 11px 6px 11px 14px; }
-    .co-stub__what {
+    .co-sum__main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+    .co-sum__what {
         overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        font-size: 10.5px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: #2563EB;
+        font-size: 12.5px; font-weight: 500; color: #64748B;
     }
-    .co-dock.is-empty .co-stub__what { color: #94A3B8; }
-    .co-stub__times { display: flex; flex-direction: column; gap: 2px; min-height: 26px; justify-content: center; }
+    .co-sum__times { display: flex; flex-direction: column; gap: 1px; }
+    .co-dock.is-empty .co-sum__times { display: none; }
     .co-range {
         display: flex; align-items: baseline; gap: 4px; white-space: nowrap;
-        font-size: 21px; font-weight: 800; letter-spacing: -.03em; line-height: 1.15; color: #0F172A; font-variant-numeric: tabular-nums;
-        animation: co-range-in .26s cubic-bezier(.2, .9, .3, 1.15) both;
+        font-size: 17px; font-weight: 700; letter-spacing: -.01em; line-height: 1.25; color: #0F172A; font-variant-numeric: tabular-nums;
     }
-    .co-range small { font-size: 11.5px; font-weight: 800; letter-spacing: .02em; color: #64748B; }
-    .co-range i { margin-left: 4px; font-style: normal; font-size: 11.5px; font-weight: 700; letter-spacing: 0; color: #64748B; }
-    .co-dock.is-multi .co-range { font-size: 16px; }
-    .co-stub__hint { font-size: 15px; font-weight: 700; color: #94A3B8; letter-spacing: -.01em; }
-    .co-stub__facts { font-size: 12px; font-weight: 600; color: #64748B; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .co-stub__facts b { font-weight: 700; color: #0F172A; }
-    @keyframes co-range-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
-
-    /* The court itself, drawn: lines in blue, its name stamped under it. */
-    .co-stub__court {
-        flex: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-        width: 58px; padding-right: 8px; color: #93B4F5;
+    .co-range small { font-size: 12px; font-weight: 600; color: #64748B; }
+    .co-range i { margin-left: 4px; font-style: normal; font-size: 12px; font-weight: 500; color: #64748B; }
+    .co-dock.is-multi .co-range { font-size: 15px; }
+    .co-sum__facts { font-size: 12px; font-weight: 500; color: #64748B; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .co-sum__facts:empty { display: none; }
+    .co-sum__facts b { font-weight: 600; color: #334155; }
+    .co-dock.is-empty .co-sum__facts { display: none; }
+    .co-sum__none { flex: none; font-size: 12.5px; font-weight: 500; color: #94A3B8; }
+    .co-dock:not(.is-empty) .co-sum__none { display: none; }
+    .co-sum__clear {
+        flex: none; display: none; height: 32px; padding: 0 10px; margin-right: -8px;
+        border: 0; border-radius: 8px; background: none; color: #2563EB; cursor: pointer;
+        font: inherit; font-size: 13.5px; font-weight: 600; -webkit-tap-highlight-color: transparent;
     }
-    .co-dock:not(.is-empty) .co-stub__court { color: #2563EB; }
-    .co-dock.is-empty .co-stub__court { color: #CBD5E1; }
-    .co-stub__court svg { display: block; transform: rotate(-4deg); }
-    .co-dock:not(.is-empty) .co-stub__court svg { animation: co-court-in .4s cubic-bezier(.2, .9, .3, 1.3) both; }
-    .co-stub__court span {
-        max-width: 54px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: inherit;
-    }
-    @keyframes co-court-in { from { transform: rotate(-14deg) scale(.85); opacity: .4; } to { transform: rotate(-4deg); opacity: 1; } }
-    .co-stub__clear {
-        position: absolute; top: -10px; right: 6px; width: 24px; height: 24px; display: none; align-items: center; justify-content: center;
-        padding: 0; border: 1px solid #CFDCF3; border-radius: 50%; background: #fff; color: #64748B; cursor: pointer;
-        box-shadow: 0 2px 6px -2px rgba(15, 23, 42, .25); -webkit-tap-highlight-color: transparent;
-    }
-    .co-dock:not(.is-empty) .co-stub__clear { display: inline-flex; }
-    .co-stub__clear:active { transform: scale(.88); background: #F1F5F9; }
+    .co-dock:not(.is-empty) .co-sum__clear { display: inline-flex; align-items: center; }
+    .co-sum__clear:active { background: #EFF4FF; }
 
     /* The key: blue, a pass sitting in a slot on the left, an arrow on the right,
        and a 2px lip underneath that a press closes. */
@@ -427,7 +387,7 @@
     .co-go.is-going .co-go__arrow { transform: translateX(6px); }
     @keyframes co-pass-ready { 0% { transform: rotate(-8deg) translateY(10px); opacity: 0; } 100% { transform: rotate(-8deg); opacity: 1; } }
     @media (prefers-reduced-motion: reduce) {
-        .co-range, .co-dock:not(.is-empty) .co-go__pass svg, .co-dock:not(.is-empty) .co-stub__court svg { animation: none; }
+        .co-dock:not(.is-empty) .co-go__pass svg { animation: none; }
         .crt { transition: none !important; }
     }
 
@@ -496,77 +456,77 @@
         .mven__modal-body #booking-widget > .detail-card-panel__subtitle { display: none; }
     }
 
-    /* ── Courts: a card per court with its drawing and its own rate ──────── */
+    /* ── Courts: a card per court with its own rate ─────────────────────────
+       2026-11-23: flat. A radio ring says "pick one"; no icon tile, no corner
+       tick, no blue glow. The selected card gets a 2px blue edge and a tint. */
     .crt-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
     .crt-head__count { font-size: 12px; font-weight: 600; color: #94A3B8; }
     .court-selector-container .court-pill.crt,
     .mven__modal-body .court-selector-container .court-pill.crt {
-        position: relative; flex: none; display: flex; align-items: center; gap: 10px;
-        height: auto; min-width: 128px; padding: 9px 14px 9px 9px; margin: 0;
-        border: 1px solid #E1E7EF; border-radius: 16px; background: #fff; color: #0F172A; text-align: left;
-        box-shadow: 0 1px 0 #fff inset, 0 1px 2px rgba(15, 23, 42, .06), 0 6px 12px -10px rgba(15, 23, 42, .35);
-        transition: transform .09s ease, box-shadow .12s ease, border-color .15s ease, background-color .15s ease;
+        position: relative; flex: none; display: flex; align-items: flex-start; gap: 10px;
+        height: auto; min-width: 132px; padding: 10px 16px 10px 12px; margin: 0;
+        border: 1px solid #D9E0EA; border-radius: 12px; background: #fff; color: #0F172A; text-align: left;
+        box-shadow: none;
+        transition: border-color .15s ease, background-color .15s ease;
         -webkit-tap-highlight-color: transparent;
     }
-    .mven__modal-body .court-selector-container .court-pill.crt:hover { background: #fff; color: #0F172A; border-color: #C9D4E3; }
-    .court-selector-container .court-pill.crt:active { transform: translateY(1px) scale(.98); box-shadow: 0 1px 1px rgba(15, 23, 42, .08); }
-    .crt__art {
-        flex: none; display: flex; align-items: center; justify-content: center; width: 36px; height: 46px; border-radius: 10px;
-        background: #F1F5FA; color: #94A3B8; transition: background-color .15s ease, color .15s ease;
+    .mven__modal-body .court-selector-container .court-pill.crt:hover { background: #fff; color: #0F172A; border-color: #94A3B8; }
+    .court-selector-container .court-pill.crt:active { background: #F8FAFC; }
+    .crt__radio {
+        flex: none; width: 16px; height: 16px; margin-top: 1px; border-radius: 50%;
+        border: 1.5px solid #CBD5E1; background: #fff; box-sizing: border-box;
+        transition: border-color .15s ease, border-width .15s ease;
     }
-    .crt__art svg { width: 26px; height: 36px; }
-    .crt__txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.2; }
-    .crt__txt b { font-size: 14px; font-weight: 800; letter-spacing: -.01em; white-space: nowrap; }
-    .crt__txt small { margin-top: 2px; font-size: 12.5px; font-weight: 700; color: #334155; font-variant-numeric: tabular-nums; }
+    .crt__txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+    .crt__txt b { font-size: 14px; font-weight: 700; letter-spacing: -.005em; white-space: nowrap; }
+    .crt__txt small { margin-top: 2px; font-size: 12.5px; font-weight: 600; color: #475569; font-variant-numeric: tabular-nums; }
     .crt__txt small i { font-style: normal; font-weight: 500; color: #94A3B8; }
-    .crt__txt em { margin-top: 1px; font-style: normal; font-size: 10.5px; font-weight: 700; color: #B45309; white-space: nowrap; }
-    .crt__tick { position: absolute; top: -5px; right: -5px; width: 18px; height: 18px; display: none; filter: drop-shadow(0 2px 3px rgba(37, 99, 235, .35)); }
+    .crt__txt em { margin-top: 1px; font-style: normal; font-size: 11.5px; font-weight: 500; color: #B45309; white-space: nowrap; font-variant-numeric: tabular-nums; }
     .court-selector-container .court-pill.crt.is-active,
     .mven__modal-body .court-selector-container .court-pill.crt.is-active {
         background: #F5F8FF; border-color: #2563EB; color: #0F172A;
-        box-shadow: 0 0 0 3px rgba(37, 99, 235, .12), 0 8px 16px -10px rgba(37, 99, 235, .55);
+        box-shadow: inset 0 0 0 1px #2563EB;
     }
-    .court-pill.crt.is-active .crt__art { background: #2563EB; color: #fff; }
-    .court-pill.crt.is-active .crt__tick { display: block; animation: sb-tick-in .3s cubic-bezier(.2, .9, .3, 1.3) both; }
-    /* Room for the tick that sits on the card's corner. */
-    .mven__modal-body .court-selector-container { padding-top: 6px !important; padding-bottom: 8px !important; }
+    .court-pill.crt.is-active .crt__radio { border: 5px solid #2563EB; }
+    .mven__modal-body .court-selector-container { padding-top: 2px !important; padding-bottom: 6px !important; }
 
-    /* ── Slot board: one segmented control, one rate line, one grid ──────────
-       The control filters the grid to a part of the day. Its white thumb slides
-       between tabs (--i = active index); counts are the live open figures. */
+    /* ── Slot board: part-of-day tabs, one rate line, one grid ──────────────
+       2026-11-23: plain underline tabs instead of a grey segmented pill. Parts
+       of the day with no slots are left out, not shown as greyed "Closed"
+       buttons; with only one part left, the tabs are not drawn at all. */
     #slots-grid-container .sb-seg {
-        position: relative; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
-        padding: 3px; margin-bottom: 12px; border-radius: 12px; background: #EEF1F5;
+        position: relative; display: grid; grid-template-columns: repeat(var(--n, 3), minmax(0, 1fr));
+        margin: 2px 0 12px; border-bottom: 1px solid #E2E8F0;
     }
     #slots-grid-container .sb-seg__thumb {
-        position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc((100% - 6px) / 3); border-radius: 9px; background: #fff;
-        box-shadow: 0 1px 1px rgba(15, 23, 42, .06), 0 2px 6px -1px rgba(15, 23, 42, .14);
+        position: absolute; left: 0; bottom: -1px; height: 2px; width: calc(100% / var(--n, 3)); border-radius: 2px 2px 0 0; background: #2563EB;
         transform: translateX(calc(var(--i, 0) * 100%));
-        transition: transform .28s cubic-bezier(.3, .7, .2, 1);
+        transition: transform .24s cubic-bezier(.3, .7, .2, 1);
     }
     #slots-grid-container .sb-seg__tab {
-        position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 1px;
-        padding: 7px 4px 6px; border: 0; background: none; cursor: pointer; font: inherit; color: #64748B;
+        position: relative; display: flex; flex-direction: column; align-items: center; gap: 1px;
+        padding: 6px 4px 9px; border: 0; background: none; cursor: pointer; font: inherit; color: #64748B;
         -webkit-tap-highlight-color: transparent;
     }
-    #slots-grid-container .sb-seg__tab b { position: relative; font-size: 13px; font-weight: 700; letter-spacing: -.01em; }
-    #slots-grid-container .sb-seg__tab small { font-size: 11px; font-weight: 600; color: #94A3B8; font-variant-numeric: tabular-nums; }
-    #slots-grid-container .sb-seg__tab.is-on b { color: #0F172A; font-weight: 800; }
-    #slots-grid-container .sb-seg__tab.is-on small { color: #16A34A; }
-    #slots-grid-container .sb-seg__tab:active:not(:disabled) b { opacity: .6; }
-    #slots-grid-container .sb-seg__tab.is-none { cursor: default; color: #B6C0CE; }
+    #slots-grid-container .sb-seg__tab b { position: relative; font-size: 14px; font-weight: 600; letter-spacing: -.005em; }
+    #slots-grid-container .sb-seg__tab small { font-size: 11.5px; font-weight: 500; color: #94A3B8; font-variant-numeric: tabular-nums; }
+    #slots-grid-container .sb-seg__tab.is-on b { color: #0F172A; font-weight: 700; }
+    #slots-grid-container .sb-seg__tab.is-on small { color: #475569; }
+    #slots-grid-container .sb-seg__tab:active b { opacity: .6; }
     /* You have picks in this part of the day. */
-    #slots-grid-container .sb-seg__dot { position: absolute; top: 1px; right: -8px; width: 6px; height: 6px; border-radius: 50%; background: #2563EB; }
+    #slots-grid-container .sb-seg__dot { position: absolute; top: 2px; right: -8px; width: 5px; height: 5px; border-radius: 50%; background: #2563EB; }
 
     #slots-grid-container .sb-rateline {
-        display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 0 2px 10px;
+        display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px 10px; padding: 0 2px 10px;
         font-size: 12.5px; color: #64748B; font-variant-numeric: tabular-nums;
     }
-    #slots-grid-container .sb-rateline b { font-size: 14px; font-weight: 800; color: #0F172A; }
-    #slots-grid-container .sb-rateline__peak { font-weight: 600; color: #B45309; white-space: nowrap; }
+    #slots-grid-container .sb-rateline b { font-size: 14px; font-weight: 700; color: #0F172A; }
+    #slots-grid-container .sb-rateline__peak { font-weight: 500; color: #B45309; white-space: nowrap; }
     #slots-grid-container .sb-rateline.is-offline { color: #B45309; font-weight: 600; }
 
-    /* The segment already names the part of the day — no second heading. */
+    /* The segment already names the part of the day — no second heading. With no
+       tabs (one part of the day), the group's own head names it. */
+    #slots-grid-container .sb-rateline ~ .sb-group { margin-top: 2px; }
     #slots-grid-container .sb-seg ~ .sb-group { margin-top: 0; }
     #slots-grid-container .sb-seg ~ .sb-group .sb-group__head { display: none; }
     @media (prefers-reduced-motion: reduce) {
@@ -1581,19 +1541,14 @@
                          drawn as a ticket stub, and the Checkout key. No money here — the bill
                          with fees is the checkout page's job. Filled by renderDock(). --}}
                     <div id="co-dock" class="co-dock is-empty" aria-live="polite">
-                        <div class="co-stub">
-                            <div class="co-stub__date" aria-hidden="true">
-                                <span id="co-dow">—</span><b id="co-day">—</b><span id="co-mon"></span>
+                        <div class="co-sum">
+                            <div class="co-sum__main">
+                                <span id="co-what" class="co-sum__what">Your slot</span>
+                                <div id="co-times" class="co-sum__times"></div>
+                                <span id="co-facts" class="co-sum__facts"></span>
                             </div>
-                            <div class="co-stub__body">
-                                <span id="co-what" class="co-stub__what">Your slot</span>
-                                <div id="co-times" class="co-stub__times"><span class="co-stub__hint">Tap an open time above</span></div>
-                                <span id="co-facts" class="co-stub__facts"></span>
-                            </div>
-                            <div id="co-court" class="co-stub__court" aria-hidden="true"></div>
-                            <button type="button" id="co-clear" class="co-stub__clear" aria-label="Clear picked slots" onclick="clearPicks()">
-                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
-                            </button>
+                            <span class="co-sum__none">No time picked</span>
+                            <button type="button" id="co-clear" class="co-sum__clear" aria-label="Clear picked slots" onclick="clearPicks()">Clear</button>
                         </div>
                         <button type="button" id="co-go" class="co-go" disabled onclick="goCheckout(this)">
                             <span class="co-go__pass" aria-hidden="true">
@@ -2914,8 +2869,7 @@
         const courts = venueCourts[selectedSport] || [];
         const countEl = document.getElementById('crt-count');
         if (countEl) countEl.innerText = courts.length > 1 ? courts.length + ' courts' : '';
-        // A card per court: its drawing, its name, its own rate (and peak rate when set).
-        const art = courtDrawing(selectedSport, null);
+        // A card per court: a radio ring, its name, its own rate (and peak rate when set).
         container.innerHTML = courts.map(court => {
             const isActive = court === selectedCourt;
             const rate = courtPrices[court] ?? venueBasePrice;
@@ -2926,13 +2880,12 @@
                 : (!daySlots(selectedDate).some(s => s.rates) && courtPeak[court] && courtPeak[court].price > rate ? courtPeak[court].price : 0);
             return `
                 <button type="button" onclick="selectCourt('${court}')" class="court-pill crt ${isActive ? 'is-active' : ''}" aria-pressed="${isActive}">
-                    <span class="crt__art">${art}</span>
+                    <span class="crt__radio" aria-hidden="true"></span>
                     <span class="crt__txt">
                         <b>${court}</b>
-                        <small>₹${Number(rate).toLocaleString('en-IN')}<i>/hr</i></small>
-                        ${peak ? `<em>peak ₹${Number(peak).toLocaleString('en-IN')}</em>` : ''}
+                        <small>₹${Number(rate).toLocaleString('en-IN')}<i> / hr</i></small>
+                        ${peak ? `<em>₹${Number(peak).toLocaleString('en-IN')} at peak</em>` : ''}
                     </span>
-                    <svg class="crt__tick" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="8" fill="#2563EB"/><path d="M4.5 8.2l2.3 2.3 4.7-4.9" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                 </button>
             `;
         }).join('');
@@ -3197,7 +3150,6 @@
                          aria-label="${slot.time}, ${state === 'open' ? '₹' + r + (isPeak ? ' peak' : '') : state}">
                         <span class="sb-key__time"><span class="sb-key__clock">${clock.replace(/^0/, '')}</span><small>${ampm || ''}</small></span>
                         ${sub ? `<span class="sb-key__sub">${sub}</span>` : tag}
-                        <svg class="sb-key__tick" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 8.2l2.3 2.3 4.7-4.9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </div>
                 `;
             });
@@ -3218,9 +3170,18 @@
             ['Afternoon', slots.filter(s => s.start >= 12 * 60 && s.start < 17 * 60)],
             ['Evening', slots.filter(s => s.start >= 17 * 60)],
         ];
-        const peakWin = courtPeak[selectedCourt] && courtPeak[selectedCourt].start && courtPeak[selectedCourt].end
-            && peakRates.length && Math.max(...peakRates) === courtPeak[selectedCourt].price
-            ? ' · ' + spoken(courtPeak[selectedCourt].start).replace(/ (AM|PM)$/, (m, ap) => spoken(courtPeak[selectedCourt].end).endsWith(ap) ? '' : m) + '–' + spoken(courtPeak[selectedCourt].end)
+        // Peak window as people say it. courtPeak times are "18:00" (24h); printing them
+        // through spoken() gave "18–6", so go through minutes: "6 PM – 6 AM".
+        const hourSaid = (t) => {
+            const v = timeMin(t);
+            if (v == null) return '';
+            const h = Math.floor(v / 60) % 24, mm = v % 60;
+            return ((h % 12) || 12) + (mm ? ':' + String(mm).padStart(2, '0') : '') + ' ' + (h < 12 ? 'AM' : 'PM');
+        };
+        const cp = courtPeak[selectedCourt];
+        const pS = cp ? hourSaid(cp.start) : '', pE = cp ? hourSaid(cp.end) : '';
+        const peakWin = pS && pE && peakRates.length && Math.max(...peakRates) === cp.price
+            ? ', ' + (pS.slice(-2) === pE.slice(-2) ? pS.slice(0, -3) : pS) + ' – ' + pE
             : '';
         // One part of the day on screen at a time. Keep the player's choice while it still
         // has slots; otherwise land on the first part with something open.
@@ -3230,20 +3191,23 @@
         const activeIdx = parts.findIndex(([n]) => n === activePart);
         const pickedIn = (g) => g.some(s => selectedSlots.some(p => p.key === `${selectedDate}_${selectedSport}_${selectedCourt}_${s.id}`));
 
+        // Only the parts of the day that have slots get a tab; one part needs no tabs.
+        const tabs = parts.filter(([, g]) => g.length);
+        const tabIdx = Math.max(0, tabs.findIndex(([n]) => n === activePart));
         const bar = `
-            <div class="sb-seg" role="tablist" aria-label="Part of day" style="--i:${activeIdx}">
+            ${tabs.length > 1 ? `<div class="sb-seg" role="tablist" aria-label="Part of day" style="--i:${tabIdx};--n:${tabs.length}">
                 <span class="sb-seg__thumb" aria-hidden="true"></span>
-                ${parts.map(([name, g]) => {
+                ${tabs.map(([name, g]) => {
                     const n = openIn(g);
                     const on = name === activePart;
-                    return `<button type="button" role="tab" aria-selected="${on}" class="sb-seg__tab${on ? ' is-on' : ''}${g.length ? '' : ' is-none'}" ${g.length ? `onclick="selectPart('${name}')"` : 'disabled'}>
+                    return `<button type="button" role="tab" aria-selected="${on}" class="sb-seg__tab${on ? ' is-on' : ''}" onclick="selectPart('${name}')">
                         <b>${name}${pickedIn(g) ? '<i class="sb-seg__dot"></i>' : ''}</b>
-                        <small>${!g.length ? 'Closed' : (n ? n + ' open' : 'Full')}</small>
+                        <small>${n ? n + ' open' : 'Full'}</small>
                     </button>`;
                 }).join('')}
-            </div>
+            </div>` : ''}
             <div class="sb-rateline${liveFailed ? ' is-offline' : ''}">
-                ${liveFailed ? 'Couldn’t refresh · showing last known' : `<span><b>₹${rate.toLocaleString('en-IN')}</b> / hour</span>${peakRates.length ? `<span class="sb-rateline__peak">Peak ₹${Math.max(...peakRates).toLocaleString('en-IN')}${peakWin}</span>` : ''}`}
+                ${liveFailed ? 'Couldn’t refresh · showing last known' : `<span><b>₹${rate.toLocaleString('en-IN')}</b> / hour</span>${peakRates.length ? `<span class="sb-rateline__peak">₹${Math.max(...peakRates).toLocaleString('en-IN')} / hour at peak${peakWin}</span>` : ''}`}
             </div>`;
 
         container.innerHTML = bar + renderGroup(activePart, parts[activeIdx][1]);
@@ -3457,20 +3421,19 @@
         const ymd = picks.length ? picks[0].date : selectedDate;
         const [y, m, d] = String(ymd).split('-').map(Number);
         const dt = new Date(y, (m || 1) - 1, d || 1);
-        document.getElementById('co-dow').innerText = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'][dt.getDay()];
-        document.getElementById('co-day').innerText = d || '—';
-        document.getElementById('co-mon').innerText = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'][(m || 1) - 1];
+        const dayLabel = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dt.getDay()] + ', ' + (d || '') + ' '
+            + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][(m || 1) - 1];
+        const multiDay = new Set(picks.map(p => p.date)).size > 1;
 
         const sport = picks.length ? picks[0].sport : selectedSport;
         const courts = [...new Set(picks.map(p => p.court).filter(Boolean))];
         const court = courts.length === 1 ? courts[0] : (picks.length ? null : selectedCourt);
-        document.getElementById('co-what').innerText = [sport, court || (courts.length > 1 ? courts.length + ' courts' : '')].filter(Boolean).join(' · ');
-        document.getElementById('co-court').innerHTML = courtDrawing(sport, court);
+        document.getElementById('co-what').innerText = [multiDay ? '' : dayLabel, sport, court || (courts.length > 1 ? courts.length + ' courts' : '')].filter(Boolean).join(' · ');
 
         const times = document.getElementById('co-times');
         const facts = document.getElementById('co-facts');
         if (!picks.length) {
-            times.innerHTML = '<span class="co-stub__hint">Tap an open time above</span>';
+            times.innerHTML = '';
             facts.innerText = '';
             return;
         }
