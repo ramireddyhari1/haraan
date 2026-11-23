@@ -44,7 +44,7 @@ final class Venue extends Model
         'price_chart', 'price_note', 'rating', 'ratings_count', 'reviews_count', 'tagline', 'hours',
         'about', 'rules', 'images', 'amenities', 'status', 'published_at', 'is_bookable', 'booking_window_days', 'is_active', 'is_featured',
         'sort_order', 'partner_id', 'organization_id', 'contact_phone', 'listing_source',
-        'hours_json', 'slot_minutes', 'cancel_free_hours', 'cancel_refund_percent',
+        'hours_json', 'slot_minutes', 'min_booking_minutes', 'cancel_free_hours', 'cancel_refund_percent',
     ];
 
     protected $casts = [
@@ -59,6 +59,7 @@ final class Venue extends Model
         'price_chart' => 'array',
         'hours_json' => 'array',
         'slot_minutes' => 'integer',
+        'min_booking_minutes' => 'integer',
         'cancel_free_hours' => 'integer',
         'cancel_refund_percent' => 'integer',
         'is_bookable' => 'boolean',
@@ -455,6 +456,35 @@ final class Venue extends Model
     public function slotLength(): int
     {
         return max(30, (int) ($this->slot_minutes ?: 60));
+    }
+
+    /**
+     * The shortest booking a customer may make, in minutes: one slot unless the venue says
+     * more ("first hour, then 30-minute steps" on a 30-minute venue = 60). Always a whole
+     * number of slots, never less than one.
+     */
+    public function minBookingMinutes(): int
+    {
+        return $this->minBookingSlots() * $this->slotLength();
+    }
+
+    /** {@see minBookingMinutes()} in slots: 1, or 2 for "1 hour first" on 30-minute slots. */
+    public function minBookingSlots(): int
+    {
+        $len = $this->slotLength();
+
+        return max(1, (int) ceil(max($len, (int) ($this->min_booking_minutes ?? 0)) / $len));
+    }
+
+    /** "1 hour" / "30 min" / "1.5 hours" — how the minimum reads to a customer. */
+    public static function minutesLabel(int $minutes): string
+    {
+        if ($minutes < 60) {
+            return $minutes.' min';
+        }
+        $h = $minutes / 60;
+
+        return ($h == (int) $h ? (int) $h : $h).' hour'.($h == 1 ? '' : 's');
     }
 
     /**

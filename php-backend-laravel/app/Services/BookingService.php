@@ -1452,6 +1452,16 @@ final class BookingService
             $lengthMin = isset($meta['duration_min']) ? max(30, (int) $meta['duration_min']) : $duration * $venue->slotLength();
             $endMin = $startMin !== null ? $startMin + $lengthMin : null;
 
+            // The venue's shortest booking ("first hour, then 30-minute steps"). Customers only:
+            // the desk books what the person at the counter asked for.
+            if (($meta['channel'] ?? null) === 'online' && $lengthMin < $venue->minBookingMinutes()) {
+                throw new ConflictHttpException(sprintf(
+                    'This venue books at least %s at a time. Pick %d back-to-back slots.',
+                    Venue::minutesLabel($venue->minBookingMinutes()),
+                    $venue->minBookingSlots(),
+                ));
+            }
+
             // Every booking lives inside one calendar date (slot_date + HH:MM). A venue open
             // past midnight lists its after-midnight hours on the next day's date instead.
             if ($endMin !== null && $endMin > 24 * 60) {
