@@ -14,6 +14,16 @@
             <path d="M54 31h12M54 49h12" stroke="{{ $ink }}" stroke-width="1"/>
             <path d="M58.5 28.5v2M60 28.5v2M61.5 28.5v2M58.5 49.5v2M60 49.5v2M61.5 49.5v2" stroke="{{ $ink }}" stroke-width=".9"/>
             @break
+        @case('cricket nets')
+            {{-- Top-down: three netted practice lanes side by side, pitch strip + stumps at the batting end. --}}
+            <rect x="4" y="8" width="112" height="64" rx="3" fill="{{ $ink }}" fill-opacity=".05" stroke="{{ $ink }}" stroke-width="1.4"/>
+            @foreach ([8, 44, 80] as $x)
+                <rect x="{{ $x }}" y="12" width="32" height="56" rx="1.5" fill="{{ $turf }}" stroke="{{ $ink }}" stroke-width="1" stroke-dasharray="1.6 1.6"/>
+                <rect x="{{ $x + 12 }}" y="16" width="8" height="46" rx="1" fill="#e9dcc0" stroke="{{ $ink }}" stroke-width=".9"/>
+                <path d="M{{ $x + 10 }} 21h12M{{ $x + 10 }} 57h12" stroke="{{ $ink }}" stroke-width=".9"/>
+                <path d="M{{ $x + 14.5 }} 17.5v2M{{ $x + 16 }} 17.5v2M{{ $x + 17.5 }} 17.5v2" stroke="{{ $ink }}" stroke-width=".9"/>
+            @endforeach
+            @break
         @case('football')
             <rect x="4" y="6" width="112" height="68" rx="3" fill="{{ $turf }}" stroke="{{ $ink }}" stroke-width="1.4"/>
             <path d="M60 6v68" stroke="{{ $ink }}" stroke-width="1"/>

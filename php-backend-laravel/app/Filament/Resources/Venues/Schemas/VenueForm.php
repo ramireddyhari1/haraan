@@ -39,6 +39,7 @@ class VenueForm
     /** The sports the app knows how to icon + filter. Category and courts draw from this too. */
     public const SPORTS = [
         'Cricket' => 'Cricket',
+        'Cricket Nets' => 'Cricket Nets',
         'Football' => 'Football',
         'Badminton' => 'Badminton',
         'Pickleball' => 'Pickleball',

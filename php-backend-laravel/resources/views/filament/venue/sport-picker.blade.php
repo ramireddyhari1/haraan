@@ -14,6 +14,7 @@
     }
     $notes = [
         'cricket' => 'Box net or turf pitch',
+        'cricket nets' => 'Practice lanes in netting',
         'football' => '5 / 7-a-side turf',
         'badminton' => 'Indoor · 20 × 44 ft',
         'pickleball' => '20 × 44 ft · 7 ft kitchen',

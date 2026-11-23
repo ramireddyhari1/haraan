@@ -21,7 +21,7 @@ use Illuminate\Support\HtmlString;
 
 class VenueCandidatesTable
 {
-    private const SPORTS = ['Cricket', 'Football', 'Badminton', 'Pickleball', 'Tennis', 'Basketball', 'Volleyball'];
+    private const SPORTS = ['Cricket', 'Cricket Nets', 'Football', 'Badminton', 'Pickleball', 'Tennis', 'Basketball', 'Volleyball'];
 
     public static function configure(Table $table): Table
     {

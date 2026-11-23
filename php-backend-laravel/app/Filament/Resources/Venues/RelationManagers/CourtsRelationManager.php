@@ -47,7 +47,7 @@ class CourtsRelationManager extends RelationManager
     protected static ?string $title = 'Courts & slots';
 
     /** Sports a court can host — the same set the venue form offers. */
-    private const SPORTS = ['Cricket', 'Football', 'Badminton', 'Pickleball', 'Basketball', 'Tennis', 'Volleyball'];
+    private const SPORTS = ['Cricket', 'Cricket Nets', 'Football', 'Badminton', 'Pickleball', 'Basketball', 'Tennis', 'Volleyball'];
 
     /** The weekday the board shows ("Monday"…). Empty = today's. */
     public string $boardDay = '';

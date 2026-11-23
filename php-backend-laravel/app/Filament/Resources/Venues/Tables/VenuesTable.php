@@ -66,7 +66,7 @@ class VenuesTable
                             TextColumn::make('category')
                                 ->badge()
                                 ->color(fn (?string $state): string => match ($state) {
-                                    'Cricket' => 'success',
+                                    'Cricket', 'Cricket Nets' => 'success',
                                     'Football' => 'warning',
                                     'Badminton', 'Pickleball' => 'info',
                                     default => 'gray',
@@ -125,7 +125,7 @@ class VenuesTable
                         'draft' => 'Draft',
                     ]),
                 SelectFilter::make('category')
-                    ->options(['Cricket' => 'Cricket', 'Football' => 'Football', 'Badminton' => 'Badminton', 'Pickleball' => 'Pickleball', 'Basketball' => 'Basketball', 'Tennis' => 'Tennis', 'Volleyball' => 'Volleyball']),
+                    ->options(['Cricket' => 'Cricket', 'Cricket Nets' => 'Cricket Nets', 'Football' => 'Football', 'Badminton' => 'Badminton', 'Pickleball' => 'Pickleball', 'Basketball' => 'Basketball', 'Tennis' => 'Tennis', 'Volleyball' => 'Volleyball']),
                 TernaryFilter::make('is_bookable')->label('Bookable'),
                 TernaryFilter::make('is_active')->label('Live'),
             ])
