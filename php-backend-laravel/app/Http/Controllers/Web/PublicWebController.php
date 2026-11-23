@@ -553,7 +553,7 @@ final class PublicWebController extends Controller
         $filteredVenues = $selectedSport === 'All'
             ? $venues
             : $venues->filter(fn ($v) => collect($v->sports ?: [$v->category])
-                ->contains(fn ($s) => strcasecmp((string) $s, $selectedSport) === 0))->values();
+                ->contains(fn ($s) => self::offersSport((string) $s, $selectedSport)))->values();
 
         // One catalogue, two presentations — no venue appears twice. Mirrors the app:
         // the reel is the top 5 by rating, "more" is strictly what the reel didn't show.
@@ -621,6 +621,17 @@ final class PublicWebController extends Controller
      *
      * @return Collection<int, object>
      */
+    /**
+     * Does a venue sport satisfy the picked Pulse chip? The sport itself, or a variant of it
+     * ("Cricket Nets" under Cricket) — nets are cricket, so a nets-only venue mustn't vanish
+     * from the cricket filter. Mirrors the app's Pulse filter (MainScreen.kt offersSport).
+     */
+    private static function offersSport(string $venueSport, string $chip): bool
+    {
+        return strcasecmp($venueSport, $chip) === 0
+            || stripos($venueSport, $chip . ' ') === 0;
+    }
+
     private function pulseListedVenues(?string $city, ?float $lat, ?float $lng, string $sport): Collection
     {
         if (! \App\Services\VenueDiscovery\DiscoverySettings::publicPages()) {
@@ -629,8 +640,11 @@ final class PublicWebController extends Controller
 
         $query = Venue::listed();
         if ($sport !== 'All') {
+            // Variants count: the Cricket chip keeps "Cricket Nets" venues (see offersSport).
             $query->where(fn ($q) => $q->whereRaw('lower(category) = ?', [strtolower($sport)])
-                ->orWhere('sports', 'like', '%"' . $sport . '"%'));
+                ->orWhereRaw('lower(category) like ?', [strtolower($sport) . ' %'])
+                ->orWhere('sports', 'like', '%"' . $sport . '"%')
+                ->orWhere('sports', 'like', '%"' . $sport . ' %'));
         }
         $limit = PlatformRules::int('venue_discovery.city_limit');
         $photos = PlatformRules::bool('venue_discovery.google_photos');
