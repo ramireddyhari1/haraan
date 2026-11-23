@@ -2008,8 +2008,12 @@ private fun GameHubTabScreen(
   val openVenue: (VenueItem) -> Unit = { v ->
     if (v.bookable) onVenueClick(v) else listedById[v.id]?.let { openListed = it }
   }
+  // A sport chip matches its own variants too: the Cricket chip keeps "Cricket Nets" venues
+  // (nets are cricket), so a nets-only venue doesn't vanish from the cricket filter.
+  fun offersSport(s: String) = s.equals(selectedSport, ignoreCase = true) ||
+    s.startsWith("$selectedSport ", ignoreCase = true)
   val sportSearchVenues = allVenueItems.filter {
-    (selectedSport == "All" || it.category == selectedSport || it.sports.any { s -> s.equals(selectedSport, ignoreCase = true) }) &&
+    (selectedSport == "All" || offersSport(it.category) || it.sports.any(::offersSport)) &&
     (searchQuery.isEmpty() || it.title.contains(searchQuery, ignoreCase = true) || it.location.contains(searchQuery, ignoreCase = true))
   }
   // Location-aware ordering. Preference order:
