@@ -105,6 +105,8 @@ data class VenueCourt(
     val peakDays: List<String> = emptyList(),
     val peakStart: String? = null,
     val peakEnd: String? = null,
+    // Cheapest this court really sells at (slot prices included); 0 on older servers.
+    val fromPrice: Int = 0,
 )
 
 /**
@@ -365,6 +367,7 @@ class VenueRepository {
                     peakDays = c.optJSONArray("peak_days").toStringList(),
                     peakStart = c.optString("peak_start").takeIf { it.isNotBlank() && it != "null" },
                     peakEnd = c.optString("peak_end").takeIf { it.isNotBlank() && it != "null" },
+                    fromPrice = c.optInt("from_price", 0),
                 )
             },
             sports = d.optJSONArray("sports").toStringList().ifEmpty { listOfNotNull(d.optString("category").takeIf { it.isNotBlank() }) },
