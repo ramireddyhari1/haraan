@@ -131,7 +131,7 @@ class PostReportResource extends Resource
                 SelectFilter::make('reason')->options(PostReport::REASONS),
                 Filter::make('post_id')
                     ->form([\Filament\Forms\Components\TextInput::make('value')->label('Post ID')->numeric()])
-                    ->query(fn (Builder $q, array $data): Builder => filled($data['value'] ?? null) ? $q->where('post_id', $data['value']) : $q),
+                    ->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null) ? $query->where('post_id', $data['value']) : $query),
             ])
             ->recordActions([
                 Action::make('take_down')

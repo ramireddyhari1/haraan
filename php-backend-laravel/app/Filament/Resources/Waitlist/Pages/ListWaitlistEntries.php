@@ -43,13 +43,13 @@ class ListWaitlistEntries extends ListRecords
                 ->badge(WaitlistEntryResource::getEloquentQuery()
                     ->where('status', WaitlistEntry::STATUS_OFFERED)->count() ?: null)
                 ->badgeColor('success')
-                ->modifyQueryUsing(fn (Builder $q): Builder => $q->where('status', WaitlistEntry::STATUS_OFFERED)),
+                ->modifyQueryUsing(fn (Builder $query): Builder => $query->where('status', WaitlistEntry::STATUS_OFFERED)),
 
             'waiting' => Tab::make('Waiting')
-                ->modifyQueryUsing(fn (Builder $q): Builder => $q->where('status', WaitlistEntry::STATUS_WAITING)),
+                ->modifyQueryUsing(fn (Builder $query): Builder => $query->where('status', WaitlistEntry::STATUS_WAITING)),
 
             'recovered' => Tab::make('Recovered')
-                ->modifyQueryUsing(fn (Builder $q): Builder => $q->where('status', WaitlistEntry::STATUS_CONVERTED)),
+                ->modifyQueryUsing(fn (Builder $query): Builder => $query->where('status', WaitlistEntry::STATUS_CONVERTED)),
 
             'all' => Tab::make('All'),
         ];

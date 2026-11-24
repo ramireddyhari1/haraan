@@ -34,18 +34,18 @@ class ListHomeFeedPosts extends ListRecords
         return [
             'all' => Tab::make('All'),
             'feed' => Tab::make('On the feed')
-                ->modifyQueryUsing(fn (Builder $q) => $q->where('status', PlayerPost::STATUS_VISIBLE)),
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('status', PlayerPost::STATUS_VISIBLE)),
             'pinned' => Tab::make('Pinned')
-                ->modifyQueryUsing(fn (Builder $q) => $q->whereNotNull('pinned_at')
+                ->modifyQueryUsing(fn (Builder $query) => $query->whereNotNull('pinned_at')
                     ->where(fn (Builder $w) => $w->whereNull('pinned_until')->orWhere('pinned_until', '>', now()))),
             'reported' => Tab::make('Reported')
                 ->badge(fn (): ?int => ($n = PlayerPost::query()->where('open_reports', '>', 0)->count()) > 0 ? $n : null)
                 ->badgeColor('danger')
-                ->modifyQueryUsing(fn (Builder $q) => $q->where('open_reports', '>', 0)),
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('open_reports', '>', 0)),
             'hidden' => Tab::make('Hidden')
-                ->modifyQueryUsing(fn (Builder $q) => $q->where('status', PlayerPost::STATUS_HIDDEN)),
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('status', PlayerPost::STATUS_HIDDEN)),
             'removed' => Tab::make('Removed')
-                ->modifyQueryUsing(fn (Builder $q) => $q->where('status', PlayerPost::STATUS_REMOVED)),
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('status', PlayerPost::STATUS_REMOVED)),
         ];
     }
 }

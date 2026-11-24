@@ -95,7 +95,7 @@ class HomeFeedPostsTable
                 TernaryFilter::make('featured'),
                 Filter::make('user_id')
                     ->form([\Filament\Forms\Components\TextInput::make('value')->label('Author user ID')->numeric()])
-                    ->query(fn (Builder $q, array $data): Builder => filled($data['value'] ?? null) ? $q->where('user_id', $data['value']) : $q),
+                    ->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null) ? $query->where('user_id', $data['value']) : $query),
             ])
             ->recordActions([
                 Action::make('preview')

@@ -79,7 +79,7 @@ class PartnerTaxProfileResource extends Resource
     public static function table(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn ($q) => $q->with('partner'))
+            ->modifyQueryUsing(fn ($query) => $query->with('partner'))
             ->columns([
                 TextColumn::make('partner.name')->label('Partner')->weight('bold')->searchable()->sortable()
                     ->description(fn (PartnerTaxProfile $r): ?string => $r->legal_name && $r->legal_name !== $r->partner?->name ? $r->legal_name : null),

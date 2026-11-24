@@ -251,9 +251,9 @@ class EventHistory extends Page implements HasTable
                         'draft' => 'Draft',
                         'cancelled' => 'Cancelled',
                     ])
-                    ->query(fn (Builder $q, array $data): Builder => filled($data['value'] ?? null)
-                        ? $q->whereRaw('lower(status) = ?', [strtolower((string) $data['value'])])
-                        : $q),
+                    ->query(fn (Builder $query, array $data): Builder => filled($data['value'] ?? null)
+                        ? $query->whereRaw('lower(status) = ?', [strtolower((string) $data['value'])])
+                        : $query),
             ], layout: FiltersLayout::AboveContent)
             ->recordActions([
                 \App\Filament\Resources\Events\Actions\ManageGalleryAction::make(),
