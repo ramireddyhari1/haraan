@@ -163,7 +163,7 @@ class PayoutBatchForm
         $account = PartnerPayoutAccount::query()->where('partner_id', (int) $partnerId)->first();
 
         if ($account === null) {
-            return '⚠ No settlement account on file — the partner must add one in /partner → Payouts.';
+            return 'No settlement account on file. The partner adds one under Payouts in /partner.';
         }
 
         return $account->fullLine()

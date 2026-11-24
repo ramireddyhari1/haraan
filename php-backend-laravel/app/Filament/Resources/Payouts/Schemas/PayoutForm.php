@@ -105,7 +105,8 @@ class PayoutForm
                     ->helperText('Filled with the partner\'s share: what the customer paid, less Haraan\'s fees and commission.'),
                 ToggleButtons::make('status')
                     ->options(Payout::STATUSES)
-                    ->colors(['pending' => 'warning', 'processed' => 'success', 'failed' => 'danger'])
+                    // Pending is the resting state, not an alarm: neutral, not a filled orange.
+                    ->colors(['pending' => 'gray', 'processed' => 'success', 'failed' => 'danger'])
                     ->default('pending')
                     ->inline()
                     ->required()
@@ -176,7 +177,7 @@ class PayoutForm
      */
     public static function partnerShare(Booking $b): float
     {
-        return round(max(0.0, (float) $b->total_amount - (float) $b->pay_at_venue - (float) $b->host_deduction), 2);
+        return $b->partnerPayable();
     }
 
     public static function partnerId(Booking $b): ?int
@@ -239,28 +240,66 @@ class PayoutForm
     {
         $b = self::booking($bookingId);
 
+        $muted = 'color:var(--hrn-ink-3,var(--gray-500))';
+
         if ($b === null) {
-            return new HtmlString('<span style="color:var(--gray-500)">Pick a booking to see the partner\'s share and where to send it.</span>');
+            return new HtmlString('<span style="font-size:.8125rem;' . $muted . '">Pick a booking to see the partner\'s share and where to send it.</span>');
         }
 
         $partnerId = self::partnerId($b);
         $partner = $partnerId ? \App\Models\User::query()->whereKey($partnerId)->value('name') : null;
         $e = fn (?string $s): string => e((string) $s);
 
-        $rows = [
-            ['Customer', $e(self::customerName($b)) . ' · ' . $e(ucfirst(strtolower((string) $b->status)))],
-            ['Customer paid', PartnerSettlement::inr((float) $b->total_amount)],
-            ['Haraan keeps', PartnerSettlement::inr((float) $b->host_deduction)],
-            ['Partner share', '<strong>' . PartnerSettlement::inr(self::partnerShare($b)) . '</strong>'],
-            ['Partner', $partner ? $e($partner) : '<span style="color:var(--danger-600)">No partner on this event/venue</span>'],
-            ['Send to', $e(PayoutBatchForm::destinationLine($partnerId))],
-        ];
+        $paid = (float) $b->total_amount;
+        $share = self::partnerShare($b);
 
-        $html = '<dl style="display:grid;grid-template-columns:max-content 1fr;gap:6px 20px;margin:0;font-size:.875rem">';
-        foreach ($rows as [$k, $v]) {
-            $html .= '<dt style="color:var(--gray-500)">' . $k . '</dt><dd style="margin:0">' . $v . '</dd>';
+        // The same parts Booking::partnerPayable() takes off, each named, so the slip adds up.
+        $offs = [];
+        if ($b->isDeskBooking()) {
+            // Desk bookings: only the online part passed through Haraan; the rest the desk took.
+            $offs['Paid at the desk'] = max(0.0, $paid - (float) $b->host_deduction - $share);
+        } else {
+            $offs['Booking fee (Haraan)'] = $paid - $b->slotValue();
+            $offs['Collected at the venue'] = (float) ($b->pay_at_venue ?? 0);
+        }
+        $offs['Haraan commission'] = (float) $b->host_deduction;
+        // partnerPayable() floors at zero; anything left over shows as its own line.
+        $rest = round($paid - array_sum($offs) - $share, 2);
+        if (abs($rest) > 0.009) {
+            $offs['Adjustment'] = $rest;
         }
 
-        return new HtmlString($html . '</dl>');
+        $offs = array_filter($offs, fn ($v) => abs((float) $v) > 0.009);
+
+        $num = 'text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap';
+        $line = fn (string $k, string $v, string $extra = ''): string => '<tr><td style="padding:3px 0;' . $muted . $extra . '">' . $k
+            . '</td><td style="padding:3px 0;' . $num . $extra . '">' . $v . '</td></tr>';
+
+        // The split, set like a receipt: what came in, what comes off, what the partner gets.
+        $slip = '<table style="width:100%;max-width:22rem;border-collapse:collapse;font-size:.8125rem">'
+            . $line('Customer paid', PartnerSettlement::inr($paid))
+            . implode('', array_map(
+                fn (string $k, float $v): string => $line($k, ($v < 0 ? '+ ' : '− ') . PartnerSettlement::inr(abs($v))),
+                array_keys($offs),
+                $offs,
+            ))
+            . '<tr><td style="padding:8px 0 0;border-top:1px solid var(--hrn-border,var(--gray-200));font-weight:650;color:var(--hrn-ink,inherit)">Partner share</td>'
+            . '<td style="padding:8px 0 0;border-top:1px solid var(--hrn-border,var(--gray-200));font-weight:700;font-size:.9375rem;color:var(--hrn-ink,inherit);' . $num . '">'
+            . PartnerSettlement::inr($share) . '</td></tr>'
+            . '</table>';
+
+        $facts = [
+            ['Customer', $e(self::customerName($b)) . ' · ' . $e(ucfirst(strtolower((string) $b->status)))],
+            ['Partner', $partner ? $e($partner) : '<span style="color:var(--danger-600)">No partner on this event or venue</span>'],
+            ['Send to', str_starts_with($dest = PayoutBatchForm::destinationLine($partnerId), 'No settlement account')
+                ? '<span style="color:var(--danger-600)">' . $e($dest) . '</span>'
+                : $e($dest)],
+        ];
+        $dl = '<dl style="display:grid;grid-template-columns:max-content 1fr;gap:4px 20px;margin:0 0 14px;font-size:.8125rem">';
+        foreach ($facts as [$k, $v]) {
+            $dl .= '<dt style="' . $muted . '">' . $k . '</dt><dd style="margin:0;color:var(--hrn-ink,inherit)">' . $v . '</dd>';
+        }
+
+        return new HtmlString($dl . '</dl>' . $slip);
     }
 }

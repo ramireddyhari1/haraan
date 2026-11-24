@@ -57,6 +57,8 @@ class PayoutsTable
                 TextColumn::make('updated_at')->dateTime()->sortable()->toggleable(isToggledHiddenByDefault: true),
             ])
             ->defaultSort('created_at', 'desc')
+            // Plain text instead of Filament's icon-in-a-circle; says what's waiting.
+            ->emptyState(view('filament.payouts.empty'))
             ->filters([
                 \Filament\Tables\Filters\SelectFilter::make('status')
                     ->options(Payout::STATUSES)
