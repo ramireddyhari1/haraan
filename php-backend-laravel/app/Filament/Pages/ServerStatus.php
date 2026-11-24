@@ -4,21 +4,22 @@ declare(strict_types=1);
 
 namespace App\Filament\Pages;
 
+use App\Support\BusinessClock;
 use BackedEnum;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Live server / infrastructure health for the ops team — the "is the box OK?" screen, so an
- * operator can see database, cache, Redis, queue, disk, memory, CPU load and the WhatsApp
- * bridge from /control without SSH. Polls itself every few seconds (wire:poll in the view).
+ * operator can see CPU, memory, disk and every service the app leans on from /control
+ * without SSH. Polls itself every 10 s (wire:poll in the view).
  *
  * Every probe is defensive and cross-platform: the dev box is Windows, prod is Linux, so
- * anything that only exists on one (load average, /proc, redis) degrades to "n/a" rather
+ * anything that only exists on one (load average, /proc, redis) degrades to "—" rather
  * than throwing. Super-admins only. Reads only — nothing here mutates state.
  */
 class ServerStatus extends Page
@@ -35,10 +36,16 @@ class ServerStatus extends Page
 
     protected static ?int $navigationSort = 90;
 
-    /** @var array<int,array<string,mixed>> Health cards rendered by the view. */
-    public array $cards = [];
+    /** @var array<int,array<string,mixed>> Host meters (CPU / memory / disk). */
+    public array $meters = [];
 
-    /** ISO timestamp of the last probe, shown in the header. */
+    /** @var array<int,array<string,mixed>> One row per service the app depends on. */
+    public array $services = [];
+
+    /** @var array<string,string|null> Plain facts about the box: host, OS, uptime. */
+    public array $facts = [];
+
+    /** Time of the last probe (IST, H:i:s), shown in the header. */
     public ?string $checkedAt = null;
 
     public static function canAccess(): bool
@@ -54,224 +61,234 @@ class ServerStatus extends Page
     /** Polled by wire:poll — re-runs every probe. */
     public function refresh(): void
     {
-        $this->cards = [
-            $this->databaseCard(),
-            $this->cacheCard(),
-            $this->redisCard(),
-            $this->queueCard(),
-            $this->diskCard(),
-            $this->memoryCard(),
-            $this->cpuCard(),
-            $this->runtimeCard(),
-            $this->bridgeCard(),
+        $this->meters = [
+            $this->cpuMeter(),
+            $this->memoryMeter(),
+            $this->diskMeter(),
         ];
 
-        // Tag each card with a section so the view can group them into
-        // Data & cache / Host resources / Services rather than one flat grid.
-        $groups = [
-            'Database' => 'data', 'Cache' => 'data', 'Redis' => 'data', 'Queue' => 'data',
-            'Disk' => 'host', 'PHP memory' => 'host', 'CPU load' => 'host',
-            'Runtime' => 'services', 'WhatsApp bridge' => 'services',
+        $this->services = [
+            $this->databaseRow(),
+            $this->cacheRow(),
+            $this->redisRow(),
+            $this->queueRow(),
+            $this->whatsappRow(),
+            $this->laravelRow(),
+            $this->phpRow(),
         ];
-        foreach ($this->cards as &$card) {
-            $card['group'] = $groups[$card['title']] ?? 'data';
-        }
-        unset($card);
 
-        $this->checkedAt = now()->toDateTimeString();
+        $this->facts = [
+            'host' => (string) (gethostname() ?: 'unknown host'),
+            'os' => trim(php_uname('s') . ' ' . php_uname('r')),
+            'uptime' => $this->uptime(),
+        ];
+
+        $this->checkedAt = BusinessClock::now()->format('H:i:s');
     }
 
     // ---------------------------------------------------------------------
-    //  Probes — each returns a card: title, value, sub, icon, status.
-    //  status ∈ ok | warn | down | idle  (drives the colour in the view).
+    //  Host meters — label, icon, value, unit, detail, pct (0–100|null),
+    //  ticks (threshold marks on the bar, in %), status.
+    //  status ∈ ok | warn | down | idle
     // ---------------------------------------------------------------------
 
-    private function databaseCard(): array
+    private function cpuMeter(): array
     {
+        $load = function_exists('sys_getloadavg') ? sys_getloadavg() : false;
+        if ($load === false) {
+            return $this->meter('CPU load', 'line:cpu', '—', '', 'Load average is not reported on this OS', null, 'idle');
+        }
+
+        $cores = $this->cpuCount();
+        $perCore = $cores ? $load[0] / $cores : $load[0];
+        $pct = (int) min(100, round($perCore * 100));
+        // Load per core > 1.0 means saturated.
+        $status = $perCore >= 1.5 ? 'down' : ($perCore >= 0.9 ? 'warn' : 'ok');
+        $detail = sprintf('load %.2f · %.2f · %.2f', $load[0], $load[1], $load[2])
+            . ($cores ? " · {$cores} cores" : '');
+
+        return $this->meter('CPU load', 'line:cpu', (string) $pct, '%', $detail, $pct, $status, [90]);
+    }
+
+    /** System RAM from /proc/meminfo. Uses MemAvailable, so page cache isn't counted as "used". */
+    private function memoryMeter(): array
+    {
+        $info = @is_readable('/proc/meminfo') ? (string) @file_get_contents('/proc/meminfo') : '';
+        preg_match('/^MemTotal:\s+(\d+)/m', $info, $t);
+        preg_match('/^MemAvailable:\s+(\d+)/m', $info, $a);
+        if (! $t || ! $a || (int) $t[1] <= 0) {
+            return $this->meter('Memory', 'line:memory-stick', '—', '', 'System memory is not readable on this OS', null, 'idle');
+        }
+
+        $total = (int) $t[1] * 1024;
+        $used = max(0, $total - (int) $a[1] * 1024);
+        $pct = (int) round($used / $total * 100);
+        $status = $pct >= 90 ? 'down' : ($pct >= 80 ? 'warn' : 'ok');
+
+        $detail = $this->bytes($used) . ' of ' . $this->bytes($total);
+        preg_match('/^SwapTotal:\s+(\d+)/m', $info, $st);
+        preg_match('/^SwapFree:\s+(\d+)/m', $info, $sf);
+        if ($st && $sf && (int) $st[1] > 0) {
+            $detail .= ' · swap ' . $this->bytes(((int) $st[1] - (int) $sf[1]) * 1024) . ' used';
+        }
+
+        return $this->meter('Memory', 'line:memory-stick', (string) $pct, '%', $detail, $pct, $status, [80, 90]);
+    }
+
+    private function diskMeter(): array
+    {
+        $free = @disk_free_space(base_path());
+        $total = @disk_total_space(base_path());
+        if ($free === false || $total === false || $total <= 0) {
+            return $this->meter('Disk', 'line:hard-drive', '—', '', 'Disk size is not readable here', null, 'idle');
+        }
+
+        $pct = (int) round((($total - $free) / $total) * 100);
+        $status = $pct >= 90 ? 'down' : ($pct >= 80 ? 'warn' : 'ok');
+
+        return $this->meter('Disk', 'line:hard-drive', (string) $pct, '%', $this->bytes((int) $free) . ' free of ' . $this->bytes((int) $total), $pct, $status, [80, 90]);
+    }
+
+    // ---------------------------------------------------------------------
+    //  Service rows — name, icon, brand (colour key), detail, metric, status, note.
+    // ---------------------------------------------------------------------
+
+    private function databaseRow(): array
+    {
+        $driver = (string) config('database.connections.' . config('database.default') . '.driver', 'database');
+        $brand = in_array($driver, ['mysql', 'mariadb'], true) ? 'mysql' : ($driver === 'sqlite' ? 'sqlite' : null);
+        $icon = $brand ? "brand:{$brand}" : 'line:database';
+        $label = ['sqlite' => 'SQLite', 'mysql' => 'MySQL', 'mariadb' => 'MariaDB', 'pgsql' => 'PostgreSQL'][$driver] ?? ucfirst($driver);
+
         try {
             $start = microtime(true);
             DB::connection()->select('select 1');
             $ms = (int) round((microtime(true) - $start) * 1000);
 
-            $driver = DB::connection()->getDriverName();
-            $sub = "{$driver} · responded in {$ms}ms";
-
+            $detail = $label;
             if ($driver === 'sqlite') {
                 $path = DB::connection()->getConfig('database');
                 if (is_string($path) && is_file($path)) {
-                    $sub .= ' · ' . $this->bytes((int) filesize($path));
+                    $detail .= ' · ' . $this->bytes((int) filesize($path));
                 }
                 try {
-                    $mode = DB::connection()->select('PRAGMA journal_mode');
-                    $jm = strtoupper((string) ($mode[0]->journal_mode ?? ''));
+                    $jm = strtoupper((string) (DB::connection()->select('PRAGMA journal_mode')[0]->journal_mode ?? ''));
                     if ($jm !== '') {
-                        $sub .= " · {$jm}";
+                        $detail .= " · {$jm} journal";
                     }
                 } catch (\Throwable) {
                     // pragma unavailable — ignore
                 }
             }
 
-            return $this->card('Database', 'Connected', $sub, 'heroicon-o-circle-stack', $ms > 500 ? 'warn' : 'ok');
+            return $this->row('Database', $icon, $brand, $detail, "{$ms} ms", $ms > 500 ? 'warn' : 'ok', $ms > 500 ? 'Slow' : null);
         } catch (\Throwable $e) {
-            return $this->card('Database', 'Unreachable', $this->short($e), 'heroicon-o-circle-stack', 'down');
+            return $this->row('Database', $icon, $brand, $label . ' · ' . $this->short($e), null, 'down');
         }
     }
 
-    private function cacheCard(): array
+    private function cacheRow(): array
     {
-        $store = config('cache.default');
-        try {
-            $key = 'server_status:probe';
-            Cache::put($key, '1', 5);
-            $ok = Cache::get($key) === '1';
+        $store = (string) config('cache.default');
+        $isRedis = $store === 'redis';
 
-            return $this->card(
-                'Cache',
-                $ok ? 'Writable' : 'Not writable',
-                'store: ' . $store,
-                'heroicon-o-bolt',
-                $ok ? 'ok' : 'warn',
-            );
+        try {
+            $start = microtime(true);
+            Cache::put('server_status:probe', '1', 5);
+            $ok = Cache::get('server_status:probe') === '1';
+            $ms = (int) round((microtime(true) - $start) * 1000);
+
+            return $this->row('Cache', $isRedis ? 'brand:redis' : 'line:layers', $isRedis ? 'redis' : null,
+                ucfirst($store) . ' store · write and read back', "{$ms} ms", $ok ? 'ok' : 'warn', $ok ? null : 'Not writable');
         } catch (\Throwable $e) {
-            return $this->card('Cache', 'Error', 'store: ' . $store . ' · ' . $this->short($e), 'heroicon-o-bolt', 'down');
+            return $this->row('Cache', $isRedis ? 'brand:redis' : 'line:layers', $isRedis ? 'redis' : null,
+                ucfirst($store) . ' store · ' . $this->short($e), null, 'down');
         }
     }
 
-    private function redisCard(): array
+    private function redisRow(): array
     {
         $usesRedis = in_array('redis', [config('cache.default'), config('session.driver'), config('queue.default')], true);
 
         if (! $usesRedis && ! extension_loaded('redis') && ! class_exists(\Predis\Client::class)) {
-            return $this->card('Redis', 'Not configured', 'App uses file/database drivers', 'heroicon-o-server', 'idle');
+            return $this->row('Redis', 'brand:redis', 'redis', 'Not used — cache, sessions and queue run without it', null, 'idle');
         }
 
         try {
             $start = microtime(true);
             $pong = app('redis')->connection()->ping();
             $ms = (int) round((microtime(true) - $start) * 1000);
-            $ok = $pong === true || $pong === 'PONG' || $pong === '+PONG' || (is_string($pong) && str_contains($pong, 'PONG'));
+            $ok = $pong === true || (is_string($pong) && str_contains($pong, 'PONG'));
 
-            return $this->card('Redis', $ok ? 'Connected' : 'No PONG', "responded in {$ms}ms", 'heroicon-o-server', $ok ? 'ok' : 'warn');
+            return $this->row('Redis', 'brand:redis', 'redis', $ok ? 'PING answered PONG' : 'No PONG reply', "{$ms} ms", $ok ? 'ok' : 'warn');
         } catch (\Throwable $e) {
             // Configured to use redis but can't reach it = real problem; otherwise informational.
-            return $this->card('Redis', 'Unreachable', $this->short($e), 'heroicon-o-server', $usesRedis ? 'down' : 'idle');
+            return $this->row('Redis', 'brand:redis', 'redis', $this->short($e), null, $usesRedis ? 'down' : 'idle');
         }
     }
 
-    private function queueCard(): array
+    private function queueRow(): array
     {
-        $conn = config('queue.default');
+        $conn = (string) config('queue.default');
         $failed = 0;
         $pending = null;
 
         try {
-            if (\Illuminate\Support\Facades\Schema::hasTable('failed_jobs')) {
+            if (Schema::hasTable('failed_jobs')) {
                 $failed = (int) DB::table('failed_jobs')->count();
             }
-            if ($conn === 'database' && \Illuminate\Support\Facades\Schema::hasTable('jobs')) {
+            if ($conn === 'database' && Schema::hasTable('jobs')) {
                 $pending = (int) DB::table('jobs')->count();
             }
         } catch (\Throwable) {
             // tables missing — leave as defaults
         }
 
-        $sub = 'driver: ' . $conn;
-        if ($pending !== null) {
-            $sub .= " · {$pending} pending";
-        }
-        if ($conn === 'sync') {
-            $sub .= ' · runs inline';
-        }
+        $detail = ucfirst($conn) . ' driver' . ($conn === 'sync' ? ' · jobs run inline' : '');
 
-        $status = $failed > 0 ? 'warn' : 'ok';
-        $value = $failed > 0 ? "{$failed} failed jobs" : 'Healthy';
-
-        return $this->card('Queue', $value, $sub, 'heroicon-o-queue-list', $status);
-    }
-
-    private function diskCard(): array
-    {
-        try {
-            $free = @disk_free_space(base_path());
-            $total = @disk_total_space(base_path());
-            if ($free === false || $total === false || $total <= 0) {
-                return $this->card('Disk', 'n/a', 'Unavailable on this host', 'heroicon-o-inbox-stack', 'idle');
-            }
-
-            $usedPct = (int) round((($total - $free) / $total) * 100);
-            $status = $usedPct >= 90 ? 'down' : ($usedPct >= 80 ? 'warn' : 'ok');
-
-            return $this->card(
-                'Disk',
-                $usedPct . '% used',
-                $this->bytes((int) $free) . ' free of ' . $this->bytes((int) $total),
-                'heroicon-o-inbox-stack',
-                $status,
-                $usedPct,
-            );
-        } catch (\Throwable $e) {
-            return $this->card('Disk', 'n/a', $this->short($e), 'heroicon-o-inbox-stack', 'idle');
-        }
-    }
-
-    private function memoryCard(): array
-    {
-        $used = memory_get_usage(true);
-        $peak = memory_get_peak_usage(true);
-        $limitRaw = (string) ini_get('memory_limit');
-        $limitBytes = $this->parseBytes($limitRaw);
-
-        // Only a finite limit (-1 = unlimited on many prod fpm pools) yields a meaningful bar.
-        $meter = null;
-        $status = 'ok';
-        if ($limitBytes > 0) {
-            $meter = (int) min(100, round($used / $limitBytes * 100));
-            $status = $meter >= 90 ? 'down' : ($meter >= 75 ? 'warn' : 'ok');
-        }
-        $limitLabel = $limitBytes > 0 ? $limitRaw : 'unlimited';
-
-        return $this->card(
-            'PHP memory',
-            $this->bytes($used),
-            'peak ' . $this->bytes($peak) . ' · limit ' . $limitLabel,
-            'heroicon-o-cpu-chip',
-            $status,
-            $meter,
+        return $this->row(
+            'Queue',
+            'line:list-ordered',
+            null,
+            $detail,
+            $pending !== null ? "{$pending} waiting" : null,
+            $failed > 0 ? 'warn' : 'ok',
+            $failed > 0 ? "{$failed} failed" : null,
         );
     }
 
-    private function cpuCard(): array
+    private function whatsappRow(): array
     {
-        if (! function_exists('sys_getloadavg')) {
-            return $this->card('CPU load', 'n/a', 'Not available on this platform', 'heroicon-o-cpu-chip', 'idle');
+        // WhatsApp goes through Meta's Cloud API — report config health rather than pinging a local service.
+        $configured = app(\App\Services\WhatsAppService::class)->isConfigured();
+        $enabled = filter_var(config('services.whatsapp.enabled', false), FILTER_VALIDATE_BOOLEAN);
+        $from = (string) config('services.whatsapp.phone_number_id');
+
+        if ($configured && $enabled) {
+            return $this->row('WhatsApp', 'brand:whatsapp', 'whatsapp', 'Meta Cloud API' . ($from ? ' · number id ' . $from : ''), null, 'ok', 'Sending');
+        }
+        if ($configured) {
+            return $this->row('WhatsApp', 'brand:whatsapp', 'whatsapp', 'Meta Cloud API · credentials set, META_WHATSAPP_ENABLED is off', null, 'warn', 'Switched off');
         }
 
-        $load = sys_getloadavg();
-        if ($load === false) {
-            return $this->card('CPU load', 'n/a', 'Unavailable', 'heroicon-o-cpu-chip', 'idle');
-        }
-
-        $cores = $this->cpuCount();
-        $one = round($load[0], 2);
-        $sub = sprintf('5m %.2f · 15m %.2f', $load[1], $load[2]);
-        if ($cores !== null) {
-            $sub .= " · {$cores} cores";
-        }
-
-        // Load per core > 1.0 means saturated.
-        $perCore = $cores !== null && $cores > 0 ? $load[0] / $cores : $load[0];
-        $status = $perCore >= 1.5 ? 'down' : ($perCore >= 0.9 ? 'warn' : 'ok');
-        $meter = (int) min(100, round($perCore * 100));
-
-        return $this->card('CPU load', (string) $one, $sub, 'heroicon-o-signal', $status, $meter);
+        return $this->row('WhatsApp', 'brand:whatsapp', 'whatsapp', 'Set META_WHATSAPP_PHONE_NUMBER_ID and the access token', null, 'idle', 'Not set up');
     }
 
-    private function runtimeCard(): array
+    private function laravelRow(): array
     {
-        $opcache = function_exists('opcache_get_status');
+        $debug = (bool) config('app.debug');
+        $env = (string) app()->environment();
+        // Debug on in production leaks stack traces to visitors — flag it.
+        $risky = $debug && $env === 'production';
+
+        return $this->row('Laravel', 'brand:laravel', 'laravel', $env . ' · debug ' . ($debug ? 'on' : 'off'),
+            'v' . app()->version(), $risky ? 'warn' : 'ok', $risky ? 'Debug is on' : null);
+    }
+
+    private function phpRow(): array
+    {
         $opcacheOn = false;
-        if ($opcache) {
+        if (function_exists('opcache_get_status')) {
             try {
                 $s = @opcache_get_status(false);
                 $opcacheOn = is_array($s) && ($s['opcache_enabled'] ?? false);
@@ -280,32 +297,27 @@ class ServerStatus extends Page
             }
         }
 
-        $sub = 'Laravel ' . app()->version()
-            . ' · ' . (config('app.debug') ? 'DEBUG on' : 'prod')
-            . ' · OPcache ' . ($opcacheOn ? 'on' : 'off');
+        $limitRaw = (string) ini_get('memory_limit');
+        $limit = $this->parseBytes($limitRaw) > 0 ? $limitRaw : 'no limit';
+        $detail = PHP_SAPI . ' · OPcache ' . ($opcacheOn ? 'on' : 'off')
+            . ' · this request ' . $this->bytes(memory_get_peak_usage(true)) . ' / ' . $limit;
 
-        // Debug on in production is a real risk; flag it.
-        $status = (config('app.debug') && app()->environment('production')) ? 'warn' : 'ok';
-
-        return $this->card('Runtime', 'PHP ' . PHP_VERSION, $sub, 'heroicon-o-command-line', $status);
+        return $this->row('PHP', 'brand:php', 'php', $detail, 'v' . PHP_VERSION, 'ok');
     }
 
-    private function bridgeCard(): array
+    /** "3d 4h" from /proc/uptime; null where the OS doesn't expose it. */
+    private function uptime(): ?string
     {
-        // WhatsApp goes through Meta's Cloud API — report config
-        // health rather than pinging a local service.
-        $configured = app(\App\Services\WhatsAppService::class)->isConfigured();
-        $enabled = filter_var(config('services.whatsapp.enabled', false), FILTER_VALIDATE_BOOLEAN);
-        $from = (string) config('services.whatsapp.phone_number_id');
-
-        if ($configured && $enabled) {
-            return $this->card('WhatsApp (Meta)', 'Live', 'Phone number id ' . ($from ?: 'configured'), 'heroicon-o-chat-bubble-left-right', 'ok');
+        $raw = @is_readable('/proc/uptime') ? (string) @file_get_contents('/proc/uptime') : '';
+        $secs = (int) (float) strtok($raw, ' ');
+        if ($secs <= 0) {
+            return null;
         }
-        if ($configured) {
-            return $this->card('WhatsApp (Meta)', 'Disabled', 'Credentials set · META_WHATSAPP_ENABLED is off', 'heroicon-o-chat-bubble-left-right', 'warn');
-        }
+        $d = intdiv($secs, 86400);
+        $h = intdiv($secs % 86400, 3600);
+        $m = intdiv($secs % 3600, 60);
 
-        return $this->card('WhatsApp (Meta)', 'Not configured', 'Set META_WHATSAPP_PHONE_NUMBER_ID + token', 'heroicon-o-chat-bubble-left-right', 'idle');
+        return $d > 0 ? "{$d}d {$h}h" : ($h > 0 ? "{$h}h {$m}m" : "{$m}m");
     }
 
     // ---------------------------------------------------------------------
@@ -313,18 +325,27 @@ class ServerStatus extends Page
     // ---------------------------------------------------------------------
 
     /**
-     * @param  int|null  $meter  0–100 fill for a progress bar (disk/mem/cpu); null = no bar.
+     * @param  int[]  $ticks  Threshold marks drawn on the bar, in percent.
      * @return array<string,mixed>
      */
-    private function card(string $title, string $value, string $sub, string $icon, string $status, ?int $meter = null): array
+    private function meter(string $label, string $icon, string $value, string $unit, string $detail, ?int $pct, string $status, array $ticks = []): array
     {
-        return compact('title', 'value', 'sub', 'icon', 'status', 'meter');
+        return compact('label', 'icon', 'value', 'unit', 'detail', 'pct', 'status', 'ticks');
+    }
+
+    /**
+     * @param  string|null  $note  Overrides the default status word (e.g. "3 failed").
+     * @return array<string,mixed>
+     */
+    private function row(string $name, string $icon, ?string $brand, string $detail, ?string $metric, string $status, ?string $note = null): array
+    {
+        return compact('name', 'icon', 'brand', 'detail', 'metric', 'status', 'note');
     }
 
     private function cpuCount(): ?int
     {
         if (is_file('/proc/cpuinfo')) {
-            $n = substr_count((string) @file_get_contents('/proc/cpuinfo'), 'processor');
+            $n = preg_match_all('/^processor\s*:/m', (string) @file_get_contents('/proc/cpuinfo'));
             if ($n > 0) {
                 return $n;
             }
@@ -341,14 +362,13 @@ class ServerStatus extends Page
         if ($val === '' || $val === '-1') {
             return -1;
         }
-        $unit = strtolower(substr($val, -1));
         $num = (int) $val;
 
-        return match ($unit) {
+        return match (strtolower(substr($val, -1))) {
             'g' => $num * 1024 * 1024 * 1024,
             'm' => $num * 1024 * 1024,
             'k' => $num * 1024,
-            default => (int) $val,
+            default => $num,
         };
     }
 
@@ -369,18 +389,19 @@ class ServerStatus extends Page
     {
         $msg = trim($e->getMessage());
 
-        return mb_strlen($msg) > 80 ? mb_substr($msg, 0, 77) . '…' : $msg;
+        return mb_strlen($msg) > 90 ? mb_substr($msg, 0, 87) . '…' : $msg;
     }
 
     protected function getHeaderActions(): array
     {
         return [
             Action::make('refresh')
-                ->label('Refresh')
+                ->label('Check now')
                 ->icon('heroicon-m-arrow-path')
+                ->color('gray')
                 ->action(function (): void {
                     $this->refresh();
-                    Notification::make()->title('Refreshed')->success()->send();
+                    Notification::make()->title('Checked just now')->success()->send();
                 }),
         ];
     }

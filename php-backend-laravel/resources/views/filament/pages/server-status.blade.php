@@ -2,177 +2,149 @@
     @php
         // Self-contained styling: Filament ships a precompiled CSS bundle that does NOT include
         // arbitrary Tailwind utilities used in custom views, so this page styles itself with a
-        // scoped <style> block (.hss-*) instead of utility classes. Dark mode keys off Filament's
-        // class-based toggle (html.dark), not prefers-color-scheme.
-        $counts  = collect($cards)->countBy('status');
-        $down = $counts['down'] ?? 0; $warn = $counts['warn'] ?? 0; $ok = $counts['ok'] ?? 0;
-        $anyDown = $down > 0; $anyWarn = $warn > 0;
+        // scoped <style> block (.ss-*). Dark mode keys off Filament's class toggle (html.dark).
+        // Icons come from App\Support\OpsIcons — Lucide line icons + the official brand marks.
 
-        $hero = $anyDown
-            ? ['tone' => 'down', 'icon' => 'heroicon-o-exclamation-triangle', 'head' => 'Attention needed', 'sub' => $down.' system'.($down===1?'':'s').' down'.($anyWarn?' · '.$warn.' to watch':'')]
-            : ($anyWarn
-                ? ['tone' => 'warn', 'icon' => 'heroicon-o-exclamation-circle', 'head' => 'All up — '.$warn.' to watch', 'sub' => 'No outages. Some metrics are elevated.']
-                : ['tone' => 'ok', 'icon' => 'heroicon-o-check-circle', 'head' => 'All systems operational', 'sub' => 'Every probe is green.']);
+        $all = collect($meters)->concat($services);
+        $down = $all->where('status', 'down')->count();
+        $warn = $all->where('status', 'warn')->count();
 
-        $sections = [
-            'data'     => ['label' => 'Data & cache',   'icon' => 'heroicon-m-circle-stack'],
-            'host'     => ['label' => 'Host resources', 'icon' => 'heroicon-m-cpu-chip'],
-            'services' => ['label' => 'Services',       'icon' => 'heroicon-m-squares-2x2'],
-        ];
-        $grouped = collect($cards)->groupBy('group');
-        $chipLabel = ['ok' => 'Healthy', 'warn' => 'Watch', 'down' => 'Down', 'idle' => 'Inactive'];
+        [$tone, $icon, $head] = $down > 0
+            ? ['down', 'circle-x', $down === 1 ? '1 system is down' : "{$down} systems are down"]
+            : ($warn > 0
+                ? ['warn', 'triangle-alert', $warn === 1 ? '1 thing needs a look' : "{$warn} things need a look"]
+                : ['ok', 'circle-check', 'All systems operational']);
+
+        $word = ['ok' => 'Operational', 'warn' => 'Degraded', 'down' => 'Down', 'idle' => 'Not in use'];
+        $facts = array_filter([$facts['host'] ?? null, $facts['os'] ?? null, isset($facts['uptime']) ? 'up '.$facts['uptime'] : null]);
     @endphp
 
     <style>
-        .hss {
-            --card: var(--hrn-surface, #ffffff);
-            --border: var(--hrn-border, #e2e8f0);
-            --ink: var(--hrn-ink, #070c18);
-            --ink2: var(--hrn-ink-2, #2d3748);
-            --ink3: var(--hrn-ink-3, #5a6a85);
-            --track: var(--hrn-track, #edf2f7);
-            --ok: var(--hrn-ok, #059669);
-            --ok-d: var(--hrn-ok-strong, #10b981);
-            --ok-bg: var(--hrn-ok-bg, #ecfdf5);
-            --warn: var(--hrn-warn, #d97706);
-            --warn-d: var(--hrn-warn-strong, #f59e0b);
-            --warn-bg: var(--hrn-warn-bg, #fffbeb);
-            --down: var(--hrn-down, #dc2626);
-            --down-d: var(--hrn-down-strong, #ef4444);
-            --down-bg: var(--hrn-down-bg, #fef2f2);
-            --idle: var(--hrn-idle, #64748b);
-            --idle-d: var(--hrn-idle-strong, #94a3b8);
-            --idle-bg: var(--hrn-idle-bg, #f1f5f9);
-            display: flex;
-            flex-direction: column;
-            gap: 28px;
+        .ss{
+            --s-card:var(--hrn-surface,#fff);--s-line:var(--hrn-border,#e4e7ec);--s-soft:#f3f4f6;
+            --s-ink:var(--hrn-ink,#0b1220);--s-ink2:var(--hrn-ink-2,#344054);--s-ink3:var(--hrn-ink-3,#667085);
+            --s-track:#eaecf0;--s-tick:#98a2b3;--s-bar:#344054;
+            --s-ok:#12a150;--s-warn:#d97706;--s-down:#dc2626;--s-idle:#98a2b3;
+            --s-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+            display:flex;flex-direction:column;gap:20px;color:var(--s-ink);
+        }
+        html.dark .ss{
+            --s-card:var(--hrn-surface,#111827);--s-line:var(--hrn-border,#263041);--s-soft:#1a2232;
+            --s-ink:var(--hrn-ink,#f2f4f7);--s-ink2:var(--hrn-ink-2,#cfd4dc);--s-ink3:var(--hrn-ink-3,#8b95a7);
+            --s-track:#263041;--s-tick:#5b6577;--s-bar:#cfd4dc;
+            --s-ok:#2fc46f;--s-warn:#f2a93b;--s-down:#f26b6b;--s-idle:#5b6577;
         }
 
-        /* Status line: a plain surface; colour only on the badge and the left rule. */
-        .hss-hero{position:relative;border-radius:14px;padding:16px 20px;background:var(--card);border:1px solid var(--border);border-left:4px solid var(--idle-d);color:var(--ink);}
-        .hss-hero.ok{border-left-color:var(--ok-d);} .hss-hero.warn{border-left-color:var(--warn-d);} .hss-hero.down{border-left-color:var(--down-d);}
-        .hss-hero-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px;}
-        .hss-hero-lead{display:flex;align-items:center;gap:14px;}
-        .hss-badge{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;}
-        .hss-hero.ok .hss-badge{background:var(--ok-bg);color:var(--ok);} .hss-hero.warn .hss-badge{background:var(--warn-bg);color:var(--warn);} .hss-hero.down .hss-badge{background:var(--down-bg);color:var(--down);}
-        .hss-badge svg{width:20px;height:20px;}
-        .hss-h1{margin:0;font-size:16px;font-weight:700;letter-spacing:-.01em;line-height:1.25;}
-        .hss-hsub{margin:2px 0 0;font-size:13px;color:var(--ink3);}
-        .hss-tally{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:var(--ink2);}
-        .hss-pill{display:inline-flex;align-items:center;gap:6px;font-weight:600;}
-        .hss-pill b{width:7px;height:7px;border-radius:50%;background:var(--ok-d);display:inline-block;}
-        .hss-pill.soft b{background:var(--warn-d);} .hss-pill.bad b{background:var(--down-d);}
-        .hss-live{margin-top:10px;font-size:12px;color:var(--ink3);}
+        /* Status line — no box, just the verdict and the facts about the box. */
+        .ss-top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 24px;}
+        .ss-verdict{display:flex;align-items:center;gap:10px;min-width:0;}
+        .ss-verdict svg{flex:none;}
+        .ss-verdict.ok svg{color:var(--s-ok);} .ss-verdict.warn svg{color:var(--s-warn);} .ss-verdict.down svg{color:var(--s-down);}
+        .ss-verdict h2{margin:0;font-size:17px;font-weight:650;letter-spacing:-.01em;}
+        .ss-facts{margin:2px 0 0;font:12px/1.4 var(--s-mono);color:var(--s-ink3);}
+        .ss-checked{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--s-ink3);font-variant-numeric:tabular-nums;}
+        .ss-checked svg{opacity:.8;}
+        .ss-checked .spin{display:none;animation:ss-spin .8s linear infinite;}
+        .ss-checked.busy .spin{display:inline-block;} .ss-checked.busy .still{display:none;}
+        @keyframes ss-spin{to{transform:rotate(360deg);}}
 
-        .hss-sec-h{display:flex;align-items:center;gap:8px;margin:0 0 12px 2px;}
-        .hss-sec-h svg{width:16px;height:16px;color:var(--ink3);}
-        .hss-sec-h h2{margin:0;font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--ink2);}
-        .hss-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;}
-        @media(max-width:1100px){.hss-grid{grid-template-columns:repeat(2,1fr);}}
-        @media(max-width:640px){.hss-grid{grid-template-columns:1fr;}}
+        .ss-panel{background:var(--s-card);border:1px solid var(--s-line);border-radius:12px;overflow:hidden;}
+        .ss-panel-h{display:flex;align-items:baseline;justify-content:space-between;padding:12px 18px;border-bottom:1px solid var(--s-line);}
+        .ss-panel-h h3{margin:0;font-size:13px;font-weight:600;color:var(--s-ink2);}
+        .ss-panel-h span{font-size:12px;color:var(--s-ink3);}
 
-        .hss-card {
-            position: relative;
-            overflow: hidden;
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: var(--hrn-radius, 14px);
-            padding: 18px 20px 16px;
-            box-shadow: var(--hrn-shadow-card);
-            transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
-                        box-shadow 0.2s cubic-bezier(0.16, 1, 0.3, 1),
-                        border-color 0.2s ease;
+        /* Host meters: three columns split by hairlines. */
+        .ss-meters{display:grid;grid-template-columns:repeat(3,1fr);}
+        .ss-m{padding:16px 18px 18px;min-width:0;}
+        .ss-m + .ss-m{border-left:1px solid var(--s-line);}
+        .ss-m-h{display:flex;align-items:center;gap:7px;font-size:13px;color:var(--s-ink3);}
+        .ss-m-h .st{margin-left:auto;font-size:12px;font-weight:600;}
+        .ss-m-v{margin:10px 0 0;font-size:30px;font-weight:650;letter-spacing:-.02em;line-height:1;font-variant-numeric:tabular-nums;}
+        .ss-m-v small{font-size:15px;font-weight:500;color:var(--s-ink3);margin-left:2px;}
+        .ss-bar{position:relative;margin-top:14px;height:6px;border-radius:3px;background:var(--s-track);}
+        .ss-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--s-bar);transition:width .5s ease;}
+        .ss-bar i.warn{background:var(--s-warn);} .ss-bar i.down{background:var(--s-down);}
+        .ss-bar b{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--s-tick);}
+        .ss-m-d{margin:10px 0 0;font:12px/1.45 var(--s-mono);color:var(--s-ink3);overflow-wrap:anywhere;}
+        @media(max-width:860px){.ss-meters{grid-template-columns:1fr;}.ss-m + .ss-m{border-left:0;border-top:1px solid var(--s-line);}}
+
+        /* Service rows. */
+        .ss-row{display:grid;grid-template-columns:32px minmax(0,1fr) auto 128px;align-items:center;gap:14px;padding:12px 18px;}
+        .ss-row + .ss-row{border-top:1px solid var(--s-line);}
+        .ss-logo{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:var(--s-soft);color:var(--s-ink3);}
+        .ss-logo.sqlite{color:#0f80cc;} .ss-logo.mysql{color:#4479a1;} .ss-logo.redis{color:#ff4438;}
+        .ss-logo.laravel{color:#ff2d20;} .ss-logo.php{color:#777bb4;} .ss-logo.whatsapp{color:#25d366;}
+        html.dark .ss-logo.mysql{color:#6a9fd0;} html.dark .ss-logo.php{color:#9a9ed6;}
+        .ss-row.idle .ss-logo{filter:grayscale(1);opacity:.55;}
+        .ss-name{font-size:14px;font-weight:600;color:var(--s-ink);}
+        .ss-det{margin-top:2px;font:12px/1.4 var(--s-mono);color:var(--s-ink3);overflow-wrap:anywhere;}
+        .ss-metric{font:13px var(--s-mono);color:var(--s-ink2);white-space:nowrap;text-align:right;}
+        .ss-st{display:flex;align-items:center;gap:7px;justify-content:flex-end;font-size:13px;font-weight:500;white-space:nowrap;}
+        .ss-st b{width:8px;height:8px;border-radius:50%;flex:none;}
+        .ss-st.ok{color:var(--s-ink2);} .ss-st.ok b{background:var(--s-ok);}
+        .ss-st.warn{color:var(--s-warn);} .ss-st.warn b{background:var(--s-warn);}
+        .ss-st.down{color:var(--s-down);} .ss-st.down b{background:var(--s-down);}
+        .ss-st.idle{color:var(--s-ink3);} .ss-st.idle b{background:transparent;box-shadow:inset 0 0 0 1.5px var(--s-idle);}
+        .ss-m-h .st.warn{color:var(--s-warn);} .ss-m-h .st.down{color:var(--s-down);} .ss-m-h .st.ok,.ss-m-h .st.idle{display:none;}
+        @media(max-width:640px){
+            .ss-row{grid-template-columns:32px minmax(0,1fr) auto;row-gap:4px;padding:12px 14px;}
+            .ss-metric{grid-column:2;grid-row:2;text-align:left;font-size:12px;}
+            .ss-st{grid-column:3;grid-row:1;}
         }
-        .hss-card:hover {
-            transform: translateY(-2px);
-            box-shadow: var(--hrn-shadow-hover);
-            border-color: color-mix(in srgb, var(--primary-500, #10b981) 32%, var(--border));
-        }
-        .hss-card::before {
-            content: "";
-            position: absolute;
-            left: 0;
-            top: 0;
-            bottom: 0;
-            width: 3.5px;
-            border-radius: 4px 0 0 4px;
-        }
-        .hss-card.ok::before{background:var(--ok-d);} .hss-card.warn::before{background:var(--warn-d);}
-        .hss-card.down::before{background:var(--down-d);} .hss-card.idle::before{background:var(--idle-d);}
-        .hss-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
-        .hss-lft{display:flex;align-items:center;gap:12px;}
-        .hss-tile{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex:none;}
-        .hss-tile svg{width:20px;height:20px;}
-        .hss-tile.ok{background:var(--ok-bg);color:var(--ok);} .hss-tile.warn{background:var(--warn-bg);color:var(--warn);}
-        .hss-tile.down{background:var(--down-bg);color:var(--down);} .hss-tile.idle{background:var(--idle-bg);color:var(--idle);}
-        .hss-title{font-size:14px;font-weight:600;color:var(--ink2);}
-        .hss-chip{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:4px 10px;font-size:12px;font-weight:700;background:var(--idle-bg);box-shadow:inset 0 0 0 1px var(--border);white-space:nowrap;}
-        .hss-chip b{width:6px;height:6px;border-radius:50%;display:inline-block;}
-        .hss-chip.ok{color:var(--ok);} .hss-chip.ok b{background:var(--ok-d);}
-        .hss-chip.warn{color:var(--warn);} .hss-chip.warn b{background:var(--warn-d);}
-        .hss-chip.down{color:var(--down);} .hss-chip.down b{background:var(--down-d);}
-        .hss-chip.idle{color:var(--idle);} .hss-chip.idle b{background:var(--idle-d);}
-        .hss-val {
-            margin: 15px 0 0;
-            font-size: 24px;
-            font-weight: 800;
-            letter-spacing: -0.025em;
-            color: var(--ink);
-            line-height: 1.15;
-            font-variant-numeric: tabular-nums;
-        }
-        .hss-meter{margin-top:11px;height:6px;border-radius:999px;background:var(--track);overflow:hidden;}
-        .hss-meter i{display:block;height:100%;border-radius:999px;transition:width .5s ease;}
-        .hss-meter i.ok{background:var(--ok-d);} .hss-meter i.warn{background:var(--warn-d);} .hss-meter i.down{background:var(--down-d);} .hss-meter i.idle{background:var(--idle-d);}
-        .hss-subtext{margin:9px 0 0;font-size:12px;line-height:1.5;color:var(--ink3);}
     </style>
 
-    <div class="hss" wire:poll.10s="refresh">
-        {{-- Hero --}}
-        <div class="hss-hero {{ $hero['tone'] }}">
-            <div class="hss-hero-row">
-                <div class="hss-hero-lead">
-                    <div class="hss-badge"><x-filament::icon :icon="$hero['icon']" /></div>
-                    <div>
-                        <p class="hss-h1">{{ $hero['head'] }}</p>
-                        <p class="hss-hsub">{{ $hero['sub'] }}</p>
-                    </div>
-                </div>
-                <div class="hss-tally">
-                    <span class="hss-pill"><b></b>{{ $ok }} healthy</span>
-                    @if ($anyWarn)<span class="hss-pill soft"><b></b>{{ $warn }} watch</span>@endif
-                    @if ($anyDown)<span class="hss-pill bad"><b></b>{{ $down }} down</span>@endif
+    <div class="ss" wire:poll.10s="refresh">
+        <div class="ss-top">
+            <div class="ss-verdict {{ $tone }}">
+                {!! \App\Support\OpsIcons::line($icon, 22) !!}
+                <div style="min-width:0">
+                    <h2>{{ $head }}</h2>
+                    @if ($facts)<p class="ss-facts">{{ implode(' · ', $facts) }}</p>@endif
                 </div>
             </div>
-            <div class="hss-live">Checked {{ $checkedAt }} · refreshes every 10 s</div>
+            <div class="ss-checked" wire:loading.class="busy">
+                <span class="still">{!! \App\Support\OpsIcons::line('clock', 14) !!}</span>
+                <span class="spin"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg></span>
+                Checked {{ $checkedAt }} IST · every 10 s
+            </div>
         </div>
 
-        {{-- Grouped cards --}}
-        @foreach ($sections as $key => $section)
-            @if ($grouped->has($key))
-                <section>
-                    <div class="hss-sec-h"><x-filament::icon :icon="$section['icon']" /><h2>{{ $section['label'] }}</h2></div>
-                    <div class="hss-grid">
-                        @foreach ($grouped[$key] as $c)
-                            @php $st = $c['status']; @endphp
-                            <div class="hss-card {{ $st }}">
-                                <div class="hss-top">
-                                    <div class="hss-lft">
-                                        <div class="hss-tile {{ $st }}"><x-filament::icon :icon="$c['icon']" /></div>
-                                        <span class="hss-title">{{ $c['title'] }}</span>
-                                    </div>
-                                    <span class="hss-chip {{ $st }}"><b></b>{{ $chipLabel[$st] ?? 'n/a' }}</span>
-                                </div>
-                                <p class="hss-val">{{ $c['value'] }}</p>
-                                @if (! is_null($c['meter'] ?? null))
-                                    <div class="hss-meter"><i class="{{ $st }}" style="width:{{ max(2, min(100, (int) $c['meter'])) }}%"></i></div>
-                                @endif
-                                <p class="hss-subtext">{{ $c['sub'] }}</p>
+        <section class="ss-panel" aria-label="Host">
+            <div class="ss-panel-h"><h3>Host</h3><span>bars mark the warning and critical lines</span></div>
+            <div class="ss-meters">
+                @foreach ($meters as $m)
+                    <div class="ss-m">
+                        <div class="ss-m-h">
+                            {!! \App\Support\OpsIcons::render($m['icon'], 16) !!}
+                            <span>{{ $m['label'] }}</span>
+                            <span class="st {{ $m['status'] }}">{{ $word[$m['status']] }}</span>
+                        </div>
+                        <p class="ss-m-v">{{ $m['value'] }}@if ($m['unit'])<small>{{ $m['unit'] }}</small>@endif</p>
+                        @if (! is_null($m['pct']))
+                            <div class="ss-bar" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ $m['pct'] }}" aria-label="{{ $m['label'] }}">
+                                <i class="{{ $m['status'] }}" style="width:{{ max(1, min(100, (int) $m['pct'])) }}%"></i>
+                                @foreach ($m['ticks'] as $t)<b style="left:{{ $t }}%"></b>@endforeach
                             </div>
-                        @endforeach
+                        @endif
+                        <p class="ss-m-d">{{ $m['detail'] }}</p>
                     </div>
-                </section>
-            @endif
-        @endforeach
+                @endforeach
+            </div>
+        </section>
+
+        <section class="ss-panel" aria-label="Services">
+            <div class="ss-panel-h"><h3>Services</h3><span>{{ count($services) }} checked</span></div>
+            @foreach ($services as $s)
+                <div class="ss-row {{ $s['status'] }}">
+                    <div class="ss-logo {{ $s['brand'] }}">{!! \App\Support\OpsIcons::render($s['icon'], 18) !!}</div>
+                    <div style="min-width:0">
+                        <div class="ss-name">{{ $s['name'] }}</div>
+                        <div class="ss-det">{{ $s['detail'] }}</div>
+                    </div>
+                    <div class="ss-metric">{{ $s['metric'] ?? '' }}</div>
+                    <div class="ss-st {{ $s['status'] }}"><b></b>{{ $s['note'] ?? $word[$s['status']] }}</div>
+                </div>
+            @endforeach
+        </section>
     </div>
 </x-filament-panels::page>
