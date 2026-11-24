@@ -789,12 +789,16 @@ h2, h3 {
     margin-bottom: 28px;
 }
 
+.sport-tab__icon { flex: none; color: #64748B; transition: color 0.15s; }
+.sport-tab.is-active .sport-tab__icon { color: #fff; }
+
 .sport-tab {
-    padding: 12px 24px;
-    border-radius: 14px;
-    border: 1.5px solid #e5e7eb;
+    padding: 9px 16px 9px 12px;
+    border-radius: 10px;
+    border: 1px solid #D9DEE5;
     background: #fff;
-    font-weight: 700;
+    letter-spacing: -0.01em;
+    font-weight: 600;
     font-size: 14.5px;
     cursor: pointer;
     transition: all 0.2s ease;
@@ -812,15 +816,15 @@ h2, h3 {
 }
 
 .sport-tab:hover {
-    border-color: #1E3A8A;
-    color: #1E3A8A;
+    border-color: #0F172A;
+    color: #0F172A;
 }
 
 .sport-tab.is-active {
-    background: #1E3A8A;
+    background: #0F172A;
     color: #fff;
-    border-color: #1E3A8A;
-    box-shadow: 0 4px 14px rgba(37, 99, 235,0.25);
+    border-color: #0F172A;
+    box-shadow: none;
 }
 
 .sport-tab.is-active img {

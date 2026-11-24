@@ -1224,27 +1224,14 @@
                     <div class="dpick__cal" id="dpick-cal" hidden></div>
                 </div>
 
-                {{-- Sport tabs (several sports): the line glyph, not a hotlinked PNG. --}}
+                {{-- Sport tabs (several sports): Material Symbols icon + the name. The old
+                     hand-drawn glyphs read as generated; SportIcons is Google's set, as-is. --}}
                 @if(count($venue->sports) > 1)
                     <div class="mb-24">
-                        <label class="sidebar-label">Select Sport</label>
-                        <div class="sports-tab-strip">
+                        <label class="sidebar-label">Sport</label>
+                        <div class="sports-tab-strip" role="tablist">
                             @foreach($venue->sports as $sport)
-                                @php
-                                    $sc = strtolower($sport);
-                                    $glyph = match (true) {
-                                        str_contains($sc, 'cricket') => \App\Support\SportGlyph::CRICKET,
-                                        str_contains($sc, 'football'), str_contains($sc, 'soccer') => '<circle cx="12" cy="12" r="9"></circle><path d="M12 7.5 8.5 10l1.3 4h4.4l1.3-4z"></path>',
-                                        str_contains($sc, 'basket') => '<circle cx="12" cy="12" r="9"></circle><path d="M12 3v18M3 12h18"></path>',
-                                        str_contains($sc, 'pickle') => \App\Support\SportGlyph::PICKLEBALL,
-                                        str_contains($sc, 'tennis') => \App\Support\SportGlyph::TENNIS,
-                                        default => \App\Support\SportGlyph::BADMINTON,
-                                    };
-                                @endphp
-                                <button onclick="selectSport('{{ $sport }}')" class="sport-tab" id="sport-tab-{{ $sport }}">
-                                    <svg class="sport-tab__glyph" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">{!! $glyph !!}</svg>
-                                    {{ $sport }}
-                                </button>
+                                <button type="button" role="tab" onclick="selectSport('{{ $sport }}')" class="sport-tab" id="sport-tab-{{ $sport }}">{!! \App\Support\SportIcons::svg($sport) !!}<span>{{ $sport }}</span></button>
                             @endforeach
                         </div>
                     </div>
@@ -1679,7 +1666,6 @@
     #booking-widget.vdk-sec { margin: 0; box-shadow: none; scroll-margin-top: 84px; }
     #booking-widget.vdk-sec:hover { transform: none; box-shadow: none; }
     #booking-widget .detail-card-panel__title { font-size: 19px; font-weight: 800; letter-spacing: -.02em; }
-    .sport-tab__glyph { flex: none; }
 
     /* Amenities */
     .vdk-amen { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px 12px; }

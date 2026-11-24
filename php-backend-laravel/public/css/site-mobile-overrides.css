@@ -2775,12 +2775,16 @@
         font-size: 13px;
         color: #64748B;
     }
+    /* Section titles in the sheet: sentence case in ink, sized as a heading
+       rather than tiny tracked grey caps. */
     .mven__modal-body .sidebar-label {
-        margin-bottom: 8px;
-        font-size: 11px;
+        margin-bottom: 10px;
+        font-size: 14.5px;
         font-weight: 700;
-        letter-spacing: 0.08em;
-        color: #64748B;
+        line-height: 1.25;
+        letter-spacing: -0.01em;
+        text-transform: none;
+        color: #0F172A;
     }
     .mven__modal-body .mb-24,
     .mven__modal-body .mb-28 { margin-bottom: 18px !important; }
@@ -2826,15 +2830,41 @@
     .mven__modal-body .sport-tab img { width: 18px; height: 18px; }
     .mven__modal-body .court-pill:hover,
     .mven__modal-body .sport-tab:hover { border-color: #E2E8F0; background: #fff; color: #334155; }
-    .mven__modal-body .court-pill.is-active,
-    .mven__modal-body .sport-tab.is-active {
+    .mven__modal-body .court-pill.is-active {
         border-color: #2563EB;
         background: #2563EB;
         color: #fff;
         box-shadow: 0 4px 12px rgba(37, 99, 235, 0.24);
     }
-    .mven__modal-body .court-pill:active,
-    .mven__modal-body .sport-tab:active { transform: scale(0.95); }
+    .mven__modal-body .court-pill:active { transform: scale(0.95); }
+
+    /* Sport: a plain text filter. Square-ish chips, no icon, no glow; the pick is
+       dark ink, so the blue stays for the slot you are actually buying. */
+    .mven__modal-body .sport-tab {
+        height: 38px;
+        gap: 7px;
+        padding: 0 14px 0 11px;
+        border-radius: 10px;
+        border-color: #D9DEE5;
+        font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+        font-size: 14px;
+        font-weight: 600;
+        line-height: 1;
+        letter-spacing: -0.01em;
+        color: #1E293B;
+        transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    }
+    .mven__modal-body .sport-tab__icon { flex: none; color: #64748B; transition: color 0.12s ease; }
+    .mven__modal-body .sport-tab.is-active .sport-tab__icon { color: #fff; }
+    .mven__modal-body .sport-tab.is-active,
+    .mven__modal-body .sport-tab.is-active:hover {
+        border-color: #0F172A;
+        background: #0F172A;
+        color: #fff;
+        box-shadow: none;
+    }
+    .mven__modal-body .sport-tab:active { background: #F1F5F9; }
+    .mven__modal-body .sport-tab.is-active:active { background: #1E293B; }
 
     /* Slots: three to a row, white until picked, then solid blue + a tick. */
     .mven__modal-body .slots-group { margin-bottom: 20px; }
