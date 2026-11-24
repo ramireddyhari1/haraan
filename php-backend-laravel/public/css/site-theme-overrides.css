@@ -785,17 +785,22 @@ h2, h3 {
 /* Sport tabs */
 .sports-tab-strip {
     display: flex;
-    gap: 12px;
+    flex-wrap: wrap;
+    gap: 8px;
     margin-bottom: 28px;
 }
 
-.sport-tab__icon { flex: none; color: #64748B; transition: color 0.15s; }
-.sport-tab.is-active .sport-tab__icon { color: #fff; }
+/* Small "Available Sports" tile: drawn ground + name + lowest rate. */
+.sport-tab__art { flex: none; display: block; width: 52px; height: 32px; border-radius: 7px; }
+.sport-tab__copy { display: flex; flex-direction: column; gap: 2px; text-align: left; }
+.sport-tab__copy strong { font-size: 14px; font-weight: 700; line-height: 1.15; color: #0F172A; white-space: nowrap; }
+.sport-tab__copy small { font-size: 12px; font-weight: 500; line-height: 1.2; color: #64748B; white-space: nowrap; }
+.sport-tab__copy small b { font-weight: 700; color: #0F172A; }
 
 .sport-tab {
-    padding: 9px 16px 9px 12px;
-    border-radius: 10px;
-    border: 1px solid #D9DEE5;
+    padding: 6px 14px 6px 6px;
+    border-radius: 12px;
+    border: 1px solid #E2E8F0;
     background: #fff;
     letter-spacing: -0.01em;
     font-weight: 600;
@@ -816,15 +821,13 @@ h2, h3 {
 }
 
 .sport-tab:hover {
-    border-color: #0F172A;
-    color: #0F172A;
+    border-color: #CBD5E1;
 }
 
 .sport-tab.is-active {
-    background: #0F172A;
-    color: #fff;
-    border-color: #0F172A;
-    box-shadow: none;
+    background: #F5F8FF;
+    border-color: #2563EB;
+    box-shadow: inset 0 0 0 1px #2563EB;
 }
 
 .sport-tab.is-active img {

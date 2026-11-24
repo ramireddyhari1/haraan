@@ -1224,14 +1224,21 @@
                     <div class="dpick__cal" id="dpick-cal" hidden></div>
                 </div>
 
-                {{-- Sport tabs (several sports): Material Symbols icon + the name. The old
-                     hand-drawn glyphs read as generated; SportIcons is Google's set, as-is. --}}
+                {{-- Sport tabs (several sports): a small copy of the "Available Sports" tile —
+                     the sport's own ground drawn from above, its name and lowest rate. --}}
                 @if(count($venue->sports) > 1)
                     <div class="mb-24">
                         <label class="sidebar-label">Sport</label>
                         <div class="sports-tab-strip" role="tablist">
                             @foreach($venue->sports as $sport)
-                                <button type="button" role="tab" onclick="selectSport('{{ $sport }}')" class="sport-tab" id="sport-tab-{{ $sport }}">{!! \App\Support\SportIcons::svg($sport) !!}<span>{{ $sport }}</span></button>
+                                <button type="button" role="tab" onclick="selectSport('{{ $sport }}')" class="sport-tab" id="sport-tab-{{ $sport }}">
+                                    <svg class="sport-tab__art" viewBox="0 0 160 100" aria-hidden="true">{!! $vdCourtArt($sport) !!}</svg>
+                                    <span class="sport-tab__copy">
+                                        <strong>{{ ucfirst($sport) }}</strong>
+                                        @php $stFrom = $vdFrom($sport); @endphp
+                                        <small>@if($stFrom > 0)from <b>₹{{ number_format($stFrom) }}</b>@else See slots @endif</small>
+                                    </span>
+                                </button>
                             @endforeach
                         </div>
                     </div>
