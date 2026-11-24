@@ -1215,7 +1215,7 @@
                     </div>
                     <div class="date-picker-strip" id="date-strip">
                         @foreach($datePills as $index => $dp)
-                            <button type="button" data-ymd="{{ $dp['ymd'] }}" class="date-pill {{ $index === 0 ? 'is-active' : '' }}">
+                            <button type="button" data-ymd="{{ $dp['ymd'] }}" class="date-pill {{ $index === 0 ? 'is-active is-today' : '' }}">
                                 <span class="date-pill__day">{{ $index === 0 ? 'Today' : \Illuminate\Support\Carbon::parse($dp['ymd'])->format('D') }}</span>
                                 <span class="date-pill__date">{{ \Illuminate\Support\Carbon::parse($dp['ymd'])->format('j') }}</span>
                             </button>
