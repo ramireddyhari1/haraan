@@ -13,6 +13,13 @@
     <div class="hrn-authbrand__glow hrn-authbrand__glow--a"></div>
     <div class="hrn-authbrand__glow hrn-authbrand__glow--b"></div>
     <div class="hrn-authbrand__grid"></div>
+    {{-- Phones: a badminton court in hairlines (true 6.1 x 13.4 m proportion),
+         bleeding off the right edge: the same texture as the partner app's band. --}}
+    <svg class="hrn-authbrand__court" viewBox="0 0 61 134" aria-hidden="true">
+        <rect x="0" y="0" width="61" height="134"/>
+        <path d="M4.6 0v134M56.4 0v134M0 47h61M0 87h61M30.5 0v47M30.5 87v47M0 7.4h61M0 126.6h61"/>
+        <path class="net" d="M0 67h61"/>
+    </svg>
 
     <div class="hrn-authbrand__inner">
         <div class="hrn-authbrand__top">
@@ -35,16 +42,16 @@
                  tappable, so they mustn't look like buttons. --}}
             <ul class="hrn-authbrand__feats">
                 <li>
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l5.5-5.5 4 4L21 7"/><path d="M15 7h6v6"/></svg>
-                    <span>Live earnings</span>
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.9" y="3.2" width="12.2" height="9.6" rx="1.5"/><path d="M8 3.2v9.6"/><circle cx="8" cy="8" r="1.75"/></svg>
+                    <span>Bookings</span>
                 </li>
                 <li>
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8V5.5A1.5 1.5 0 0 1 5.5 4H8M16 4h2.5A1.5 1.5 0 0 1 20 5.5V8M20 16v2.5a1.5 1.5 0 0 1-1.5 1.5H16M8 20H5.5A1.5 1.5 0 0 1 4 18.5V16"/><path d="M4 12h16"/></svg>
+                    <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1 3.5h14v3a1.5 1.5 0 0 0 0 3v3H1v-3a1.5 1.5 0 0 0 0-3z"/><path d="M5.8 8.1l1.6 1.6 3.1-3.2"/></svg>
                     <span>Gate check-in</span>
                 </li>
                 <li>
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="7" height="9" rx="1.5"/><rect x="13" y="4" width="7" height="5" rx="1.5"/><rect x="13" y="11" width="7" height="9" rx="1.5"/><rect x="4" y="15" width="7" height="5" rx="1.5"/></svg>
-                    <span>One console</span>
+                    <svg viewBox="0 0 16 16" aria-hidden="true" class="is-bars"><path d="M3.5 13V9.2M8 13V6.4M12.5 13V3"/></svg>
+                    <span>Payouts</span>
                 </li>
             </ul>
         </div>
@@ -99,7 +106,7 @@
         padding: 0;
         gap: 0;
         align-items: stretch;
-        background: var(--hrn-form-bg, #f7f8fb);
+        background: var(--hrn-form-bg, #fff);
     }
 
     /* Blue wordmark + handwritten tag, pinned top-right of the light form column. */
@@ -344,107 +351,176 @@
         font-size: 0.75rem; color: rgba(224,232,255,0.55);
     }
 
+    .hrn-authbrand__court { display: none; }
+
     /* ---------------------------------------------------------------------
-       MOBILE — stack: compact brand band on top, form below.
+       PHONES & TABLETS: the partner app's sign-in (PartnerSignIn.kt). A navy
+       band with the logo on top and the headline resting on a white sheet
+       that sits on the bottom edge. No glow, no grid, no floating card.
     --------------------------------------------------------------------- */
     @media (max-width: 1023px) {
         .fi-simple-layout:has(.hrn-authbrand) {
             display: flex;
             flex-direction: column;
             min-height: 100dvh;
+            background: #fff;
         }
-        /* Brand band: tight, rounded off at the bottom so the form tucks under it. */
         .hrn-authbrand {
-            min-height: auto;
-            border-radius: 0 0 1.75rem 1.75rem;
-            box-shadow: 0 18px 40px -24px rgba(10, 23, 56, 0.9);
+            flex: 1 0 auto;
+            min-height: 15.5rem;
+            border-radius: 0;
+            box-shadow: none;
+            background:
+                radial-gradient(90% 70% at 0% 100%, rgba(37, 99, 235, 0.2), transparent 70%),
+                linear-gradient(180deg, #0B1A3F 0%, #081230 100%);
         }
-        .hrn-authbrand-rbrand { display: none; }   /* band already shows the logo */
+        .hrn-authbrand__glow,
+        .hrn-authbrand__grid,
+        .hrn-authbrand__sub,
+        .hrn-authbrand__mock,
+        .hrn-authbrand__foot,
+        .hrn-authbrand-rbrand { display: none; }
+
+        .hrn-authbrand__court {
+            display: block;
+            position: absolute;
+            z-index: 0;
+            left: 66%;
+            top: 10%;
+            width: 34%;
+            height: auto;
+            transform: rotate(18deg);
+            overflow: visible;
+            fill: none;
+            stroke: rgba(255, 255, 255, 0.09);
+            stroke-width: 1.3px;
+        }
+        .hrn-authbrand__court * { vector-effect: non-scaling-stroke; }
+        .hrn-authbrand__court .net { stroke-width: 2.3px; }
+
+        /* Logo at the top; the headline rests just above the sheet's edge
+           (the sheet rides 28px up over the band, hence the extra padding). */
         .hrn-authbrand__inner {
-            padding: 1.5rem 1.5rem 1.9rem;
-            gap: 0.55rem;
+            padding: calc(env(safe-area-inset-top, 0px) + 18px) 24px 54px;
+            gap: 0;
         }
-        .hrn-authbrand__top { margin-bottom: 0.35rem; }
-        .hrn-authbrand__logo { height: 1.75rem; }
-        .hrn-authbrand__mid { margin-top: 0; }     /* flow top-down, no auto push */
+        .hrn-authbrand__top { gap: 11px; margin: 0; }
+        .hrn-authbrand__logo { height: 21px; }
+        .hrn-authbrand__pill {
+            position: relative;
+            padding: 0 0 0 12px;
+            border: 0;
+            border-radius: 0;
+            background: none;
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: 2.6px;
+            color: rgba(255, 255, 255, 0.72);
+        }
+        .hrn-authbrand__pill::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            width: 1px;
+            height: 14px;
+            margin-top: -7px;
+            background: rgba(255, 255, 255, 0.28);
+        }
+        .hrn-authbrand__mid { margin-top: auto; padding-top: 2.5rem; }
         .hrn-authbrand__headline {
-            font-size: 1.75rem; line-height: 1.12;
-            margin: 0.35rem 0 0.55rem;
+            font-size: 29px;
+            line-height: 34px;
+            font-weight: 700;
+            letter-spacing: -0.6px;
+            margin: 0;
         }
-        .hrn-authbrand__sub {
-            font-size: 0.9rem; line-height: 1.5;
-            color: rgba(224, 232, 255, 0.82);
-        }
-        .hrn-authbrand__mock { display: none; }         /* keep the band tight */
-        .hrn-authbrand__foot { display: none; }
-        .hrn-authbrand__inner { padding-bottom: 3.4rem; } /* room for the card overlap */
+        /* What the app does, as a ruled row of facts: hairlines, not buttons. */
         .hrn-authbrand__feats {
-            margin-top: 1.1rem; padding-top: 0.95rem;
-            grid-template-columns: repeat(3, 1fr); max-width: none;
+            margin: 22px 0 0;
+            padding: 14px 0 0;
+            max-width: none;
+            grid-template-columns: 1fr 1.25fr 1fr;
+            border-top: 1px solid rgba(255, 255, 255, 0.16);
         }
         .hrn-authbrand__feats li {
-            flex-direction: column; align-items: flex-start; gap: 0.4rem;
-            padding: 0 0.85rem; font-size: 0.78rem;
+            position: relative;
+            justify-content: center;
+            gap: 7px;
+            padding: 0;
+            font-size: 12px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.82);
         }
+        .hrn-authbrand__feats li:first-child { padding-left: 0; }
+        .hrn-authbrand__feats li + li { border-left: 0; }
+        .hrn-authbrand__feats li + li::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 50%;
+            width: 1px;
+            height: 18px;
+            margin-top: -9px;
+            background: rgba(255, 255, 255, 0.16);
+        }
+        .hrn-authbrand__feats svg { width: 16px; height: 16px; stroke: #BFD3FF; stroke-width: 1.4; }
+        .hrn-authbrand__feats svg.is-bars { stroke-width: 2; }
 
-        /* Form card rides up over the band's rounded edge — reads as a sheet
-           laid on top, not a second page stacked below. */
+        /* The white sheet: on the bottom edge, rounded top corners over the navy. */
         .fi-simple-layout:has(.hrn-authbrand) .fi-simple-main-ctn {
-            flex: 1;
-            align-items: flex-start;
-            justify-content: flex-start;
+            flex: none;
+            display: block;
             position: relative;
             z-index: 2;
-            margin-top: -2.1rem;
-            padding: 0 1rem 2.5rem;
+            margin-top: -28px;
+            padding: 28px 24px 8px;
+            background: #fff;
+            border-radius: 28px 28px 0 0;
+            animation: hrn-sheet 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
         }
         .fi-simple-layout:has(.hrn-authbrand) main.fi-simple-main {
-            animation: hrn-sheet 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+            width: 100%;
+            max-width: 30rem;
+            margin: 0 auto;
+            padding: 0;
+            background: none;
+            border: 0;
+            border-radius: 0;
+            box-shadow: none;
+            animation: none;
+        }
+        .fi-simple-layout:has(.hrn-authbrand) > .hga {
+            position: relative;
+            z-index: 2;
+            background: #fff;
+            padding-bottom: env(safe-area-inset-bottom, 0px);
+            animation: hrn-sheet 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
         }
         @keyframes hrn-sheet {
-            from { opacity: 0; transform: translate3d(0, 28px, 0); }
+            from { opacity: 0; transform: translate3d(0, 60px, 0); }
             to   { opacity: 1; transform: none; }
-        }
-        .fi-simple-layout:has(.hrn-authbrand) main.fi-simple-main {
-            max-width: 26rem;
-            margin: 0 auto;
-        }
-        /* Give the sign-in form a real card on mobile so it reads as premium.
-           (Filament v4 paints the card on main.fi-simple-main.) */
-        .fi-simple-layout:has(.hrn-authbrand) main.fi-simple-main {
-            background: #fff;
-            border: 1px solid rgba(15, 23, 42, 0.06);
-            border-radius: 1.4rem;
-            box-shadow:
-                0 1px 2px rgba(15, 23, 42, 0.04),
-                0 8px 20px -10px rgba(10, 23, 56, 0.18),
-                0 30px 60px -32px rgba(10, 23, 56, 0.4);
-            padding: 1.6rem 1.35rem 1.4rem;
-            gap: 1.5rem;
-        }
-        .dark .fi-simple-layout:has(.hrn-authbrand) main.fi-simple-main,
-        :root.dark .fi-simple-layout:has(.hrn-authbrand) main.fi-simple-main {
-            background: #131a2a;
-            border-color: rgba(255, 255, 255, 0.08);
         }
     }
 
-    @media (max-width: 480px) {
-        .hrn-authbrand__inner { padding: 1.35rem 1.35rem 3.25rem; }
-        .hrn-authbrand__headline { font-size: 1.55rem; }
-        .hrn-authbrand__sub { font-size: 0.86rem; }
-        .hrn-authbrand__feats li { font-size: 0.74rem; padding: 0 0.7rem; }
+    /* Short phones (SE, mini): the fact row goes, the sheet stays whole. */
+    @media (max-width: 1023px) and (max-height: 700px) {
+        .hrn-authbrand { min-height: 12rem; }
+        .hrn-authbrand__feats { display: none; }
+        .hrn-authbrand__mid { padding-top: 1.75rem; }
     }
 
     @media (prefers-reduced-motion: reduce) {
         .hrn-authbrand__glow,
         .hrn-authbrand__top, .hrn-authbrand__headline, .hrn-authbrand__sub,
         .hrn-authbrand__feats li, .hrn-authbrand__mock,
-        .fi-simple-layout:has(.hrn-authbrand) main.fi-simple-main { animation: none; }
+        .fi-simple-layout:has(.hrn-authbrand) main.fi-simple-main,
+        .fi-simple-layout:has(.hrn-authbrand) .fi-simple-main-ctn,
+        .fi-simple-layout:has(.hrn-authbrand) > .hga { animation: none; }
     }
 
     /* Right column background follows the theme (light default / dark panel). */
-    .fi-simple-layout:has(.hrn-authbrand) { --hrn-form-bg: #f7f8fb; }
+    .fi-simple-layout:has(.hrn-authbrand) { --hrn-form-bg: #fff; }
     .dark .fi-simple-layout:has(.hrn-authbrand),
     :root.dark .fi-simple-layout:has(.hrn-authbrand) { --hrn-form-bg: #0f1420; }
 </style>

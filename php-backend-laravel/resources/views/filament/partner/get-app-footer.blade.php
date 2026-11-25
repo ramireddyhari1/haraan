@@ -122,7 +122,17 @@
         .fi-simple-layout:has(.hrn-authbrand) > .hga { grid-row: 2; grid-column: 2; }
         .hga__mob { display: none !important; }
     }
-    @media (max-width: 1023px) { .hga__desk { display: none !important; } }
+    @media (max-width: 1023px) {
+        .hga__desk { display: none !important; }
+        /* Inside the white sign-in sheet: a hairline row like the app's, not a
+           floating card. Terms already sit under the form, so the legal row goes. */
+        .hga .hga__in { max-width: 30rem; padding: 0 24px 18px; }
+        .hga .hga__mob { margin-top: 4px; padding: 12px; border: 1px solid #E4E8EF; border-radius: 16px; box-shadow: none; }
+        .hga .hga__appicon { width: 2.75rem; height: 2.75rem; box-shadow: 0 0 0 1px rgba(15,23,42,.06); }
+        .hga .hga-get { box-shadow: none; height: 2.1rem; }
+        .hga .hga-get:active, .hga .hga-get.is-pressed { box-shadow: none; transform: scale(.94); }
+        .hga .hga__legal { display: none; }
+    }
 
     .hga__in { width: 100%; max-width: 31rem; margin: 0 auto; padding: 0 1.5rem 1.4rem; box-sizing: border-box; }
 
