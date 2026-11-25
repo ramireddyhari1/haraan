@@ -1089,6 +1089,8 @@ private fun CameraMode(
     // Set by Adjust: the bowler's stumps stay where the hand put them, not where the detector
     // next sees them. Cleared by Reset, Setup, a turn of the phone, or the phone being moved.
     var bowlersEndPinned by remember { mutableStateOf(false) }
+    /** The bowler's set was put there by hand (rocks, nothing): drawn as stumps. */
+    var bowlersEndHandPlaced by remember { mutableStateOf(false) }
 
     /*
      * CALIBRATING FROM THE STUMPS, AND WHICH END THE PHONE IS AT.
@@ -1184,6 +1186,8 @@ private fun CameraMode(
     var saveTrackingVideos by remember { mutableStateOf(session.saveTrackingVideos) }
     // The ball whose after-ball replay last played itself, so it plays once.
     var playedBallMs by remember { androidx.compose.runtime.mutableLongStateOf(-1L) }
+    /** The ball whose short sweep is playing (PathSweep), or null. */
+    var sweeping by remember { mutableStateOf<LiveReplay?>(null) }
 
     /*
      * AFTER A BALL, IN ORDER: the path on the real picture, then the 3D replay, and the clip
@@ -1208,6 +1212,10 @@ private fun CameraMode(
     // The phone's tilt when Setup was done, for telling a knocked tripod from a batter in the way.
     var setupTilt by remember { mutableStateOf<com.haraan.app.vision.DeviceTilt.Reading?>(null) }
     var setupNote by remember { mutableStateOf<String?>(null) }
+    /** The phone moved since the stumps were set: the chip asks for a check instead of READY. */
+    var stumpsNeedCheck by remember { mutableStateOf(false) }
+    /** Bumped on each Setup/Adjust Done, so the moved-watch is armed afresh every time. */
+    var setupWatch by remember { androidx.compose.runtime.mutableIntStateOf(0) }
     var showAr by remember { mutableStateOf(false) }
     var replayClip by remember { mutableStateOf<ReplayClip?>(null) }
     var showVideo by remember { mutableStateOf(false) }
@@ -1286,6 +1294,7 @@ private fun CameraMode(
         wicketTapping = false
         // Placed in the old orientation: describes nothing in this one.
         bowlersEndPinned = false
+        bowlersEndHandPlaced = false
         adjusting = false
     }
 
@@ -2333,6 +2342,7 @@ private fun CameraMode(
                     safeBottomY = size.height * GUIDE_SAFE_BOTTOM,
                     guideTypeface = guideTypeface,
                     bowlersEnd = bowlersEndBase,
+                    bowlersEndVirtual = bowlersEndHandPlaced,
                 )
             }
         }
@@ -2752,6 +2762,7 @@ private fun CameraMode(
                     // Two words for the player. Everything else is in the developer readout.
                     val (dot, words) = when {
                         thermalThrottled -> Warn to "Phone is hot · tracking paused"
+                        stumpsNeedCheck -> Warn to "CHECK STUMPS · tap Adjust"
                         isReady -> Good to "READY"
                         else -> Ink.copy(alpha = 0.45f) to "Detecting stumps…"
                     }
@@ -3706,13 +3717,21 @@ private fun CameraMode(
             delay(AUTO_REPLAY_AFTER_MS)
             if (liveResult?.ballMs == r.ballMs && liveSequence == null) {
                 playedBallMs = r.ballMs
-                liveSequence = liveResult
-                android.util.Log.i(ANALYSIS_TAG, "after-ball replay starts: ball ${r.ballMs}, ${r.frames.size} frames, 3D ${r.flight != null}")
+                /*
+                 * THE SHORT ONE PLAYS ITSELF (2026-11-20): a second and a half of the path
+                 * sweeping over the stopped picture (PathSweep). The full replay — footage, then
+                 * the stadium, eight to ten seconds — is on the Replay button.
+                 */
+                if (!r.path.isEmpty) sweeping = r
+                android.util.Log.i(ANALYSIS_TAG, "after-ball sweep starts: ball ${r.ballMs}, ${r.frames.size} frames, 3D ${r.flight != null}")
             }
         }
         // The last ball's result stays until the next ball is seen in flight.
         LaunchedEffect(trackedPoints, recording, calledFlight) {
-            if (recording && trackedPoints > 0 && calledFlight == null) liveResult = null
+            if (recording && trackedPoints > 0 && calledFlight == null) {
+                liveResult = null
+                sweeping = null
+            }
         }
         /*
          * ...EXCEPT IN A BOWLING SESSION, where the bowler walks back to his mark between
@@ -3779,6 +3798,8 @@ private fun CameraMode(
                     wicketDiagnostics = wicketTracker.diagnostics()
                     setupTilt = com.haraan.app.vision.DeviceTilt.steady()
                     setupNote = null
+                    stumpsNeedCheck = false
+                    setupWatch++
                     if (!nearFound) {
                         val k = com.haraan.app.vision.PitchGeometry.STUMP_CENTRES_SPAN_M / com.haraan.app.vision.PitchGeometry.STUMP_SET_WIDTH_M
                         bowlersEndBase = com.haraan.app.vision.BowlersEnd(
@@ -3790,6 +3811,7 @@ private fun CameraMode(
                     // HELD EITHER WAY: the detector's reading inside the box, or the box. Left to
                     // follow the detector, the bowler's set wandered with every ball (2026-11-20).
                     bowlersEndPinned = bowlersEndBase != null
+                    bowlersEndHandPlaced = !nearFound
                     view.performHapticFeedback(Feel.COMMIT)
                     setupAligning = false
                 },
@@ -3821,6 +3843,7 @@ private fun CameraMode(
                 },
                 onNear = { moved ->
                     bowlersEndPinned = true
+                    bowlersEndHandPlaced = true
                     bowlersEndBase = moved
                 },
                 onReset = {
@@ -3829,6 +3852,7 @@ private fun CameraMode(
                     wicketLock = wicketTracker.lock()
                     wicketDiagnostics = wicketTracker.diagnostics()
                     bowlersEndPinned = false
+                    bowlersEndHandPlaced = false
                     bowlersEndFilter.clear()
                     view.performHapticFeedback(Feel.REMOVE)
                     adjusting = false
@@ -3844,13 +3868,15 @@ private fun CameraMode(
                     bowlersEndBase = near
                     setupTilt = com.haraan.app.vision.DeviceTilt.steady()
                     setupNote = null
+                    stumpsNeedCheck = false
+                    setupWatch++
                     view.performHapticFeedback(Feel.COMMIT)
                     adjusting = false
                 },
                 picture = { loupeFrame.get() },
             )
         }
-        SetupMovedWatch(setupTilt) {
+        SetupMovedWatch(setupWatch, setupTilt) {
             /*
              * HAND-PLACED STUMPS ARE KEPT, AND THE PERSON IS TOLD. They used to be let go here,
              * which handed the wicket back to a detector that was failing too, ball after ball
@@ -3858,17 +3884,32 @@ private fun CameraMode(
              * in a moment, and nothing is lost meanwhile.
              */
             setupTilt = null
+            stumpsNeedCheck = true
             setupNote = "The phone moved since Setup · check the stumps with Adjust"
             scope.launch { com.haraan.app.ui.matches.cricketThud(ctx, com.haraan.app.ui.matches.Thud.UNDO) }
         }
         val result = liveResult
-        if (result != null && liveSequence == null) {
+        val sweepNow = sweeping
+        if (sweepNow != null) {
+            // Waits for the clip to finish writing (it can run a moment past the call); the
+            // card comes after the sweep, never before it.
+            if (liveSequence == null && !recording) {
+                PathSweep(
+                    path = sweepNow.path,
+                    frames = sweepNow.frames,
+                    uprightAspect = uprightAspect,
+                    onDone = { if (sweeping === sweepNow) sweeping = null },
+                )
+            }
+        } else if (result != null && liveSequence == null) {
             LiveResultOverlay(
                 path = result.path,
                 uprightAspect = uprightAspect,
                 speedKmh = result.speedKmh,
                 onReplay = { liveSequence = result }.takeIf { result.frames.size >= 2 || result.flight != null },
                 flight = result.flight,
+                // The sweep already drew it and knocked at the bounce: the card lands now.
+                alreadyDrawn = result.ballMs == playedBallMs && !result.path.isEmpty,
             )
         }
         liveSequence?.let { seq ->
@@ -4016,13 +4057,18 @@ private fun CameraAccessNeeded(
  * standing in for the lens) never calls it.
  */
 @Composable
-private fun SetupMovedWatch(setupTilt: com.haraan.app.vision.DeviceTilt.Reading?, onMoved: () -> Unit) {
-    LaunchedEffect(setupTilt) {
-        val at = setupTilt ?: return@LaunchedEffect
+private fun SetupMovedWatch(armed: Int, setupTilt: com.haraan.app.vision.DeviceTilt.Reading?, onMoved: () -> Unit) {
+    // Armed by each Done (not by the tilt it caught): Done tapped with the phone in a hand
+    // caught no steady tilt, and the watch never ran at all (2026-11-20).
+    LaunchedEffect(armed) {
+        if (armed == 0) return@LaunchedEffect
+        var at = setupTilt
         val limit = Math.toRadians(SETUP_MOVED_DEG)
         while (true) {
             kotlinx.coroutines.delay(500)
             val now = com.haraan.app.vision.DeviceTilt.steady() ?: continue
+            // No steady reading at Done: the first steady one is where it was set up.
+            if (at == null) { at = now; continue }
             if (kotlin.math.abs(now.pitchRad - at.pitchRad) > limit || kotlin.math.abs(now.rollRad - at.rollRad) > limit) {
                 onMoved()
                 return@LaunchedEffect

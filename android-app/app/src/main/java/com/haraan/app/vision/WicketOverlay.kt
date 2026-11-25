@@ -126,6 +126,8 @@ fun DrawScope.drawWicketLock(
      * then laid along the real pitch, from the locked stumps to these, not towards the phone.
      */
     bowlersEnd: BowlersEnd? = null,
+    /** The bowler's set was placed by hand: drawn as stumps, like a [WicketLock.virtual] one. */
+    bowlersEndVirtual: Boolean = false,
 ) {
     if (box.width <= 0f) return
 
@@ -217,6 +219,7 @@ fun DrawScope.drawWicketLock(
                 Point2(near.base.x + half, near.base.y),
                 top = top,
             ),
+            virtual = bowlersEndVirtual,
         )
         drawWicketLock(bowlerLock, box, density, guideReveal = 0f)
     }
@@ -239,6 +242,31 @@ fun DrawScope.drawWicketLock(
     val bl = Offset(left.x - perpX * pad, left.y - perpY * pad)
     val br = Offset(right.x + perpX * pad, right.y + perpY * pad)
     val lift = stumpHeight + pad
+
+    /*
+     * NO WOOD THERE: THE WICKET IS DRAWN (2026-11-20). In gully cricket the wicket is rocks, a
+     * brick or nothing at all, and the hand puts it in place. Three plain stumps and the bails,
+     * regulation size where they were placed, so the screen reads the same as on real stumps.
+     */
+    if (lock.virtual) {
+        val stumpW = (span * 0.16f).coerceIn(with(density) { 1.5.dp.toPx() }, with(density) { 6.dp.toPx() })
+        val wood = Color.White.copy(alpha = 0.78f * alpha)
+        val shade = Color.Black.copy(alpha = 0.30f * alpha)
+        for (i in 0..2) {
+            val f = i / 2f
+            val foot = Offset(left.x + dx * f, left.y + dy * f)
+            val head = Offset(foot.x + upX * stumpHeight, foot.y + upY * stumpHeight)
+            drawLine(shade, foot, head, stumpW + with(density) { 1.5.dp.toPx() }, StrokeCap.Round)
+            drawLine(wood, foot, head, stumpW, StrokeCap.Round)
+        }
+        // The bails, a hair above the tops.
+        val lift2 = stumpHeight + stumpW * 0.9f
+        val b0 = Offset(left.x + upX * lift2, left.y + upY * lift2)
+        val b1 = Offset(right.x + upX * lift2, right.y + upY * lift2)
+        drawLine(shade, b0, b1, stumpW * 0.8f + with(density) { 1.5.dp.toPx() }, StrokeCap.Round)
+        drawLine(wood, b0, b1, stumpW * 0.8f, StrokeCap.Round)
+    }
+
     val tl = Offset(bl.x + upX * lift, bl.y + upY * lift)
     val tr = Offset(br.x + upX * lift, br.y + upY * lift)
     /** One corner at [at]: an arm [corner] long along each of [a] and [b]. */

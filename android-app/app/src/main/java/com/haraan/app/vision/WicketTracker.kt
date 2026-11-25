@@ -218,6 +218,11 @@ data class WicketLock(
     val subPixel: Boolean = false,
     /** How the latest sighting that agreed with this lock was found. */
     val method: StumpMethod? = null,
+    /**
+     * Placed by hand where the detector has never seen stumps — rocks, a brick, a bag, bare
+     * ground. The wicket is drawn there, regulation size, since there is no wood to frame.
+     */
+    val virtual: Boolean = false,
 ) {
     val base: Point2 get() = anchor.base
 
@@ -476,6 +481,9 @@ class WicketTracker {
      */
     private var placed: WicketAnchor? = null
 
+    /** Detector agreements since the hand placed the wicket; few means no real stumps there. */
+    private var manualConfirms = 0
+
     /** Residuals of observed-minus-predicted, newest last, for the jitter figure. */
     private val residuals = ArrayDeque<Float>()
 
@@ -578,8 +586,22 @@ class WicketTracker {
     private fun applyMotion(motion: FrameMotion) {
         if (motion.isUsable) {
             blindFrames = 0
-            // A hand-placed wicket is fixed in the picture: the phone is on its tripod.
-            if (source != WicketLockSource.MANUAL) anchor = anchor?.map { motion.apply(it, aspect) }
+            /*
+             * A hand-placed wicket ignores the motion estimate's NOISE — a pixel or two a frame
+             * that bowlers and batters crossing the picture put into it, and that walked the
+             * stumps off on a tripod — but follows a real movement of the phone (a hand-held
+             * camera, a knocked tripod), or its markings were left floating over the wrong
+             * scenery (2026-11-20).
+             */
+            val noise = kotlin.math.abs(motion.dx) < MANUAL_MOTION_DEADBAND_X &&
+                kotlin.math.abs(motion.dy) < MANUAL_MOTION_DEADBAND_Y &&
+                kotlin.math.abs(motion.rotationRad) < MANUAL_MOTION_DEADBAND_ROT &&
+                kotlin.math.abs(motion.scale - 1f) < MANUAL_MOTION_DEADBAND_SCALE
+            if (source != WicketLockSource.MANUAL || !noise) {
+                anchor = anchor?.map { motion.apply(it, aspect) }
+                // Followed with the phone: where it was put moves with it.
+                if (source == WicketLockSource.MANUAL) placed = placed?.map { motion.apply(it, aspect) }
+            }
             memory?.let { it.anchor = it.anchor.map { p -> motion.apply(p, aspect) } }
             for (h in hypotheses) h.anchor = h.anchor.map { motion.apply(it, aspect) }
         } else {
@@ -620,6 +642,7 @@ class WicketTracker {
                 noteRoll(nearest)
                 ageFrames = 0
                 lastSeenMs = timestampMs
+                manualConfirms++
                 note = "hand-placed, confirmed by the detector"
             } else {
                 gateRejections++
@@ -1217,6 +1240,7 @@ class WicketTracker {
         memory = null
         residuals.clear()
         scoreEma = 1f
+        manualConfirms = 0
         note = "hand-placed"
     }
 
@@ -1245,6 +1269,7 @@ class WicketTracker {
         blindFrames = 0
         hypotheses.clear()
         memory = null
+        manualConfirms = MANUAL_REAL_AFTER
         note = "set up: held where the detector saw it"
         placed = anchor
         return true
@@ -1374,6 +1399,7 @@ class WicketTracker {
                 aspect = aspect,
                 subPixel = subPixel,
                 method = method,
+                virtual = source == WicketLockSource.MANUAL && manualConfirms < MANUAL_REAL_AFTER,
             )
         }
         val lead = lead() ?: return null
@@ -1677,6 +1703,15 @@ class WicketTracker {
         const val REACQUIRE_BLEND = 0.3f
         const val CONFIRMED_BLEND = 0.18f
         const val MANUAL_NUDGE_WEIGHT = 0.02f
+
+        /** Per-frame motion under these is estimate noise for a hand-placed wicket (~3.5 px at 720x1280). */
+        const val MANUAL_MOTION_DEADBAND_X = 0.005f
+        const val MANUAL_MOTION_DEADBAND_Y = 0.003f
+        const val MANUAL_MOTION_DEADBAND_ROT = 0.004f
+        const val MANUAL_MOTION_DEADBAND_SCALE = 0.004f
+
+        /** Detector agreements before a hand-placed wicket counts as real stumps (not rocks). */
+        const val MANUAL_REAL_AFTER = 6
 
         /** How far the detector may nudge a hand-placed wicket from where it was put, in spans. */
         const val MANUAL_MAX_DRIFT_SPANS = 0.15f

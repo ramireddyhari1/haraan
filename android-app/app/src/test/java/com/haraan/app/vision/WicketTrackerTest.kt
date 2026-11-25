@@ -587,6 +587,30 @@ class WicketTrackerTest {
     }
 
     @Test
+    fun `a hand-placed wicket with no stumps there is drawn as stumps`() {
+        val tracker = WicketTracker()
+        // Rocks, or bare ground: placed by hand, and the detector never sees bars there.
+        tracker.lockManually(Point2(0.45, 0.7), Point2(0.55, 0.7), frameAspect = aspect)
+        var last: WicketLock? = null
+        repeat(20) { i -> last = tracker.onFrame(null, FrameMotion(0f, 0f, 1f, 0f, inliers = 30, total = 32), aspect, i * 33L) }
+        assertTrue(last!!.virtual)
+        assertEquals(WicketLockSource.MANUAL, last!!.source)
+        assertEquals(WicketTrackState.CONFIRMED, last!!.state)
+    }
+
+    @Test
+    fun `a hand-placed lock follows a real movement of the phone`() {
+        val tracker = WicketTracker()
+        tracker.lockManually(Point2(0.45, 0.7), Point2(0.55, 0.7), frameAspect = aspect)
+        val placed = tracker.lock()!!.anchor.base
+        // The phone turned: the picture slid well past the noise, frame after frame.
+        val pan = FrameMotion(0.02f, 0f, 1f, 0f, inliers = 30, total = 32)
+        var last: WicketLock? = null
+        repeat(5) { i -> last = tracker.onFrame(null, pan, aspect, i * 33L) }
+        assertTrue("stayed at ${last!!.anchor.base.x} for a 0.1 pan", last!!.anchor.base.x - placed.x > 0.08)
+    }
+
+    @Test
     fun `the detector may only nudge a hand-placed lock a little way`() {
         val tracker = WicketTracker()
         tracker.lockManually(Point2(0.45, 0.7), Point2(0.55, 0.7), frameAspect = aspect)

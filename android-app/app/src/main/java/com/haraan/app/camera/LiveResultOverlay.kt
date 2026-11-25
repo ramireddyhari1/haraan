@@ -69,6 +69,8 @@ internal fun LiveResultOverlay(
     onReplay: (() -> Unit)?,
     /** The fitted flight, for where it pitched, the verdict, turn and swing. Null: the path alone. */
     flight: Flight3d? = null,
+    /** The path was just drawn by [PathSweep]: shown whole at once, no second knock at the bounce. */
+    alreadyDrawn: Boolean = false,
 ) {
     val context = LocalContext.current
     val reveal = remember(path) { Animatable(0f) }
@@ -94,7 +96,9 @@ internal fun LiveResultOverlay(
         val pitchedAt = path.bounceMs
             ?.let { ((it - path.startMs) / span).toFloat() }
             ?.takeIf { span > 0 && it > 0.05f && it < 0.98f }
-        if (pitchedAt != null) {
+        if (alreadyDrawn) {
+            reveal.snapTo(1f)
+        } else if (pitchedAt != null) {
             reveal.animateTo(pitchedAt, tween((REVEAL_MS * pitchedAt).roundToInt(), easing = LinearEasing))
             launch { cricketThud(context, Thud.RUN) }
             reveal.animateTo(1f, tween((REVEAL_MS * (1f - pitchedAt)).roundToInt(), easing = LinearEasing))

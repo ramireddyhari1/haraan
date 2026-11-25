@@ -134,7 +134,20 @@ internal fun DeliveryReplaySequence(
     var image by remember { mutableStateOf<ImageBitmap?>(null) }
     var atMs by remember { mutableStateOf(frames.firstOrNull()?.first ?: path.startMs) }
     var stadium by remember { mutableStateOf<CompletableDeferred<Unit>?>(null) }
+    // Nothing of the replay shows until the ball has covered the live picture.
+    var content by remember { mutableStateOf(false) }
+    var stinger by remember { mutableStateOf<StingerRun?>(null) }
     LaunchedEffect(frames, path) {
+        /** The ball wipe: [swap] runs while it covers the whole screen. */
+        suspend fun wipe(word: String, swap: () -> Unit) {
+            val run = StingerRun(word)
+            stinger = run
+            run.covered.await()
+            swap()
+            run.finished.await()
+            stinger = null
+        }
+        wipe("REPLAY") { content = true }
         // The stadium's textures are made now, while the delivery plays, so its first frame
         // is not where they get built.
         launch(Dispatchers.Default) { com.haraan.app.vision.ReplayTextures.warm() }
@@ -162,12 +175,17 @@ internal fun DeliveryReplaySequence(
             val done = CompletableDeferred<Unit>()
             stadium = done
             done.await()
+        }
+        // Back to the camera the same way it came in: the ball covers, the replay goes.
+        wipe("LIVE") {
             stadium = null
+            content = false
         }
         onDone()
     }
 
-    Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+    Box(Modifier.fillMaxSize()) {
+    if (content) Box(Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
         Box(Modifier.fillMaxWidth().aspectRatio(ReplayFrameRing.WIDTH.toFloat() / ReplayFrameRing.HEIGHT)) {
             Canvas(Modifier.fillMaxSize()) {
                 image?.let { img ->
@@ -206,6 +224,8 @@ internal fun DeliveryReplaySequence(
                 autoCloseAfterMs = stadiumAutoCloseMs,
             )
         }
+    }
+    stinger?.let { ReplayStinger(it) }
     }
 }
 
