@@ -61,7 +61,7 @@ private val Due = Color(0xFFDC2626)
 /** How a payment was taken. Colours stay inside Haraan's blues plus one warm accent for cash. */
 enum class PayWay(val label: String, val color: Color) {
     Upi("UPI", Color(0xFF2563EB)),
-    Online("Haraan", Color(0xFF60A5FA)),
+    Online("Online", Color(0xFF60A5FA)),
     Cash("Cash", Color(0xFFF59E0B)),
     Card("Card", Color(0xFF1E3A8A)),
 }
@@ -76,7 +76,36 @@ data class PaymentEntry(
     /** "2:30 PM" for today, "Yesterday", "28 Sep" before that. */
     val whenLabel: String,
     val today: Boolean,
-)
+    /** Every way it was paid — an advance online plus the balance in cash is both. */
+    val split: com.haraan.partner.PaidSplit = com.haraan.partner.PaidSplit(),
+    /** Paid an advance online; the rest is collected at the venue. */
+    val advance: Boolean = false,
+    /** "Advance" / "Balance" when this row is one payment of a booking paid in parts. */
+    val part: String? = null,
+) {
+    fun paidBy(w: PayWay): Double = when (w) {
+        PayWay.Online -> split.online
+        PayWay.Cash -> split.cash
+        PayWay.Upi -> split.upi
+        PayWay.Card -> split.card
+    }
+}
+
+/**
+ * "₹136 online + ₹280 cash" when a booking was paid more than one way, else the one way
+ * ("Paid on Haraan", "Cash"). Used by Home and the Payments list alike.
+ */
+fun waysLine(split: com.haraan.partner.PaidSplit, way: PayWay?, paid: Double, advance: Boolean, inr: (Double) -> String): String? {
+    val parts = listOfNotNull(
+        split.online.takeIf { it > 0 }?.let { "₹" + inr(it) + (if (advance) " advance online" else " online") },
+        split.cash.takeIf { it > 0 }?.let { "₹" + inr(it) + " cash" },
+        split.upi.takeIf { it > 0 }?.let { "₹" + inr(it) + " UPI" },
+        split.card.takeIf { it > 0 }?.let { "₹" + inr(it) + " card" },
+    )
+    if (parts.size >= 2) return parts.joinToString(" + ")
+    if (advance && split.online > 0 && split.atVenue <= 0) return "Advance on Haraan"
+    return way?.let { if (it == PayWay.Online) "Paid on Haraan" else it.label } ?: if (paid <= 0) "Not paid" else null
+}
 
 /**
  * Money on Home, the way a shop's payments app shows it: what came in today, how
@@ -95,7 +124,8 @@ fun PaymentsCard(
     val view = LocalView.current
     val todays = entries.filter { it.today && it.paid > 0 }
     val received = todays.sumOf { it.paid }
-    val byWay = PayWay.entries.associateWith { w -> todays.filter { it.way == w }.sumOf { it.paid } }.filterValues { it > 0 }
+    // Summed per way off each booking's split, so an advance + cash balance counts in both.
+    val byWay = PayWay.entries.associateWith { w -> todays.sumOf { it.paidBy(w) } }.filterValues { it > 0 }
     val count = remember(received) { Animatable(0f) }
     LaunchedEffect(received) { count.animateTo(received.toFloat(), tween(900, easing = FastOutSlowInEasing)) }
 
@@ -200,10 +230,18 @@ fun PaymentsCard(
             ) {
                 Canvas(Modifier.size(22.dp)) { bankGlyph() }
                 Spacer(Modifier.width(10.dp))
-                Text(
-                    "₹" + formatInr(toBank) + " on its way to your bank",
-                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = BrandInk, modifier = Modifier.weight(1f),
-                )
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "₹" + formatInr(toBank) + " on its way to your bank",
+                        fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = BrandInk,
+                    )
+                    // Why it isn't the online total: only online money is paid out, after
+                    // Haraan's commission. Cash at the counter is already yours.
+                    Text(
+                        "Your share of online payments, after Haraan's commission",
+                        fontSize = 11.5.sp, color = Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = BrandInk, modifier = Modifier.size(18.dp))
             }
         }
@@ -237,7 +275,9 @@ private fun PaymentRow(e: PaymentEntry, index: Int, formatInr: (Double) -> Strin
             Text(e.name, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 listOfNotNull(
-                    e.way?.let { if (it == PayWay.Online) "Paid on Haraan" else it.label } ?: if (e.paid <= 0) "Not paid" else null,
+                    e.part,
+                    if (e.part != null) e.way?.let { if (it == PayWay.Online) "Paid on Haraan" else it.label }
+                    else waysLine(e.split, e.way, e.paid, e.advance, formatInr),
                     if (e.walkIn) "Walk-in" else null,
                     e.whenLabel,
                 ).joinToString(" · "),
@@ -249,7 +289,7 @@ private fun PaymentRow(e: PaymentEntry, index: Int, formatInr: (Double) -> Strin
                 Text("+₹" + formatInr(e.paid), fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Ink, style = TextStyle(fontFeatureSettings = "tnum"))
             }
             if (owed > 0) {
-                Text("₹" + formatInr(owed) + " due", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Due)
+                Text("₹" + formatInr(owed) + if (e.advance) " at venue" else " due", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Due)
             } else if (e.paid > 0) {
                 Text("Received", fontSize = 11.5.sp, color = Color(0xFF15803D), fontWeight = FontWeight.SemiBold)
             }

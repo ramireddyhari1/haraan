@@ -2185,17 +2185,63 @@ private fun paymentEntries(list: List<BookingSummary>): List<com.haraan.partner.
     val fmtIn = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ssXXX", java.util.Locale.US)
     val today = java.util.Calendar.getInstance()
     fun sameDay(a: java.util.Calendar, b: java.util.Calendar) = a.get(java.util.Calendar.YEAR) == b.get(java.util.Calendar.YEAR) && a.get(java.util.Calendar.DAY_OF_YEAR) == b.get(java.util.Calendar.DAY_OF_YEAR)
-    return list.asSequence()
+    val yesterday = (today.clone() as java.util.Calendar).apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }
+    fun labelOf(at: java.util.Date): Pair<String, Boolean> {
+        val cal = java.util.Calendar.getInstance().apply { time = at }
+        val time = java.text.SimpleDateFormat("h:mm a", java.util.Locale.ENGLISH).format(at)
+        return when {
+            sameDay(cal, today) -> time
+            sameDay(cal, yesterday) -> "Yesterday $time"
+            else -> java.text.SimpleDateFormat("d MMM", java.util.Locale.ENGLISH).format(at)
+        } to sameDay(cal, today)
+    }
+    fun wayOf(m: String) = when (m.lowercase()) {
+        "cash" -> com.haraan.partner.ui.home.PayWay.Cash
+        "upi", "upi_qr" -> com.haraan.partner.ui.home.PayWay.Upi
+        "card" -> com.haraan.partner.ui.home.PayWay.Card
+        else -> com.haraan.partner.ui.home.PayWay.Online
+    }
+    val live = list.asSequence()
         .filter { it.amount > 0 && !(it.status ?: "").lowercase().let { s -> s.startsWith("cancel") || s == "expired" || s == "refunded" } }
+    // A newer server lists each payment: one row per payment, at the time it came in, so an
+    // advance online and the balance in cash later are two lines — like a shop's payments
+    // app. A balance still owed is its own row at the booking's time.
+    if (live.any { it.payments != null }) {
+        return live.flatMap { b ->
+            val booked = b.createdAt?.let { runCatching { fmtIn.parse(it) }.getOrNull() }
+            val pays = b.payments.orEmpty()
+            val parts = pays.size >= 2 || (b.isAdvance && pays.isNotEmpty())
+            val rows = pays.mapIndexedNotNull { i, p ->
+                val at = p.at?.let { runCatching { fmtIn.parse(it) }.getOrNull() } ?: booked ?: return@mapIndexedNotNull null
+                val (label, isToday) = labelOf(at)
+                com.haraan.partner.ui.home.PaymentEntry(
+                    name = b.customer, amount = p.amount, paid = p.amount, way = wayOf(p.method),
+                    walkIn = b.channel.equals("offline", true), whenLabel = label, today = isToday,
+                    split = com.haraan.partner.PaidSplit.of(p.method, p.amount), advance = b.isAdvance,
+                    part = if (!parts) null else if (i == 0 && b.isAdvance) "Advance" else if (i == 0) "Part" else "Balance",
+                ) to at.time
+            }
+            val owedRow = if (b.owed > 0 && booked != null) {
+                val (label, isToday) = labelOf(booked)
+                listOf(
+                    com.haraan.partner.ui.home.PaymentEntry(
+                        name = b.customer, amount = b.owed, paid = 0.0, way = null,
+                        walkIn = b.channel.equals("offline", true), whenLabel = label, today = isToday,
+                        advance = b.isAdvance, part = if (b.isAdvance) "Balance" else null,
+                    ) to booked.time,
+                )
+            } else emptyList()
+            (rows + owedRow).asSequence()
+        }
+            .sortedByDescending { it.second }
+            .map { it.first }
+            .toList()
+    }
+    return live
         .mapNotNull { b ->
             val at = b.createdAt?.let { runCatching { fmtIn.parse(it) }.getOrNull() } ?: return@mapNotNull null
+            val (label, _) = labelOf(at)
             val cal = java.util.Calendar.getInstance().apply { time = at }
-            val yesterday = (today.clone() as java.util.Calendar).apply { add(java.util.Calendar.DAY_OF_YEAR, -1) }
-            val label = when {
-                sameDay(cal, today) -> java.text.SimpleDateFormat("h:mm a", java.util.Locale.ENGLISH).format(at)
-                sameDay(cal, yesterday) -> "Yesterday"
-                else -> java.text.SimpleDateFormat("d MMM", java.util.Locale.ENGLISH).format(at)
-            }
             val way = when ((b.paymentMethod ?: "").lowercase()) {
                 "cash" -> com.haraan.partner.ui.home.PayWay.Cash
                 "upi", "upi_qr" -> com.haraan.partner.ui.home.PayWay.Upi
@@ -2206,6 +2252,7 @@ private fun paymentEntries(list: List<BookingSummary>): List<com.haraan.partner.
             com.haraan.partner.ui.home.PaymentEntry(
                 name = b.customer, amount = b.amount, paid = b.amountPaid, way = way,
                 walkIn = b.channel.equals("offline", true), whenLabel = label, today = sameDay(cal, today),
+                split = b.split(), advance = b.isAdvance,
             ) to at.time
         }
         .sortedByDescending { it.second }
@@ -2380,6 +2427,12 @@ private fun TodayStatus(
             ClosedGate(Modifier.size(width = 64.dp, height = 46.dp))
         }
     }
+    // Where today's money is: online came through Haraan (paid out to you later), cash /
+    // UPI / card is already at the counter. An advance + cash balance counts in both.
+    day.collectedSplit?.takeIf { day.collected > 0 }?.let { s ->
+        Spacer(Modifier.height(10.dp))
+        CollectedSplitRow(s)
+    }
     if (day.due > 0) {
         Spacer(Modifier.height(8.dp))
         Row(
@@ -2388,7 +2441,13 @@ private fun TodayStatus(
         ) {
             LayoutBox(Modifier.size(7.dp).clip(RoundedCornerShape(99.dp)).background(RED))
             Spacer(Modifier.width(7.dp))
-            Text("₹" + formatInr(day.due) + " still to collect today", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = RED)
+            Text(
+                "₹" + formatInr(day.due) + " still to collect today" +
+                    // How much of it is advance bookers paying the rest when they arrive.
+                    (if (day.atVenueDue > 0 && day.atVenueDue < day.due) " · ₹" + formatInr(day.atVenueDue) + " from advances"
+                    else if (day.atVenueDue > 0) " at venue" else ""),
+                fontSize = 14.sp, fontWeight = FontWeight.Bold, color = RED,
+            )
             Icon(Icons.Filled.ChevronRight, contentDescription = null, tint = RED, modifier = Modifier.size(18.dp))
         }
     }
@@ -2510,7 +2569,20 @@ private fun NextBookingCard(b: ShiftBooking, onOpen: () -> Unit) {
         }
         Column(horizontalAlignment = Alignment.End) {
             Text("₹" + formatInr(b.amount), fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = AuthInk)
-            Text(if (b.paid) "Paid" else "Unpaid", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (b.paid) Color(0xFF15803D) else RED)
+            // An advance booker isn't "unpaid": they owe the rest at the counter.
+            Text(
+                when {
+                    b.paid -> "Paid"
+                    b.advance && b.due > 0 -> "₹" + formatInr(b.due) + " at venue"
+                    else -> "Unpaid"
+                },
+                fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                color = when {
+                    b.paid -> Color(0xFF15803D)
+                    b.advance -> Color(0xFFB45309)
+                    else -> RED
+                },
+            )
         }
     }
 }
@@ -5880,3 +5952,38 @@ private suspend fun <T> runCatchingUi(block: suspend () -> T): UiState<T> = try 
     UiState.Error(e.message ?: "Something went wrong")
 }
 
+/**
+ * Today's collected money in two piles: Online (through Haraan, paid out later) and
+ * At venue (cash, the venue's UPI, card — already in the till), with the breakdown.
+ */
+@Composable
+private fun CollectedSplitRow(s: PaidSplit) {
+    val atVenue = listOfNotNull(
+        s.cash.takeIf { it > 0 }?.let { "Cash ₹" + formatInr(it) },
+        s.upi.takeIf { it > 0 }?.let { "UPI ₹" + formatInr(it) },
+        s.card.takeIf { it > 0 }?.let { "Card ₹" + formatInr(it) },
+    )
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        SplitPile("Online", s.online, "via Haraan", Color(0xFF2563EB), Modifier.weight(1f))
+        SplitPile(
+            "Cash / at venue", s.atVenue,
+            if (atVenue.size >= 2) atVenue.joinToString(" · ") else "in your counter",
+            Color(0xFFB45309), Modifier.weight(1f),
+        )
+    }
+}
+
+@Composable
+private fun SplitPile(label: String, amount: Double, note: String, tint: Color, modifier: Modifier) {
+    Column(
+        modifier.clip(RoundedCornerShape(14.dp)).background(tint.copy(alpha = 0.07f))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+    ) {
+        Text(label, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = tint)
+        Text(
+            "₹" + formatInr(amount), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = AuthInk,
+            style = TextStyle(fontFeatureSettings = "tnum"),
+        )
+        Text(note, fontSize = 11.5.sp, color = AuthMuted, maxLines = 1)
+    }
+}

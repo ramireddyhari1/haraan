@@ -43,6 +43,8 @@ data class DayBookingsUiState(
     val bookings: List<DayBookingItem> = emptyList(),
     val filteredBookings: List<DayBookingItem> = emptyList(),
     val selectedBookingForDetails: DayBookingItem? = null,
+    /** A balance being recorded from the booking sheet — its buttons wait on it. */
+    val collectingBookingId: Long? = null,
     val walkInTarget: WalkInTarget? = null,
     val isSubmittingWalkIn: Boolean = false,
     /** Passes the walk-in's mobile number holds here, found when the 10th digit lands. */
@@ -616,6 +618,32 @@ class DayBookingsViewModel(
 
     fun closeBookingDetails() {
         _uiState.update { it.copy(selectedBookingForDetails = null) }
+    }
+
+    /**
+     * The customer paid what they still owe at the counter: an advance booker's balance,
+     * or a walk-in settling up. The server records exactly the balance, never twice.
+     */
+    fun collectBalance(booking: DayBookingItem, method: PayMethod) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(collectingBookingId = booking.id) }
+            repository.collectAtDesk(token, booking.id, method, null).fold(
+                onSuccess = {
+                    _uiState.update {
+                        it.copy(
+                            collectingBookingId = null,
+                            selectedBookingForDetails = null,
+                            successSnackbarMessage = "₹${booking.balanceDue.toInt()} received in ${method.label} from ${booking.customerName}",
+                            successIsMoney = true,
+                        )
+                    }
+                    loadData(forceRefresh = true)
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(collectingBookingId = null, errorMessage = e.message ?: "Couldn't record the payment") }
+                },
+            )
+        }
     }
 
     fun cancelBooking(bookingId: Long) {

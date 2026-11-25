@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Check
@@ -70,6 +71,8 @@ fun BookingDetailsSheet(
     onDismiss: () -> Unit,
     onCheckIn: (ticketCode: String) -> Unit,
     onCancel: (bookingId: Long) -> Unit,
+    onCollect: (com.haraan.partner.PayMethod) -> Unit = {},
+    collecting: Boolean = false,
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -84,6 +87,7 @@ fun BookingDetailsSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(androidx.compose.foundation.rememberScrollState())
                 .navigationBarsPadding()
                 .padding(horizontal = 20.dp, vertical = 8.dp),
         ) {
@@ -222,12 +226,32 @@ fun BookingDetailsSheet(
                     Text("₹" + booking.totalAmount.toInt(), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = InkDark)
                 }
                 Spacer(Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text("Amount Paid", fontSize = 13.sp, color = MutedGray)
-                    Text("₹" + booking.amountPaid.toInt(), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = GreenColor)
+                // Each way the money came in on its own line: an advance paid online and
+                // the balance in cash are two payments, not one "cash" amount.
+                val split = booking.paidSplit
+                val ways = listOfNotNull(
+                    split.online.takeIf { it > 0 }?.let { (if (booking.isAdvance) "Advance paid online" else "Paid online") to it },
+                    split.cash.takeIf { it > 0 }?.let { "Cash at venue" to it },
+                    split.upi.takeIf { it > 0 }?.let { "UPI at venue" to it },
+                    split.card.takeIf { it > 0 }?.let { "Card at venue" to it },
+                )
+                if (ways.isEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("Amount Paid", fontSize = 13.sp, color = MutedGray)
+                        Text("₹" + com.haraan.partner.formatInr(booking.amountPaid), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = GreenColor)
+                    }
+                }
+                ways.forEach { (label, amount) ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(label, fontSize = 13.sp, color = MutedGray)
+                        Text("₹" + com.haraan.partner.formatInr(amount), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = GreenColor)
+                    }
                 }
                 if (booking.balanceDue > 0) {
                     Spacer(Modifier.height(6.dp))
@@ -237,27 +261,40 @@ fun BookingDetailsSheet(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                     ) {
-                        Text("Outstanding Balance", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = RedColor)
-                        Text("₹" + booking.balanceDue.toInt(), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = RedColor)
+                        Text(
+                            if (booking.isAdvance) "To collect at venue" else "Outstanding Balance",
+                            fontSize = 13.sp, fontWeight = FontWeight.Bold, color = RedColor,
+                        )
+                        Text("₹" + com.haraan.partner.formatInr(booking.balanceDue), fontSize = 14.sp, fontWeight = FontWeight.ExtraBold, color = RedColor)
                     }
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text("Payment Method", fontSize = 12.sp, color = MutedGray)
-                    Text(
-                        booking.paymentMethod?.uppercase() ?: "ONLINE",
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = PrimaryBlue,
-                    )
                 }
             }
 
             Spacer(Modifier.height(20.dp))
+
+            // The balance, taken at the counter: the advance booker who just turned up, or a
+            // walk-in settling. One tap for how they paid; the server takes exactly what's owed.
+            if (booking.isDue) {
+                Text(
+                    "Collect ₹" + com.haraan.partner.formatInr(booking.balanceDue) + " · how did they pay?",
+                    fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = InkDark,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    listOf(com.haraan.partner.PayMethod.CASH, com.haraan.partner.PayMethod.UPI, com.haraan.partner.PayMethod.CARD).forEach { m ->
+                        Button(
+                            onClick = { onCollect(m) },
+                            enabled = !collecting,
+                            colors = ButtonDefaults.buttonColors(containerColor = if (m == com.haraan.partner.PayMethod.CASH) GreenColor else PrimaryBlue),
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.weight(1f).height(46.dp),
+                        ) {
+                            Text(m.label, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+            }
 
             // Action Buttons
             if (!booking.isCancelled) {

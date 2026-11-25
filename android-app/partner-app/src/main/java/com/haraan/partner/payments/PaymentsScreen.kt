@@ -80,7 +80,7 @@ private val Good = Color(0xFF15803D)
 /** How a payment came in. Haraan blues, plus one warm accent for cash. */
 private enum class Way(val label: String, val color: Color) {
     Upi("UPI", Color(0xFF2563EB)),
-    Online("Haraan", Color(0xFF60A5FA)),
+    Online("Online", Color(0xFF60A5FA)),
     Cash("Cash", Color(0xFFF59E0B)),
     Card("Card", Color(0xFF1E3A8A)),
 }
@@ -97,6 +97,8 @@ private data class Pay(
     val slot: String?,
     /** The booking it came from — the detail sheet reads the rest off it. */
     val src: BookingSummary,
+    /** Every way it was paid — an advance online plus cash at the venue counts as both. */
+    val split: com.haraan.partner.PaidSplit = src.split(),
 ) {
     val owed get() = (amount - paid).coerceAtLeast(0.0)
 }
@@ -212,7 +214,16 @@ private fun thisMonth(all: List<Pay>): Month {
         received = mine.sumOf { it.paid },
         due = all.sumOf { it.owed },
         count = mine.count { it.paid > 0 },
-        byWay = Way.entries.associateWith { w -> mine.filter { it.way == w }.sumOf { it.paid } }.filterValues { it > 0 },
+        byWay = Way.entries.associateWith { w ->
+            mine.sumOf {
+                when (w) {
+                    Way.Online -> it.split.online
+                    Way.Cash -> it.split.cash
+                    Way.Upi -> it.split.upi
+                    Way.Card -> it.split.card
+                }
+            }
+        }.filterValues { it > 0 },
         label = java.text.SimpleDateFormat("MMMM", java.util.Locale.ENGLISH).format(now.time),
     )
 }
@@ -350,7 +361,11 @@ private fun PayRow(p: Pay, index: Int, onOpen: () -> Unit) {
             Text(p.name, fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 listOfNotNull(
-                    p.way?.let { if (it == Way.Online) "Paid on Haraan" else it.label } ?: if (p.paid <= 0) "Not paid" else null,
+                    com.haraan.partner.ui.home.waysLine(
+                        p.split,
+                        when (p.way) { Way.Online -> com.haraan.partner.ui.home.PayWay.Online; Way.Cash -> com.haraan.partner.ui.home.PayWay.Cash; Way.Upi -> com.haraan.partner.ui.home.PayWay.Upi; Way.Card -> com.haraan.partner.ui.home.PayWay.Card; null -> null },
+                        p.paid, p.src.isAdvance, ::formatInr,
+                    ),
                     if (p.walkIn) "Walk-in" else null,
                     p.slot,
                     java.text.SimpleDateFormat("h:mm a", java.util.Locale.ENGLISH).format(p.at),
@@ -360,7 +375,7 @@ private fun PayRow(p: Pay, index: Int, onOpen: () -> Unit) {
         }
         Column(horizontalAlignment = Alignment.End) {
             if (p.paid > 0) Text("+₹" + formatInr(p.paid), fontSize = 14.5.sp, fontWeight = FontWeight.Bold, color = Ink, style = TextStyle(fontFeatureSettings = "tnum"))
-            if (p.owed > 0) Text("₹" + formatInr(p.owed) + " due", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Due)
+            if (p.owed > 0) Text("₹" + formatInr(p.owed) + if (p.src.isAdvance) " at venue" else " due", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Due)
             else if (p.paid > 0) Text("Received", fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, color = Good)
         }
     }

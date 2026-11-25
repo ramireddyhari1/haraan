@@ -172,6 +172,7 @@ class DayBookingsRepositoryImpl(
         var cashCollected = 0.0
         var upiCollected = 0.0
         var onlineCollected = 0.0
+        var cardCollected = 0.0
 
         for (b in bookings) {
             if (!b.isCancelled) {
@@ -181,12 +182,13 @@ class DayBookingsRepositoryImpl(
                     chaseCount++
                 }
 
-                val method = b.paymentMethod?.lowercase() ?: ""
-                when {
-                    method.contains("cash") -> cashCollected += b.amountPaid
-                    method.contains("upi") -> upiCollected += b.amountPaid
-                    else -> onlineCollected += b.amountPaid
-                }
+                // Every way the booking was paid, not its last method: an advance paid
+                // online with the balance in cash is both, and used to count all as cash.
+                val s = b.paidSplit
+                cashCollected += s.cash
+                upiCollected += s.upi
+                cardCollected += s.card
+                onlineCollected += s.online
             }
         }
 
@@ -214,6 +216,7 @@ class DayBookingsRepositoryImpl(
             cashCollected = cashCollected,
             upiCollected = upiCollected,
             onlineCollected = onlineCollected,
+            cardCollected = cardCollected,
             isBlocked = grid?.isBlocked == true,
         )
     }
@@ -487,6 +490,8 @@ class DayBookingsRepositoryImpl(
             branchName = this.branch,
             isCancelled = cancelled,
             isCheckedIn = this.checkedIn > 0,
+            payAtVenue = this.payAtVenue,
+            paidSplit = this.split(),
         )
     }
 }

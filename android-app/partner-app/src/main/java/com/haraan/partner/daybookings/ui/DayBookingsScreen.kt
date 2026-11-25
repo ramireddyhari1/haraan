@@ -452,6 +452,8 @@ fun DayBookingsScreen(
             onDismiss = { viewModel.closeBookingDetails() },
             onCheckIn = { code -> viewModel.checkInBooking(code) },
             onCancel = { id -> viewModel.cancelBooking(id) },
+            onCollect = { method -> viewModel.collectBalance(booking, method) },
+            collecting = state.collectingBookingId == booking.id,
         )
     }
 }

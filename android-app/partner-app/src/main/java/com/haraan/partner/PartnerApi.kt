@@ -223,6 +223,8 @@ data class HaraanBrought(
     val players: Int,
     /** Share of all bookings that came through Haraan, 0..1; null with no bookings. */
     val share: Double?,
+    /** Paid at the counter on those bookings (advance balances) — not Haraan money. */
+    val atVenueAllTime: Double = 0.0,
 )
 
 /** Running totals since the first booking; only ever climbs. */
@@ -324,6 +326,10 @@ data class ShiftBoard(
     val expected: Double,
     val collected: Double,
     val due: Double,
+    /** Today's money by how it came: online through Haraan vs cash/UPI/card at the desk. */
+    val collectedSplit: PaidSplit? = null,
+    /** Balances advance bookers still owe at the venue today. */
+    val atVenueDue: Double = 0.0,
     /** Owed across every date, not just today — the chase list doesn't reset at midnight. */
     val chaseCount: Int,
     val chaseAmount: Double,
@@ -348,6 +354,10 @@ data class ShiftBooking(
     val walkIn: Boolean,
     /** On court right now — the row the desk cares about most. */
     val running: Boolean,
+    /** Still to collect at the counter. */
+    val due: Double = 0.0,
+    /** Paid an advance online; [due] is the balance to take at the venue. */
+    val advance: Boolean = false,
 )
 
 data class EventSummary(
@@ -417,7 +427,63 @@ data class BookingSummary(
     val email: String? = null,
     /** False on a server that doesn't send contact yet — "none" and "not sent" read differently. */
     val contactSent: Boolean = false,
-)
+    /** > 0 when the customer chose Pay advance online: this much was to be paid at the venue. */
+    val payAtVenue: Double = 0.0,
+    /** How the money came in, from the server's ledger. Null on an older server. */
+    val paidSplit: PaidSplit? = null,
+    /** Each payment on its own (way, amount, when). Null on an older server. */
+    val payments: List<PaymentLine>? = null,
+) {
+    val isAdvance: Boolean get() = payAtVenue > 0.0
+    val owed: Double get() = (amount - amountPaid).coerceAtLeast(0.0)
+
+    /**
+     * Every way this booking was paid. An advance paid online with the balance in cash is
+     * online + cash — the last method alone ([paymentMethod]) called all of it cash.
+     */
+    fun split(): PaidSplit = paidSplit ?: PaidSplit.of(paymentMethod, amountPaid)
+}
+
+/** One payment on a booking: how ([method]: online | cash | upi | card), how much, when (ISO). */
+data class PaymentLine(val method: String, val amount: Double, val at: String?)
+
+/**
+ * Money in by how it came. [online] went through Haraan (Razorpay) and is paid out later;
+ * cash, UPI and card are already in the venue's hands.
+ */
+data class PaidSplit(
+    val online: Double = 0.0,
+    val cash: Double = 0.0,
+    val upi: Double = 0.0,
+    val card: Double = 0.0,
+) {
+    /** Taken at the counter: cash, the venue's own UPI, card. */
+    val atVenue: Double get() = cash + upi + card
+
+    operator fun plus(o: PaidSplit) = PaidSplit(online + o.online, cash + o.cash, upi + o.upi, card + o.card)
+
+    companion object {
+        /** An older server sends only the last method: put it all there, as before. */
+        fun of(method: String?, amount: Double): PaidSplit {
+            if (amount <= 0.0) return PaidSplit()
+            return when ((method ?: "").lowercase()) {
+                "cash" -> PaidSplit(cash = amount)
+                "upi" -> PaidSplit(upi = amount)
+                "card" -> PaidSplit(card = amount)
+                else -> PaidSplit(online = amount)
+            }
+        }
+
+        fun parse(o: JSONObject?): PaidSplit? = o?.let {
+            PaidSplit(
+                online = it.optDouble("online", 0.0),
+                cash = it.optDouble("cash", 0.0),
+                upi = it.optDouble("upi", 0.0),
+                card = it.optDouble("card", 0.0),
+            )
+        }
+    }
+}
 
 /**
  * A game on one of the partner's courts.
@@ -958,11 +1024,16 @@ data class InvoicesPage(
 )
 
 /** The settlement home: what's owed, where it goes, and what's already gone. */
+/** How the settlement total is reached: paid online (as Razorpay took it) − tax − commission = net. */
+data class PayoutBreakdown(val paidOnline: Double, val tax: Double, val commission: Double, val net: Double)
+
 data class PayoutsPage(
     val available: Double,
     val inFlight: Double,
     val settled: Double,
     val collected: Double,
+    /** Null on an older server. */
+    val breakdown: PayoutBreakdown? = null,
     val account: PayoutAccount?,
     val batches: List<PayoutBatchRow>,
     /** Only the owner changes the destination (and only if Haraan lets owners); desk staff read it. */
@@ -1278,6 +1349,9 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
             expected = money.optDouble("expected", 0.0),
             collected = money.optDouble("collected", 0.0),
             due = money.optDouble("due", 0.0),
+            // Older servers send no split: Home then shows the total alone, as before.
+            collectedSplit = if (money.has("online")) PaidSplit.parse(money) else null,
+            atVenueDue = money.optDouble("at_venue_due", 0.0),
             chaseCount = chase.optInt("count"),
             chaseAmount = chase.optDouble("amount", 0.0),
             closed = if (closedArr == null) emptyList() else (0 until closedArr.length()).mapNotNull {
@@ -1292,6 +1366,8 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                         court = b.optString("court", ""),
                         amount = b.optDouble("amount", 0.0),
                         paid = b.optBoolean("paid", false),
+                        due = b.optDouble("due", 0.0),
+                        advance = b.optBoolean("advance", false),
                         walkIn = b.optBoolean("walk_in", false),
                         running = b.optBoolean("running", false),
                     )
@@ -1405,6 +1481,7 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                     lastMonth = share(h.optJSONObject("last_month")),
                     players = h.optInt("players"),
                     share = if (h.isNull("share") || !h.has("share")) null else h.optDouble("share"),
+                    atVenueAllTime = h.optJSONObject("all_time")?.optDouble("at_venue", 0.0) ?: 0.0,
                 )
             },
             growth = (o.optJSONObject("growth") ?: JSONObject()).let { g ->
@@ -1543,6 +1620,13 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
                 phone = o.optStringOrNull("phone"),
                 email = o.optStringOrNull("email"),
                 contactSent = o.has("phone"),
+                payAtVenue = o.optDouble("pay_at_venue", 0.0),
+                paidSplit = PaidSplit.parse(o.optJSONObject("paid_split")),
+                payments = o.optJSONArray("payments")?.let { a ->
+                    (0 until a.length()).mapNotNull { i ->
+                        a.optJSONObject(i)?.let { p -> PaymentLine(p.optString("method"), p.optDouble("amount", 0.0), p.optStringOrNull("at")) }
+                    }
+                },
             )
         }
     }
@@ -2356,6 +2440,14 @@ class PartnerApi(private val baseUrl: String = ApiConfig.BASE_URL) {
             inFlight = b.optDouble("in_flight", 0.0),
             settled = b.optDouble("settled", 0.0),
             collected = b.optDouble("collected", 0.0),
+            breakdown = b.optJSONObject("breakdown")?.let { d ->
+                PayoutBreakdown(
+                    paidOnline = d.optDouble("paid_online", 0.0),
+                    tax = d.optDouble("tax", 0.0),
+                    commission = d.optDouble("commission", 0.0),
+                    net = d.optDouble("net", 0.0),
+                )
+            },
             account = acc?.let {
                 PayoutAccount(
                     method = it.optString("method", "bank"),

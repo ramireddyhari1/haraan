@@ -131,6 +131,8 @@ fun PaymentDetailSheet(
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var paid by remember { mutableStateOf(b.amountPaid) }
     var method by remember { mutableStateOf(b.paymentMethod) }
+    // Every way it was paid: an advance online plus the balance in cash is both.
+    var split by remember { mutableStateOf(b.split()) }
     var cancelled by remember { mutableStateOf((b.status ?: "").lowercase().startsWith("cancel")) }
     var collecting by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -162,7 +164,7 @@ fun PaymentDetailSheet(
                 .graphicsLayer { alpha = rise.value; translationY = (1f - rise.value) * 40.dp.toPx() },
         ) {
             Pass(
-                b = b, walkIn = walkIn, bookedAt = bookedAt, paid = paid, owed = owed, method = method,
+                b = b, walkIn = walkIn, bookedAt = bookedAt, paid = paid, owed = owed, method = method, split = split,
                 cancelled = cancelled, stamp = stamp.value, copied = copied,
                 onCopy = { code -> clipboard.setText(AnnotatedString(code)); copied = true; Haptics.tick(view) },
             )
@@ -193,7 +195,7 @@ fun PaymentDetailSheet(
             // ---- what can still be done
             if (canManage && !cancelled && owed > 0) {
                 if (!collecting) {
-                    PrimaryButton("Collect ₹" + formatInr(owed)) { Haptics.tick(view); collecting = true }
+                    PrimaryButton("Collect ₹" + formatInr(owed) + if (b.isAdvance) " at venue" else "") { Haptics.tick(view); collecting = true }
                 } else {
                     Text("How did they pay?", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Muted)
                     Spacer(Modifier.height(8.dp))
@@ -203,7 +205,7 @@ fun PaymentDetailSheet(
                                 busy = true; error = null
                                 scope.launch {
                                     runCatching { api.collectAtDesk(token, b.id, m, null) }
-                                        .onSuccess { paid = b.amount; method = m.api; collecting = false; stampKey++; onChanged() }
+                                        .onSuccess { split = split + com.haraan.partner.PaidSplit.of(m.api, owed); paid = b.amount; method = m.api; collecting = false; stampKey++; onChanged() }
                                         .onFailure { e -> Haptics.reject(view); error = (e as? ApiException)?.message ?: "Couldn't record that. Try again." }
                                     busy = false
                                 }
@@ -272,6 +274,7 @@ private fun Pass(
     paid: Double,
     owed: Double,
     method: String?,
+    split: com.haraan.partner.PaidSplit,
     cancelled: Boolean,
     stamp: Float,
     copied: Boolean,
@@ -352,7 +355,8 @@ private fun Pass(
                             Text(
                                 when {
                                     cancelled -> "Cancelled"
-                                    owed <= 0 && paid > 0 -> "Paid" + (method?.let { " · " + wayName(it) } ?: "")
+                                    owed <= 0 && paid > 0 -> "Paid" + (waysText(split) ?: method?.let { " · " + wayName(it) } ?: "")
+                                    paid > 0 && b.isAdvance -> "₹" + formatInr(paid) + " advance online · ₹" + formatInr(owed) + " at venue"
                                     paid > 0 -> "₹" + formatInr(paid) + " paid · ₹" + formatInr(owed) + " to collect"
                                     else -> "₹" + formatInr(owed) + " to collect"
                                 },
@@ -643,6 +647,17 @@ private fun qrBitmap(content: String, size: Int): Bitmap? = runCatching {
     val px = IntArray(size * size) { i -> if (m[i % size, i / size]) 0xFF0F172A.toInt() else 0xFFFFFFFF.toInt() }
     Bitmap.createBitmap(px, size, size, Bitmap.Config.ARGB_8888)
 }.getOrNull()
+
+/** " · ₹240 online + ₹960 cash" — only when it was paid more than one way. */
+private fun waysText(s: com.haraan.partner.PaidSplit): String? {
+    val parts = listOfNotNull(
+        s.online.takeIf { it > 0 }?.let { "₹" + formatInr(it) + " online" },
+        s.cash.takeIf { it > 0 }?.let { "₹" + formatInr(it) + " cash" },
+        s.upi.takeIf { it > 0 }?.let { "₹" + formatInr(it) + " UPI" },
+        s.card.takeIf { it > 0 }?.let { "₹" + formatInr(it) + " card" },
+    )
+    return if (parts.size >= 2) " · " + parts.joinToString(" + ") else null
+}
 
 private fun wayName(m: String): String = when (m.lowercase()) {
     "cash" -> "Cash"

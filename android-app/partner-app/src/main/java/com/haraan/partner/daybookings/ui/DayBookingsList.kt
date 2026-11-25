@@ -239,7 +239,9 @@ private fun BookingCard(
                     when {
                         unpaid -> {
                             Text(
-                                "DUE: ₹${formatInr(booking.balanceDue)}",
+                                // An advance booker owes the rest at the counter — say so,
+                                // so it isn't read as an unpaid booking.
+                                (if (booking.isAdvance) "AT VENUE: ₹" else "DUE: ₹") + formatInr(booking.balanceDue),
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = RedColor,
@@ -247,7 +249,7 @@ private fun BookingCard(
                         }
                         else -> {
                             Text(
-                                booking.paymentMethod?.uppercase() ?: "PAID",
+                                waysLabel(booking.paidSplit) ?: booking.paymentMethod?.uppercase() ?: "PAID",
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = GreenColor,
@@ -321,3 +323,11 @@ private fun formatInr(amount: Double): String {
     val rounded = Math.round(amount)
     return java.text.NumberFormat.getNumberInstance(java.util.Locale.forLanguageTag("en-IN")).format(rounded)
 }
+
+/** "ONLINE + CASH" — every way a booking was paid, not just the last one. */
+internal fun waysLabel(s: com.haraan.partner.PaidSplit): String? = listOfNotNull(
+    "ONLINE".takeIf { s.online > 0 },
+    "CASH".takeIf { s.cash > 0 },
+    "UPI".takeIf { s.upi > 0 },
+    "CARD".takeIf { s.card > 0 },
+).takeIf { it.isNotEmpty() }?.joinToString(" + ")

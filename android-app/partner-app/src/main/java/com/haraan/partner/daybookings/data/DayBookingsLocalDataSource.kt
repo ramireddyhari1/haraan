@@ -420,6 +420,10 @@ class DayBookingsLocalDataSource(context: Context) {
         o.put("paymentMethod", b.paymentMethod)
         o.put("slotDate", b.slotDate)
         o.put("slotLabel", b.slotLabel)
+        o.put("payAtVenue", b.payAtVenue)
+        b.paidSplit?.let { s ->
+            o.put("paidSplit", JSONObject().put("online", s.online).put("cash", s.cash).put("upi", s.upi).put("card", s.card))
+        }
         return o
     }
 
@@ -440,6 +444,8 @@ class DayBookingsLocalDataSource(context: Context) {
             paymentMethod = o.optString("paymentMethod").takeIf { it.isNotBlank() },
             slotDate = o.optString("slotDate").takeIf { it.isNotBlank() },
             slotLabel = o.optString("slotLabel").takeIf { it.isNotBlank() },
+            payAtVenue = o.optDouble("payAtVenue", 0.0),
+            paidSplit = com.haraan.partner.PaidSplit.parse(o.optJSONObject("paidSplit")),
         )
     }
 }

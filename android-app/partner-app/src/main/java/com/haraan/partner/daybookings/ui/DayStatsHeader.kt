@@ -200,6 +200,7 @@ private fun collectedSplit(stats: DaySummaryStats): String? {
     val parts = listOfNotNull(
         stats.cashCollected.takeIf { it > 0 }?.let { "Cash ₹" + formatInr(it) },
         stats.upiCollected.takeIf { it > 0 }?.let { "UPI ₹" + formatInr(it) },
+        stats.cardCollected.takeIf { it > 0 }?.let { "Card ₹" + formatInr(it) },
         stats.onlineCollected.takeIf { it > 0 }?.let { "Online ₹" + formatInr(it) },
     )
     // One method is already said by the total; the split only helps with two or more.

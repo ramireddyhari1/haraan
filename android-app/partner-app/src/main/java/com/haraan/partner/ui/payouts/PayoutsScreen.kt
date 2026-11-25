@@ -310,10 +310,44 @@ private fun MoneyPathCard(p: PayoutsPage) {
         }
         Spacer(Modifier.height(6.dp))
         Row(Modifier.fillMaxWidth()) {
-            Stop("Collected", p.collected, Modifier.weight(1f))
+            // "Collected" is what customers paid through Haraan — the same figure Razorpay
+            // shows — not the share after commission, which read as a mismatch.
+            Stop("Paid online", p.breakdown?.paidOnline ?: p.collected, Modifier.weight(1f))
             Stop(if (moving) "On the way" else "With Haraan", if (moving) p.inFlight else p.available, Modifier.weight(1f))
             Stop("In your bank", p.settled, Modifier.weight(1f))
         }
+        p.breakdown?.takeIf { it.paidOnline > 0 }?.let { b ->
+            Spacer(Modifier.height(14.dp))
+            Column(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Color(0xFFF5F8FD))
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+            ) {
+                MoneyLine("Paid online by customers", b.paidOnline, Ink)
+                if (b.tax > 0) MoneyLine("Tax on online bookings", -b.tax, Muted)
+                if (b.commission > 0) MoneyLine("Haraan commission", -b.commission, Muted)
+                Spacer(Modifier.height(6.dp))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(Color(0x140F172A)))
+                Spacer(Modifier.height(6.dp))
+                MoneyLine("Your share", b.net, Ink, bold = true)
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Cash and UPI you took at the counter are already yours, so they aren't in this.",
+                    fontSize = 11.5.sp, color = Muted, lineHeight = 15.sp,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MoneyLine(label: String, amount: Double, color: Color, bold: Boolean = false) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, fontSize = 13.sp, color = color, fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal, modifier = Modifier.weight(1f))
+        Text(
+            (if (amount < 0) "− ₹" else "₹") + formatInr(kotlin.math.abs(amount)),
+            fontSize = 13.sp, color = color, fontWeight = if (bold) FontWeight.Bold else FontWeight.SemiBold,
+            style = TextStyle(fontFeatureSettings = "tnum"),
+        )
     }
 }
 

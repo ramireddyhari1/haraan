@@ -813,8 +813,11 @@ internal fun HaraanBroughtCard(h: HaraanBrought, memoryKey: String, modifier: Mo
             rupees(money.shown),
             fontSize = 30.sp, fontWeight = FontWeight.ExtraBold, color = Ink, letterSpacing = (-0.8).sp,
         )
+        // The headline is what was paid online through Haraan — what Razorpay took. An
+        // advance booker's balance, paid at the counter, is said separately.
         Text(
-            "from ${h.allTime.count} online " + (if (h.allTime.count == 1) "booking" else "bookings") + " so far",
+            "paid online from ${h.allTime.count} " + (if (h.allTime.count == 1) "booking" else "bookings") + " so far" +
+                (if (h.atVenueAllTime > 0) " · " + rupees(h.atVenueAllTime) + " more paid at your venue" else ""),
             fontSize = 13.sp, color = Muted,
         )
         Spacer(Modifier.height(12.dp))
@@ -828,7 +831,7 @@ internal fun HaraanBroughtCard(h: HaraanBrought, memoryKey: String, modifier: Mo
             Spacer(Modifier.height(10.dp))
             val up = h.lastMonth.count > 0 && h.thisMonth.count > h.lastMonth.count
             Text(
-                "This month: ${h.thisMonth.count} online · ${rupees(h.thisMonth.amount)}" +
+                "This month: ${h.thisMonth.count} online · ${rupees(h.thisMonth.amount)} paid online" +
                     when {
                         up -> "  ▲ up from ${h.lastMonth.count}"
                         h.lastMonth.count > 0 -> "  · last month ${h.lastMonth.count}"

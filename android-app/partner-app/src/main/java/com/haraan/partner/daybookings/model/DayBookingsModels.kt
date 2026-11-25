@@ -54,6 +54,8 @@ data class DaySummaryStats(
     val upiCollected: Double = 0.0,
     val onlineCollected: Double = 0.0,
     val isBlocked: Boolean = false,
+    /** Card at the desk — kept apart so Cash + UPI + Card + Online adds up to Collected. */
+    val cardCollected: Double = 0.0,
 )
 
 /**
@@ -79,7 +81,12 @@ data class DayBookingItem(
     val branchName: String?,
     val isCancelled: Boolean,
     val isCheckedIn: Boolean,
+    /** > 0 when the customer paid an advance online and owes the rest at the venue. */
+    val payAtVenue: Double = 0.0,
+    /** How the money came in: online (through Haraan) vs cash / UPI / card at the desk. */
+    val paidSplit: com.haraan.partner.PaidSplit = com.haraan.partner.PaidSplit(),
 ) {
+    val isAdvance: Boolean get() = payAtVenue > 0.0
     val isWalkIn: Boolean get() = channel.equals("offline", ignoreCase = true)
     /** Waiting on an online payment at the desk: holds the court until it's paid or lapses. */
     val isAwaitingPayment: Boolean get() = status.equals("PENDING", ignoreCase = true)
