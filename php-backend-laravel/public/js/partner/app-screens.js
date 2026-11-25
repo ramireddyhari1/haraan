@@ -450,6 +450,85 @@
             }).join('') + '<div class="ha-pad6"></div></section>';
     }
 
+    /* ---- Amenity + house-rule signs --------------------------------------------
+       The same drawings customers see on the venue page (gamehub-detail.blade.php
+       `$mvAmenityIcon` / `$mvKnowIcon`) and in the apps (AmenitySign.kt / RuleSign.kt):
+       same keyword buckets, same paths. Keep all of them in step. 24×24 space. */
+    var SIGN = (function () {
+        var NAVY = '#1E3A8A', BLUE = '#2563EB', INK = '#0F172A';
+        function F(d, c, eo) { return '<path d="' + d + '" fill="' + (c || NAVY) + '" stroke="none"' + (eo ? ' fill-rule="evenodd"' : '') + '></path>'; }
+        function S(d, w, c) { return '<path d="' + d + '" fill="none" stroke="' + (c || NAVY) + '" stroke-width="' + w + '"></path>'; }
+        function C(cx, cy, r, c) { return '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + (c || NAVY) + '" stroke="none"></circle>'; }
+        function svg(inner, color) {
+            return '<svg class="ha-sign" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"' + (color ? ' style="color:' + color + '"' : '') + '>' + inner + '</svg>';
+        }
+        function hasAny(text, list) { for (var i = 0; i < list.length; i++) if (text.indexOf(list[i]) >= 0) return true; return false; }
+
+        function amenity(name) {
+            var a = String(name || '').toLowerCase();
+            var has = function () { return hasAny(a, [].slice.call(arguments)); };
+            var g;
+            if (has('wifi', 'wi-fi', 'internet')) g = S('M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M2 9a14 14 0 0 1 20 0', '2') + C(12, 19.5, 1.6);
+            else if (has('park')) g = F('M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z', BLUE)
+                + F('M9 6.5h4.2a3.7 3.7 0 0 1 0 7.4h-1.7v3.6H9zM11.5 8.8v2.8h1.6a1.4 1.4 0 0 0 0-2.8z', '#FFFFFF', true);
+            else if (has('wash', 'toilet', 'restroom', 'rest room')) g = C(6.8, 4.4, 1.9) + F('M4.8 7.8h4a1.1 1.1 0 0 1 1.1 1.1v5.4H8.8v6.2H7.4v-5H6.2v5H4.8v-6.2H3.7V8.9a1.1 1.1 0 0 1 1.1-1.1z')
+                + C(17.2, 4.4, 1.9) + F('M15.8 7.8h2.8l2.5 7.2h-2.1v5.5h-1.4v-5.5h-.8v5.5h-1.4v-5.5h-2.1z') + S('M12 3v18', '1.2');
+            else if (has('shower')) g = S('M5 21V7a3 3 0 0 1 6 0v.5', '1.8') + F('M8 9.5a5 5 0 0 1 10 0z')
+                + C(10, 13, 1, BLUE) + C(13, 14, 1, BLUE) + C(16, 13, 1, BLUE) + C(11.5, 17, 1, BLUE) + C(14.5, 17, 1, BLUE);
+            else if (has('chang', 'locker')) g = S('M12 6.8a1.8 1.8 0 1 0-1.8-1.8M12 6.8v1.4L3.4 14.6c-.9.7-.4 2.1.7 2.1h15.8c1.1 0 1.6-1.4.7-2.1L12 8.2', '1.8');
+            else if (has('cafe', 'coffee', 'canteen')) g = F('M4 9h12v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5z') + S('M16 10.5h1.5a2.5 2.5 0 0 1 0 5H16M7 3.5c-.8 1 .8 1.8 0 3M11 3.5c-.8 1 .8 1.8 0 3', '1.6') + F('M3 20.5h14v1.2H3z');
+            else if (has('food', 'restaurant', 'kitchen')) g = S('M7 3v5a2 2 0 0 0 4 0V3M9 3v18', '1.8') + F('M17.5 3c-2 .8-3.3 3.3-3.3 7.2h2v10.8h1.8V3z');
+            else if (has('water', 'drink')) g = F('M12 2.2s2.7 3 2.7 4.8a2.7 2.7 0 0 1-5.4 0c0-1.8 2.7-4.8 2.7-4.8z', BLUE)
+                + F('M7.7 14h8.6l-.6 6.1H8.3z', BLUE) + S('M6.5 10h11l-1.2 10.6a1 1 0 0 1-1 .9H8.7a1 1 0 0 1-1-.9z', '1.6');
+            else if (has('light', 'flood')) g = F('M5 2.5h14a1 1 0 0 1 1 1V8a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1z')
+                + C(8, 5.75, 1.4, '#FDE68A') + C(12, 5.75, 1.4, '#FDE68A') + C(16, 5.75, 1.4, '#FDE68A')
+                + S('M12 9v12M8.5 21h7', '1.8') + S('M7.5 11 5.5 14M16.5 11l2 3', '1.4', '#F59E0B');
+            else if (has('seat', 'gallery', 'chair', 'bench', 'stand')) g = F('M7 3h10a1 1 0 0 1 1 1v8H6V4a1 1 0 0 1 1-1z') + F('M4.5 13h15a1 1 0 0 1 1 1v1.6h-17V14a1 1 0 0 1 1-1z') + S('M6.5 15.6V21M17.5 15.6V21', '1.8');
+            else if (a === 'ac' || has('a/c', 'air con', 'aircon', 'air-con', 'air condition', 'cool')) g = S('M12 3v18M4.2 7.5l15.6 9M4.2 16.5l15.6-9M9.5 4.5 12 7l2.5-2.5M9.5 19.5 12 17l2.5 2.5', '1.7', BLUE);
+            else if (has('first aid', 'first-aid', 'medical', 'medic')) g = F('M6 3h12a3 3 0 0 1 3 3v12a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V6a3 3 0 0 1 3-3z', '#FFFFFF') + S('M6 3.8h12A2.2 2.2 0 0 1 20.2 6v12a2.2 2.2 0 0 1-2.2 2.2H6A2.2 2.2 0 0 1 3.8 18V6A2.2 2.2 0 0 1 6 3.8z', '1.2', '#DC2626')
+                + F('M10 6.5h4v3.5h3.5v4H14v3.5h-4V14H6.5v-4H10z', '#DC2626');
+            else if (has('cctv', 'secur', 'guard', 'safe')) g = F('M3 7.6 15.6 4.2l1.4 5.2L4.4 12.8z') + F('M17.4 5.6l2.8-.8 1 3.6-2.8.8z')
+                + C(6.3, 9.2, .9, '#EF4444') + S('M9 11.6l1.1 4H5.5V21', '1.8');
+            else if (has('equip', 'gear', 'gym', 'kit')) g = F('M2 10h2v4H2zM4.8 7h3v10h-3zM16.2 7h3v10h-3zM20 10h2v4h-2zM7.8 11h8.4v2H7.8z');
+            else g = S('M20 6 9 17l-5-5', '2');
+            return svg(g);
+        }
+
+        // A prohibition is the real sign: the thing itself in ink under a red ring and slash.
+        function inkF(d) { return '<path d="' + d + '" fill="' + INK + '" stroke="none"></path>'; }
+        function inkS(d, w) { return '<path d="' + d + '" stroke="' + INK + '" stroke-width="' + w + '"></path>'; }
+        function dot(cx, cy) { return inkF('M' + (cx - 1.35) + ' ' + cy + 'a1.35 1.35 0 1 0 2.7 0a1.35 1.35 0 1 0-2.7 0z'); }
+        var PICTO = {
+            smoke: inkF('M4.5 13.2h10.3v2.6H4.5z') + inkF('M15.5 13.2h1.3v2.6h-1.3z') + inkF('M17.5 13.2h1.1v2.6h-1.1z')
+                + inkS('M16.4 11.8c0-1.4 1.6-1.4 1.6-2.8s-1.6-1.4-1.6-2.8', '1.3'),
+            alcohol: inkF('M8.3 5.5h1.8v2.7c.9.5 1.4 1.3 1.4 2.3v7.7H6.9v-7.7c0-1 .5-1.8 1.4-2.3z')
+                + inkF('M13.4 10h4.6l-.4 2.6a1.9 1.9 0 0 1-3.8 0z') + inkS('M15.7 14.5v3.4M14.3 18h2.8', '1.2'),
+            food: inkS('M8 6v3.6a1.6 1.6 0 0 0 3.2 0V6M9.6 6v12.5', '1.4') + inkF('M16.2 6c-1.6.6-2.6 2.6-2.6 5.6h1.6v6.9h1.4V6z'),
+            pet: inkF('M12 11.6c-2.2 0-4 2.6-4 4.3 0 1.3 1 1.9 2.1 1.9.8 0 1.2-.4 1.9-.4s1.1.4 1.9.4c1.1 0 2.1-.6 2.1-1.9 0-1.7-1.8-4.3-4-4.3z')
+                + dot(8.35, 10.6) + dot(10.6, 8) + dot(13.4, 8) + dot(15.65, 10.6),
+            shoe: inkF('M5.2 15.6V9.8h2.9l1.3 1.9c1.7.4 4.6.8 6.6 1.4 1.4.4 2.1 1.2 2.1 2.2v.3z') + inkS('M5.2 17.3h13', '1.3'),
+            none: '',
+        };
+        function rule(text, cancellation) {
+            var raw = String(text || ''), r = raw.trim().toLowerCase();
+            var has = function () { return hasAny(r, [].slice.call(arguments)); };
+            var isCancel = (cancellation && raw === cancellation) || has('cancel', 'refund');
+            if (!isCancel && (r.indexOf('no ') === 0 || has('not allowed', 'prohibited', 'banned', "don't", 'do not'))) {
+                var kind = has('smok', 'cigar', 'tobacco', 'gutka', 'gutkha', 'pan masala', 'vap', 'beedi', 'bidi') ? 'smoke'
+                    : has('food', 'eat', 'snack', 'meal', 'chew') ? 'food'
+                    : has('alcohol', 'liquor', 'beer', 'wine', 'drink', 'booze', 'drunk') ? 'alcohol'
+                    : has('pet', 'dog', 'animal') ? 'pet'
+                    : has('shoe', 'footwear', 'spike', 'stud', 'boot', 'chappal', 'slipper', 'heel') ? 'shoe' : 'none';
+                return svg(PICTO[kind] + '<path d="M4.9 4.9l14.2 14.2" stroke="#fff" stroke-width="3.6" stroke-linecap="butt"></path><circle cx="12" cy="12" r="10" stroke-width="2.2"></circle><path d="M4.9 4.9l14.2 14.2" stroke-width="2.2" stroke-linecap="butt"></path>', '#DC2626');
+            }
+            if (isCancel) return svg('<circle cx="12" cy="13" r="8"></circle><path d="M12 9v4l2.5 2M9.5 2.5h5"></path>', BLUE);
+            if (has('mandatory', 'required', 'must', 'compulsory')) return svg('<path d="M12 3.5 21.5 20h-19z"></path><path d="M12 10v4.2M12 17.2v.01"></path>', '#B45309');
+            if (has('book', 'reserv')) return svg('<path d="M6.5 5.5h11A1.5 1.5 0 0 1 19 7v11a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 18V7a1.5 1.5 0 0 1 1.5-1.5zM5 10h14M9 3.5v4M15 3.5v4"></path>', BLUE);
+            return svg('<circle cx="12" cy="12" r="9"></circle><path d="M12 11v5.5M12 7.8v.01"></path>', BLUE);
+        }
+        return { amenity: amenity, rule: rule };
+    })();
+
     function detailsCard(d, published, commission) {
         var html = '<section class="ha-vcard"><div class="ha-row ha-vhead"><b class="ha-grow">Venue details</b>';
         if (d) {
@@ -472,8 +551,9 @@
             + '</div>';
         var imgs = d.images || [];
         if (imgs.length) html += '<b class="ha-vsec">Photos · ' + imgs.length + '</b><div class="ha-vphotos">' + imgs.map(function (src) { return '<img src="' + esc(src) + '" alt="" loading="lazy">'; }).join('') + '</div>';
-        if ((d.amenities || []).length) html += '<b class="ha-vsec">Amenities</b><div class="ha-chips">' + d.amenities.map(function (a) { return '<span>' + esc(a) + '</span>'; }).join('') + '</div>';
-        if ((d.rules || []).length) html += '<b class="ha-vsec">House rules</b><ul class="ha-rules">' + d.rules.map(function (r) { return '<li>' + esc(r) + '</li>'; }).join('') + '</ul>';
+        // Amenities and rules with the signs customers see on the venue page.
+        if ((d.amenities || []).length) html += '<b class="ha-vsec">Amenities</b><div class="ha-chips ha-amen">' + d.amenities.map(function (a) { return '<span>' + SIGN.amenity(a) + esc(a) + '</span>'; }).join('') + '</div>';
+        if ((d.rules || []).length) html += '<b class="ha-vsec">House rules</b><ul class="ha-rules ha-rules--signs">' + d.rules.map(function (r) { return '<li>' + SIGN.rule(r, d.cancellation) + '<span>' + esc(r) + '</span></li>'; }).join('') + '</ul>';
         // Haraan's fees on the player's bill aren't the partner's to see; their commission is.
         if (d.cancellation || commission) {
             html += '<b class="ha-vsec">Policy &amp; charges</b><div class="ha-keylines">'

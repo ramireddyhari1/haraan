@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
@@ -185,18 +184,20 @@ internal fun VenueDetailsCard(d: VenueDetails?, published: Boolean, commission: 
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                d.amenities.forEach { Chip(it) }
+                d.amenities.forEach { AmenityChip(it) }
             }
         }
 
+        // Each rule with the sign customers see on the venue page: a red no-entry over the
+        // thing itself for a prohibition, an amber alert for a must, plain info otherwise.
         if (d.rules.isNotEmpty()) {
             Section("House rules")
-            Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(Modifier.padding(horizontal = 18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
                 d.rules.forEach { r ->
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(5.dp).clip(CircleShape).background(Faint))
+                    Row(verticalAlignment = Alignment.Top) {
+                        RuleSign(r, d.cancellation.orEmpty(), Modifier.padding(top = 1.dp).size(18.dp))
                         Spacer(Modifier.width(10.dp))
-                        Text(r, fontSize = 13.5.sp, color = Ink)
+                        Text(r, fontSize = 13.5.sp, color = Ink, lineHeight = 19.sp)
                     }
                 }
             }
@@ -249,13 +250,18 @@ private fun Section(title: String) {
     )
 }
 
+/** An amenity with the sign customers see on the venue page (the blue P, the man and woman…). */
 @Composable
-private fun Chip(text: String) {
-    Text(
-        text, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, color = Ink,
-        modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Soft)
-            .border(1.dp, Hairline, RoundedCornerShape(10.dp)).padding(horizontal = 11.dp, vertical = 7.dp),
-    )
+private fun AmenityChip(text: String) {
+    Row(
+        Modifier.clip(RoundedCornerShape(10.dp)).background(Soft)
+            .border(1.dp, Hairline, RoundedCornerShape(10.dp)).padding(start = 9.dp, end = 11.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AmenitySign(text, Modifier.size(18.dp))
+        Spacer(Modifier.width(7.dp))
+        Text(text, fontSize = 12.5.sp, fontWeight = FontWeight.Medium, color = Ink)
+    }
 }
 
 @Composable

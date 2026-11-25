@@ -146,6 +146,13 @@ html.ha-app.ha-full .ha-nav-cap { opacity: .9; box-shadow: 0 10px 20px -6px rgba
 .ha-rules { margin: 0; padding: 0 18px; list-style: none; display: grid; gap: 6px; }
 .ha-rules li { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
 .ha-rules li::before { content: ""; width: 5px; height: 5px; border-radius: 99px; background: var(--ha-faint); flex: none; }
+/* Amenity and rule signs: the same drawings as the public venue page. */
+.ha-amen span { display: inline-flex; align-items: center; gap: 7px; padding: 6px 11px 6px 9px; }
+.ha-sign { width: 18px; height: 18px; flex: none; }
+.ha-rules--signs { gap: 9px; }
+.ha-rules--signs li { align-items: flex-start; line-height: 19px; }
+.ha-rules--signs li::before { content: none; }
+.ha-rules--signs .ha-sign { margin-top: 1px; }
 .ha-keylines { padding: 0 18px; display: grid; gap: 8px; }
 .ha-keylines p { font-size: 13.5px; line-height: 19px; }
 .ha-keylines small { display: block; font-size: 11.5px; color: var(--ha-muted); }
