@@ -656,6 +656,51 @@ final class Venue extends Model
         return Booking::query()->where('venue_id', $this->id)->exists();
     }
 
+    /**
+     * Re-price Haraan's commission (`host_deduction`) on this venue's bookings that haven't
+     * been paid out yet, at {@see commissionPercent()}. Online bookings only — a desk booking
+     * never carries commission. Commission is on the court value after discount:
+     * total_amount − convenience_fee, the same base the booking was first priced on.
+     *
+     * "Not paid out" = no live per-booking payout row, and booked after the partner's last
+     * settlement batch (batches are amount-level, so anything up to the latest one may be
+     * inside it and is left as it was).
+     *
+     * @return int bookings changed
+     */
+    public function recomputeUnsettledCommission(): int
+    {
+        $percent = $this->commissionPercent();
+        $lastBatch = $this->partner_id === null ? null : PayoutBatch::query()
+            ->where('partner_id', $this->partner_id)
+            ->whereRaw('lower(status) != ?', ['failed'])
+            ->max('created_at');
+
+        $rows = Booking::query()
+            ->where('venue_id', $this->id)
+            ->where('booking_type', 'venue')
+            ->where(fn (Builder $q) => $q->whereNull('channel')
+                ->orWhereNotIn(\Illuminate\Support\Facades\DB::raw('lower(channel)'), Booking::DESK_CHANNELS))
+            ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('payouts')
+                ->whereColumn('payouts.booking_id', 'bookings.id')
+                ->whereRaw('lower(payouts.status) != ?', ['failed']))
+            ->when($lastBatch !== null, fn (Builder $q) => $q->where('created_at', '>', $lastBatch))
+            ->get(['id', 'total_amount', 'convenience_fee', 'host_deduction']);
+
+        $changed = 0;
+        foreach ($rows as $b) {
+            $base = max(0.0, (float) $b->total_amount - (float) $b->convenience_fee);
+            $commission = round($base * $percent / 100, 2);
+            if (abs($commission - (float) $b->host_deduction) >= 0.005) {
+                // forceFill: host_deduction is money the ledger reads — set it deliberately.
+                $b->forceFill(['host_deduction' => $commission])->saveQuietly();
+                $changed++;
+            }
+        }
+
+        return $changed;
+    }
+
     protected static function booted(): void
     {
         // A new venue has no reviews, so it has no rating — not the column's '4.5' default.
@@ -674,6 +719,15 @@ final class Venue extends Model
         static::deleting(function (Venue $venue): void {
             if ($venue->hasBookings()) {
                 throw new \DomainException("Venue #{$venue->id} has bookings and cannot be deleted. Deactivate it instead.");
+            }
+        });
+
+        // Haraan's commission changed in /control: every booking not yet paid out is worked
+        // out again at the new rate, so "0%" means the partner is owed the lot from now on —
+        // not only for bookings made after the change. Settled money is never touched.
+        static::updated(function (Venue $venue): void {
+            if ($venue->wasChanged('commission_percent')) {
+                $venue->recomputeUnsettledCommission();
             }
         });
 

@@ -229,6 +229,71 @@ final class Booking extends Model
         return max(0.0, round($sum, 2));
     }
 
+    /**
+     * The slot value in SQL — what a partner sees and is paid on. A venue row's
+     * `total_amount` includes the online fees (convenience, gateway, named fees), which
+     * Haraan keeps, so they come off; tax already sits outside total_amount. Event rows
+     * are untouched (their `total_amount` is the tickets alone).
+     */
+    public const SLOT_VALUE_SQL = "(coalesce(total_amount, 0) - CASE WHEN booking_type = 'venue' THEN coalesce(convenience_fee, 0) ELSE 0 END)";
+
+    /** The court's price for this booking after any discount — no fees, no tax. */
+    public function slotValue(): float
+    {
+        if ($this->booking_type !== 'venue') {
+            return round((float) $this->total_amount, 2);
+        }
+
+        return round(max(0.0, (float) $this->total_amount - (float) $this->convenience_fee), 2);
+    }
+
+    /** What the customer paid on top of the slot (fees + tax) — Haraan's, paid online up front. */
+    public function chargesOnTop(): float
+    {
+        if ($this->booking_type !== 'venue') {
+            return 0.0;
+        }
+
+        return round(max(0.0, (float) $this->convenience_fee) + max(0.0, (float) $this->tax_amount), 2);
+    }
+
+    /**
+     * Slot money received so far, as the partner sees it: what was paid less the fees and
+     * tax that rode along on the online payment. ₹136 online for a ₹400 slot with a ₹16 fee
+     * is ₹120 toward the slot.
+     */
+    public function partnerPaid(): float
+    {
+        return round(min($this->slotValue(), max(0.0, (float) $this->amount_paid - $this->chargesOnTop())), 2);
+    }
+
+    /** Ways the venue takes money itself, at its own counter — never through Haraan. */
+    public const DESK_PAYMENT_METHODS = ['cash', 'upi', 'card'];
+
+    /**
+     * What Haraan owes the partner for this booking: only money that passed through Haraan
+     * (Razorpay), less Haraan's commission / host fees.
+     *
+     *  - Online booking: the booking's value, less the advance balance the venue takes at
+     *    its desk (`pay_at_venue`), less `host_deduction`. Tax sits outside total_amount.
+     *  - Desk booking (walk-in / WhatsApp): only what was paid through a Haraan QR or link.
+     *    Cash, the venue's own UPI or card never reached Haraan — counting the booking's
+     *    full value made a ₹7,400 day of cash walk-ins read as money Haraan owed.
+     */
+    public function partnerPayable(): float
+    {
+        if ($this->isDeskBooking()) {
+            $online = (float) $this->payments()
+                ->whereNotIn(\Illuminate\Support\Facades\DB::raw('lower(method)'), self::DESK_PAYMENT_METHODS)
+                ->sum('amount');
+
+            return round(max(0.0, $online - (float) $this->host_deduction), 2);
+        }
+
+        // The slot value — the online fees are Haraan's — less the venue-collected balance.
+        return round(max(0.0, $this->slotValue() - (float) ($this->pay_at_venue ?? 0) - (float) $this->host_deduction), 2);
+    }
+
     /** What the customer still owes. Zero once settled, never negative. */
     public function balanceDue(): float
     {

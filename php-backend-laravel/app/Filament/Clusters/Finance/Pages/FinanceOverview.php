@@ -76,9 +76,10 @@ class FinanceOverview extends Page
 
         $gross = (float) $paid()->sum('total_amount');
         // What Haraan itself keeps — the same expression as the Command Center: customer-paid
-        // platform and gateway fees, event convenience fees, and what came off hosts' payouts.
+        // platform and gateway fees, convenience fees (venue fees too — the partner is paid on
+        // the slot value only), and what came off hosts' payouts.
         $ours = (float) $paid()->sum(DB::raw(
-            "platform_fee + gateway_fee + host_deduction + CASE WHEN booking_type = 'venue' THEN 0 ELSE convenience_fee END"
+            "coalesce(platform_fee, 0) + coalesce(gateway_fee, 0) + coalesce(host_deduction, 0) + coalesce(convenience_fee, 0)"
         ));
         $tax = (float) $paid()->sum('tax_amount');
         $refunded = (float) Booking::query()->whereRaw('lower(status) = ?', ['refunded'])

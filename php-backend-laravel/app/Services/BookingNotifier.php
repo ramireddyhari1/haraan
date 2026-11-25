@@ -390,7 +390,8 @@ final class BookingNotifier
     /** "Rs.1,200 paid online" or "Rs.1,200 · Rs.800 due at the desk". @param list<Booking> $rows */
     private function amountSummary(array $rows): string
     {
-        $charged = array_sum(array_map(fn (Booking $r): float => $r->amountCharged(), $rows));
+        // The owner sees slot prices only — never the online fees or tax (Haraan's).
+        $charged = array_sum(array_map(fn (Booking $r): float => $r->slotValue(), $rows));
         $due = array_sum(array_map(fn (Booking $r): float => $r->balanceDue(), $rows));
 
         $money = fn (float $v): string => 'Rs.' . number_format($v, fmod($v, 1.0) === 0.0 ? 0 : 2);

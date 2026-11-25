@@ -53,13 +53,53 @@ final class PartnerSettlement
      */
     public function collected(int $partnerId): float
     {
-        $paid = $this->bookings($partnerId)->whereIn(DB::raw('lower(status)'), self::PAID_BOOKING);
+        return $this->collectedBreakdown($partnerId)['net'];
+    }
 
-        // pay_at_venue: the balance of an advance booking, collected by the venue itself at
-        // its desk — it never passed through Haraan, so it is not Haraan's to pay out.
-        return max(0.0, (float) (clone $paid)->sum('total_amount')
-            - (float) (clone $paid)->sum('pay_at_venue')
-            - (float) (clone $paid)->sum('host_deduction'));
+    /**
+     * The payout basis, in the order a partner reads it: what came in through Haraan
+     * (`gross`, the venue's share of it — tax excluded), less Haraan's commission / host
+     * fees (`commission`), leaving what's owed (`net`). Same rule as
+     * {@see Booking::partnerPayable()}: online bookings less the advance balance taken at
+     * the venue; desk bookings (walk-in, WhatsApp) only for money paid through a Haraan QR
+     * or link — their cash never reached Haraan.
+     *
+     * `tax` is the online tax customers paid on top (Haraan's, never the venue's): gross +
+     * tax is what Razorpay collected on these bookings.
+     *
+     * @return array{gross: float, tax: float, commission: float, net: float}
+     */
+    public function collectedBreakdown(int $partnerId): array
+    {
+        $paid = $this->bookings($partnerId)->whereIn(DB::raw('lower(status)'), self::PAID_BOOKING);
+        $desk = Booking::DESK_CHANNELS;
+        $notDesk = fn (Builder $q) => $q->where(fn (Builder $w) => $w
+            ->whereNull('channel')
+            ->orWhereNotIn(DB::raw('lower(channel)'), $desk));
+
+        $online = (clone $paid)->where($notDesk);
+        // Slot money only: the online fees (convenience, gateway, named) and tax are
+        // Haraan's — never paid out — so the partner's gross is the slot value online.
+        $onlineGross = (float) (clone $online)->sum(DB::raw(Booking::SLOT_VALUE_SQL)) - (float) (clone $online)->sum('pay_at_venue');
+        $onlineCommission = (float) (clone $online)->sum('host_deduction');
+        $tax = 0.0;
+
+        $deskRows = (clone $paid)->whereIn(DB::raw('lower(channel)'), $desk);
+        $deskGross = (float) \App\Models\BookingPayment::query()
+            ->whereIn('booking_id', (clone $deskRows)->select('bookings.id'))
+            ->whereNotIn(DB::raw('lower(method)'), Booking::DESK_PAYMENT_METHODS)
+            ->sum('amount');
+        $deskCommission = (float) (clone $deskRows)->sum('host_deduction');
+
+        $gross = max(0.0, $onlineGross + $deskGross);
+        $commission = max(0.0, $onlineCommission + $deskCommission);
+
+        return [
+            'gross' => round($gross, 2),
+            'tax' => round(max(0.0, $tax), 2),
+            'commission' => round($commission, 2),
+            'net' => round(max(0.0, $gross - $commission), 2),
+        ];
     }
 
     /** The platform's share of this partner's paid bookings (host-paid fees + commission). */

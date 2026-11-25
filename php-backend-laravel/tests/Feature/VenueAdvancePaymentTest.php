@@ -150,6 +150,165 @@ class VenueAdvancePaymentTest extends TestCase
         $this->assertEqualsWithDelta(120.0, app(PartnerSettlement::class)->collected($this->owner->id), 0.01);
     }
 
+    public function test_partner_sees_the_advance_online_and_collects_the_balance_in_cash(): void
+    {
+        $this->book(['payMode' => 'advance'])->assertCreated();
+        $this->confirm();
+        $booking = Booking::query()->latest('id')->firstOrFail();
+
+        $this->withHeader('Authorization', 'Bearer '.JwtService::issueForUser(
+            $this->owner,
+            (string) config('app.jwt_secret', env('JWT_SECRET', 'change_me')),
+        ));
+
+        $row = collect($this->getJson('/api/partner/bookings?date='.today()->toDateString())
+            ->assertOk()->json('data'))->firstWhere('id', $booking->id);
+        $this->assertEqualsWithDelta(1200.0, $row['amount'], 0.01);
+        $this->assertEqualsWithDelta(240.0, $row['amount_paid'], 0.01);
+        $this->assertEqualsWithDelta(960.0, $row['pay_at_venue'], 0.01);
+        $this->assertEqualsWithDelta(240.0, $row['paid_split']['online'], 0.01);
+
+        $this->getJson('/api/partner/today')->assertOk()
+            ->assertJsonPath('data.money.online', 240)
+            ->assertJsonPath('data.money.at_venue_due', 960)
+            ->assertJsonPath('data.money.due', 960);
+
+        // The player turns up and pays the rest in cash.
+        $this->postJson("/api/partner/bookings/{$booking->id}/collect", ['method' => 'cash'])
+            ->assertOk()->assertJsonPath('paid', true);
+
+        $booking->refresh();
+        $this->assertSame('paid', strtolower((string) $booking->payment_status));
+        $this->assertEqualsWithDelta(0.0, $booking->balanceDue(), 0.01);
+
+        // Two ways, not one: ₹240 online and ₹960 cash — never ₹1,200 "cash".
+        $row = collect($this->getJson('/api/partner/bookings?date='.today()->toDateString())
+            ->assertOk()->json('data'))->firstWhere('id', $booking->id);
+        $this->assertSame('cash', $row['payment_method']);
+        $this->assertEqualsWithDelta(240.0, $row['paid_split']['online'], 0.01);
+        $this->assertEqualsWithDelta(960.0, $row['paid_split']['cash'], 0.01);
+        // And as two payments in the feed, each with its own way and time.
+        $this->assertSame(['online', 'cash'], array_column($row['payments'], 'method'));
+        $this->assertEqualsWithDelta(240.0, $row['payments'][0]['amount'], 0.01);
+        $this->assertEqualsWithDelta(960.0, $row['payments'][1]['amount'], 0.01);
+        $this->assertNotNull($row['payments'][1]['at']);
+
+        $this->getJson('/api/partner/today')->assertOk()
+            ->assertJsonPath('data.money.online', 240)
+            ->assertJsonPath('data.money.cash', 960)
+            ->assertJsonPath('data.money.due', 0);
+
+        // "Through Haraan" is what Razorpay took — the ₹240 advance — not the ₹1,200 booking.
+        $this->getJson('/api/partner/insights')->assertOk()
+            ->assertJsonPath('data.haraan.all_time.count', 1)
+            ->assertJsonPath('data.haraan.all_time.amount', 240)
+            ->assertJsonPath('data.haraan.all_time.at_venue', 960)
+            ->assertJsonPath('data.haraan.all_time.booked', 1200);
+
+        // A walk-in paid ₹500 cash at the desk never reached Haraan: it changes nothing owed.
+        $walkIn = Booking::forceCreate([
+            'booking_type' => 'venue', 'venue_id' => $this->venue->id, 'user_id' => $this->owner->id,
+            'channel' => 'offline', 'status' => 'CONFIRMED', 'payment_status' => 'unpaid',
+            'slot_date' => today()->toDateString(), 'start_time' => '06:00', 'end_time' => '07:00',
+            'quantity' => 1, 'total_amount' => 500, 'amount_paid' => 0, 'guest_name' => 'Cash Walkin',
+        ]);
+        app(\App\Services\BookingLedger::class)->collect($walkIn, 500, 'cash', $this->owner);
+        $this->assertEqualsWithDelta(0.0, $walkIn->refresh()->partnerPayable(), 0.01);
+
+        // Settlement reads like Razorpay: ₹240 paid online − ₹120 commission = ₹120 owed.
+        $this->getJson('/api/partner/payouts')->assertOk()
+            ->assertJsonPath('balance.breakdown.paid_online', 240)
+            ->assertJsonPath('balance.breakdown.commission', 120)
+            ->assertJsonPath('balance.breakdown.net', 120)
+            ->assertJsonPath('balance.collected', 120);
+
+        // Cash at the counter is never paid out: the payout is still the advance's share.
+        $this->assertEqualsWithDelta(120.0, app(PartnerSettlement::class)->collected($this->owner->id), 0.01);
+    }
+
+    public function test_partner_sees_slot_money_only_never_the_fees_or_tax(): void
+    {
+        \App\Support\PlatformRules::save(['fees.venue_tax_type' => 'percent', 'fees.venue_tax_value' => 18]);
+        $this->venue->update(['convenience_fee_type' => 'flat', 'convenience_fee_value' => 30]);
+
+        // Razorpay takes ₹240 advance + ₹30 fee + ₹216 tax (18% of ₹1,200) = ₹486.
+        $this->book(['payMode' => 'advance'])->assertCreated();
+        Http::assertSent(fn ($r) => str_contains($r->url(), '/v1/orders') && (int) $r->data()['amount'] === 48600);
+        $this->confirm();
+        $booking = Booking::query()->latest('id')->firstOrFail();
+        $this->assertEqualsWithDelta(1200.0, $booking->slotValue(), 0.01);
+
+        $this->withHeader('Authorization', 'Bearer '.JwtService::issueForUser(
+            $this->owner,
+            (string) config('app.jwt_secret', env('JWT_SECRET', 'change_me')),
+        ));
+
+        // The partner sees the ₹1,200 slot and the ₹240 slot advance — never the ₹30 fee or tax.
+        $row = collect($this->getJson('/api/partner/bookings?date='.today()->toDateString())
+            ->assertOk()->json('data'))->firstWhere('id', $booking->id);
+        $this->assertEqualsWithDelta(1200.0, $row['amount'], 0.01);
+        $this->assertEqualsWithDelta(240.0, $row['amount_paid'], 0.01);
+        $this->assertEqualsWithDelta(240.0, $row['paid_split']['online'], 0.01);
+        $this->assertEqualsWithDelta(240.0, $row['payments'][0]['amount'], 0.01);
+        $this->assertEqualsWithDelta(960.0, $row['amount'] - $row['amount_paid'], 0.01);
+
+        $grid = $this->getJson("/api/partner/venues/{$this->venue->id}/day?date=".today()->toDateString())->assertOk();
+        $this->assertStringContainsString('"amount":1200', $grid->getContent());
+
+        $this->getJson('/api/partner/today')->assertOk()
+            ->assertJsonPath('data.money.expected', 1200)
+            ->assertJsonPath('data.money.online', 240)
+            ->assertJsonPath('data.money.due', 960);
+
+        // Settlement: slot money online ₹240 − 10% commission on ₹1,200 (₹120) = ₹120.
+        $this->getJson('/api/partner/payouts')->assertOk()
+            ->assertJsonPath('balance.breakdown.paid_online', 240)
+            ->assertJsonPath('balance.breakdown.tax', 0)
+            ->assertJsonPath('balance.breakdown.net', 120);
+        $this->getJson('/api/partner/insights')->assertOk()
+            ->assertJsonPath('data.haraan.all_time.amount', 240);
+
+        // The balance in cash settles it: ₹960.
+        $this->postJson("/api/partner/bookings/{$booking->id}/collect", ['method' => 'cash'])->assertOk();
+        $booking->refresh();
+        $this->assertSame('paid', strtolower((string) $booking->payment_status));
+        $this->assertEqualsWithDelta(960.0, (float) $booking->payments()->where('method', 'cash')->sum('amount'), 0.01);
+        $this->assertEqualsWithDelta(1200.0, $booking->partnerPaid(), 0.01);
+    }
+
+    public function test_changing_the_commission_reprices_bookings_not_yet_paid_out(): void
+    {
+        // Booked at 10%: ₹120 commission on the ₹1,200 court.
+        $this->book(['payMode' => 'full'])->assertCreated();
+        $this->confirm();
+        $settledEarlier = Booking::query()->latest('id')->firstOrFail();
+        $this->assertEqualsWithDelta(120.0, (float) $settledEarlier->host_deduction, 0.01);
+
+        // Haraan settles with the partner: that booking is inside the batch now.
+        \App\Models\PayoutBatch::create([
+            'partner_id' => $this->owner->id, 'gross_amount' => 1200, 'amount' => 1080,
+            'commission_amount' => 120, 'status' => 'paid',
+        ]);
+
+        Carbon::setTestNow(Carbon::parse('2026-08-25 11:00:00'));
+        Http::fake(['api.razorpay.com/*' => Http::response(['id' => 'order_ADV1', 'amount' => 24000, 'currency' => 'INR'], 200)]);
+        $this->book(['payMode' => 'advance', 'date' => today()->addDay()->toDateString()])->assertCreated();
+        $this->confirm();
+        $unsettled = Booking::query()->latest('id')->firstOrFail();
+        $this->assertEqualsWithDelta(120.0, (float) $unsettled->host_deduction, 0.01);
+
+        // Admin sets the venue to 0% in /control.
+        $this->venue->refresh()->update(['commission_percent' => 0]);
+
+        $this->assertEqualsWithDelta(0.0, (float) $unsettled->refresh()->host_deduction, 0.01);
+        // Already paid out at 10% — left exactly as it was.
+        $this->assertEqualsWithDelta(120.0, (float) $settledEarlier->refresh()->host_deduction, 0.01);
+
+        // And back to 5%: ₹60 on the unsettled ₹1,200 court.
+        $this->venue->refresh()->update(['commission_percent' => 5]);
+        $this->assertEqualsWithDelta(60.0, (float) $unsettled->refresh()->host_deduction, 0.01);
+    }
+
     public function test_paying_in_full_is_unchanged(): void
     {
         $this->book(['payMode' => 'full'])->assertCreated();

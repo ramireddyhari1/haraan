@@ -227,8 +227,12 @@ final class VenueDayGrid
             'status'      => $x->status,
             'checked_in'  => (int) $x->checked_in_count,
             'ticket_code' => $x->ticket_code,
-            'amount'      => round((float) $x->total_amount, 2),
-            'amount_paid' => round((float) $x->amount_paid, 2),
+            // The slot price only — the online fees and tax are Haraan's, never shown to the
+            // partner — and the slot money received. amount − paid is the real balance.
+            'amount'      => $x->slotValue(),
+            'amount_paid' => $x->partnerPaid(),
+            // > 0 for an advance booking: the share to collect at the venue.
+            'pay_at_venue' => round((float) ($x->pay_at_venue ?? 0), 2),
             // unpaid | part | paid — drives the desk's "who still owes" chase list.
             'payment_status' => $x->payment_status,
         ];

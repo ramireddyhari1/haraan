@@ -223,11 +223,12 @@ class PartnerController extends Controller
         // Fourteen LOCAL days: a booking at 1 AM IST belongs to that morning,
         // not to the previous UTC date.
         $start = BusinessClock::now()->startOfDay()->subDays(13);
-        $rows = (clone $paid())->where('created_at', '>=', $start->copy()->utc())->get(['total_amount', 'created_at']);
+        $rows = (clone $paid())->where('created_at', '>=', $start->copy()->utc())->get(['total_amount', 'convenience_fee', 'booking_type', 'created_at']);
         $byDay = [];
         foreach ($rows as $row) {
             $k = BusinessClock::local($row->created_at)->format('Y-m-d');
-            $byDay[$k] = ($byDay[$k] ?? 0) + (float) $row->total_amount;
+            // Slot money only: the online fees are Haraan's, not the partner's revenue.
+            $byDay[$k] = ($byDay[$k] ?? 0) + $row->slotValue();
         }
         $trend = [];
         for ($i = 0; $i < 14; $i++) {
@@ -255,7 +256,7 @@ class PartnerController extends Controller
                 'total' => $venueIds->count(),
             ],
             'sales' => [
-                'revenue'        => round((float) (clone $paid())->sum('total_amount'), 2),
+                'revenue'        => round((float) (clone $paid())->sum(DB::raw(Booking::SLOT_VALUE_SQL)), 2),
                 'tickets_sold'   => (int) (clone $paid())->sum('quantity'),
                 'bookings_total' => (clone $paid())->count(),
                 // Today at the venue, not the server's UTC day.
@@ -484,7 +485,7 @@ class PartnerController extends Controller
             ->where('booking_type', 'venue')
             ->whereIn('venue_id', $venueIds)
             ->whereDate('slot_date', $date)
-            ->with(['user:id,name'])
+            ->with(['user:id,name', 'payments'])
             ->get();
 
         // A PENDING row is a player on the payment screen (or a checkout the release job
@@ -493,8 +494,17 @@ class PartnerController extends Controller
         $live = $bookings->reject(fn (Booking $b): bool => $this->isDead($b)
             || strtolower((string) $b->status) === 'pending');
 
-        $expected = round((float) $live->sum('total_amount'), 2);
-        $collected = round((float) $live->sum('amount_paid'), 2);
+        // What the customers were charged (an online booking's tax included), so a
+        // booking paid in full can't read as owing nothing while "collected" tops "expected".
+        // Slot money only — the partner sees court prices, never the online fees or tax
+        // (Haraan's), so "expected", "collected" and "due" are all in slot rupees.
+        $expected = round((float) $live->sum(fn (Booking $b): float => $b->slotValue()), 2);
+        $collected = round((float) $live->sum(fn (Booking $b): float => $b->partnerPaid()), 2);
+        // Where the money is: online came through Haraan (paid out later), the rest the
+        // desk already holds. Read off the ledger rows, not the booking's last method —
+        // an advance paid online + the balance in cash is two ways, not one.
+        $split = self::paidSplit($live);
+        $atVenueDue = round((float) $live->sum(fn (Booking $b): float => (float) ($b->pay_at_venue ?? 0) > 0 ? $b->balanceDue() : 0.0), 2);
 
         // Booked = court-hours taken, the same unit as the total, so the two can't
         // disagree the way "3 of 2" did. Each booking is placed by its slot or its own
@@ -547,8 +557,11 @@ class PartnerController extends Controller
                     : ($b->attendee_name ?: $b->user?->name ?: 'Guest'),
                 'venue'    => $venueName($b),
                 'court'    => $courtName($b),
-                'amount'   => round((float) $b->total_amount, 2),
+                'amount'   => $b->slotValue(),
                 'paid'     => strtolower((string) $b->payment_status) === 'paid',
+                // Owed at the counter: an advance booking's balance, or a walk-in's unpaid hour.
+                'due'      => $b->balanceDue(),
+                'advance'  => (float) ($b->pay_at_venue ?? 0) > 0,
                 'walk_in'  => strtolower((string) $b->channel) === 'offline',
             ];
         })->sortBy('sort')->values();
@@ -575,7 +588,13 @@ class PartnerController extends Controller
                 'money'     => [
                     'expected'  => $expected,
                     'collected' => $collected,
-                    'due'       => round(max($expected - $collected, 0), 2),
+                    'due'       => round((float) $live->sum(fn (Booking $b): float => $b->balanceDue()), 2),
+                    'online'    => $split['online'],
+                    'cash'      => $split['cash'],
+                    'upi'       => $split['upi'],
+                    'card'      => $split['card'],
+                    // Balances advance bookers still owe at the venue today.
+                    'at_venue_due' => $atVenueDue,
                 ],
                 'chase'     => $this->chaseTotal($venueIds),
                 'closed'    => $venues->whereIn('id', $blocked)
@@ -737,14 +756,14 @@ class PartnerController extends Controller
             ->whereIn('venue_id', $venueIds)
             ->whereRaw('lower(coalesce(payment_status, ?)) <> ?', ['unpaid', 'paid'])
             ->where('total_amount', '>', 0)
-            ->get(['status', 'total_amount', 'amount_paid'])
+            ->get(['status', 'booking_type', 'total_amount', 'tax_amount', 'amount_paid'])
             // A hold waiting on a QR is not money owed; it pays or it lapses.
             ->reject(fn (Booking $b): bool => $this->isDead($b) || strtolower((string) $b->status) === 'pending');
 
         return [
             'count'  => $owed->count(),
             'amount' => round(
-                (float) $owed->sum(fn (Booking $b): float => max((float) $b->total_amount - (float) $b->amount_paid, 0)),
+                (float) $owed->sum(fn (Booking $b): float => $b->balanceDue()),
                 2,
             ),
         ];
@@ -1242,7 +1261,10 @@ class PartnerController extends Controller
      */
     private function mintDeskPayment(Booking $booking, Venue $venue, string $want, bool $native = false): array
     {
-        $amount = round(max((float) $booking->total_amount - (float) $booking->amount_paid, 0.0), 2);
+        // What is still owed against what the customer was CHARGED: an online booking's
+        // tax sits outside total_amount, so total − paid asked an advance booker for less
+        // than the balance and left it 'partial' after they paid it.
+        $amount = $booking->balanceDue();
         $minutes = \App\Support\PlatformRules::int('bookings.desk_qr_minutes');
         $paise = (int) round($amount * 100);
         $notes = ['booking_id' => (string) $booking->id];
@@ -1394,7 +1416,7 @@ class PartnerController extends Controller
             ->where('booking_id', $booking->id)->where('reference', $paymentId)->exists();
 
         if (! $already) {
-            $amount = $state['amount_paid'] > 0 ? $state['amount_paid'] : (float) $booking->total_amount;
+            $amount = $state['amount_paid'] > 0 ? $state['amount_paid'] : $booking->balanceDue();
             $this->ledger->collect($booking, $amount, 'online', null, $paymentId, match ($kind) {
                 'upi_qr' => 'Razorpay UPI QR',
                 'order'  => 'Razorpay checkout',
@@ -1510,7 +1532,9 @@ class PartnerController extends Controller
             $booking = $this->bookings->confirmDeskHold($booking);
         }
 
-        $due = round((float) $booking->total_amount - (float) $booking->amount_paid, 2);
+        // The balance against what was charged (tax included), so an advance booking's
+        // balance taken in cash actually settles it.
+        $due = $booking->balanceDue();
         if ($due > 0) {
             $this->ledger->collect($booking, $due, $data['method'], $request->user());
             $booking->refresh();
@@ -2815,7 +2839,7 @@ class PartnerController extends Controller
             ->with('user:id,name,phone')
             ->orderByDesc('created_at')
             ->limit(5000)
-            ->get(['id', 'user_id', 'channel', 'guest_name', 'guest_phone', 'total_amount', 'slot_date', 'created_at']);
+            ->get(['id', 'user_id', 'booking_type', 'channel', 'guest_name', 'guest_phone', 'total_amount', 'convenience_fee', 'slot_date', 'created_at']);
 
         $byPhone = [];
         $anonymous = 0;
@@ -2848,7 +2872,7 @@ class PartnerController extends Controller
 
             $c = &$byPhone[$phone];
             $c['bookings']++;
-            $c['spent'] += (float) $b->total_amount;
+            $c['spent'] += $b->slotValue();
             // Keep the most recently used name — people get re-typed at the desk.
             if ($c['last_visit'] === null || ($when !== null && $when->gt($c['last_visit']))) {
                 $c['last_visit'] = $when;
@@ -2941,6 +2965,19 @@ class PartnerController extends Controller
                 'settled'   => round($net['paidOut'], 2),
                 'withheld'  => round($net['withheld'], 2),
                 'collected' => round($s['collected'], 2),
+                // How `collected` is reached, so it can be checked against Razorpay:
+                // paid online (incl. tax) − tax − Haraan commission = collected. Cash and
+                // the venue's own UPI/card never pass through Haraan and aren't in it.
+                'breakdown' => (function () use ($settlement, $partnerId): array {
+                    $b = $settlement->collectedBreakdown($partnerId);
+
+                    return [
+                        'paid_online' => round($b['gross'] + $b['tax'], 2),
+                        'tax'         => $b['tax'],
+                        'commission'  => $b['commission'],
+                        'net'         => $b['net'],
+                    ];
+                })(),
             ],
             'account' => $account === null ? null : [
                 'method'         => $account->method,
@@ -3573,7 +3610,8 @@ class PartnerController extends Controller
             ->where('venue_id', $venue->id)
             ->whereIn(DB::raw('lower(status)'), self::PAID_STATUSES);
 
-        $revenue   = (float) $paid()->sum('total_amount');
+        // Slot money only — the online fees are Haraan's.
+        $revenue   = (float) $paid()->sum(DB::raw(Booking::SLOT_VALUE_SQL));
         $bookings  = (int) $paid()->count();
         $checkedIn = (int) $paid()->sum('checked_in_count');
 
@@ -3602,11 +3640,11 @@ class PartnerController extends Controller
         // not to the previous UTC date.
         $start = BusinessClock::now()->startOfDay()->subDays(13);
         $rows = (clone $paid())->where('created_at', '>=', $start->copy()->utc())
-            ->get(['total_amount', 'created_at']);
+            ->get(['total_amount', 'convenience_fee', 'booking_type', 'created_at']);
         $byDay = [];
         foreach ($rows as $row) {
             $k = BusinessClock::local($row->created_at)->format('Y-m-d');
-            $byDay[$k]['rev'] = ($byDay[$k]['rev'] ?? 0) + (float) $row->total_amount;
+            $byDay[$k]['rev'] = ($byDay[$k]['rev'] ?? 0) + $row->slotValue();
             $byDay[$k]['cnt'] = ($byDay[$k]['cnt'] ?? 0) + 1;
         }
         $series = [];
@@ -3680,7 +3718,7 @@ class PartnerController extends Controller
             ),
             'sports'   => is_array($v->sports) ? array_values(array_filter($v->sports)) : [],
             'bookings' => (clone $paid)->count(),
-            'revenue'  => round((float) (clone $paid)->sum('total_amount'), 2),
+            'revenue'  => round((float) (clone $paid)->sum(DB::raw(Booking::SLOT_VALUE_SQL)), 2),
             // Haraan's cut, set in /control — the partner reads it, never sets it.
             'commission_percent' => $v->commissionPercent(),
             'commission_label'   => $v->commissionLabel(),
@@ -3694,7 +3732,12 @@ class PartnerController extends Controller
             'id'           => $b->id,
             'ticket_code'  => $b->ticket_code,
             'quantity'     => (int) $b->quantity,
-            'amount'       => round((float) $b->total_amount, 2),
+            // The slot price only: the online fees and tax are Haraan's and never shown to
+            // the partner. amount − amount_paid is still the real balance (fees and tax are
+            // always paid online up front).
+            'amount'       => $b->slotValue(),
+            // > 0 when they chose Pay advance: this much is to be collected at the venue.
+            'pay_at_venue' => round((float) ($b->pay_at_venue ?? 0), 2),
             'status'       => $b->status,
             'checked_in'   => (int) $b->checked_in_count,
             'slot_date'    => optional($b->slot_date)->toDateString() ?? $b->slot_date,
@@ -3716,7 +3759,7 @@ class PartnerController extends Controller
             'email'        => $b->isDeskBooking()
                 ? null
                 : ($b->attendee_email ?: $b->user?->email ?: null),
-            'amount_paid'  => round((float) $b->amount_paid, 2),
+            'amount_paid'  => $b->partnerPaid(),
             'payment_status' => $b->payment_status,
             // HOW it was taken, not just whether. Reads the last collected row on
             // the ledger; null means no money was ever recorded against this
@@ -3724,6 +3767,68 @@ class PartnerController extends Controller
             'payment_method' => $b->relationLoaded('payments')
                 ? $b->payments->last(fn ($p) => (float) $p->amount > 0)?->method
                 : null,
+            // Every way the money came in, from the ledger: an advance paid online and
+            // the balance in cash is online + cash, not "cash" for the lot.
+            'paid_split' => $b->relationLoaded('payments') ? self::paidSplit(collect([$b])) : null,
+            // Each payment on its own, when and how it came in: an advance paid online in
+            // the morning and the balance in cash that evening are two lines in a feed.
+            'payments' => $b->relationLoaded('payments') ? self::partnerPayments($b) : null,
         ];
+    }
+
+    /**
+     * Money in by how it came, summed off the booking_payments ledger (refund rows are
+     * negative, so they net out). `online` is anything through Razorpay — checkout, a
+     * desk QR or link — which Haraan pays out later; cash / upi / card is in the till.
+     *
+     * @param  \Illuminate\Support\Collection<int, Booking>  $bookings  with `payments` loaded
+     * @return array{online: float, cash: float, upi: float, card: float}
+     */
+    private static function paidSplit($bookings): array
+    {
+        $out = ['online' => 0.0, 'cash' => 0.0, 'upi' => 0.0, 'card' => 0.0];
+        foreach ($bookings as $b) {
+            foreach (self::partnerPayments($b) as $p) {
+                $key = in_array($p['method'], ['cash', 'upi', 'card'], true) ? $p['method'] : 'online';
+                $out[$key] += $p['amount'];
+            }
+        }
+
+        return array_map(fn (float $v): float => round(max($v, 0.0), 2), $out);
+    }
+
+    /**
+     * A booking's payments as the partner sees them: slot money only. The online fees and
+     * tax rode along on the first online payment (₹136 = ₹120 slot advance + ₹16 fee), so
+     * they come off the online payments first; a payment that was all fees drops out.
+     *
+     * @return list<array{method: string, amount: float, at: string|null}>
+     */
+    private static function partnerPayments(Booking $b): array
+    {
+        $charges = $b->chargesOnTop();
+        $out = [];
+        foreach ($b->payments ?? [] as $p) {
+            $amount = (float) $p->amount;
+            if ($amount <= 0) {
+                continue;
+            }
+            $method = strtolower((string) $p->method);
+            if ($charges > 0 && ! in_array($method, Booking::DESK_PAYMENT_METHODS, true)) {
+                $take = min($charges, $amount);
+                $amount -= $take;
+                $charges -= $take;
+            }
+            if ($amount <= 0.004) {
+                continue;
+            }
+            $out[] = [
+                'method' => $method,
+                'amount' => round($amount, 2),
+                'at'     => optional($p->collected_at ?? $p->created_at)->toIso8601String(),
+            ];
+        }
+
+        return $out;
     }
 }

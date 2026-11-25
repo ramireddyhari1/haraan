@@ -221,8 +221,8 @@ class VenueBookingUserToPartnerTest extends TestCase
         $this->assertEqualsWithDelta(1466.0, (float) $booking->amount_paid, 0.01);
         $this->assertSame('paid', $booking->payment_status);
 
-        // The venue is owed its court time and fee — not the tax.
-        $this->assertEqualsWithDelta(1250.0, app(PartnerSettlement::class)->collected($this->owner->id), 0.01);
+        // The venue is owed its court time only — the ₹50 fee and the tax are Haraan's.
+        $this->assertEqualsWithDelta(1200.0, app(PartnerSettlement::class)->collected($this->owner->id), 0.01);
     }
 
     public function test_pulse_tax_is_taken_on_the_price_after_the_coupon(): void

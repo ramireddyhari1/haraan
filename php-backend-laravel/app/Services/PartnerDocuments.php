@@ -268,9 +268,10 @@ final class PartnerDocuments
                 'customer' => $k->channel === 'offline' ? ($k->guest_name ?: 'Walk-in') : ($k->attendee_name ?: 'Online customer'),
                 'channel' => $k->channel === 'offline' ? 'Desk' : 'Online',
                 'status' => ucfirst(strtolower((string) $k->status)),
-                'amount' => (float) $k->total_amount,
+                // Slot price; the online fees are Haraan's and never on a partner statement.
+                'amount' => $k->slotValue(),
                 'deduction' => (float) $k->host_deduction,
-                'share' => max(0.0, (float) $k->total_amount - (float) $k->host_deduction),
+                'share' => $k->partnerPayable(),
             ]);
     }
 

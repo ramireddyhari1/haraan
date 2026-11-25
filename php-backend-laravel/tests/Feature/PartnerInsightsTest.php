@@ -203,18 +203,33 @@ final class PartnerInsightsTest extends TestCase
     public function test_haraan_brought_counts_online_bookings_and_real_players(): void
     {
         $today = BusinessClock::today();
-        $this->booking($today, '06:00', '07:00', 'online', 1000);
-        $this->booking($today, '07:00', '08:00', 'whatsapp', 400);
-        $this->booking($today, '08:00', '09:00', 'offline', 500);
+        $ledger = app(\App\Services\BookingLedger::class);
+        $pay = function (Booking $b, float $amount, string $method) use ($ledger): void {
+            \App\Models\BookingPayment::query()->create([
+                'booking_id' => $b->id, 'amount' => $amount, 'method' => $method, 'collected_at' => now(),
+            ]);
+            $ledger->recompute($b);
+        };
+        $pay($this->booking($today, '06:00', '07:00', 'online', 1000), 1000, 'online');
+        // A WhatsApp desk hold paid by its payment link — Razorpay money.
+        $pay($this->booking($today, '07:00', '08:00', 'whatsapp', 400), 400, 'online');
+        $pay($this->booking($today, '08:00', '09:00', 'offline', 500), 500, 'cash');
         $this->booking($today, '14:00', '15:00', 'online', 900, 'CANCELLED');
+        // An advance booking: ₹300 online, ₹700 balance in cash at the venue.
+        $adv = $this->booking($today, '16:00', '17:00', 'online', 1000);
+        $pay($adv, 300, 'online');
+        $pay($adv, 700, 'cash');
 
         $h = $this->insights()->assertOk()->json('data.haraan');
 
-        $this->assertSame(2, $h['all_time']['count']);
-        $this->assertEquals(1400, $h['all_time']['amount']);
-        $this->assertSame(2, $h['this_month']['count']);
-        $this->assertSame(1, $h['players']);          // the app booking's player; WhatsApp desk rows point at the partner
-        $this->assertEquals(0.67, $h['share']);
+        $this->assertSame(3, $h['all_time']['count']);
+        // What Razorpay took: 1000 + 400 + the 300 advance — never the advance's cash balance.
+        $this->assertEquals(1700, $h['all_time']['amount']);
+        $this->assertEquals(700, $h['all_time']['at_venue']);
+        $this->assertEquals(2400, $h['all_time']['booked']);
+        $this->assertSame(3, $h['this_month']['count']);
+        $this->assertSame(2, $h['players']);          // the app bookings' players; WhatsApp desk rows point at the partner
+        $this->assertEquals(0.75, $h['share']);
     }
 
     public function test_growth_only_climbs_and_leaves_future_bookings_out(): void

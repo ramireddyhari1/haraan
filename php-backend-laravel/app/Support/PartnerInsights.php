@@ -173,8 +173,8 @@ final class PartnerInsights
         return Booking::query()
             ->where('booking_type', 'venue')
             ->whereIn('venue_id', $venueIds)
-            ->with('user:id,name,phone')
-            ->get(['id', 'user_id', 'venue_id', 'slot_date', 'start_time', 'status', 'channel', 'total_amount', 'guest_name', 'guest_phone', 'attendee_name', 'created_at'])
+            ->with(['user:id,name,phone', 'payments:id,booking_id,amount,method'])
+            ->get(['id', 'user_id', 'venue_id', 'booking_type', 'slot_date', 'start_time', 'status', 'channel', 'total_amount', 'convenience_fee', 'tax_amount', 'guest_name', 'guest_phone', 'attendee_name', 'created_at'])
             ->filter(fn (Booking $b): bool => CourtOccupancy::isLive($b))
             ->sortBy(fn (Booking $b): string => (string) $b->created_at)
             ->values();
@@ -209,11 +209,11 @@ final class PartnerInsights
             $p['first'] = min($p['first'], $date);
             $p['name'] = $name;          // the latest spelling the desk typed
             $p['via'] = $channel;
-            $p['spent'] += (float) $b->total_amount;
+            $p['spent'] += $b->slotValue();
             $p['visits'][] = [
                 'date'    => $date,
                 'time'    => $start === null ? '' : Carbon::today()->addMinutes($start)->format('g:i A'),
-                'amount'  => (float) $b->total_amount,
+                'amount'  => $b->slotValue(),
                 'channel' => $channel,
             ];
             unset($p);
@@ -294,7 +294,24 @@ final class PartnerInsights
 
             return $d->gte($from) && $d->lte($to);
         });
-        $sum = fn (Collection $rows): array => ['count' => $rows->count(), 'amount' => round((float) $rows->sum('total_amount'), 2)];
+        // `amount` is the slot money that actually came through Haraan — the Razorpay
+        // payments on the ledger, less the online fees and tax riding on them (Haraan's,
+        // never shown to the partner). An advance booking's at-the-venue balance isn't
+        // Haraan money. `booked` is the slots' value; `at_venue` what was paid at the counter.
+        $deskWays = ['cash', 'upi', 'card'];
+        $paidBy = function (Booking $b, bool $online) use ($deskWays): float {
+            $sum = (float) $b->payments
+                ->filter(fn ($p): bool => in_array(strtolower((string) $p->method), $deskWays, true) !== $online)
+                ->sum('amount');
+
+            return $online ? max(0.0, $sum - $b->chargesOnTop()) : $sum;
+        };
+        $sum = fn (Collection $rows): array => [
+            'count'    => $rows->count(),
+            'amount'   => round(max(0.0, (float) $rows->sum(fn (Booking $b): float => $paidBy($b, true))), 2),
+            'booked'   => round((float) $rows->sum(fn (Booking $b): float => $b->slotValue()), 2),
+            'at_venue' => round(max(0.0, (float) $rows->sum(fn (Booking $b): float => $paidBy($b, false))), 2),
+        ];
         $thisMonthStart = $today->copy()->startOfMonth();
         $lastMonthStart = $thisMonthStart->copy()->subMonth();
 
@@ -332,7 +349,7 @@ final class PartnerInsights
             $end = $monthly ? $cursor->copy()->endOfMonth() : $cursor->copy()->addDays(6);
             while ($i < $played->count() && Carbon::parse($played[$i]->slot_date)->lte($end)) {
                 $count++;
-                $money += (float) $played[$i]->total_amount;
+                $money += $played[$i]->slotValue();
                 $i++;
             }
             $points[] = [
@@ -445,7 +462,7 @@ final class PartnerInsights
             ->whereIn('venue_id', $ids)
             ->whereDate('slot_date', '>=', $from->toDateString())
             ->whereDate('slot_date', '<=', $to->toDateString())
-            ->get(['id', 'venue_id', 'venue_slot_id', 'venue_court_id', 'slot_date', 'start_time', 'end_time', 'status', 'channel', 'total_amount'])
+            ->get(['id', 'venue_id', 'booking_type', 'venue_slot_id', 'venue_court_id', 'slot_date', 'start_time', 'end_time', 'status', 'channel', 'total_amount', 'convenience_fee'])
             ->filter(fn (Booking $b): bool => CourtOccupancy::isLive($b))
             ->groupBy(fn (Booking $b): string => Carbon::parse($b->slot_date)->toDateString());
     }
@@ -491,7 +508,7 @@ final class PartnerInsights
                     }
                 }
 
-                $amount = (float) $b->total_amount;
+                $amount = $b->slotValue();
                 $channel = $this->channelOf($b);
                 $out['revenue'] += $amount;
                 $out['channels'][$channel]['amount'] += $amount;

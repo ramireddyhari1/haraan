@@ -287,8 +287,10 @@ class CommandCenter extends Page
      */
     private function platformRevenue(?Carbon $since): float
     {
+        // Venue fees (convenience, gateway, named) are Haraan's too since 2026-11-23 — the
+        // partner is paid on the slot value only.
         return (float) $this->inWindow($this->paid(), $since)->sum(DB::raw(
-            "platform_fee + gateway_fee + host_deduction + CASE WHEN booking_type = 'venue' THEN 0 ELSE convenience_fee END"
+            "coalesce(platform_fee, 0) + coalesce(gateway_fee, 0) + coalesce(host_deduction, 0) + coalesce(convenience_fee, 0)"
         ));
     }
 
@@ -296,7 +298,19 @@ class CommandCenter extends Page
     private function buildLedger(): array
     {
         $allPaid = $this->paid()->where(fn ($q) => $q->whereNotNull('event_id')->orWhereNotNull('venue_id'));
-        $earned = (float) (clone $allPaid)->sum('total_amount') - (float) (clone $allPaid)->sum('pay_at_venue') - (float) (clone $allPaid)->sum('host_deduction');
+        // Owed = slot value (online fees are Haraan's) less the balance venues take at their
+        // desk, less commission — and desk bookings only for money paid through a Haraan QR
+        // or link: a cash walk-in never reached Haraan. Same rule as Booking::partnerPayable().
+        $notDesk = fn ($q) => $q->where(fn ($w) => $w->whereNull('channel')
+            ->orWhereNotIn(DB::raw('lower(channel)'), Booking::DESK_CHANNELS));
+        $online = (clone $allPaid)->where($notDesk);
+        $desk = (clone $allPaid)->whereIn(DB::raw('lower(channel)'), Booking::DESK_CHANNELS);
+        $earned = (float) (clone $online)->sum(DB::raw(Booking::SLOT_VALUE_SQL))
+            - (float) (clone $online)->sum('pay_at_venue') - (float) (clone $online)->sum('host_deduction')
+            + (float) \App\Models\BookingPayment::query()
+                ->whereIn('booking_id', (clone $desk)->select('bookings.id'))
+                ->whereNotIn(DB::raw('lower(method)'), Booking::DESK_PAYMENT_METHODS)->sum('amount')
+            - (float) (clone $desk)->sum('host_deduction');
         $settled = (float) Payout::query()->whereIn(DB::raw('lower(status)'), PartnerSettlement::SETTLED_PAYOUT)->sum('amount')
             // A settlement's gross leaves what partners are owed, including the commission and tax it held back.
             + (float) PayoutBatch::query()->whereIn(DB::raw('lower(status)'), PayoutBatch::PAID)->sum(DB::raw('COALESCE(gross_amount, amount + commission_amount)'));

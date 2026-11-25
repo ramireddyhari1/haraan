@@ -545,6 +545,13 @@ What is Haraan ball tracking? | It is the ball-tracking feature in the Haraan cr
             $changes[(string) $key] = ['from' => $before, 'to' => $parsed];
         }
 
+        // The default commission moved: venues that follow it (no rate of their own) re-price
+        // their not-yet-paid-out bookings, the same as when a venue's own rate is changed.
+        if (isset($changes['fees.venue_commission_percent'])) {
+            \App\Models\Venue::query()->whereNull('commission_percent')->get()
+                ->each(fn (\App\Models\Venue $v) => $v->recomputeUnsettledCommission());
+        }
+
         return $changes;
     }
 

@@ -187,7 +187,7 @@ final class RazorpayBilling
         // Razorpay reports paise; fall back to the booking's own total if it's absent.
         $amount = isset($payment['amount'])
             ? ((int) $payment['amount']) / 100
-            : (float) $booking->total_amount;
+            : $booking->balanceDue();
 
         $this->ledger->collect($booking, $amount, 'online', null, $paymentId ?: null, 'Razorpay payment link');
 
