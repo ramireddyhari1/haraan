@@ -50,6 +50,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.haraan.app.ui.Feel
@@ -233,23 +234,32 @@ internal fun HaraanFloatingNav(
     selectedIndex: Int,
     onSelect: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    slim: Float = 0f,
     avatarUrl: String? = null,
     hasUnreadAlerts: Boolean = false,
 ) {
     val view = LocalView.current
     val shape = RoundedCornerShape(32.dp)
     val index = selectedIndex.coerceIn(0, FloatingNavItems.lastIndex)
+    // 0 = full bar, 1 = slim bar while reading down a list (Instagram-style). Driven
+    // by the caller from scroll distance, so it already moves with the finger.
+    val slim = slim.coerceIn(0f, 1f)
 
     Box(
         modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 10.dp)
+            .padding(
+                start = lerp(16.dp, 26.dp, slim),
+                end = lerp(16.dp, 26.dp, slim),
+                top = 6.dp,
+                bottom = lerp(10.dp, 8.dp, slim),
+            )
     ) {
         Row(
             Modifier
                 .fillMaxWidth()
-                .height(64.dp)
+                .height(lerp(64.dp, 54.dp, slim))
                 // A wide, low-opacity tinted shadow reads as lift; the default grey
                 // elevation shadow reads as a Material card.
                 .shadow(
@@ -262,7 +272,7 @@ internal fun HaraanFloatingNav(
                 .clip(shape)
                 .background(Color.White)
                 .border(BorderStroke(1.dp, NavHairline), shape)
-                .padding(6.dp),
+                .padding(lerp(6.dp, 5.dp, slim)),
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -273,6 +283,7 @@ internal fun HaraanFloatingNav(
                     selected = selected,
                     avatarUrl = if (item.label == "Player") avatarUrl else null,
                     showDot = item.label == "Alerts" && hasUnreadAlerts,
+                    slim = slim,
                     onClick = {
                         if (!selected) view.performHapticFeedback(Feel.SELECT)
                         onSelect(i)
@@ -289,6 +300,7 @@ private fun RowScope.NavSlot(
     selected: Boolean,
     avatarUrl: String?,
     showDot: Boolean,
+    slim: Float,
     onClick: () -> Unit,
 ) {
     val interaction = remember { MutableInteractionSource() }
@@ -345,7 +357,12 @@ private fun RowScope.NavSlot(
             horizontalArrangement = Arrangement.Center,
             modifier = Modifier.padding(horizontal = 10.dp),
         ) {
-            Box(Modifier.size(24.dp), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .size(24.dp)
+                    .graphicsLayer { val s = 1f - 0.06f * slim; scaleX = s; scaleY = s },
+                contentAlignment = Alignment.Center,
+            ) {
                 var avatarFailed by remember(avatarUrl) { mutableStateOf(false) }
                 if (!avatarUrl.isNullOrBlank() && !avatarFailed) {
                     // The Player tab is the account's own face. The ring does the job
@@ -401,7 +418,7 @@ private fun RowScope.NavSlot(
                 Spacer(Modifier.width(7.dp * open))
                 Text(
                     item.label,
-                    fontSize = 13.5.sp,
+                    fontSize = (13.5f - 0.5f * slim).sp,
                     fontWeight = FontWeight.Bold,
                     letterSpacing = (-0.1).sp,
                     color = lerp(NavIdle, NavAccent, open),

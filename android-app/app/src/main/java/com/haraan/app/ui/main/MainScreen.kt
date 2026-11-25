@@ -231,6 +231,7 @@ import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.TransformOrigin
@@ -5054,12 +5055,63 @@ private fun CrexMatchesScreen(
     inbox?.threads?.firstOrNull { it.id == wanted }?.let { openThread = it }
   }
 
-  Box(modifier = Modifier.fillMaxSize()) {
+  // Instagram-style bar: the floating nav slims as you read down a list and grows back as
+  // you scroll up. It FOLLOWS the finger (progress tracks scroll distance, so it moves
+  // exactly as fast as the content), then glides to fully slim or fully open when the
+  // scroll ends, so it never rests half-way. Listens to every scrollable inside the
+  // scaffold (board, feed, chat, profile) via nested scroll, and counts only distance
+  // the content actually moved, so an overscroll pull at the top or bottom never moves it.
+  val navSlim = remember { Animatable(0f) }
+  val navSlimRangePx = with(androidx.compose.ui.platform.LocalDensity.current) { 120.dp.toPx() }
+  val navScrollWatcher = remember(navSlimRangePx) {
+    object : androidx.compose.ui.input.nestedscroll.NestedScrollConnection {
+      override fun onPostScroll(
+        consumed: Offset,
+        available: Offset,
+        source: androidx.compose.ui.input.nestedscroll.NestedScrollSource,
+      ): Offset {
+        val dy = consumed.y
+        if (dy != 0f) {
+          val next = (navSlim.value - dy / navSlimRangePx).coerceIn(0f, 1f)
+          if (next != navSlim.value) scope.launch { navSlim.snapTo(next) }
+        }
+        return Offset.Zero
+      }
+
+      override suspend fun onPostFling(
+        consumed: androidx.compose.ui.unit.Velocity,
+        available: androidx.compose.ui.unit.Velocity,
+      ): androidx.compose.ui.unit.Velocity {
+        val v = navSlim.value
+        if (v > 0f && v < 1f) {
+          navSlim.animateTo(
+            if (v >= 0.5f) 1f else 0f,
+            androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 260f),
+          )
+        }
+        return androidx.compose.ui.unit.Velocity.Zero
+      }
+    }
+  }
+  // Back at the very top of the board, or on a tab switch, the bar is always full size.
+  val boardAtTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+  LaunchedEffect(boardAtTop, showHomeFeed, showProfile, showChatList) {
+    if (boardAtTop || showHomeFeed || showProfile || showChatList) {
+      navSlim.animateTo(0f, androidx.compose.animation.core.spring(dampingRatio = 1f, stiffness = 260f))
+    }
+  }
+
+  Box(
+    modifier = Modifier
+      .fillMaxSize()
+      .nestedScroll(navScrollWatcher)
+  ) {
   Scaffold(
     containerColor = Color.Transparent,
     contentWindowInsets = WindowInsets(0),
     bottomBar = {
       CrexBottomBar(
+        slim = navSlim.value,
         // Home (social feed), Chat and Player all render inside this scaffold as tabs, so
         // the active slot follows whichever is up; otherwise the board (Matches) is showing.
         current = if (showHomeFeed) "Home" else if (showProfile) "Player" else if (showChatList) "Chat" else "Matches",
@@ -11912,6 +11964,7 @@ private fun SportFilterRow(selected: String, onSelected: (String) -> Unit, showA
 @Composable
 private fun CrexBottomBar(
   current: String,
+  slim: Float = 0f,
   onHomeClick: () -> Unit,
   onMatchesClick: () -> Unit = {},
   onChatClick: () -> Unit = {},
@@ -11922,6 +11975,7 @@ private fun CrexBottomBar(
 ) {
   HaraanFloatingNav(
     selectedIndex = FloatingNavLabels.indexOf(current).coerceAtLeast(0),
+    slim = slim,
     avatarUrl = avatarUrl,
     // No per-user unread count exists yet — the old bar's always-on dot was fake.
     hasUnreadAlerts = false,
