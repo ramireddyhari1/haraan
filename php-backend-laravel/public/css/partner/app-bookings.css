@@ -453,6 +453,16 @@ button.ha-dk-cell:active:not(:disabled) { transform: scale(.95); transition-dura
 .ha-bk-ledger p.is-due b { color: #DC2626; font-size: 14px; font-weight: 800; }
 .ha-bk-ledger p.is-small { border-top: 1px solid #F1F5F9; font-size: 12px !important; }
 .ha-bk-ledger p em { font-style: normal; font-size: 11.5px; font-weight: 700; color: #1D4ED8; }
+/* Collect the balance at the counter (BookingDetailsSheet): one tap for how they paid. */
+.ha-bk-collect { margin: -4px 0 14px; }
+.ha-bk-collect p { margin: 0 0 8px !important; font-size: 13px !important; font-weight: 600; color: #0B1220; }
+.ha-bk-collect div { display: flex; gap: 8px; }
+.ha-bk-collect button { flex: 1; height: 46px; border: 0; border-radius: 12px; background: #2563EB; color: #fff; font: 700 14px Inter, system-ui, sans-serif; cursor: pointer; transition: transform .12s, opacity .16s; }
+.ha-bk-collect button.is-cash { background: #16A34A; }
+.ha-bk-collect button:active { transform: scale(.96); }
+.ha-bk-collect button:disabled { opacity: .55; cursor: default; }
+.ha-bk-collect button.is-busy { opacity: 1; animation: ha-bk-busy .9s ease-in-out infinite alternate; }
+@keyframes ha-bk-busy { to { opacity: .6; } }
 .ha-bk-off { padding: 14px; border-radius: 12px; background: #FEF2F2; color: #DC2626; text-align: center; font-size: 13px; font-weight: 700; }
 .ha-bk-in { display: flex; align-items: center; justify-content: center; gap: 8px; height: 48px; border-radius: 12px; background: #ECFDF3; color: #15803D; font-size: 14px; font-weight: 700; }
 .ha-bk-in .ha-ic { width: 18px; height: 18px; }

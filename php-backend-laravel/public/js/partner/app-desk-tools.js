@@ -1303,10 +1303,15 @@
             + '<ellipse cx="' + f(cx) + '" cy="' + f(cy) + '" rx="' + f(r * 0.55) + '" ry="' + f(r * 0.25) + '" fill="none" stroke="rgba(255,255,255,.4)"/></g>';
     }
 
+    function shareLine(label, amount, cls) {
+        return '<p class="' + (cls || '') + '"><span>' + label + '</span><b>' + (amount < 0 ? '− ' : '') + money(Math.abs(amount)) + '</b></p>';
+    }
+
     /** The money's road, drawn: till, Haraan holding it, the bank. Coins sit where the money is. */
     function moneyPath(p) {
         var b = p.balance || {}, a = p.account, where = a && a.masked;
         var available = +b.available || 0, inFlight = +b.in_flight || 0, settled = +b.settled || 0, collected = +b.collected || 0;
+        var bd = b.breakdown || null, paidOnline = bd ? +bd.paid_online || 0 : 0;
         var note = !a ? 'Add where to send it. Nothing is transferred until you do.' : inFlight > 0 ? money(inFlight) + ' is on its way to ' + where + '.'
             : !a.verified ? 'Haraan checks your account first, then sends it to ' + where + '.' : available > 0 ? 'The next transfer goes to ' + where + '.' : 'Everything collected has been sent to ' + where + '.';
         var W = 330, H = 86, cy = H * 0.55, xs = [W / 6, W / 2, W * 5 / 6], r = 25, atH = available > 0, moving = inFlight > 0;
@@ -1325,7 +1330,15 @@
         return '<section class="ha-dt-card ha-dt-pad"><small class="ha-dt-cap">Waiting to be settled</small>'
             + '<b class="ha-dt-big" data-to="' + available + '">' + money(available) + '</b><p class="ha-dt-lead">' + esc(note) + '</p>'
             + '<svg class="ha-dt-road" viewBox="0 0 ' + W + ' ' + H + '" aria-hidden="true">' + svg + '</svg>'
-            + '<div class="ha-dt-stops"><span><b>' + money(collected) + '</b><small>Collected</small></span><span><b>' + money(moving ? inFlight : available) + '</b><small>' + (moving ? 'On the way' : 'With Haraan') + '</small></span><span><b>' + money(settled) + '</b><small>In your bank</small></span></div></section>';
+            // "Paid online" is what customers paid through Haraan, the same figure Razorpay
+            // shows; the share after commission read as a mismatch next to it.
+            + '<div class="ha-dt-stops"><span><b>' + money(bd ? paidOnline : collected) + '</b><small>' + (bd ? 'Paid online' : 'Collected') + '</small></span><span><b>' + money(moving ? inFlight : available) + '</b><small>' + (moving ? 'On the way' : 'With Haraan') + '</small></span><span><b>' + money(settled) + '</b><small>In your bank</small></span></div>'
+            + (bd && paidOnline > 0 ? '<div class="ha-dt-share">' + shareLine('Paid online by customers', paidOnline)
+                + (+bd.tax > 0 ? shareLine('Tax on online bookings', -bd.tax, 'is-mute') : '')
+                + (+bd.commission > 0 ? shareLine('Haraan commission', -bd.commission, 'is-mute') : '')
+                + '<i></i>' + shareLine('Your share', +bd.net || 0, 'is-net')
+                + '<small>Cash and UPI you took at the counter are already yours, so they aren’t in this.</small></div>' : '')
+            + '</section>';
     }
 
     function guilloche(id) {

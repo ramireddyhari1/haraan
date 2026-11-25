@@ -112,7 +112,31 @@
             amount: amount, paid: paid, balance: balance, payStatus: String(b.payment_status || ''), method: b.payment_method || null,
             slotDate: b.slot_date || '', slotLabel: b.slot_label || '', cancelled: cancelled,
             due: balance > 0 && !cancelled && amount > 0 && !awaiting,
+            // Paid an advance online; `balance` is what's left to take at the venue.
+            advance: (+b.pay_at_venue || 0) > 0,
+            split: splitOf(b.paid_split, b.payment_method, paid),
         };
+    }
+
+    /**
+     * How the money came in (PaidSplit): online through Haraan vs cash / UPI / card at the
+     * desk. An older server sends only the last method, so it all goes there, as before.
+     */
+    function splitOf(raw, method, paid) {
+        if (raw && typeof raw === 'object') return { online: +raw.online || 0, cash: +raw.cash || 0, upi: +raw.upi || 0, card: +raw.card || 0 };
+        var s = { online: 0, cash: 0, upi: 0, card: 0 }, m = String(method || '').toLowerCase();
+        if (paid > 0) s[m === 'cash' || m === 'upi' || m === 'card' ? m : 'online'] = paid;
+        return s;
+    }
+
+    /** "ONLINE + CASH": every way a booking was paid, not just the last one. */
+    function waysLabel(sp) {
+        var w = [];
+        if (sp.online > 0) w.push('ONLINE');
+        if (sp.cash > 0) w.push('CASH');
+        if (sp.upi > 0) w.push('UPI');
+        if (sp.card > 0) w.push('CARD');
+        return w.length ? w.join(' + ') : null;
     }
 
     /** The day's numbers (calculateStats): cells for capacity, the bookings for money. */
@@ -131,19 +155,19 @@
                 total += +s.capacity || 0; booked += +s.booked || 0; open += +s.available || 0; expected += (+s.booked || 0) * (+s.price || 0);
             }
         });
-        var collected = 0, due = 0, chase = 0, cash = 0, upi = 0, online = 0;
+        var collected = 0, due = 0, chase = 0, cash = 0, upi = 0, card = 0, online = 0;
         var live = (items || []).filter(function (b) { return !b.cancelled; });
         live.forEach(function (b) {
             collected += b.paid;
             if (b.due) { due += b.balance; chase++; }
-            var m = String(b.method || '').toLowerCase();
-            if (m.indexOf('cash') >= 0) cash += b.paid; else if (m.indexOf('upi') >= 0) upi += b.paid; else online += b.paid;
+            // Every way it was paid, not the last method: an advance online + cash balance is both.
+            cash += b.split.cash; upi += b.split.upi; card += b.split.card; online += b.split.online;
         });
         // A session spent from a pass is ₹0, a discounted walk-in its own price.
         if (live.length) expected = live.reduce(function (t, b) { return t + b.amount; }, 0);
         return {
             total: total, booked: booked, open: open, rate: total > 0 ? Math.min(1, booked / total) : 0,
-            expected: expected, collected: collected, due: due, chase: chase, cash: cash, upi: upi, online: online,
+            expected: expected, collected: collected, due: due, chase: chase, cash: cash, upi: upi, card: card, online: online,
             blocked: !!(grid && grid.is_blocked),
         };
     }
@@ -287,7 +311,7 @@
 
     function statsCard(st, canManage) {
         var share = st.expected > 0 ? Math.min(1, st.collected / st.expected) : 0;
-        var split = [st.cash > 0 ? 'Cash ' + rupees(st.cash) : null, st.upi > 0 ? 'UPI ' + rupees(st.upi) : null, st.online > 0 ? 'Online ' + rupees(st.online) : null].filter(Boolean);
+        var split = [st.cash > 0 ? 'Cash ' + rupees(st.cash) : null, st.upi > 0 ? 'UPI ' + rupees(st.upi) : null, st.card > 0 ? 'Card ' + rupees(st.card) : null, st.online > 0 ? 'Online ' + rupees(st.online) : null].filter(Boolean);
         var pct = Math.round(st.rate * 100);
         return '<section class="ha-dk-stats">'
             + (st.blocked ? '<div class="ha-dk-closed">' + ic('block') + '<b>Venue closed on this day</b>' + (canManage ? '<button type="button" data-reopen>Reopen</button>' : '') + '</div>' : '')
@@ -385,7 +409,10 @@
                 + '<div class="ha-dk-who"><b>' + esc(b.customer) + '</b>'
                 + (b.cancelled ? '<em class="is-off">Cancelled</em>' : b.checkedIn ? '<em class="is-in">Checked in</em>' : '')
                 + '<small>' + esc([b.walkIn ? 'Walk-in' : 'Online', b.slotLabel, b.ticket].filter(Boolean).join(' · ')) + '</small></div>'
-                + '<div class="ha-dk-amt"><b>' + rupees(b.amount) + '</b>' + (b.cancelled ? '' : b.due ? '<small class="is-due">' + rupees(b.balance) + ' due</small>' : '<small class="is-paid">Paid</small>') + '</div>'
+                + '<div class="ha-dk-amt"><b>' + rupees(b.amount) + '</b>' + (b.cancelled ? '' : b.due
+                    // An advance booker owes the rest at the counter: say so, so it isn't read as unpaid.
+                    ? '<small class="is-due">' + (b.advance ? 'AT VENUE: ' : 'DUE: ') + rupees(b.balance) + '</small>'
+                    : '<small class="is-paid">' + esc(waysLabel(b.split) || 'PAID') + '</small>') + '</div>'
                 + (b.cancelled ? '' : '<div class="ha-dk-itemacts">'
                     + (digits.length >= 10 ? '<a href="tel:+91' + digits.slice(-10) + '" aria-label="Call">' + ic('phone') + '</a><a href="https://wa.me/91' + digits.slice(-10) + '" target="_blank" rel="noopener" aria-label="WhatsApp" class="is-wa">' + ic('chat') + '</a>' : '')
                     + (!b.checkedIn ? '<button type="button" data-checkin="' + esc(b.ticket) + '">Check-in</button>' : '') + '</div>')
@@ -913,6 +940,17 @@
 
     /* ====================================================== BOOKING DETAILS SHEET === */
 
+    /** Each way the money came in on its own line: an advance online and the balance in cash are two payments. */
+    function waysHtml(b) {
+        var sp = b.split, rows = [];
+        if (sp.online > 0) rows.push([b.advance ? 'Advance paid online' : 'Paid online', sp.online]);
+        if (sp.cash > 0) rows.push(['Cash at venue', sp.cash]);
+        if (sp.upi > 0) rows.push(['UPI at venue', sp.upi]);
+        if (sp.card > 0) rows.push(['Card at venue', sp.card]);
+        if (!rows.length) rows.push(['Paid', b.paid]);
+        return rows.map(function (r) { return '<p><span>' + r[0] + '</span><b class="is-in">' + rupees(r[1]) + '</b></p>'; }).join('');
+    }
+
     function openBooking(item, extra) {
         var b = item;
         var digits = String(b.phone || '').replace(/\D/g, '');
@@ -925,15 +963,35 @@
             + '<div><b>' + esc(b.customer) + '</b><small>' + (b.walkIn ? 'Walk-in desk customer' : 'Booked on Haraan') + '</small></div>'
             + (local.length === 10 ? '<a class="ha-bk-ic" href="tel:+91' + local + '" aria-label="Call">' + ic('phone') + '</a><a class="ha-bk-ic is-wa" href="https://wa.me/91' + local + '" target="_blank" rel="noopener" aria-label="WhatsApp">' + ic('chat') + '</a>' : '')
             + '</div>'
-            + '<div class="ha-bk-ledger"><p><span>Booking price</span><b>' + rupees(b.amount) + '</b></p><p><span>Paid</span><b class="is-in">' + rupees(b.paid) + '</b></p>'
-            + (b.balance > 0 && !b.cancelled ? '<p class="is-due"><span>Still to collect</span><b>' + rupees(b.balance) + '</b></p>' : '')
-            + '<p class="is-small"><span>Paid by</span><em>' + esc(String(b.method || (b.walkIn ? 'Desk' : 'Online')).replace('_', ' ').toUpperCase()) + '</em></p></div>'
+            + '<div class="ha-bk-ledger"><p><span>Booking price</span><b>' + rupees(b.amount) + '</b></p>' + waysHtml(b)
+            + (b.balance > 0 && !b.cancelled ? '<p class="is-due"><span>' + (b.advance ? 'To collect at venue' : 'Still to collect') + '</span><b>' + rupees(b.balance) + '</b></p>' : '')
+            + '</div>'
+            // The balance, taken at the counter: the advance booker who just turned up, or a
+            // walk-in settling. One tap for how they paid; the server takes exactly what's owed.
+            + (b.due ? '<div class="ha-bk-collect"><p>Collect ' + rupees(b.balance) + ' · how did they pay?</p><div>'
+                + '<button type="button" class="is-cash" data-collect="cash">Cash</button><button type="button" data-collect="upi">UPI</button><button type="button" data-collect="card">Card</button></div></div>' : '')
             + (b.cancelled ? '<div class="ha-bk-off">This booking was cancelled</div>'
                 : (!b.checkedIn ? '<button type="button" class="ha-wk-cta is-center" data-checkin><b>' + ic('check') + 'Check in</b></button>' : '<div class="ha-bk-in">' + ic('check') + 'Checked in</div>')
                 + '<button type="button" class="ha-bk-cancel" data-cancel>Cancel booking</button>')
             + '</div>');
         s.addEventListener('click', function (e) {
             var t = e.target, x;
+            if ((x = t.closest('[data-collect]'))) {
+                var row = x.parentNode, method = x.dataset.collect;
+                [].forEach.call(row.children, function (c) { c.disabled = true; });
+                x.classList.add('is-busy');
+                A.apiSend('POST', 'bookings/' + b.id + '/collect', { method: method }).then(function (r) {
+                    haptic('confirm'); s.close();
+                    A.toast(rupees(b.balance) + ' collected by ' + String((r && r.via) || method).toUpperCase());
+                    load(true);
+                }, function (err) {
+                    haptic('reject');
+                    [].forEach.call(row.children, function (c) { c.disabled = false; });
+                    x.classList.remove('is-busy');
+                    A.toast(err.message || 'Couldn’t record the payment');
+                });
+                return;
+            }
             if (t.closest('[data-copy]')) {
                 haptic('tick');
                 try { navigator.clipboard.writeText(b.ticket).then(function () { A.toast('Ticket code copied'); }); } catch (err) { /* none */ }

@@ -408,3 +408,13 @@ span.ha-dt-face:not(.is-blue) { font-size: 11px; }
     .ha-dt > *, .ha-dt-swing, .ha-dt-rise, .ha-dt-breathe, .ha-dt-lanyard, .ha-dt-pour, .ha-dt-bounce, .ha-dt-ballshadow, .ha-dt-seat, .ha-dt-fancard, .ha-dt-deal, .ha-dt-punch,
     .ha-dt-coindrop, .ha-dt-travel, .ha-dt-stamp, .ha-dt-drop, .ha-dt-lift, .ha-dt-live::after { animation: none !important; }
 }
+
+/* How the settlement is reached (PayoutsScreen): paid online, less tax and commission, = your share. */
+.ha-dt-share { margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: #F5F8FD; }
+.ha-dt-share p { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 !important; padding: 2px 0; font-size: 13px !important; color: #0B1220; }
+.ha-dt-share p b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.ha-dt-share p.is-mute { color: #6B7688; }
+.ha-dt-share p.is-net { font-weight: 700; }
+.ha-dt-share p.is-net b { font-weight: 700; }
+.ha-dt-share i { display: block; height: 1px; margin: 6px 0; background: rgba(15,23,42,.08); }
+.ha-dt-share small { display: block; margin-top: 6px; font-size: 11.5px; line-height: 15px; color: #6B7688; }
