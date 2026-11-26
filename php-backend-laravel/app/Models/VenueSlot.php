@@ -208,6 +208,28 @@ final class VenueSlot extends Model
      */
     public function allowsCourt(VenueCourt $court): bool
     {
+        return $this->allowsCourtSport($court) && $this->withinCourtHours($court);
+    }
+
+    /**
+     * Does this slot sit inside the court's own hours? A court with none follows the
+     * venue's hours, which made the slot rows, so it is always inside them.
+     */
+    public function withinCourtHours(VenueCourt $court): bool
+    {
+        if (! $court->hasOwnHours()) {
+            return true;
+        }
+        $length = $this->relationLoaded('venue') && $this->venue !== null
+            ? $this->venue->slotLength()
+            : ($court->venue?->slotLength() ?? 60);
+
+        return $court->isOpenFor(self::startMinutes((string) $this->time), $length);
+    }
+
+    /** The sport half of {@see allowsCourt()}. */
+    public function allowsCourtSport(VenueCourt $court): bool
+    {
         $mine = $this->sportsList();
         $theirs = $court->sportsList();
 

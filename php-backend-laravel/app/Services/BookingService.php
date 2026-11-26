@@ -1433,7 +1433,7 @@ final class BookingService
             // empty still means "no restriction", so a venue that never touches sports is
             // unaffected, and a booking with no court at all (every row from before courts
             // existed) is never rejected here.
-            if ($slot !== null && $court !== null && ! $slot->allowsCourt($court)) {
+            if ($slot !== null && $court !== null && ! $slot->allowsCourtSport($court)) {
                 throw new ConflictHttpException(sprintf(
                     'That time is for %s only — %s cannot be booked then',
                     implode(', ', $slot->sportsList()),
@@ -1460,6 +1460,13 @@ final class BookingService
                     Venue::minutesLabel($venue->minBookingMinutes()),
                     $venue->minBookingSlots(),
                 ));
+            }
+
+            // A court can keep shorter hours than the venue ("nets 6 AM – 6 PM"). Customers
+            // book inside them, the whole booking included; the desk is the owner's own
+            // calendar and may still book outside them.
+            if (($meta['channel'] ?? null) === 'online' && $court !== null && ! $court->isOpenFor($startMin, $lengthMin)) {
+                throw new ConflictHttpException(sprintf('%s is open %s only', $court->name, $court->hoursLabel()));
             }
 
             // Every booking lives inside one calendar date (slot_date + HH:MM). A venue open

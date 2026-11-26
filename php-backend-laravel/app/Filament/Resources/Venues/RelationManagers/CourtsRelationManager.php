@@ -22,6 +22,7 @@ use Filament\Notifications\Notification;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Grid;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
@@ -136,6 +137,7 @@ class CourtsRelationManager extends RelationManager
                     ->seconds(false)
                     ->format('H:i')
                     ->displayFormat('h:i A'),
+                ...$this->hoursFields(),
                 TextInput::make('sort_order')
                     ->numeric()
                     ->default(0),
@@ -184,6 +186,7 @@ class CourtsRelationManager extends RelationManager
             ])
             ->recordActions([
                 $this->slotPricesAction(),
+                $this->courtHoursAction(),
                 EditAction::make()
                     ->after(fn (VenueCourt $record) => $this->afterCourtSaved($record, 'venue.court_updated')),
                 DeleteAction::make()
@@ -226,6 +229,76 @@ class CourtsRelationManager extends RelationManager
      * normal rate (or the slot's all-courts price). Saves into the same
      * `venue_slots.court_prices` the partner app and the Slots tab edit.
      */
+    /**
+     * A court's own daily hours. Off = the court follows the venue's hours (every court
+     * before this existed). On = it is sold only inside open → close, e.g. nets 6 AM – 6 PM
+     * on a venue that is open 24 hours. A close at or before the open runs past midnight.
+     *
+     * @return array<int, mixed>
+     */
+    private function hoursFields(): array
+    {
+        return [
+            Toggle::make('own_hours')
+                ->label('Own hours for this court')
+                ->helperText('Off: open whenever the venue is open. On: sold only between the times below, every day.')
+                ->live()
+                ->dehydrated(false)
+                ->afterStateHydrated(fn (Toggle $component, ?VenueCourt $record) => $component->state($record?->hasOwnHours() ?? false)),
+            TimePicker::make('open_time')
+                ->label('Opens at')
+                ->seconds(false)
+                ->format('H:i')
+                ->displayFormat('h:i A')
+                ->visible(fn (Get $get): bool => (bool) $get('own_hours'))
+                ->required(fn (Get $get): bool => (bool) $get('own_hours'))
+                ->dehydrateStateUsing(fn ($state, Get $get) => $get('own_hours') && $state ? substr((string) $state, 0, 5) : null)
+                ->dehydratedWhenHidden(),
+            TimePicker::make('close_time')
+                ->label('Closes at')
+                ->seconds(false)
+                ->format('H:i')
+                ->displayFormat('h:i A')
+                ->helperText('12:00 AM = midnight. A time before the opening runs past midnight.')
+                ->visible(fn (Get $get): bool => (bool) $get('own_hours'))
+                ->required(fn (Get $get): bool => (bool) $get('own_hours'))
+                ->different('open_time')
+                ->dehydrateStateUsing(fn ($state, Get $get) => $get('own_hours') && $state ? substr((string) $state, 0, 5) : null)
+                ->dehydratedWhenHidden(),
+        ];
+    }
+
+    /** The card's "Hours" button: just the court's hours, one tap from the board. */
+    private function courtHoursAction(): Action
+    {
+        return Action::make('courtHours')
+            ->label('Hours')
+            ->icon('heroicon-m-clock')
+            ->modalHeading(fn (VenueCourt $record): string => $record->name.' — opening hours')
+            ->modalDescription(fn (): string => 'Venue hours: '.($this->getOwnerRecord()->displayHours() ?: 'not set').'. A court can keep shorter hours inside them; its slots outside them are not sold online.')
+            ->modalSubmitActionLabel('Save hours')
+            ->modalWidth('md')
+            ->schema(fn (): array => $this->hoursFields())
+            ->fillForm(fn (VenueCourt $record): array => [
+                'own_hours' => $record->hasOwnHours(),
+                'open_time' => $record->open_time,
+                'close_time' => $record->close_time,
+            ])
+            ->action(function (VenueCourt $record, array $data): void {
+                $record->open_time = $data['open_time'] ?? null;
+                $record->close_time = $data['open_time'] !== null ? ($data['close_time'] ?? null) : null;
+                $record->save();
+                AdminAction::log('venue.court_hours_updated', [
+                    'court' => $record->name,
+                    'hours' => $record->hoursLabel() ?? 'venue hours',
+                ], $this->getOwnerRecord());
+                Notification::make()
+                    ->title($record->name.': '.($record->hoursLabel() ?? 'follows the venue hours'))
+                    ->success()
+                    ->send();
+            });
+    }
+
     private function slotPricesAction(): Action
     {
         return Action::make('slotPrices')
@@ -268,7 +341,7 @@ class CourtsRelationManager extends RelationManager
                         Grid::make(['default' => 2, 'md' => 4])->schema(
                             $rows->sortBy(fn (VenueSlot $s): int => VenueSlot::startMinutes($s->time) ?? PHP_INT_MAX)
                                 ->map(fn (VenueSlot $s) => TextInput::make('p.'.$s->id)
-                                    ->label($s->time.($s->is_available ? '' : ' (closed)').($s->allowsCourt($record) ? '' : ' (other sport)'))
+                                    ->label($s->time.($s->is_available ? '' : ' (closed)').($s->allowsCourtSport($record) ? '' : ' (other sport)').($s->withinCourtHours($record) ? '' : ' (outside court hours)'))
                                     ->numeric()
                                     ->minValue(0)
                                     ->prefix('₹')
@@ -611,7 +684,9 @@ class CourtsRelationManager extends RelationManager
             $chips = $rows->map(function (VenueSlot $s) use ($c, $date, $venuePrice): array {
                 $own = $s->courtPriceList()[(int) $c->id] ?? null;
                 $slotAll = (float) $s->price > 0 ? (float) $s->price : null;
-                $allowed = $s->allowsCourt($c);
+                $sportOk = $s->allowsCourtSport($c);
+                $hoursOk = $s->withinCourtHours($c);
+                $allowed = $sportOk && $hoursOk;
                 $rate = $c->rateFor(Carbon::parse($date->toDateString()), $s->time, $venuePrice, $s->priceForCourt($c));
                 $source = match (true) {
                     $own !== null => 'own',
@@ -626,7 +701,13 @@ class CourtsRelationManager extends RelationManager
                     'rate' => $rate,
                     'source' => $source,
                     'open' => (bool) $s->is_available && $allowed,
-                    'why' => ! $s->is_available ? 'Slot is closed' : (! $allowed ? 'Slot runs for '.implode(', ', $s->sportsList()).' only' : null),
+                    'why' => match (true) {
+                        ! $s->is_available => 'Slot is closed',
+                        ! $hoursOk => 'Outside this court\'s hours ('.$c->hoursLabel().')',
+                        ! $sportOk => 'Slot runs for '.implode(', ', $s->sportsList()).' only',
+                        default => null,
+                    },
+                    'afterHours' => ! $hoursOk,
                     'day' => VenueSlot::normaliseDay($s->day),
                 ];
             })->values()->all();
@@ -647,6 +728,7 @@ class CourtsRelationManager extends RelationManager
                     $c->peakDaysList() !== [] ? implode(', ', $c->peakDaysList()) : 'Daily',
                     $c->peak_start && $c->peak_end ? Carbon::parse($c->peak_start)->format('g:i A').'–'.Carbon::parse($c->peak_end)->format('g:i A') : null,
                 ]))) : null,
+                'hours' => $c->hoursLabel(),
                 'chips' => $chips,
                 'openCount' => $sold->count(),
                 'min' => $sold->min('rate'),

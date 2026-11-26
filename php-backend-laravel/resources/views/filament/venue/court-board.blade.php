@@ -39,7 +39,8 @@
     .cb-chips span { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 6px; background: var(--cc-surface); border: 1px solid var(--cc-line); color: var(--cc-ink-2); }
     .cb-rates { font-size: 12.5px; color: var(--cc-ink-2); line-height: 1.55; }
     .cb-rates b { color: var(--cc-ink); font-weight: 650; }
-    .cb-btns { display: flex; gap: 6px; margin-top: auto; }
+    .cb-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; }
+    .cb-btns .cb-btn { flex: 1 1 calc(50% - 3px); }
     .cb-btn { flex: 1; border: 1px solid var(--cc-line); border-bottom-width: 2px; background: var(--cc-surface); color: var(--cc-ink); font-size: 12.5px; font-weight: 600;
         padding: 6px 8px; border-radius: 9px; cursor: pointer; transition: transform .08s, border-color .15s; }
     .cb-btn:hover { border-color: var(--cc-blue-mid); }
@@ -151,7 +152,7 @@
             @foreach ($chipTone as $k => $t)
                 <span><i style="background: {{ $t['bg'] }}; border-color: {{ $t['bd'] === 'transparent' ? $t['bg'] : $t['bd'] }}"></i>{{ ucfirst($sourceLabel[$k]) }}</span>
             @endforeach
-            <span><i style="background: repeating-linear-gradient(-45deg, var(--cc-sunk) 0 3px, transparent 3px 6px); border: 1px dashed var(--cc-line)"></i>Not sold (closed or other sport)</span>
+            <span><i style="background: repeating-linear-gradient(-45deg, var(--cc-sunk) 0 3px, transparent 3px 6px); border: 1px dashed var(--cc-line)"></i>Not sold (closed, outside court hours or other sport)</span>
         </div>
     @endif
 
@@ -172,12 +173,14 @@
                 </div>
                 <div class="cb-rates">
                     Base <b class="cc-num">₹{{ number_format($c['base']) }}</b>/hr{{ $c['baseFromVenue'] ? ' (venue rate)' : '' }}
+                    <br>Hours <b>{{ $c['hours'] ?? 'Same as venue' }}</b>
                     @if ($c['peak'])
                         <br>Peak <b class="cc-num" style="color: var(--cc-amber)">₹{{ number_format($c['peak']) }}</b> · {{ $c['peakWhen'] }}
                     @endif
                 </div>
                 <div class="cb-btns">
                     <button type="button" class="cb-btn pri" wire:click="mountTableAction('slotPrices', '{{ $c['id'] }}')">Slot prices</button>
+                    <button type="button" class="cb-btn" wire:click="mountTableAction('courtHours', '{{ $c['id'] }}')">Hours</button>
                     <button type="button" class="cb-btn" wire:click="mountTableAction('edit', '{{ $c['id'] }}')">Edit</button>
                     <button type="button" class="cb-btn del" title="Delete court" aria-label="Delete {{ $c['name'] }}" wire:click="mountTableAction('delete', '{{ $c['id'] }}')">Delete</button>
                 </div>
@@ -215,7 +218,7 @@
                             @else
                                 <button type="button" class="cb-slot shut" wire:click="mountAction('editSlot', { slot: {{ $chip['id'] }} })" title="{{ $chip['time'] }} · {{ $chip['why'] }} · tap to change">
                                     <span class="t">{{ $chip['time'] }}</span>
-                                    <span class="r cc-num">₹{{ number_format($chip['rate']) }}</span>
+                                    <span class="r cc-num">{{ ($chip['afterHours'] ?? false) ? 'Closed' : '₹'.number_format($chip['rate']) }}</span>
                                 </button>
                             @endif
                         @endforeach

@@ -40,6 +40,7 @@ final class VenueCourt extends Model
         'venue_id', 'parent_court_id', 'is_composite', 'split_type', 'partition_label',
         'allow_simultaneous_booking', 'name', 'seats', 'kind', 'sports', 'price',
         'sort_order', 'is_active', 'peak_price', 'peak_days', 'peak_start', 'peak_end',
+        'open_time', 'close_time',
     ];
 
     protected $casts = [
@@ -260,6 +261,62 @@ final class VenueCourt extends Model
 
         // Never a negative charge, whatever was typed into a price field.
         return max(0, (int) $baseRate);
+    }
+
+    /**
+     * This court's own daily window in minutes [open, close], or null when it follows the
+     * venue's hours. Close at or before open runs past midnight (6 PM – 2 AM = [1080, 1560]);
+     * open = close is round the clock, same as no hours at all.
+     *
+     * @return array{0:int,1:int}|null
+     */
+    public function hoursWindow(): ?array
+    {
+        $o = self::minutes($this->open_time);
+        $c = self::minutes($this->close_time);
+        if ($o === null || $c === null || $o === $c) {
+            return null;
+        }
+
+        return [$o, $c < $o ? $c + 1440 : $c];
+    }
+
+    /** True when this court keeps its own hours rather than the venue's. */
+    public function hasOwnHours(): bool
+    {
+        return $this->hoursWindow() !== null;
+    }
+
+    /**
+     * Is the court open for a booking that starts at $startMin and lasts $lengthMin?
+     * The whole booking has to fit: nets that close at 6 PM can't sell 5:30–6:30.
+     */
+    public function isOpenFor(?int $startMin, int $lengthMin = 0): bool
+    {
+        $w = $this->hoursWindow();
+        if ($w === null || $startMin === null) {
+            return true;
+        }
+        [$o, $c] = $w;
+        foreach ([$startMin, $startMin + 1440] as $s) {
+            if ($s >= $o && $s + $lengthMin <= $c) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** "6:00 AM – 6:00 PM", or null when the court follows the venue's hours. */
+    public function hoursLabel(): ?string
+    {
+        $w = $this->hoursWindow();
+        if ($w === null) {
+            return null;
+        }
+        $fmt = static fn (int $m): string => sprintf('%d:%02d %s', intdiv($m % 1440, 60) % 12 ?: 12, $m % 60, ($m % 1440) < 720 ? 'AM' : 'PM');
+
+        return $fmt($w[0]).' – '.$fmt($w[1]);
     }
 
     /** The peak rate when there is a real one (> 0), else null — for anything that displays it. */

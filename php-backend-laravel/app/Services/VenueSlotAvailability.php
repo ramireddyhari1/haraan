@@ -54,6 +54,7 @@ final class VenueSlotAvailability
             $courtsQuery->where('id', $courtId);
         }
         $courts = $courtsQuery->get();
+        $courts->each(fn (VenueCourt $c) => $c->setRelation('venue', $venue));
         // Composite/sub-courts share floor space: booking the full turf takes its halves.
         $related = $courts->mapWithKeys(fn (VenueCourt $c) => [$c->id => $c->allRelatedCourtIds()]);
 
@@ -83,6 +84,12 @@ final class VenueSlotAvailability
 
             // Venues that don't model courts (or whose courts can't host this slot's sports)
             // book by slot alone — the legacy one-booking-per-slot rule checkout still applies.
+            // Courts that could host this slot's sport but are all shut at this time (their
+            // own hours, e.g. nets 6 AM – 6 PM) close the slot; it is not a court-less slot.
+            if ($eligible->isEmpty() && $courts->contains(fn (VenueCourt $c) => $slot->allowsCourtSport($c))) {
+                return $this->row($slot, self::CLOSED, 0, 1);
+            }
+
             if ($eligible->isEmpty()) {
                 if ($this->blockedBy($blocks, null, $start, $end)) {
                     return $this->row($slot, self::CLOSED, 0, 1);
