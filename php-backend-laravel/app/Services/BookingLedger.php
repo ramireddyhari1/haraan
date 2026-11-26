@@ -46,6 +46,14 @@ class BookingLedger
         ?string $reference = null,
         ?string $note = null,
     ): BookingPayment {
+        // A person can only record money THEY took at the counter. Gateway ("online") money
+        // enters only from a Razorpay-verified path (signature, captured order, QR/link whose
+        // notes name this booking), which never passes a person. Payouts are built on online
+        // money, so letting anyone type it in would let them raise what Haraan pays out.
+        if ($collectedBy !== null && ! in_array(strtolower($method), Booking::DESK_PAYMENT_METHODS, true)) {
+            throw new \DomainException('Only cash, UPI or card taken at the counter can be recorded by hand. Online payments are recorded from Razorpay automatically.');
+        }
+
         $payment = $this->record($booking, abs($amount), $method, $collectedBy, $reference, $note);
 
         // The receipt, deferred until after the response. Kept to one line and one

@@ -321,6 +321,19 @@ final class Booking extends Model
             return round(max(0.0, $slot - min($slot, $onlineSlot)), 2);
         }
 
+        // Money on the ledger, none of it through Razorpay: Haraan received nothing, so it
+        // owes nothing — whatever the desk later records (a "cash refund" typed in by hand
+        // must never turn into a payout). Only a row with NO ledger at all (bookings from
+        // before online money reached the ledger) falls back to the advance rule below.
+        //
+        // The same holds for a booking with NO ledger at all made after online money started
+        // reaching the ledger (25 Aug 2026): a confirmed online booking always has its
+        // Razorpay row, so one without any was never paid through Haraan.
+        if ($this->booking_type === 'venue'
+            && ($payments->isNotEmpty() || ($this->created_at !== null && $this->created_at->gte(self::LEDGER_SINCE)))) {
+            return round($slot, 2);
+        }
+
         $desk = (float) $payments->filter($isDesk)->sum('amount');
 
         return round(min($slot, max((float) ($this->pay_at_venue ?? 0), $desk)), 2);
@@ -329,6 +342,11 @@ final class Booking extends Model
     private const ONLINE_SUM_SQL = "(SELECT coalesce(sum(bp.amount), 0) FROM booking_payments bp WHERE bp.booking_id = bookings.id AND lower(bp.method) NOT IN ('cash','upi','card'))";
 
     private const HAS_ONLINE_SQL = "EXISTS (SELECT 1 FROM booking_payments bp WHERE bp.booking_id = bookings.id AND lower(bp.method) NOT IN ('cash','upi','card'))";
+
+    /** When online money started reaching booking_payments (BookingLedger::settleOnline, deployed 25 Aug 2026). */
+    public const LEDGER_SINCE = '2026-08-26 00:00:00';
+
+    private const HAS_ANY_PAYMENT_SQL = 'EXISTS (SELECT 1 FROM booking_payments bp WHERE bp.booking_id = bookings.id)';
 
     private const DESK_SUM_SQL = "(SELECT coalesce(sum(bp.amount), 0) FROM booking_payments bp WHERE bp.booking_id = bookings.id AND lower(bp.method) IN ('cash','upi','card'))";
 
@@ -345,6 +363,7 @@ final class Booking extends Model
      */
     public const VENUE_COLLECTED_SQL = "(CASE WHEN booking_type = 'venue' AND ".self::HAS_ONLINE_SQL
         .' THEN (CASE WHEN '.self::ONLINE_SLOT_SQL.' >= '.self::SLOT_VALUE_SQL.' THEN 0 ELSE '.self::SLOT_VALUE_SQL.' - '.self::ONLINE_SLOT_SQL.' END)'
+        ." WHEN booking_type = 'venue' AND (".self::HAS_ANY_PAYMENT_SQL." OR created_at >= '".self::LEDGER_SINCE."') THEN ".self::SLOT_VALUE_SQL
         ." WHEN booking_type = 'venue'"
         .' THEN (CASE WHEN '.self::DESK_TAKEN_SQL.' > '.self::SLOT_VALUE_SQL.' THEN '.self::SLOT_VALUE_SQL.' ELSE '.self::DESK_TAKEN_SQL.' END)'
         .' ELSE coalesce(pay_at_venue, 0) END)';

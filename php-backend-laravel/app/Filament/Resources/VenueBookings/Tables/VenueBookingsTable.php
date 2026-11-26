@@ -176,17 +176,19 @@ class VenueBookingsTable
                             ->numeric()
                             ->required()
                             ->minValue(1)
+                            ->maxValue(fn (Booking $record): float => $record->balanceDue())
                             // Defaults to the whole balance — the common case is settling in full.
                             ->default(fn (Booking $record): float => $record->balanceDue())
                             ->helperText(fn (Booking $record): string => 'Balance due is ' . self::inr($record->balanceDue())
                                 . '. Enter less to record a part payment.'),
                         Select::make('method')
                             ->label('How was it paid?')
+                            // Counter money only. Online payments come in from Razorpay on
+                            // their own; typing one in here would raise the partner's payout.
                             ->options([
                                 'cash' => 'Cash',
                                 'upi' => 'UPI',
                                 'card' => 'Card',
-                                'online' => 'Online / gateway',
                             ])
                             ->default('cash')
                             ->native(false)

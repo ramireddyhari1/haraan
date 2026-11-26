@@ -412,6 +412,53 @@ class VenueAdvancePaymentTest extends TestCase
         $this->assertEqualsWithDelta(240.0, (float) $booking->amount_paid, 0.01);
     }
 
+    /** Nobody can type "online" money in by hand — it would raise the payout. */
+    public function test_a_person_cannot_record_online_money(): void
+    {
+        $b = Booking::forceCreate([
+            'booking_type' => 'venue', 'venue_id' => $this->venue->id, 'user_id' => $this->player->id,
+            'channel' => 'online', 'status' => 'CONFIRMED', 'payment_status' => 'unpaid',
+            'slot_date' => today()->toDateString(), 'start_time' => '19:00', 'end_time' => '20:00',
+            'quantity' => 1, 'total_amount' => 1200, 'amount_paid' => 0,
+            'created_at' => '2026-11-01 10:00:00',
+        ]);
+        $ledger = app(\App\Services\BookingLedger::class);
+
+        foreach (['online', 'Online', 'razorpay', 'upi_qr'] as $method) {
+            try {
+                $ledger->collect($b, 1200, $method, $this->owner);
+                $this->fail("A person recorded '{$method}' money.");
+            } catch (\DomainException) {
+                // refused, as it should be
+            }
+        }
+
+        $this->assertSame(0, $b->payments()->count());
+        $this->assertEqualsWithDelta(0.0, app(PartnerSettlement::class)->collected($this->owner->id), 0.01);
+
+        // Counter money is still fine.
+        $ledger->collect($b, 1200, 'cash', $this->owner);
+        $this->assertEqualsWithDelta(1200.0, (float) $b->refresh()->amount_paid, 0.01);
+    }
+
+    /** A hand-typed cash "refund" must never turn a booking Haraan got nothing for into a payout. */
+    public function test_a_fake_cash_refund_does_not_create_a_payout(): void
+    {
+        $b = Booking::forceCreate([
+            'booking_type' => 'venue', 'venue_id' => $this->venue->id, 'user_id' => $this->player->id,
+            'channel' => 'online', 'status' => 'CONFIRMED', 'payment_status' => 'unpaid',
+            'slot_date' => today()->toDateString(), 'start_time' => '19:00', 'end_time' => '20:00',
+            'quantity' => 1, 'total_amount' => 1200, 'pay_at_venue' => 960, 'amount_paid' => 0,
+        ]);
+        $ledger = app(\App\Services\BookingLedger::class);
+        $ledger->collect($b, 1200, 'cash', $this->owner);
+        $ledger->refund($b, 1200, 'cash', $this->owner);
+        $b->refresh();
+
+        $this->assertEqualsWithDelta(0.0, $b->partnerPayable(), 0.01);
+        $this->assertEqualsWithDelta(0.0, app(PartnerSettlement::class)->collected($this->owner->id), 0.01);
+    }
+
     public function test_desk_collect_refuses_when_razorpay_cannot_be_asked(): void
     {
         $this->book(['payMode' => 'advance'])->assertCreated();
