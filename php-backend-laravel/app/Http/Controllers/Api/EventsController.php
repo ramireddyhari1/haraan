@@ -104,6 +104,12 @@ final class EventsController extends Controller
             return response()->json(['error' => 'Unauthorized'], 401);
         }
 
+        // Only partners (hosts) and Haraan admins create events. Any signed-in player could
+        // before — and publish it straight away.
+        if (! $authUser->isSuperAdmin() && ! $authUser->hasRoleEither(['PARTNER'])) {
+            return response()->json(['error' => 'Only event hosts can create events.'], 403);
+        }
+
         $validated = $request->validated();
 
         $event = Event::query()->create([
@@ -140,6 +146,17 @@ final class EventsController extends Controller
 
         if ($event === null) {
             return response()->json(['error' => 'Event not found'], 404);
+        }
+
+        // Only the event's own host (or a desk user of that host) and Haraan admins may edit
+        // it. This had no check at all: any signed-in app user could change any event's
+        // price, status and ticket counts.
+        $authUser = $request->attributes->get('auth_user');
+        if (! $authUser instanceof User) {
+            return response()->json(['error' => 'Unauthorized'], 401);
+        }
+        if (! $authUser->isSuperAdmin() && (int) $event->partner_id !== (int) $authUser->effectivePartnerId()) {
+            return response()->json(['error' => 'Forbidden'], 403);
         }
 
         $validated = $request->validated();

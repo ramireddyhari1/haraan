@@ -316,9 +316,9 @@ Route::controller(WebPasswordResetController::class)->group(function (): void {
 // WhatsApp Auth Routes (legacy phone-OTP; the login form no longer surfaces this,
 // but the routes stay so any in-flight/bookmarked flow doesn't 404).
 Route::controller(WhatsAppAuthController::class)->group(function (): void {
-    Route::post('/auth/whatsapp/request', 'requestOtp')->name('whatsapp.request');
+    Route::post('/auth/whatsapp/request', 'requestOtp')->middleware('throttle:otp')->name('whatsapp.request');
     Route::get('/auth/whatsapp/verify', 'showVerifyForm')->name('whatsapp.verify.show');
-    Route::post('/auth/whatsapp/verify', 'verifyOtp')->name('whatsapp.verify.submit');
+    Route::post('/auth/whatsapp/verify', 'verifyOtp')->middleware('throttle:auth')->name('whatsapp.verify.submit');
     Route::get('/auth/whatsapp/cancel', 'cancel')->name('whatsapp.cancel');
 });
 
@@ -358,6 +358,7 @@ Route::controller(AccountDeletionController::class)->group(function (): void {
 
 // "Continue with Google" on the website — the login modal posts the GIS ID token here.
 Route::post('/auth/google', [GoogleWebAuthController::class, 'login'])
+    ->middleware('throttle:auth')
     ->name('google.web.login');
 
 // Phone-number sign-in (Firebase SMS OTP) — the browser completes the OTP and posts
@@ -468,18 +469,19 @@ Route::controller(PartnerAuthController::class)
 
 Route::middleware('erp.key')->group(function (): void {
     Route::get('/erp', fn () => view('portal.index'))->name('portal.index');
-    Route::get('/erp/setup-admin', [AdminAuthController::class, 'setupAdmin'])->name('portal.setup_admin');
+    // /erp/setup-admin removed 2026-11-26: it created an ADMIN from ?email=&password= on a GET.
+    // Make admins in /control → Staff, or `php artisan` on the server.
 
     // Admin auth — consolidated onto the single Filament "Control" panel (/control).
     // The legacy Blade login now redirects there so there is ONE admin front door.
     Route::get('admin/login', fn () => redirect('/control'))->name('admin.login');
-    Route::post('admin/login', [AdminAuthController::class, 'login'])->name('admin.login.submit');
+    Route::post('admin/login', [AdminAuthController::class, 'login'])->middleware('throttle:auth')->name('admin.login.submit');
     Route::post('admin/logout', [AdminAuthController::class, 'logout'])->name('admin.logout');
     // Password reset for admin
     Route::get('admin/password/reset', [PasswordResetController::class, 'showLinkRequestForm'])->name('admin.password.request');
-    Route::post('admin/password/email', [PasswordResetController::class, 'sendResetLinkEmail'])->name('admin.password.email');
+    Route::post('admin/password/email', [PasswordResetController::class, 'sendResetLinkEmail'])->middleware('throttle:otp')->name('admin.password.email');
     Route::get('admin/password/reset/{token}', [PasswordResetController::class, 'showResetForm'])->name('admin.password.reset');
-    Route::post('admin/password/reset', [PasswordResetController::class, 'reset'])->name('admin.password.update');
+    Route::post('admin/password/reset', [PasswordResetController::class, 'reset'])->middleware('throttle:auth')->name('admin.password.update');
 
     // Protected admin routes
     Route::prefix('admin')->name('admin.')->middleware(['auth', EnsureRole::class.':ADMIN,COADMIN'])->group(function (): void {

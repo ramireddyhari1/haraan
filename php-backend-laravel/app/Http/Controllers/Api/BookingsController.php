@@ -55,15 +55,36 @@ final class BookingsController extends Controller
             ->response();
     }
 
-    public function show(string $id): JsonResponse
+    public function show(Request $request, string $id): JsonResponse
     {
         $booking = Booking::query()->find($id);
+        $authUser = $request->attributes->get('auth_user');
 
-        if ($booking === null) {
+        // The customer's own booking, the host's (its venue or event), or a Haraan admin.
+        // Any signed-in user could read any booking by id before — including its ticket
+        // code, the QR that opens the gate. Not-yours reads as not-found, so ids can't be
+        // probed.
+        if ($booking === null || ! $authUser instanceof User || ! self::maySee($authUser, $booking)) {
             return response()->json(['error' => 'Booking not found'], 404);
         }
 
         return response()->json(['data' => new BookingResource($booking)]);
+    }
+
+    private static function maySee(User $user, Booking $booking): bool
+    {
+        if ((int) $booking->user_id === (int) $user->id || $user->isSuperAdmin()) {
+            return true;
+        }
+
+        $partnerId = (int) $user->effectivePartnerId();
+        if ($booking->venue_id !== null
+            && \App\Models\Venue::query()->whereKey($booking->venue_id)->where('partner_id', $partnerId)->exists()) {
+            return true;
+        }
+
+        return $booking->event_id !== null
+            && \App\Models\Event::query()->whereKey($booking->event_id)->where('partner_id', $partnerId)->exists();
     }
 
     /**

@@ -78,8 +78,22 @@ final class JwtService
         return $claimed === $current;
     }
 
+    /**
+     * A signing secret too weak to trust: missing, the old 'change_me' default, or short.
+     * Signing refuses it and checking treats every token as invalid, so a server that
+     * lost JWT_SECRET fails closed (nobody signed in) instead of open (anyone can forge).
+     */
+    public static function weakSecret(string $secret): bool
+    {
+        return strlen($secret) < 16 || in_array(strtolower($secret), ['change_me', 'changeme', 'secret', 'jwt_secret'], true);
+    }
+
     public static function issue(array $payload, string $secret, int $ttlSeconds = 604800): string
     {
+        if (self::weakSecret($secret)) {
+            throw new \RuntimeException('JWT_SECRET is missing or too weak; refusing to sign tokens.');
+        }
+
         $header = ['alg' => 'HS256', 'typ' => 'JWT'];
         $now = time();
 
@@ -97,6 +111,10 @@ final class JwtService
 
     public static function decode(string $jwt, string $secret): ?array
     {
+        if (self::weakSecret($secret)) {
+            return null;
+        }
+
         $parts = explode('.', $jwt);
         if (count($parts) !== 3) {
             return null;
@@ -123,7 +141,8 @@ final class JwtService
             return null;
         }
 
-        if (isset($payload['exp']) && is_numeric($payload['exp']) && time() >= (int) $payload['exp']) {
+        // Every token we sign carries `exp`; one without it would never expire.
+        if (! isset($payload['exp']) || ! is_numeric($payload['exp']) || time() >= (int) $payload['exp']) {
             return null;
         }
 

@@ -97,9 +97,9 @@ return [
 
     'cipher' => 'AES-256-CBC',
 
-    'jwt_secret' => env('JWT_SECRET', 'change_me'),
+    'jwt_secret' => env('JWT_SECRET', ''),
 
-    'erp_portal_key' => env('ERP_PORTAL_KEY', 'letmein'),
+    'erp_portal_key' => env('ERP_PORTAL_KEY', ''),
 
     'key' => env('APP_KEY'),
 
