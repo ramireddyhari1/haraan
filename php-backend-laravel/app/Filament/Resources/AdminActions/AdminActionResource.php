@@ -16,6 +16,9 @@ use Filament\Tables\Table;
 
 class AdminActionResource extends Resource
 {
+    // Filament 4.12+: page access follows this resource's own can*() rules (see the trait).
+    use \App\Filament\Concerns\ResourceRulesDecidePageAccess;
+
     protected static ?string $model = AdminAction::class;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-clipboard-document-list';

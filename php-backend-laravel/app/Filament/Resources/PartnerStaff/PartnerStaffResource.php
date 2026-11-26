@@ -46,6 +46,9 @@ use Illuminate\Support\Str;
  */
 class PartnerStaffResource extends Resource
 {
+    // Filament 4.12+: page access follows this resource's own can*() rules (see the trait).
+    use \App\Filament\Concerns\ResourceRulesDecidePageAccess;
+
     protected static ?string $model = User::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUsers;

@@ -30,6 +30,9 @@ use Illuminate\Database\Eloquent\Builder;
  */
 class VenueBookingResource extends Resource
 {
+    // Filament 4.12+: page access follows this resource's own can*() rules (see the trait).
+    use \App\Filament\Concerns\ResourceRulesDecidePageAccess;
+
     protected static ?string $model = Booking::class;
 
     // Two resources share the Booking model, so this one needs its own slug.

@@ -22,6 +22,12 @@ final class EventSeeder extends Seeder
         if (! $partner) {
             $partner = User::first();
         }
+        if (! $partner && app()->isProduction()) {
+            // Never mint a password-"password" account on prod.
+            $this->command?->warn('EventSeeder skipped: no partner exists and it will not create a default-password one in production.');
+
+            return;
+        }
         if (! $partner) {
             $partner = User::create([
                 'name' => 'Haraan Live Experiences',

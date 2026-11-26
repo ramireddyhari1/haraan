@@ -20,6 +20,9 @@ use Illuminate\Database\Eloquent\Builder;
 
 class UserResource extends Resource
 {
+    // Filament 4.12+: page access follows this resource's own can*() rules (see the trait).
+    use \App\Filament\Concerns\ResourceRulesDecidePageAccess;
+
     // Alias the org-scoping query so we can layer the staff-role filter on top.
     use ScopesToOrganization {
         getEloquentQuery as protected scopedOrgQuery;

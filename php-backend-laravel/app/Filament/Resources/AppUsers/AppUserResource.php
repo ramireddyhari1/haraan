@@ -35,6 +35,9 @@ use Illuminate\Database\Eloquent\Model;
  */
 class AppUserResource extends Resource
 {
+    // Filament 4.12+: page access follows this resource's own can*() rules (see the trait).
+    use \App\Filament\Concerns\ResourceRulesDecidePageAccess;
+
     // Layer the "regular user" role filter on top of org scoping.
     use ScopesToOrganization {
         getEloquentQuery as protected scopedOrgQuery;

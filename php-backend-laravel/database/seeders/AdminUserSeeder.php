@@ -9,6 +9,14 @@ class AdminUserSeeder extends Seeder
 {
     public function run(): void
     {
+        // A local-dev convenience only. Run on prod once, it left a live ADMIN with the
+        // password "password" (found and locked 2026-11-26). Make real admins in /control.
+        if (app()->isProduction()) {
+            $this->command?->warn('AdminUserSeeder skipped: it never creates admin@local/password in production.');
+
+            return;
+        }
+
         if (User::where('email', 'admin@local')->exists()) {
             return;
         }
