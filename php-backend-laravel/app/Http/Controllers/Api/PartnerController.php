@@ -1532,6 +1532,10 @@ class PartnerController extends Controller
             $booking = $this->bookings->confirmDeskHold($booking);
         }
 
+        // Never paid online: Haraan's online fee and tax were never charged, so the desk
+        // takes the slot price only.
+        $booking->dropUnchargedOnlineCharges();
+
         // The balance against what was charged (tax included), so an advance booking's
         // balance taken in cash actually settles it.
         $due = $booking->balanceDue();
@@ -3807,26 +3811,43 @@ class PartnerController extends Controller
     private static function partnerPayments(Booking $b): array
     {
         $charges = $b->chargesOnTop();
-        $out = [];
+        $rows = [];
         foreach ($b->payments ?? [] as $p) {
             $amount = (float) $p->amount;
             if ($amount <= 0) {
                 continue;
             }
-            $method = strtolower((string) $p->method);
-            if ($charges > 0 && ! in_array($method, Booking::DESK_PAYMENT_METHODS, true)) {
-                $take = min($charges, $amount);
-                $amount -= $take;
-                $charges -= $take;
-            }
-            if ($amount <= 0.004) {
-                continue;
-            }
-            $out[] = [
-                'method' => $method,
-                'amount' => round($amount, 2),
+            $rows[] = [
+                'method' => strtolower((string) $p->method),
+                'amount' => $amount,
                 'at'     => optional($p->collected_at ?? $p->created_at)->toIso8601String(),
             ];
+        }
+
+        // Online payments carry the fees first. Whatever is left (an online hold settled
+        // in full at the desk, fee and all) comes off the desk payments, so the split
+        // always adds up to Booking::partnerPaid() — the "collected" figure.
+        foreach ([false, true] as $deskPass) {
+            foreach ($rows as $i => $r) {
+                if ($charges <= 0) {
+                    break 2;
+                }
+                if (in_array($r['method'], Booking::DESK_PAYMENT_METHODS, true) !== $deskPass) {
+                    continue;
+                }
+                $take = min($charges, $r['amount']);
+                $rows[$i]['amount'] -= $take;
+                $charges -= $take;
+            }
+        }
+
+        $out = [];
+        foreach ($rows as $r) {
+            if ($r['amount'] <= 0.004) {
+                continue;
+            }
+            $r['amount'] = round($r['amount'], 2);
+            $out[] = $r;
         }
 
         return $out;

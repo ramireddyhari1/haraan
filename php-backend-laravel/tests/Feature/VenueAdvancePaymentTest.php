@@ -276,6 +276,71 @@ class VenueAdvancePaymentTest extends TestCase
         $this->assertEqualsWithDelta(1200.0, $booking->partnerPaid(), 0.01);
     }
 
+    /**
+     * Classic Sports Arena, 25 Nov: an online advance booking never paid online, then settled
+     * in full by UPI at the desk. The desk took Haraan's fee, the UPI pile read ₹25 more than
+     * "collected", and payouts owed the ₹150 advance Haraan never received.
+     */
+    public function test_an_online_hold_never_paid_online_and_settled_at_the_desk(): void
+    {
+        $this->venue->update(['convenience_fee_type' => 'flat', 'convenience_fee_value' => 30]);
+        $this->book(['payMode' => 'advance'])->assertCreated();
+        $booking = Booking::query()->latest('id')->firstOrFail();
+        $this->assertEqualsWithDelta(30.0, (float) $booking->convenience_fee, 0.01);
+        // No confirm: the player never paid the Razorpay order.
+
+        $this->withHeader('Authorization', 'Bearer '.JwtService::issueForUser(
+            $this->owner,
+            (string) config('app.jwt_secret', env('JWT_SECRET', 'change_me')),
+        ));
+
+        $this->postJson("/api/partner/bookings/{$booking->id}/collect", ['method' => 'upi'])
+            ->assertOk()->assertJsonPath('paid', true);
+
+        // The desk takes the ₹1,200 slot — never Haraan's ₹30 online fee.
+        $booking->refresh();
+        $this->assertSame('paid', strtolower((string) $booking->payment_status));
+        $this->assertEqualsWithDelta(1200.0, (float) $booking->payments()->sum('amount'), 0.01);
+        $this->assertEqualsWithDelta(0.0, (float) $booking->convenience_fee, 0.01);
+        $this->assertEqualsWithDelta(1200.0, $booking->slotValue(), 0.01);
+
+        $this->getJson('/api/partner/today')->assertOk()
+            ->assertJsonPath('data.money.collected', 1200)
+            ->assertJsonPath('data.money.upi', 1200)
+            ->assertJsonPath('data.money.online', 0);
+
+        // Nothing came through Razorpay, so Haraan owes nothing for it.
+        $this->assertEqualsWithDelta(0.0, $booking->partnerPayable(), 0.01);
+        $this->assertEqualsWithDelta(0.0, app(PartnerSettlement::class)->collected($this->owner->id), 0.01);
+        $this->assertEqualsWithDelta(0.0, PayoutForm::partnerShare($booking), 0.01);
+    }
+
+    /** Rows already settled the old way (fee taken at the desk) read consistently too. */
+    public function test_a_desk_payment_that_included_the_online_fee_still_adds_up(): void
+    {
+        $b = Booking::forceCreate([
+            'booking_type' => 'venue', 'venue_id' => $this->venue->id, 'user_id' => $this->player->id,
+            'channel' => 'online', 'status' => 'CONFIRMED', 'payment_status' => 'unpaid',
+            'slot_date' => today()->toDateString(), 'start_time' => '19:00', 'end_time' => '20:00',
+            'quantity' => 1, 'total_amount' => 525, 'convenience_fee' => 25, 'pay_at_venue' => 350,
+            'amount_paid' => 0,
+        ]);
+        app(\App\Services\BookingLedger::class)->collect($b, 525, 'upi', $this->owner);
+        $b->refresh();
+
+        $this->assertEqualsWithDelta(500.0, $b->partnerPaid(), 0.01);
+        $this->assertEqualsWithDelta(0.0, $b->partnerPayable(), 0.01);
+        $this->assertEqualsWithDelta(0.0, app(PartnerSettlement::class)->collected($this->owner->id), 0.01);
+
+        $this->withHeader('Authorization', 'Bearer '.JwtService::issueForUser(
+            $this->owner,
+            (string) config('app.jwt_secret', env('JWT_SECRET', 'change_me')),
+        ));
+        $this->getJson('/api/partner/today')->assertOk()
+            ->assertJsonPath('data.money.collected', 500)
+            ->assertJsonPath('data.money.upi', 500);
+    }
+
     public function test_changing_the_commission_reprices_bookings_not_yet_paid_out(): void
     {
         // Booked at 10%: ₹120 commission on the ₹1,200 court.

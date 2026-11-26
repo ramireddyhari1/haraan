@@ -80,7 +80,8 @@ final class PartnerSettlement
         $online = (clone $paid)->where($notDesk);
         // Slot money only: the online fees (convenience, gateway, named) and tax are
         // Haraan's — never paid out — so the partner's gross is the slot value online.
-        $onlineGross = (float) (clone $online)->sum(DB::raw(Booking::SLOT_VALUE_SQL)) - (float) (clone $online)->sum('pay_at_venue');
+        // Less what the venue took at its own counter (Booking::venueCollected()).
+        $onlineGross = (float) (clone $online)->sum(DB::raw(Booking::SLOT_VALUE_SQL)) - (float) (clone $online)->sum(DB::raw(Booking::VENUE_COLLECTED_SQL));
         $onlineCommission = (float) (clone $online)->sum('host_deduction');
         $tax = 0.0;
 

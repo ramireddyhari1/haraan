@@ -694,7 +694,9 @@ class VenueBookings extends Page
                 $booking = $bookings->confirmDeskHold($booking);
             }
 
-            $due = round((float) $booking->total_amount - (float) $booking->amount_paid, 2);
+            // Same rule as the partner desk: never paid online → slot price only.
+            $booking->dropUnchargedOnlineCharges();
+            $due = $booking->balanceDue();
             if ($due > 0) {
                 $ledger->collect($booking, $due, $method, auth()->user());
             }

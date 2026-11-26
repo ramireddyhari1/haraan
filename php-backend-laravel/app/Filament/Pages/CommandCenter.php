@@ -306,7 +306,7 @@ class CommandCenter extends Page
         $online = (clone $allPaid)->where($notDesk);
         $desk = (clone $allPaid)->whereIn(DB::raw('lower(channel)'), Booking::DESK_CHANNELS);
         $earned = (float) (clone $online)->sum(DB::raw(Booking::SLOT_VALUE_SQL))
-            - (float) (clone $online)->sum('pay_at_venue') - (float) (clone $online)->sum('host_deduction')
+            - (float) (clone $online)->sum(DB::raw(Booking::VENUE_COLLECTED_SQL)) - (float) (clone $online)->sum('host_deduction')
             + (float) \App\Models\BookingPayment::query()
                 ->whereIn('booking_id', (clone $desk)->select('bookings.id'))
                 ->whereNotIn(DB::raw('lower(method)'), Booking::DESK_PAYMENT_METHODS)->sum('amount')

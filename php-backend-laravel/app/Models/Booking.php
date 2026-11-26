@@ -290,8 +290,66 @@ final class Booking extends Model
             return round(max(0.0, $online - (float) $this->host_deduction), 2);
         }
 
-        // The slot value — the online fees are Haraan's — less the venue-collected balance.
-        return round(max(0.0, $this->slotValue() - (float) ($this->pay_at_venue ?? 0) - (float) $this->host_deduction), 2);
+        // The slot value — the online fees are Haraan's — less what the venue took itself.
+        return round(max(0.0, $this->slotValue() - $this->venueCollected() - (float) $this->host_deduction), 2);
+    }
+
+    /**
+     * Slot money an ONLINE booking's venue took at its own counter, which never passed
+     * through Haraan: the advance balance it was due (`pay_at_venue`), or more when the
+     * desk took more — an online hold that was never paid online and then settled in full
+     * at the counter is all venue money. Counting only `pay_at_venue` there made Haraan
+     * owe the advance it never received (Classic Sports Arena, 25 Nov: ₹150 × 2).
+     */
+    public function venueCollected(): float
+    {
+        $payments = $this->relationLoaded('payments') ? $this->payments : $this->payments()->get();
+        $desk = (float) $payments
+            ->filter(fn ($p): bool => in_array(strtolower((string) $p->method), self::DESK_PAYMENT_METHODS, true))
+            ->sum('amount');
+
+        return round(min($this->slotValue(), max((float) ($this->pay_at_venue ?? 0), $desk)), 2);
+    }
+
+    /**
+     * {@see venueCollected()} in SQL, per row, for the payout sums. Event rows keep the old
+     * rule (just `pay_at_venue`, which they never set).
+     */
+    public const VENUE_COLLECTED_SQL = "(CASE WHEN booking_type = 'venue' THEN (CASE WHEN (CASE WHEN coalesce(pay_at_venue, 0) > "
+        ."(SELECT coalesce(sum(bp.amount), 0) FROM booking_payments bp WHERE bp.booking_id = bookings.id AND lower(bp.method) IN ('cash','upi','card')) "
+        ."THEN coalesce(pay_at_venue, 0) ELSE "
+        ."(SELECT coalesce(sum(bp.amount), 0) FROM booking_payments bp WHERE bp.booking_id = bookings.id AND lower(bp.method) IN ('cash','upi','card')) END) > "
+        .self::SLOT_VALUE_SQL." THEN ".self::SLOT_VALUE_SQL." ELSE (CASE WHEN coalesce(pay_at_venue, 0) > "
+        ."(SELECT coalesce(sum(bp.amount), 0) FROM booking_payments bp WHERE bp.booking_id = bookings.id AND lower(bp.method) IN ('cash','upi','card')) "
+        ."THEN coalesce(pay_at_venue, 0) ELSE "
+        ."(SELECT coalesce(sum(bp.amount), 0) FROM booking_payments bp WHERE bp.booking_id = bookings.id AND lower(bp.method) IN ('cash','upi','card')) END) END) "
+        ."ELSE coalesce(pay_at_venue, 0) END)";
+
+    /**
+     * An online venue booking about to be settled at the desk with nothing paid through
+     * Haraan: the online fees and tax were never charged (they ride on the Razorpay
+     * payment), so they come off before the desk works out what's due. Otherwise the desk
+     * collects Haraan's ₹25 fee into its own till. A no-op once any online money landed.
+     */
+    public function dropUnchargedOnlineCharges(): void
+    {
+        if ($this->booking_type !== 'venue' || $this->isDeskBooking() || $this->chargesOnTop() <= 0) {
+            return;
+        }
+
+        $online = $this->payments()
+            ->whereNotIn(\Illuminate\Support\Facades\DB::raw('lower(method)'), self::DESK_PAYMENT_METHODS)
+            ->where('amount', '>', 0)
+            ->exists();
+        if ($online) {
+            return;
+        }
+
+        $this->forceFill([
+            'total_amount'    => round(max(0.0, (float) $this->total_amount - (float) $this->convenience_fee), 2),
+            'convenience_fee' => 0,
+            'tax_amount'      => 0,
+        ])->save();
     }
 
     /** What the customer still owes. Zero once settled, never negative. */

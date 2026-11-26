@@ -260,7 +260,7 @@ class PayoutForm
             $offs['Paid at the desk'] = max(0.0, $paid - (float) $b->host_deduction - $share);
         } else {
             $offs['Booking fee (Haraan)'] = $paid - $b->slotValue();
-            $offs['Collected at the venue'] = (float) ($b->pay_at_venue ?? 0);
+            $offs['Collected at the venue'] = $b->venueCollected();
         }
         $offs['Haraan commission'] = (float) $b->host_deduction;
         // partnerPayable() floors at zero; anything left over shows as its own line.
