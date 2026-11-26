@@ -1526,6 +1526,10 @@ class PartnerController extends Controller
         if (strtoupper((string) $booking->status) === 'CANCELLED') {
             return response()->json(['error' => 'This booking was cancelled.'], 422);
         }
+        // The customer may already have paid online with the confirm lost (UPI app switch):
+        // settle that first, so the desk only takes what's really still owed.
+        $booking = $this->bookings->settleCapturedOrderBeforeDesk($booking);
+
         // An online walk-in is still a hold. Confirm it BEFORE taking the cash: if the hold
         // lapsed and the court was sold, this refuses and no money has changed hands.
         if (in_array(strtoupper((string) $booking->status), ['PENDING', 'EXPIRED'], true)) {

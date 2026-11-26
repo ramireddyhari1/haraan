@@ -688,6 +688,8 @@ class VenueBookings extends Page
             if (strtoupper((string) $booking->status) === 'CANCELLED') {
                 throw new \RuntimeException('This booking was cancelled.');
             }
+            // Already paid online with the confirm lost? Settle that first.
+            $booking = $bookings->settleCapturedOrderBeforeDesk($booking);
             // An online walk-in is still a hold: confirm it before taking money, so a
             // lapsed hold whose court was resold refuses here instead.
             if (in_array(strtoupper((string) $booking->status), ['PENDING', 'EXPIRED'], true)) {

@@ -315,6 +315,82 @@ class VenueAdvancePaymentTest extends TestCase
         $this->assertEqualsWithDelta(0.0, PayoutForm::partnerShare($booking), 0.01);
     }
 
+    /**
+     * Classic Sports Arena, 25 Nov, as it really was: the player DID pay the advance, but the
+     * browser never came back from the UPI app, so nothing confirmed it. The desk must find
+     * that payment and take only the balance — not the whole price again.
+     */
+    public function test_desk_collect_finds_an_advance_paid_online_whose_confirm_was_lost(): void
+    {
+        $this->book(['payMode' => 'advance'])->assertCreated();
+        $booking = Booking::query()->latest('id')->firstOrFail();
+        $this->assertSame('PENDING', strtoupper((string) $booking->status));
+
+        Http::swap(new \Illuminate\Http\Client\Factory());
+        Http::fake([
+            'api.razorpay.com/v1/orders/order_ADV1/payments' => Http::response(['items' => [
+                ['id' => 'pay_LOST1', 'status' => 'captured', 'amount' => 24000],
+            ]], 200),
+            'api.razorpay.com/*' => Http::response(['id' => 'order_ADV1'], 200),
+        ]);
+
+        $this->withHeader('Authorization', 'Bearer '.JwtService::issueForUser(
+            $this->owner,
+            (string) config('app.jwt_secret', env('JWT_SECRET', 'change_me')),
+        ));
+        $this->postJson("/api/partner/bookings/{$booking->id}/collect", ['method' => 'upi'])
+            ->assertOk()->assertJsonPath('paid', true);
+
+        $booking->refresh();
+        $this->assertSame('CONFIRMED', strtoupper((string) $booking->status));
+        $this->assertSame('pay_LOST1', $booking->razorpay_payment_id);
+        // ₹240 online (found) + ₹960 UPI at the desk — never ₹1,200 UPI on top.
+        $this->assertEqualsWithDelta(240.0, (float) $booking->payments()->where('method', 'online')->sum('amount'), 0.01);
+        $this->assertEqualsWithDelta(960.0, (float) $booking->payments()->where('method', 'upi')->sum('amount'), 0.01);
+        $this->assertSame('paid', strtolower((string) $booking->payment_status));
+        // Haraan received the ₹240 advance, so it's owed: ₹240 − ₹120 commission.
+        $this->assertEqualsWithDelta(120.0, app(PartnerSettlement::class)->collected($this->owner->id), 0.01);
+    }
+
+    public function test_desk_collect_refuses_when_razorpay_cannot_be_asked(): void
+    {
+        $this->book(['payMode' => 'advance'])->assertCreated();
+        $booking = Booking::query()->latest('id')->firstOrFail();
+        Http::swap(new \Illuminate\Http\Client\Factory());
+        Http::fake(['api.razorpay.com/*' => Http::response([], 500)]);
+
+        $this->withHeader('Authorization', 'Bearer '.JwtService::issueForUser(
+            $this->owner,
+            (string) config('app.jwt_secret', env('JWT_SECRET', 'change_me')),
+        ));
+        $this->postJson("/api/partner/bookings/{$booking->id}/collect", ['method' => 'cash'])->assertStatus(409);
+        $this->assertEqualsWithDelta(0.0, (float) $booking->refresh()->amount_paid, 0.01);
+    }
+
+    /**
+     * 25 Nov as it stands, no refund: ₹175 came in online (₹150 slot advance + ₹25 fee) and
+     * the desk also took ₹525. Haraan holds the ₹150 slot advance, so the payout owes it.
+     */
+    public function test_online_money_is_paid_out_even_when_the_desk_also_took_the_full_price(): void
+    {
+        $b = Booking::forceCreate([
+            'booking_type' => 'venue', 'venue_id' => $this->venue->id, 'user_id' => $this->player->id,
+            'channel' => 'online', 'status' => 'CONFIRMED', 'payment_status' => 'unpaid',
+            'slot_date' => today()->toDateString(), 'start_time' => '19:00', 'end_time' => '20:00',
+            'quantity' => 1, 'total_amount' => 525, 'convenience_fee' => 25, 'pay_at_venue' => 350,
+            'amount_paid' => 0,
+        ]);
+        $ledger = app(\App\Services\BookingLedger::class);
+        $ledger->collect($b, 525, 'upi', $this->owner);
+        $ledger->settleOnline($b, 175, 'pay_LATE');
+        $b->refresh();
+
+        $this->assertEqualsWithDelta(350.0, $b->venueCollected(), 0.01);
+        $this->assertEqualsWithDelta(150.0, $b->partnerPayable(), 0.01);
+        $this->assertEqualsWithDelta(150.0, app(PartnerSettlement::class)->collected($this->owner->id), 0.01);
+        $this->assertEqualsWithDelta(150.0, PayoutForm::partnerShare($b), 0.01);
+    }
+
     /** Rows already settled the old way (fee taken at the desk) read consistently too. */
     public function test_a_desk_payment_that_included_the_online_fee_still_adds_up(): void
     {

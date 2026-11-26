@@ -295,35 +295,59 @@ final class Booking extends Model
     }
 
     /**
-     * Slot money an ONLINE booking's venue took at its own counter, which never passed
-     * through Haraan: the advance balance it was due (`pay_at_venue`), or more when the
-     * desk took more — an online hold that was never paid online and then settled in full
-     * at the counter is all venue money. Counting only `pay_at_venue` there made Haraan
-     * owe the advance it never received (Classic Sports Arena, 25 Nov: ₹150 × 2).
+     * Slot money of an ONLINE booking that did NOT come through Haraan — the part the
+     * partner is not paid out on.
+     *
+     * Once Razorpay money is on the ledger, that money decides: Haraan owes the slot part
+     * of what it actually received (online payments less its fees and tax), and the rest
+     * of the slot was the venue's to take. What the desk took on top doesn't change what
+     * Haraan holds — Classic Sports Arena, 25 Nov: ₹350 came in online (₹150 slot advance
+     * + ₹25 fee, × 2) and the desk also took ₹525 each; Haraan still owes the ₹300.
+     *
+     * With no Razorpay money at all, the venue took everything it collected: the advance
+     * balance it was due (`pay_at_venue`) or more when the desk took more, so an online
+     * hold settled in full at the counter owes nothing.
      */
     public function venueCollected(): float
     {
         $payments = $this->relationLoaded('payments') ? $this->payments : $this->payments()->get();
-        $desk = (float) $payments
-            ->filter(fn ($p): bool => in_array(strtolower((string) $p->method), self::DESK_PAYMENT_METHODS, true))
-            ->sum('amount');
+        $isDesk = fn ($p): bool => in_array(strtolower((string) $p->method), self::DESK_PAYMENT_METHODS, true);
+        $slot = $this->slotValue();
 
-        return round(min($this->slotValue(), max((float) ($this->pay_at_venue ?? 0), $desk)), 2);
+        $online = $payments->reject($isDesk);
+        if ($this->booking_type === 'venue' && $online->isNotEmpty()) {
+            $onlineSlot = max(0.0, (float) $online->sum('amount') - $this->chargesOnTop());
+
+            return round(max(0.0, $slot - min($slot, $onlineSlot)), 2);
+        }
+
+        $desk = (float) $payments->filter($isDesk)->sum('amount');
+
+        return round(min($slot, max((float) ($this->pay_at_venue ?? 0), $desk)), 2);
     }
+
+    private const ONLINE_SUM_SQL = "(SELECT coalesce(sum(bp.amount), 0) FROM booking_payments bp WHERE bp.booking_id = bookings.id AND lower(bp.method) NOT IN ('cash','upi','card'))";
+
+    private const HAS_ONLINE_SQL = "EXISTS (SELECT 1 FROM booking_payments bp WHERE bp.booking_id = bookings.id AND lower(bp.method) NOT IN ('cash','upi','card'))";
+
+    private const DESK_SUM_SQL = "(SELECT coalesce(sum(bp.amount), 0) FROM booking_payments bp WHERE bp.booking_id = bookings.id AND lower(bp.method) IN ('cash','upi','card'))";
+
+    /** Online money less Haraan's fees and tax, floored at 0. */
+    private const ONLINE_SLOT_SQL = '(CASE WHEN '.self::ONLINE_SUM_SQL." - coalesce(convenience_fee, 0) - coalesce(tax_amount, 0) > 0 THEN "
+        .self::ONLINE_SUM_SQL." - coalesce(convenience_fee, 0) - coalesce(tax_amount, 0) ELSE 0 END)";
+
+    /** max(pay_at_venue, desk money). */
+    private const DESK_TAKEN_SQL = '(CASE WHEN coalesce(pay_at_venue, 0) > '.self::DESK_SUM_SQL.' THEN coalesce(pay_at_venue, 0) ELSE '.self::DESK_SUM_SQL.' END)';
 
     /**
      * {@see venueCollected()} in SQL, per row, for the payout sums. Event rows keep the old
      * rule (just `pay_at_venue`, which they never set).
      */
-    public const VENUE_COLLECTED_SQL = "(CASE WHEN booking_type = 'venue' THEN (CASE WHEN (CASE WHEN coalesce(pay_at_venue, 0) > "
-        ."(SELECT coalesce(sum(bp.amount), 0) FROM booking_payments bp WHERE bp.booking_id = bookings.id AND lower(bp.method) IN ('cash','upi','card')) "
-        ."THEN coalesce(pay_at_venue, 0) ELSE "
-        ."(SELECT coalesce(sum(bp.amount), 0) FROM booking_payments bp WHERE bp.booking_id = bookings.id AND lower(bp.method) IN ('cash','upi','card')) END) > "
-        .self::SLOT_VALUE_SQL." THEN ".self::SLOT_VALUE_SQL." ELSE (CASE WHEN coalesce(pay_at_venue, 0) > "
-        ."(SELECT coalesce(sum(bp.amount), 0) FROM booking_payments bp WHERE bp.booking_id = bookings.id AND lower(bp.method) IN ('cash','upi','card')) "
-        ."THEN coalesce(pay_at_venue, 0) ELSE "
-        ."(SELECT coalesce(sum(bp.amount), 0) FROM booking_payments bp WHERE bp.booking_id = bookings.id AND lower(bp.method) IN ('cash','upi','card')) END) END) "
-        ."ELSE coalesce(pay_at_venue, 0) END)";
+    public const VENUE_COLLECTED_SQL = "(CASE WHEN booking_type = 'venue' AND ".self::HAS_ONLINE_SQL
+        .' THEN (CASE WHEN '.self::ONLINE_SLOT_SQL.' >= '.self::SLOT_VALUE_SQL.' THEN 0 ELSE '.self::SLOT_VALUE_SQL.' - '.self::ONLINE_SLOT_SQL.' END)'
+        ." WHEN booking_type = 'venue'"
+        .' THEN (CASE WHEN '.self::DESK_TAKEN_SQL.' > '.self::SLOT_VALUE_SQL.' THEN '.self::SLOT_VALUE_SQL.' ELSE '.self::DESK_TAKEN_SQL.' END)'
+        .' ELSE coalesce(pay_at_venue, 0) END)';
 
     /**
      * An online venue booking about to be settled at the desk with nothing paid through

@@ -1280,6 +1280,63 @@ final class BookingService
      * @throws ConflictHttpException  When the lapsed hold's court has since been taken,
      *                                or the booking is not a hold at all.
      */
+    /**
+     * Before the desk takes money for an ONLINE booking: did the customer already pay its
+     * Razorpay order? On a phone the browser often never comes back from the UPI app, so the
+     * confirm call is lost and the hold sits PENDING until the sweep notices the payment.
+     * If the player walks up first, the desk used to confirm it and take the whole price
+     * again — Classic Sports Arena, 25 Nov: ₹350 paid online, then ₹1,050 by UPI at the
+     * counter, with the ₹350 on no ledger at all.
+     *
+     * Settles the order's payment (all rows on the order) before the desk works out what's
+     * due. Fails closed: if Razorpay can't be asked, the desk is told to try again rather
+     * than risk charging twice.
+     *
+     * @throws ConflictHttpException  When Razorpay can't be reached.
+     */
+    public function settleCapturedOrderBeforeDesk(Booking $booking): Booking
+    {
+        $orderId = trim((string) $booking->razorpay_order_id);
+        if ($booking->isDeskBooking() || $orderId === '') {
+            return $booking;
+        }
+
+        $paidOnline = $booking->payments()
+            ->whereNotIn(DB::raw('lower(method)'), Booking::DESK_PAYMENT_METHODS)
+            ->where('amount', '>', 0)
+            ->exists();
+        if ($paidOnline) {
+            return $booking;
+        }
+
+        try {
+            $paymentId = $this->razorpay->capturedPaymentFor($orderId);
+        } catch (RuntimeException) {
+            throw new ConflictHttpException('Couldn’t check whether this customer already paid online. Try again in a moment.');
+        }
+        if ($paymentId === null) {
+            return $booking;
+        }
+
+        $ids = Booking::query()->where('razorpay_order_id', $orderId)
+            ->whereIn(DB::raw('upper(status)'), ['PENDING', 'EXPIRED', 'CONFIRMED'])
+            ->pluck('id')->map(fn ($id): int => (int) $id)->all();
+
+        $this->confirmReservation($ids, $paymentId);
+        // confirmReservation() skips rows that are already CONFIRMED; their money still
+        // belongs on the ledger (settleOnline is idempotent on the payment id).
+        foreach (Booking::query()->whereIn('id', $ids)->get() as $row) {
+            if (trim((string) $row->razorpay_payment_id) === '') {
+                $row->forceFill(['razorpay_payment_id' => $paymentId])->save();
+            }
+            $this->ledger->settleOnline($row, $row->onlineDue(), $paymentId);
+        }
+
+        Log::warning("Razorpay order {$orderId} was paid but never confirmed; settled booking(s) ".implode(', ', $ids).' before the desk collected.');
+
+        return $booking->refresh();
+    }
+
     public function confirmDeskHold(Booking $booking): Booking
     {
         return DB::transaction(function () use ($booking): Booking {
