@@ -352,6 +352,66 @@ class VenueAdvancePaymentTest extends TestCase
         $this->assertEqualsWithDelta(120.0, app(PartnerSettlement::class)->collected($this->owner->id), 0.01);
     }
 
+    /** Paid in the UPI app, never came back to the browser: confirmed within a minute. */
+    public function test_the_minute_sweep_confirms_a_paid_hold_before_it_lapses(): void
+    {
+        $this->book(['payMode' => 'advance'])->assertCreated();
+        $booking = Booking::query()->latest('id')->firstOrFail();
+
+        Http::swap(new \Illuminate\Http\Client\Factory());
+        Http::fake([
+            'api.razorpay.com/v1/orders/order_ADV1/payments' => Http::response(['items' => [
+                ['id' => 'pay_UPI1', 'status' => 'captured', 'amount' => 24000],
+            ]], 200),
+        ]);
+
+        // Too fresh: the buyer's own confirm call gets the first 45 seconds.
+        $this->assertSame(0, app(\App\Services\BookingService::class)->confirmPaidHolds());
+
+        Carbon::setTestNow(now()->addMinute());
+        $this->assertSame(1, app(\App\Services\BookingService::class)->confirmPaidHolds());
+
+        $booking->refresh();
+        $this->assertSame('CONFIRMED', strtoupper((string) $booking->status));
+        $this->assertSame('pay_UPI1', $booking->razorpay_payment_id);
+        $this->assertEqualsWithDelta(240.0, (float) $booking->amount_paid, 0.01);
+        // The desk now sees the advance paid and only the balance due.
+        $this->assertEqualsWithDelta(960.0, $booking->balanceDue(), 0.01);
+    }
+
+    public function test_the_minute_sweep_leaves_an_unpaid_hold_alone(): void
+    {
+        $this->book(['payMode' => 'advance'])->assertCreated();
+        $booking = Booking::query()->latest('id')->firstOrFail();
+
+        Http::swap(new \Illuminate\Http\Client\Factory());
+        Http::fake(['api.razorpay.com/v1/orders/order_ADV1/payments' => Http::response(['items' => []], 200)]);
+
+        Carbon::setTestNow(now()->addMinute());
+        $this->assertSame(0, app(\App\Services\BookingService::class)->confirmPaidHolds());
+        $this->assertSame('PENDING', strtoupper((string) $booking->refresh()->status));
+    }
+
+    /** Closing the checkout after paying in the UPI app must not hand a paid court back. */
+    public function test_closing_checkout_after_paying_confirms_instead_of_releasing(): void
+    {
+        $this->book(['payMode' => 'advance'])->assertCreated();
+        $booking = Booking::query()->latest('id')->firstOrFail();
+
+        Http::swap(new \Illuminate\Http\Client\Factory());
+        Http::fake([
+            'api.razorpay.com/v1/orders/order_ADV1/payments' => Http::response(['items' => [
+                ['id' => 'pay_UPI2', 'status' => 'captured', 'amount' => 24000],
+            ]], 200),
+        ]);
+
+        app(\App\Services\BookingService::class)->releaseReservedOrder($this->player, 'order_ADV1');
+
+        $booking->refresh();
+        $this->assertSame('CONFIRMED', strtoupper((string) $booking->status));
+        $this->assertEqualsWithDelta(240.0, (float) $booking->amount_paid, 0.01);
+    }
+
     public function test_desk_collect_refuses_when_razorpay_cannot_be_asked(): void
     {
         $this->book(['payMode' => 'advance'])->assertCreated();

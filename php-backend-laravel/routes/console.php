@@ -41,6 +41,12 @@ Schedule::command('matches:close-stale')->hourly()->withoutOverlapping();
 // Release expired ticket locks (abandoned checkouts) so the seat returns to the
 // pool for the next buyer, without waiting for someone to next book that event.
 Artisan::command('bookings:release-expired', function (BookingService $bookings) {
+    // Paid holds first: a customer who paid in the UPI app and never came back to the
+    // browser is confirmed within a minute, not when the 15-minute hold runs out.
+    $paid = $bookings->confirmPaidHolds();
+    if ($paid > 0) {
+        $this->info("Confirmed {$paid} paid hold(s).");
+    }
     $count = $bookings->releaseAllExpired();
     $this->info("Released {$count} expired ticket lock(s).");
 })->purpose('Release expired ticket reservation holds');

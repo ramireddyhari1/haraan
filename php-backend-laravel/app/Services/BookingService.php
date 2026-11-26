@@ -613,10 +613,55 @@ final class BookingService
             ->all();
 
         if ($ids !== []) {
-            // A UPI QR for this hold must stop taking money before the slot goes back.
-            $this->closeOrderUpiQr($razorpayOrderId);
-            $this->releaseBookings($ids);
+            // The checkout closing is not proof nobody paid: on a phone the buyer pays in the
+            // UPI app and the window can close (or be closed) after the money went through.
+            // Ask Razorpay first — confirm if paid, release if not, keep the hold if Razorpay
+            // can't be asked. settleLapsedHolds() also closes the order's UPI QR first.
+            $this->settleLapsedHolds($ids);
         }
+    }
+
+    /**
+     * Confirm holds whose Razorpay order is already paid, without waiting for the hold to
+     * lapse. On a phone the browser often never comes back from the UPI app, so the client's
+     * confirm call never arrives; until the 15-minute hold ran out, a paid booking sat
+     * PENDING and read as unpaid at the venue's desk (Classic Sports Arena, 25 Nov: the
+     * desk charged the full price on top of a ₹350 advance paid 18 minutes earlier).
+     *
+     * Runs every minute with the expiry sweep. Only asks; never releases anything. A hold
+     * younger than 45 seconds is left to the buyer's own confirm call.
+     *
+     * @return int  how many holds were confirmed
+     */
+    public function confirmPaidHolds(): int
+    {
+        $rows = Booking::query()
+            ->whereRaw('upper(status) = ?', ['PENDING'])
+            ->whereNotNull('razorpay_order_id')->where('razorpay_order_id', '!=', '')
+            ->whereNotNull('reserved_until')->where('reserved_until', '>=', now())
+            ->where('created_at', '<=', now()->subSeconds(45))
+            ->where(fn ($q) => $q->whereNull('channel')->orWhere('channel', '!=', 'whatsapp'))
+            ->get(['id', 'razorpay_order_id']);
+
+        $confirmed = 0;
+        foreach ($rows->groupBy(fn (Booking $b): string => trim((string) $b->razorpay_order_id)) as $orderId => $group) {
+            try {
+                $paymentId = $this->razorpay->capturedPaymentFor($orderId) ?? $this->paidOrderUpiQr($orderId);
+            } catch (RuntimeException $e) {
+                continue; // ask again next minute
+            }
+            if ($paymentId === null) {
+                continue;
+            }
+
+            $ids = $group->pluck('id')->map(fn ($id): int => (int) $id)->all();
+            $this->confirmReservation($ids, $paymentId);
+            Log::warning("Razorpay order {$orderId} was paid but not yet confirmed by the client; confirmed booking(s) ".implode(', ', $ids).' from the sweep.');
+            BookingNotifier::dispatch(Booking::query()->find($ids[0]));
+            $confirmed += count($ids);
+        }
+
+        return $confirmed;
     }
 
     /** Where an order's checkout UPI QR is remembered: the QR is per order, not per row. */
