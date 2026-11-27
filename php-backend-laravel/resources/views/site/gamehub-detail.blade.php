@@ -2437,7 +2437,7 @@
                 <div class="receipt-inner-content">
                     <!-- Receipt Header -->
                     <div class="receipt-header">
-                        <img src="{{ asset('images/haraan-logo.png') }}" class="receipt-haraan-logo" alt="HARAAN">
+                        <img src="{{ asset('images/haraan-logo-960.png') }}" class="receipt-haraan-logo" alt="HARAAN">
                         <p class="receipt-brand-text">HARAAN SPORTS</p>
                         <h2 class="receipt-venue-title">{{ $venue->title }}</h2>
                         <p class="receipt-venue-sub">

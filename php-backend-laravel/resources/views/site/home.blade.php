@@ -30,7 +30,7 @@
             <div class="mpager__track" data-mpager-track>
                 @foreach($mEvents as $ev)
                     @php
-                        $img = $ev->heroImageUrl() ?? '/bv-white.png';
+                        $img = $ev->heroImageUrl(\App\Models\Event::CARD_IMAGE_WIDTH) ?? '/bv-white.png';
                         $whenParts = array_filter([
                             optional($ev->date)?->format('j M'),
                             trim((string) $ev->time) ?: null,
@@ -73,7 +73,7 @@
     <div class="mhome__head"><h3>Trending</h3><a href="/events">See all</a></div>
     <div class="mhome__scroll mhome__scroll--sm">
         @foreach($mEvents->take(10) as $ev)
-            @php $img = $ev->heroImageUrl() ?? '/bv-white.png'; @endphp
+            @php $img = $ev->heroImageUrl(\App\Models\Event::CARD_IMAGE_WIDTH) ?? '/bv-white.png'; @endphp
             <a class="mtrend" href="{{ \App\Support\SeoUrl::event($ev) }}">
                 <span class="mtrend__rank" data-rank="{{ $loop->iteration }}">{{ $loop->iteration }}</span>
                 <div class="mtrend__img" style="background-image:url('{{ $img }}')">
@@ -137,7 +137,7 @@
     </div>
     <div class="mhome__grid">
         @foreach($mEvents as $ev)
-            @php $img = $ev->heroImageUrl() ?? '/bv-white.png'; @endphp
+            @php $img = $ev->heroImageUrl(\App\Models\Event::CARD_IMAGE_WIDTH) ?? '/bv-white.png'; @endphp
             <a class="mcard" href="{{ \App\Support\SeoUrl::event($ev) }}">
                 <div class="mcard__img" style="background-image:url('{{ $img }}')">
                     <span class="mcard__fast"><i>⚡</i>Fast filling</span>
@@ -213,7 +213,7 @@
 
     @if($featured)
         @php
-            $fimg   = $featured->heroImageUrl() ?? '/bv-white.png';
+            $fimg   = $featured->heroImageUrl(\App\Models\Event::CARD_IMAGE_WIDTH) ?? '/bv-white.png';
             $fwhen  = optional($featured->date)->format('D, M j • g:i A');
             $fprice = $featured->fromPrice() > 0
                 ? '₹'.number_format($featured->fromPrice()).($featured->priceTierCount() > 1 ? ' onwards' : '')

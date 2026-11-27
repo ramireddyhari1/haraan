@@ -137,7 +137,7 @@
         @if ($events->count())
             <div class="hp-grid">
                 @foreach ($events as $event)
-                    @php $poster = $event->heroImageUrl(); @endphp
+                    @php $poster = $event->heroImageUrl(\App\Models\Event::CARD_IMAGE_WIDTH); @endphp
                     <a href="{{ \App\Support\SeoUrl::event($event) }}" class="hp-card">
                         <div class="hp-poster" @if ($poster) style="background-image:url('{{ $poster }}')" @endif>
                             @if (! $poster)<span>{{ strtoupper(mb_substr($event->title, 0, 1)) }}</span>@endif
@@ -162,7 +162,7 @@
             <h2 class="hp-h2">Past events</h2>
             <div class="hp-grid hp-grid-past">
                 @foreach ($pastEvents as $event)
-                    @php $poster = $event->heroImageUrl(); @endphp
+                    @php $poster = $event->heroImageUrl(\App\Models\Event::CARD_IMAGE_WIDTH); @endphp
                     <a href="{{ \App\Support\SeoUrl::event($event) }}" class="hp-card hp-card-past">
                         <div class="hp-poster" @if ($poster) style="background-image:url('{{ $poster }}')" @endif>
                             @if (! $poster)<span>{{ strtoupper(mb_substr($event->title, 0, 1)) }}</span>@endif

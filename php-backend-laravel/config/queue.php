@@ -70,7 +70,9 @@ return [
             'queue' => env('REDIS_QUEUE', 'default'),
             'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
             'block_for' => null,
-            'after_commit' => false,
+            // Wait for the surrounding DB transaction to commit, so a worker never picks
+            // up a job for a row it can't see yet. Outside a transaction it's immediate.
+            'after_commit' => (bool) env('REDIS_QUEUE_AFTER_COMMIT', true),
         ],
 
         'deferred' => [

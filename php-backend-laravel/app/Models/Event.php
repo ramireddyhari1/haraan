@@ -168,7 +168,39 @@ final class Event extends Model
         self::saved(static function (self $event): void {
             $event->maybeNotifyFollowers();
         });
+
+        // Sized WebP copies of the poster and gallery (same as venue photos): a 786 KB
+        // poster was being sent to 300px cards. Made after the response; until they
+        // exist every page falls back to the original.
+        self::saved(static function (self $event): void {
+            $inserted = $event->getOriginal() === [];
+            if (! $inserted && ! $event->wasChanged('images') && ! $event->wasChanged('gallery')) {
+                return;
+            }
+
+            $list = static fn ($v): array => array_values(array_filter(
+                is_array($v) ? $v : (array) json_decode((string) $v, true),
+                static fn ($i): bool => is_string($i) && trim($i) !== '',
+            ));
+            $now = array_merge($list($event->images), $list($event->gallery));
+            $before = array_merge($list($event->getOriginal('images')), $list($event->getOriginal('gallery')));
+            $removed = array_diff($before, $now);
+
+            $sync = static function () use ($now, $removed): void {
+                foreach ($removed as $path) {
+                    \App\Support\VenuePhoto::forget($path);
+                }
+                foreach ($now as $path) {
+                    \App\Support\VenuePhoto::generate($path);
+                }
+            };
+
+            app()->runningInConsole() ? $sync() : dispatch($sync)->afterResponse();
+        });
     }
+
+    /** Width of the poster copy shown on cards and lists (≈300–420 css px at 2–3×). */
+    public const CARD_IMAGE_WIDTH = 960;
 
     /**
      * Notify this event's host's followers, exactly once, when it first becomes
@@ -250,15 +282,29 @@ final class Event extends Model
      *
      * @return array<int, string>
      */
-    public function imageUrls(): array
+    public function imageUrls(int $max = \App\Support\VenuePhoto::DISPLAY_WIDTH): array
+    {
+        return \App\Support\VenuePhoto::urls(MediaUrl::resolveMany(is_array($this->images) ? $this->images : []), $max);
+    }
+
+    /**
+     * The uploaded originals (JPEG/PNG), for link previews and search engines:
+     * WhatsApp/Facebook previews don't all accept the WebP copies.
+     *
+     * @return array<int, string>
+     */
+    public function originalImageUrls(): array
     {
         return MediaUrl::resolveMany(is_array($this->images) ? $this->images : []);
     }
 
-    /** First browser-loadable image, or null when the event has none. */
-    public function heroImageUrl(): ?string
+    /**
+     * First browser-loadable image, or null when the event has none. Pass
+     * CARD_IMAGE_WIDTH for cards and thumbnails.
+     */
+    public function heroImageUrl(int $max = \App\Support\VenuePhoto::DISPLAY_WIDTH): ?string
     {
-        return $this->imageUrls()[0] ?? null;
+        return $this->imageUrls($max)[0] ?? null;
     }
 
     /** True once the event has a real geocoded pin (set via Places Autocomplete). */
@@ -478,7 +524,7 @@ final class Event extends Model
      */
     public function galleryUrls(): array
     {
-        return MediaUrl::resolveMany(is_array($this->gallery) ? $this->gallery : []);
+        return \App\Support\VenuePhoto::urls(MediaUrl::resolveMany(is_array($this->gallery) ? $this->gallery : []));
     }
 
     /**

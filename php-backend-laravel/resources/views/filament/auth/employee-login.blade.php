@@ -49,7 +49,7 @@
                     {{-- Hero Top Bar --}}
                     <div class="hrn-hero-header">
                         <div class="hrn-brand-mark">
-                            <img src="{{ asset('images/haraan-logo.png') }}"
+                            <img src="{{ asset('images/haraan-logo-960.png') }}"
                                  alt="HARAAN Logo"
                                  class="hrn-logo-img" />
                             <span class="hrn-badge-pill">WORKFORCE</span>
@@ -139,7 +139,7 @@
                     {{-- MOBILE BRAND HEADER (Native Mobile Layout Only) --}}
                     <header class="hrn-mob-header">
                         <div class="hrn-mob-top-row">
-                            <img src="{{ asset('images/haraan-logo.png') }}"
+                            <img src="{{ asset('images/haraan-logo-960.png') }}"
                                  alt="HARAAN"
                                  class="hrn-mob-logo" />
                             <div class="hrn-mob-badge">

@@ -80,7 +80,7 @@
 
     <div class="bk-card">
         <div class="bk-event">
-            <img src="{{ $event->heroImageUrl() ?? asset('events.png') }}" alt="">
+            <img src="{{ $event->heroImageUrl(\App\Models\Event::CARD_IMAGE_WIDTH) ?? asset('events.png') }}" alt="">
             <div>
                 <strong>{{ $event->title }}</strong>
                 {{-- `date` is date-only, so formatting its clock printed "12:00 AM"

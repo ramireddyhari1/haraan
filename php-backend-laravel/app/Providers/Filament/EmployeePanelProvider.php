@@ -30,7 +30,7 @@ class EmployeePanelProvider extends PanelProvider
             ->id('employee')
             ->path('employee')
             ->brandName('Haraan Employee')
-            ->brandLogo(asset('images/haraan-logo.png'))
+            ->brandLogo(asset('images/haraan-logo-960.png'))
             ->brandLogoHeight('2.2rem')
             ->favicon(asset('favicon-192.png'))
             ->font('Inter')

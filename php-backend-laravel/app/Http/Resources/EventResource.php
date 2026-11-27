@@ -108,7 +108,8 @@ final class EventResource extends JsonResource
                 'remaining' => $s->remaining(),
                 'soldOut'   => $s->soldOut(),
             ])->values()),
-            'images'         => \App\Support\MediaUrl::resolveMany($this->images),
+            // The 1600px WebP copy of each poster (falls back to the original).
+            'images'         => $this->resource->imageUrls(),
             'gallery'        => $this->galleryUrls(),
             // Who is actually running this event: live host profile, else the
             // partner account. The app used to hardcode "Haraan Events /

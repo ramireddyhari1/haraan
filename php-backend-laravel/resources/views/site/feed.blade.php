@@ -30,7 +30,7 @@
 <div class="hfeed">
     {{-- Brand header. No back arrow: the bottom bar is the way between screens here. --}}
     <header class="hfeed__bar">
-        <img class="hfeed__mark" src="{{ asset('images/haraan-logo-white.png') }}" alt="Haraan">
+        <img class="hfeed__mark" src="{{ asset('images/haraan-logo-white-960.png') }}" alt="Haraan">
         <span class="hfeed__beta">BETA</span>
     </header>
 

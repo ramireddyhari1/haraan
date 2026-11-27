@@ -156,7 +156,7 @@ final class PartnerAppShell
             'logout' => $logout,
             'branchUrl' => Route::has('partner.branch.switch') ? route('partner.branch.switch') : null,
             'logo' => asset('images/haraan-logo-blue.png'),
-            'logoWhite' => asset('images/haraan-logo-white.png'),
+            'logoWhite' => asset('images/haraan-logo-white-960.png'),
             'shareBase' => url('/gamehub'),
             'urls' => self::urls(self::destinations(), $spa || self::fastAppOn()),
             'spa' => $spa,

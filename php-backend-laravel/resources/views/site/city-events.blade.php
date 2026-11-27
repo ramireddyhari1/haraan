@@ -8,7 +8,7 @@
 
         return [
             'url' => \App\Support\SeoUrl::event($ev),
-            'img' => $ev->heroImageUrl() ?? asset('images/haraan-social-card.png'),
+            'img' => $ev->heroImageUrl(\App\Models\Event::CARD_IMAGE_WIDTH) ?? asset('images/haraan-social-card.png'),
             'title' => $ev->title,
             'when' => implode(' • ', array_filter([
                 optional($ev->date)?->format('D, j M'),

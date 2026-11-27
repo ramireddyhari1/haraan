@@ -85,7 +85,7 @@
             <div class="mpager__track" data-mpager-track>
                 @foreach($forYou as $ev)
                     @php
-                        $img = $ev->heroImageUrl() ?? '/bv-white.png';
+                        $img = $ev->heroImageUrl(\App\Models\Event::CARD_IMAGE_WIDTH) ?? '/bv-white.png';
                         // Mirrors EventRepository.formatWhen(): "27 Jun • 12:00 AM", then
                         // uppercased by the card. Not the site's old "Sat, Jun 27" shape.
                         $whenParts = array_filter([
@@ -140,7 +140,7 @@
     <div class="mhome__head mhome__head--bare"><h3>Trending</h3></div>
     <div class="mtrends">
         @foreach($mTrending as $ev)
-            @php $img = $ev->heroImageUrl() ?? '/bv-white.png'; @endphp
+            @php $img = $ev->heroImageUrl(\App\Models\Event::CARD_IMAGE_WIDTH) ?? '/bv-white.png'; @endphp
             <a class="mtrend" href="{{ \App\Support\SeoUrl::event($ev) }}">
                 <span class="mtrend__rank" data-rank="{{ $loop->iteration }}" aria-hidden="true">{{ $loop->iteration }}</span>
                 <span class="mtrend__img">
@@ -207,7 +207,7 @@
     <div class="mhome__grid">
         @foreach($mEvents as $ev)
             @php
-                $img = $ev->heroImageUrl() ?? '/bv-white.png';
+                $img = $ev->heroImageUrl(\App\Models\Event::CARD_IMAGE_WIDTH) ?? '/bv-white.png';
                 $soon = optional($ev->date)->between(now(), now()->addDays(7)) ?? false;
                 $mFrom      = $ev->fromPrice();
                 $hasOnwards = $mFrom > 0 && $ev->priceTierCount() > 1;
@@ -237,7 +237,7 @@
                     {{-- "Haraan special" lockup (the feed band's twin). Lives inside
                          each slide's top-left corner, so it moves with the banner. --}}
                     <div class="banner-brand" aria-hidden="true">
-                        <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
+                        <img src="{{ asset('images/haraan-logo-960.png') }}" alt="Haraan">
                         <span>special</span>
                     </div>
                     <div class="banner-item__bg">
@@ -321,7 +321,7 @@
         </div>
         <div class="trend-grid">
             @foreach($topFive as $ev)
-                @php $timg = $ev->heroImageUrl() ?? asset('events.png'); @endphp
+                @php $timg = $ev->heroImageUrl(\App\Models\Event::CARD_IMAGE_WIDTH) ?? asset('events.png'); @endphp
                 <a class="trend-card" href="{{ \App\Support\SeoUrl::event($ev) }}">
                     <div class="trend-card__media" style="background-image:url('{{ $timg }}')">
                         <span class="trend-card__grad" aria-hidden="true"></span>

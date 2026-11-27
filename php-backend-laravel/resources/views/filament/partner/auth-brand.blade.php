@@ -24,7 +24,7 @@
     <div class="hrn-authbrand__inner">
         <div class="hrn-authbrand__top">
             <img class="hrn-authbrand__logo"
-                 src="{{ asset('images/haraan-logo-white.png') }}"
+                 src="{{ asset('images/haraan-logo-white-960.png') }}"
                  alt="haraan" width="1680" height="445">
             <span class="hrn-authbrand__pill">PARTNER</span>
         </div>

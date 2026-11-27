@@ -283,7 +283,7 @@ final class PublicWebController extends Controller
             'name' => $event->title,
             'url' => SeoUrl::event($event),
             'description' => Str::limit($desc, 300),
-            'image' => array_values(array_filter($event->imageUrls())) ?: null,
+            'image' => array_values(array_filter($event->originalImageUrls())) ?: null,
             // The stored date/time is IST wall-clock (the app runs on UTC), so
             // stamp the offset without shifting the hands — otherwise Google shows
             // an event that starts 5½ hours early.
@@ -328,7 +328,7 @@ final class PublicWebController extends Controller
         return [
             'title' => trim($event->title.($where !== '' ? ' — '.$where : '')),
             'description' => $desc,
-            'image' => $event->heroImageUrl(),
+            'image' => $event->originalImageUrls()[0] ?? null,
             'type' => 'event',
             'canonical' => SeoUrl::event($event),
             'jsonld' => $schema,

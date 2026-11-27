@@ -10,7 +10,7 @@
     <div class="hrn-empbrand__inner">
         <div class="hrn-empbrand__top">
             <img class="hrn-empbrand__logo"
-                 src="{{ asset('images/haraan-logo-white.png') }}"
+                 src="{{ asset('images/haraan-logo-white-960.png') }}"
                  alt="haraan" width="1680" height="445">
             <span class="hrn-empbrand__pill">EMPLOYEE</span>
         </div>

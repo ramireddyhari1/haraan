@@ -258,7 +258,7 @@
          events. --}}
     <section class="bp-hero">
         <div class="bp-hero__top">
-            <img class="bp-hero__thumb" src="{{ $event->heroImageUrl() ?? asset('events.png') }}" alt="">
+            <img class="bp-hero__thumb" src="{{ $event->heroImageUrl(\App\Models\Event::CARD_IMAGE_WIDTH) ?? asset('events.png') }}" alt="">
             <div class="bp-hero__id">
                 <div class="bp-hero__status {{ $isLive ? '' : 'is-off' }}">
                     <i></i>{{ $isLive ? 'Confirmed' : ucfirst(strtolower((string) $booking->status)) }}

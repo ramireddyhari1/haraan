@@ -341,7 +341,7 @@
          it never nags. Styles are inlined in <head> so it covers the first paint. --}}
     <div id="haraanLoader" class="hloader" role="status" aria-live="polite" aria-label="Loading Haraan">
         <div class="hloader__stage">
-            <div class="hloader__mark" style="--logo:url('{{ $assetVer('images/haraan-logo.png') }}')" aria-hidden="true">
+            <div class="hloader__mark" style="--logo:url('{{ $assetVer('images/haraan-logo-960.png') }}')" aria-hidden="true">
                 <span class="hloader__ghost"></span>
                 <span class="hloader__fill"></span>
             </div>
@@ -372,7 +372,7 @@
     <header class="topbar {{ request()->is('events*') || request()->is('/') ? 'topbar--events' : '' }} {{ request()->is('gamehub*') ? 'topbar--gamehub' : '' }}">
         <div class="topbar__inner container">
             <a href="/" class="brand">
-                <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan" class="brand__img">
+                <img src="{{ asset('images/haraan-logo-960.png') }}" alt="Haraan" class="brand__img">
             </a>
 
             {{-- Mobile header lockup (the app's GreetingHeader). Hidden ≥1025px, where the
@@ -587,7 +587,7 @@
 
             <div class="mfoot__base">
                 <div class="mfoot__brand">
-                    <img src="{{ asset('images/haraan-logo.png') }}" alt="Haraan">
+                    <img src="{{ asset('images/haraan-logo-960.png') }}" alt="Haraan">
                     <span class="mfoot__tag">{{ $footTag }}</span>
                 </div>
                 <div class="mfoot__meta">

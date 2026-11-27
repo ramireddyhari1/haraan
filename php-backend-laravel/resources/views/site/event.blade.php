@@ -2229,7 +2229,7 @@
                             @endphp
                             <a class="dk-card" href="{{ \App\Support\SeoUrl::event($s) }}">
                                 <div class="dk-card__img">
-                                    <img src="{{ $s->heroImageUrl() ?? asset('events.png') }}" alt="{{ $s->title }}" loading="lazy" decoding="async">
+                                    <img src="{{ $s->heroImageUrl(\App\Models\Event::CARD_IMAGE_WIDTH) ?? asset('events.png') }}" alt="{{ $s->title }}" loading="lazy" decoding="async">
                                 </div>
                                 <div class="dk-card__b">
                                     <div class="dk-card__cat">{{ $s->category ?: 'Event' }}</div>

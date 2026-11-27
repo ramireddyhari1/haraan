@@ -46,8 +46,8 @@ class AdminPanelProvider extends PanelProvider
             ->id('control')
             ->path('control')
             ->brandName('Haraan Control')
-            ->brandLogo(asset('images/haraan-logo.png'))
-            ->darkModeBrandLogo(asset('images/haraan-logo-white.png'))
+            ->brandLogo(asset('images/haraan-logo-960.png'))
+            ->darkModeBrandLogo(asset('images/haraan-logo-white-960.png'))
             ->brandLogoHeight('1.875rem')
             ->favicon(asset('favicon-192.png'))
             // Inter across the whole panel — the single biggest lift from stock
